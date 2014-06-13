@@ -123,20 +123,24 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         ui = document_controller.ui
 
-        self.number_frames = self.ui.create_line_edit_widget(properties={"width": 60})
-        self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 60})
+        # TODO: how to get text to align right?
+        self.number_frames = self.ui.create_line_edit_widget(properties={"width": 30})
+        # TODO: how to get text to align right?
+        self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 50})
 
-        self.acquire_button = ui.create_push_button_widget(_("Start"), properties={"width": 40, "height": 32})
+        self.acquire_button = ui.create_push_button_widget(_("Start"), properties={"width": 40, "height": 23})
 
         dialog_row = ui.create_row_widget()
         dialog_row.add(ui.create_label_widget(_("Number of frames:"), properties={"width": 96}))
         dialog_row.add(self.number_frames)
-        dialog_row.add(ui.create_label_widget(_("Energy offset per frame:"), properties={"width": 96}))
+        # TODO: is there a less manual spacer that appropriately stretches to fill a row's space?
+        dialog_row.add_spacing(20)
+        dialog_row.add(ui.create_label_widget(_("Energy offset/frame:"), properties={"width": 128}))
         dialog_row.add(self.energy_offset)
         dialog_row.add(self.acquire_button, alignment="right")
 
-        self.acquire_button.on_clicked = lambda: self.acquire(int(self.number_frames.current_text),
-                                                              float(self.energy_offset.current_text))
+        self.acquire_button.on_clicked = lambda: self.acquire(int(self.number_frames.text),
+                                                              float(self.energy_offset.text))
 
         properties["margin"] = 6
         properties["spacing"] = 2
