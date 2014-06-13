@@ -15,7 +15,7 @@ from nion.swift.Decorators import relative_file
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 
-from ImageAlignment import register
+import ImageAlignment.register
 
 _ = gettext.gettext
 
@@ -49,11 +49,6 @@ class AcquireController(object):
             logging.debug("Already acquiring")
             return
 
-        def get_frame():
-            print "Grabbing frame"
-            with HardwareSource.get_data_generator_by_id("eels_tv_camera") as data_generator:
-                return data_generator()
-
         def set_offset_energy(offset):
             """
             TODO: Phil should tell us how he's changing the energy offset for each spectrum
@@ -62,15 +57,23 @@ class AcquireController(object):
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
-            # grab one frame to get image size
-            frame = get_frame()
-            stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
-            for frame in xrange(number_frames):
-                set_offset_energy(offset_per_spectrum)
-                stack[frame] = get_frame()
-                if task_object is not None:
-                    task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
-            return stack
+            with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
+                # grab one frame to get image size
+                data_element = data_generator()
+                frame = data_element["data"]
+                stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
+                for frame in xrange(number_frames):
+                    set_offset_energy(offset_per_spectrum)
+                    stack[frame] = data_generator()["data"]
+                    if task_object is not None:
+                        task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
+                data_element["data"] = stack
+                # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
+                data_element["spatial_calibrations"] = ({"origin": 0.0,
+                                                         "scale": 1,
+                                                         "units": "frame"},) + \
+                                                       data_element["spatial_calibrations"]
+            return data_element
 
         def align_stack(stack, task_object=None):
             number_frames = stack.shape[0]
@@ -86,7 +89,7 @@ class AcquireController(object):
                 if task_object is not None:
                     task_object.update_progress(_("Cross correlating frame {}.").format(index), (index + 1, number_frames), None)
                 # TODO: make interpolation factor variable (it is hard-coded to 100 here.)
-                shifts[index] = ref_shift+np.array(register.get_shift(ref, _slice, 100))
+                shifts[index] = ref_shift+np.array(ImageAlignment.register.get_shift(ref, _slice, 100))
                 ref = _slice[:]
                 ref_shift = shifts[index]
             # sum image needs to be big enough for shifted images
@@ -95,18 +98,21 @@ class AcquireController(object):
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(_("Summing frame {}.").format(index), (index + 1, number_frames), None)
-                sum_image += register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
+                sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
             return sum_image
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
-                stack = acquire_series(number_frames, energy_offset_per_frame, task)
-                summed_image = align_stack(stack, task)
-                # add the summed image to Swift
-                data_element = {"data": summed_image, "properties": {}}
-                data_item = document_controller.add_data_element(data_element)
+                data_element = acquire_series(number_frames, energy_offset_per_frame, task)
                 # add the stack to Swift
-                data_element = {"data": stack, "properties": {}}
+                data_item = document_controller.add_data_element(data_element)
+
+                # align and sum the stack
+                summed_image = align_stack(data_element["data"], task)
+                # add the summed image to Swift
+                data_element["data"] = summed_image
+                # strip off the first dimension that we sum over
+                data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
                 data_item = document_controller.add_data_element(data_element)
 
         # create and start the thread.
