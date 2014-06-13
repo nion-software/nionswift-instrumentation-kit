@@ -6,8 +6,6 @@ import threading
 # third party libraries
 import numpy as np
 import autostem
-import autostem.tuning
-import superscan
 
 # local libraries
 from nion.swift import Decorators
