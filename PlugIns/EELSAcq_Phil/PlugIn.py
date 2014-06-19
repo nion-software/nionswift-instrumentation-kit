@@ -2,6 +2,7 @@
 import gettext
 import logging
 import threading
+from time import sleep
 
 # third party libraries
 import numpy as np
@@ -11,9 +12,9 @@ import autostem
 from nion.swift import Decorators
 from nion.swift import Panel
 from nion.swift import Workspace
-from nion.swift.Decorators import relative_file
 from nion.swift.model import HardwareSource
-from nion.swift.model import ImportExportManager
+from nion.swift.model import DataItem
+from nion.swift.model import Operation
 
 import ImageAlignment.register
 
@@ -50,24 +51,39 @@ class AcquireController(object):
             return
 
         def set_offset_energy(offset):
-            """
-            TODO: Phil should tell us how he's changing the energy offset for each spectrum
-            """
+            key = "EELS_Prism_Temp"
+            current_energy = 0
+            current_energy = autostem.TryGetVal(key)
+            print current_energy
+            autostem.SetVal(key, float(current_energy[1])+offset)
             pass
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
+
             with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
                 # grab one frame to get image size
                 data_element = data_generator()
                 frame = data_element["data"]
-                stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
-                for frame in xrange(number_frames):
-                    set_offset_energy(offset_per_spectrum)
-                    stack[frame] = data_generator()["data"]
-                    if task_object is not None:
-                        task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
-                data_element["data"] = stack
+                image_stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
+                dark_stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
+                reference_energy = autostem.TryGetVal("EELS_Prism_Temp")
+                dark = False
+                for stack in [image_stack, dark_stack]:
+                    if dark:
+                        autostem.SetVal("C_Blank", 1.0)
+                    for frame in xrange(number_frames):
+                        with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
+                            set_offset_energy(offset_per_spectrum)
+                            stack[frame] = data_generator()["data"]
+                            if task_object is not None:
+                                task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
+                    if dark:
+                        autostem.SetVal("C_Blank", 0)
+                    autostem.SetVal("EELS_Prism_Temp", reference_energy[1])
+                    dark = not dark
+                    sleep(2)
+                data_element["data"] = image_stack-dark_stack
                 # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
                 data_element["spatial_calibrations"] = ({"origin": 0.0,
                                                          "scale": 1,
@@ -81,7 +97,6 @@ class AcquireController(object):
                 task_object.update_progress(_("Starting image alignment."), (0, number_frames))
             # Pre-allocate an array for the shifts we'll measure
             shifts = np.zeros((number_frames, 2))
-            # we're going to use OpenCV to do the phase correlation
             # initial reference slice is first slice
             ref = stack[0][:]
             ref_shift = np.array([0, 0])
@@ -102,10 +117,15 @@ class AcquireController(object):
             return sum_image
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
+            # grab the document model and workspace for convenience
+            document_model = self.document_controller.document_model
+            workspace = self.document_controller.workspace
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
                 data_element = acquire_series(number_frames, energy_offset_per_frame, task)
                 # add the stack to Swift
                 data_item = document_controller.add_data_element(data_element)
+                document_model.append_data_item(data_item)
+                workspace.get_image_panel_by_id("stack").set_displayed_data_item(data_item)
 
                 # align and sum the stack
                 summed_image = align_stack(data_element["data"], task)
@@ -114,6 +134,20 @@ class AcquireController(object):
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
                 data_item = document_controller.add_data_element(data_element)
+                document_model.append_data_item(data_item)
+                workspace.get_image_panel_by_id("aligned and summed stack").set_displayed_data_item(data_item)
+
+                # next, line profile through center of crop
+                integrated_data_item = DataItem.DataItem()
+                integrated_data_item.title = _("EELS Integrated")
+                integration_operation = Operation.OperationItem("line-profile-operation")
+                integration_operation.set_property("start", (0.5, 0.0))
+                integration_operation.set_property("end", (0.5, 1.0))
+                integration_operation.set_property("integration_width", 40)
+                integrated_data_item.add_operation(integration_operation)
+                integrated_data_item.append_data_item(data_item)
+                document_model.append_data_item(integrated_data_item)
+                workspace.get_image_panel_by_id("spectrum").set_displayed_data_item(integrated_data_item)
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
@@ -157,8 +191,30 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         self.widget = column
 
+        self.__workspace_controller = None
+
     def acquire(self, number_frames, energy_offset):
+        # change to the EELS workspace layout
+        self.document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_workspace)
         AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, self.document_controller)
+
+    def __get_workspace_controller(self):
+        if not self.__workspace_controller:
+            self.__workspace_controller = self.document_controller.create_workspace_controller()
+        return self.__workspace_controller
+
+    def __configure_workspace(self, workspace, layout_id):
+        column = self.ui.create_splitter_widget("vertical")
+        image_panel1 = workspace.create_image_panel("spectrum")
+        row = self.ui.create_splitter_widget("horizontal")
+        image_panel2 = workspace.create_image_panel("stack")
+        image_panel3 = workspace.create_image_panel("aligned and summed stack")
+        row.add(image_panel2.widget)
+        row.add(image_panel3.widget)
+        column.add(image_panel1.widget)
+        column.add(row)
+        return column, image_panel1, layout_id
+
 
 
 panel_name = name+"-control-panel"
