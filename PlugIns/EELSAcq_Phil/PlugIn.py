@@ -16,6 +16,7 @@ from nion.swift import Workspace
 from nion.swift.model import HardwareSource
 from nion.swift.model import DataItem
 from nion.swift.model import Operation
+from nion.swift.model import ImportExportManager
 
 import ImageAlignment.register
 
@@ -117,9 +118,8 @@ class AcquireController(object):
                 sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
             return sum_image
 
-        def add_element_and_show_in_panel(data_element, document_controller, image_panel_id, data_item=None):
+        def show_in_panel(data_item, document_controller, image_panel_id):
             workspace = document_controller.workspace
-            data_item=document_controller.add_data_element(data_element)
             workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(data_item)
 
         def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=100):
@@ -133,7 +133,8 @@ class AcquireController(object):
             integration_operation.set_property("end", (midpoint, 1.0))
             integration_operation.set_property("integration_width", integration_width)
             integrated_data_item.add_operation(integration_operation)
-            integrated_data_item.add_data_source(data_item)
+            #integrated_data_item.add_data_source(data_item)
+            integrated_data_item.append_data_item(data_item)
             document_model.append_data_item(integrated_data_item)
             workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(integrated_data_item)
 
@@ -142,8 +143,9 @@ class AcquireController(object):
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
                 data_element = acquire_series(number_frames, energy_offset_per_frame, task)
                 data_element["title"] = "Spectrum stack"
+                data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 # add the stack to Swift
-                document_controller.queue_main_thread_task(functools.partial(add_element_and_show_in_panel,data_element, document_controller, "stack"))
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "stack"))
 
                 # align and sum the stack
                 summed_image = align_stack(data_element["data"], task)
@@ -153,9 +155,8 @@ class AcquireController(object):
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
                 # we'll replace data_item with a reference to our new data item in the main thread call here
-                data_item = None
-
-                document_controller.queue_main_thread_task(functools.partial(add_element_and_show_in_panel, data_element, document_controller, "aligned and summed stack", data_item))
+                data_item = ImportExportManager.create_data_item_from_data_element(data_element)
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "aligned and summed stack"))
 
                 _midpoint = 0.5
                 _integration_width=100
