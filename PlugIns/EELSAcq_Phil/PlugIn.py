@@ -23,6 +23,9 @@ _ = gettext.gettext
 name = "PhilEELSAcquire"
 disp_name = _("Phil-Style EELS Acquire")
 
+energy_adjust_control = "EELS_Prism_Temp"
+blank_control = "C_Blank"
+
 class AcquireController(object):
     __metaclass__ = Decorators.Singleton
 
@@ -51,12 +54,9 @@ class AcquireController(object):
             return
 
         def set_offset_energy(offset):
-            key = "EELS_Prism_Temp"
-            current_energy = 0
-            current_energy = autostem.TryGetVal(key)
-            print current_energy
-            autostem.SetVal(key, float(current_energy[1])+offset)
-            pass
+            current_energy = autostem.TryGetVal(energy_adjust_control)
+            # built-in 150ms delay to avoid double peaks and ghosting
+            autostem.SetValWait(energy_adjust_control, float(current_energy[1])+offset, 150)
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
@@ -67,11 +67,11 @@ class AcquireController(object):
                 frame = data_element["data"]
                 image_stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
                 dark_stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
-                reference_energy = autostem.TryGetVal("EELS_Prism_Temp")
+                reference_energy = autostem.TryGetVal(energy_adjust_control)
                 dark = False
                 for stack in [image_stack, dark_stack]:
                     if dark:
-                        autostem.SetVal("C_Blank", 1.0)
+                        autostem.SetVal(blank_control, 1.0)
                     for frame in xrange(number_frames):
                         with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
                             set_offset_energy(offset_per_spectrum)
@@ -79,8 +79,8 @@ class AcquireController(object):
                             if task_object is not None:
                                 task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
                     if dark:
-                        autostem.SetVal("C_Blank", 0)
-                    autostem.SetVal("EELS_Prism_Temp", reference_energy[1])
+                        autostem.SetVal(blank_control, 0)
+                    autostem.SetVal(energy_adjust_control, reference_energy[1])
                     dark = not dark
                     sleep(2)
                 data_element["data"] = image_stack-dark_stack
@@ -118,8 +118,8 @@ class AcquireController(object):
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
             # grab the document model and workspace for convenience
-            document_model = self.document_controller.document_model
-            workspace = self.document_controller.workspace
+            document_model = document_controller.document_model
+            workspace = document_controller.workspace
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
                 data_element = acquire_series(number_frames, energy_offset_per_frame, task)
                 # add the stack to Swift
