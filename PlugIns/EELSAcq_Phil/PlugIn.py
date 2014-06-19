@@ -3,6 +3,7 @@ import gettext
 import logging
 import threading
 from time import sleep
+import functools
 
 # third party libraries
 import numpy as np
@@ -116,38 +117,49 @@ class AcquireController(object):
                 sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
             return sum_image
 
-        def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
-            # grab the document model and workspace for convenience
+        def add_element_and_show_in_panel(data_element, document_controller, image_panel_id, data_item=None):
+            workspace = document_controller.workspace
+            data_item=document_controller.add_data_element(data_element)
+            workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(data_item)
+
+        def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=100):
             document_model = document_controller.document_model
             workspace = document_controller.workspace
+            # next, line profile through center of crop
+            integrated_data_item = DataItem.DataItem()
+            integrated_data_item.title = _("EELS Integrated")
+            integration_operation = Operation.OperationItem("line-profile-operation")
+            integration_operation.set_property("start", (midpoint, 0.0))
+            integration_operation.set_property("end", (midpoint, 1.0))
+            integration_operation.set_property("integration_width", integration_width)
+            integrated_data_item.add_operation(integration_operation)
+            integrated_data_item.add_data_source(data_item)
+            document_model.append_data_item(integrated_data_item)
+            workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(integrated_data_item)
+
+        def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
+            # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
                 data_element = acquire_series(number_frames, energy_offset_per_frame, task)
+                data_element["title"] = "Spectrum stack"
                 # add the stack to Swift
-                data_item = document_controller.add_data_element(data_element)
-                document_model.append_data_item(data_item)
-                workspace.get_image_panel_by_id("stack").set_displayed_data_item(data_item)
+                document_controller.queue_main_thread_task(functools.partial(add_element_and_show_in_panel,data_element, document_controller, "stack"))
 
                 # align and sum the stack
                 summed_image = align_stack(data_element["data"], task)
                 # add the summed image to Swift
                 data_element["data"] = summed_image
+                data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
-                data_item = document_controller.add_data_element(data_element)
-                document_model.append_data_item(data_item)
-                workspace.get_image_panel_by_id("aligned and summed stack").set_displayed_data_item(data_item)
+                # we'll replace data_item with a reference to our new data item in the main thread call here
+                data_item = None
 
-                # next, line profile through center of crop
-                integrated_data_item = DataItem.DataItem()
-                integrated_data_item.title = _("EELS Integrated")
-                integration_operation = Operation.OperationItem("line-profile-operation")
-                integration_operation.set_property("start", (0.5, 0.0))
-                integration_operation.set_property("end", (0.5, 1.0))
-                integration_operation.set_property("integration_width", 40)
-                integrated_data_item.add_operation(integration_operation)
-                integrated_data_item.append_data_item(data_item)
-                document_model.append_data_item(integrated_data_item)
-                workspace.get_image_panel_by_id("spectrum").set_displayed_data_item(integrated_data_item)
+                document_controller.queue_main_thread_task(functools.partial(add_element_and_show_in_panel, data_element, document_controller, "aligned and summed stack", data_item))
+
+                _midpoint = 0.5
+                _integration_width=100
+                document_controller.queue_main_thread_task(functools.partial(add_line_profile, data_item, document_controller, "spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
@@ -173,8 +185,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
         dialog_row = ui.create_row_widget()
         dialog_row.add(ui.create_label_widget(_("Number of frames:"), properties={"width": 96}))
         dialog_row.add(self.number_frames)
-        # TODO: is there a less manual spacer that appropriately stretches to fill a row's space?
-        dialog_row.add_spacing(20)
+        dialog_row.add_stretch()
         dialog_row.add(ui.create_label_widget(_("Energy offset/frame:"), properties={"width": 128}))
         dialog_row.add(self.energy_offset)
         dialog_row.add(self.acquire_button, alignment="right")
