@@ -120,6 +120,7 @@ class AcquireController(object):
 
         def show_in_panel(data_item, document_controller, image_panel_id):
             workspace = document_controller.workspace
+            document_controller.document_model.append_data_item(data_item)
             workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(data_item)
 
         def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=100):
@@ -133,8 +134,7 @@ class AcquireController(object):
             integration_operation.set_property("end", (midpoint, 1.0))
             integration_operation.set_property("integration_width", integration_width)
             integrated_data_item.add_operation(integration_operation)
-            #integrated_data_item.add_data_source(data_item)
-            integrated_data_item.append_data_item(data_item)
+            integrated_data_item.add_data_source(data_item)
             document_model.append_data_item(integrated_data_item)
             workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(integrated_data_item)
 
@@ -154,12 +154,16 @@ class AcquireController(object):
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
-                # we'll replace data_item with a reference to our new data item in the main thread call here
+                data_element["spatial_calibrations"][0]["origin"]=(summed_image.shape[1]/2.0-np.sum(summed_image, axis=0).argmax())*data_element["spatial_calibrations"][0]["scale"]
                 data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "aligned and summed stack"))
 
-                _midpoint = 0.5
-                _integration_width=100
+                dispersive_sum = np.sum(summed_image, axis=1)
+                differential = np.diff(dispersive_sum)
+                top = np.argmax(differential)
+                bottom = np.argmin(differential)
+                _midpoint = np.mean([bottom, top])/dispersive_sum.shape[0]
+                _integration_width = np.abs(bottom-top)*data_element["spatial_calibrations"][1]["scale"]
                 document_controller.queue_main_thread_task(functools.partial(add_line_profile, data_item, document_controller, "spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
