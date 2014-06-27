@@ -73,7 +73,9 @@ class AcquireController(object):
                 dark = False
                 for stack in [image_stack, dark_stack]:
                     if dark:
-                        autostem.SetVal(blank_control, 1.0)
+                        autostem.SetValWait(blank_control, 1.0, 200)
+                        # sleep 2 seconds to allow afterglow to die out
+                        sleep(2)
                     for frame in xrange(number_frames):
                         with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
                             set_offset_energy(offset_per_spectrum)
@@ -84,7 +86,6 @@ class AcquireController(object):
                         autostem.SetVal(blank_control, 0)
                     autostem.SetVal(energy_adjust_control, reference_energy[1])
                     dark = not dark
-                    sleep(2)
                 data_element["data"] = image_stack-dark_stack
                 # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
                 data_element["spatial_calibrations"] = ({"origin": 0.0,
