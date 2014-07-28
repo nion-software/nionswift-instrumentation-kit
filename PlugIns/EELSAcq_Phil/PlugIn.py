@@ -63,7 +63,7 @@ class AcquireController(object):
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
 
-            with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
+            with HardwareSource.get_data_element_generator_by_id("eels_camera") as data_generator:
                 # grab one frame to get image size
                 data_element = data_generator()
                 frame = data_element["data"]
@@ -77,7 +77,7 @@ class AcquireController(object):
                         # sleep 2 seconds to allow afterglow to die out
                         sleep(2)
                     for frame in xrange(number_frames):
-                        with HardwareSource.get_data_element_generator_by_id("eels_tv_camera") as data_generator:
+                        with HardwareSource.get_data_element_generator_by_id("eels_camera") as data_generator:
                             set_offset_energy(offset_per_spectrum)
                             stack[frame] = data_generator()["data"]
                             if task_object is not None:
