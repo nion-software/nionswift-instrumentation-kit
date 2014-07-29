@@ -17,6 +17,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import DataItem
 from nion.swift.model import Operation
 from nion.swift.model import ImportExportManager
+from nion.swift.model import Region
 
 import ImageAlignment.register
 
@@ -55,10 +56,12 @@ class AcquireController(object):
             logging.debug("Already acquiring")
             return
 
-        def set_offset_energy(offset):
+        def set_offset_energy(offset, sleep_time=1):
             current_energy = autostem.TryGetVal(energy_adjust_control)
             # built-in 150ms delay to avoid double peaks and ghosting
             autostem.SetValWait(energy_adjust_control, float(current_energy[1])+offset, 150)
+            # sleep 1 sec to avoid double peaks and ghosting
+            sleep(sleep_time)
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
@@ -71,17 +74,21 @@ class AcquireController(object):
                 dark_stack = np.empty((number_frames, frame.shape[0], frame.shape[1]))
                 reference_energy = autostem.TryGetVal(energy_adjust_control)
                 dark = False
+                dark_string = ""
                 for stack in [image_stack, dark_stack]:
                     if dark:
                         autostem.SetValWait(blank_control, 1.0, 200)
-                        # sleep 2 seconds to allow afterglow to die out
-                        sleep(2)
+                        # sleep 4 seconds to allow afterglow to die out
+                        sleep(4)
+                        dark_string = " (dark)"
                     for frame in xrange(number_frames):
                         with HardwareSource.get_data_element_generator_by_id("eels_camera") as data_generator:
-                            set_offset_energy(offset_per_spectrum)
+                            if not dark:
+                                set_offset_energy(offset_per_spectrum, 1)
                             stack[frame] = data_generator()["data"]
                             if task_object is not None:
-                                task_object.update_progress(_("Grabbing frame {}.").format(frame+1), (frame + 1, number_frames), None)
+                                task_object.update_progress(_("Grabbing {} frame {}.").format(dark_string, frame+1),
+                                                            (frame + 1, number_frames), None)
                     if dark:
                         autostem.SetVal(blank_control, 0)
                     autostem.SetVal(energy_adjust_control, reference_energy[1])
@@ -124,20 +131,23 @@ class AcquireController(object):
             document_controller.document_model.append_data_item(data_item)
             workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(data_item)
 
-        def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=100):
+        def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=.25):
             document_model = document_controller.document_model
             workspace = document_controller.workspace
             # next, line profile through center of crop
-            integrated_data_item = DataItem.DataItem()
-            integrated_data_item.title = _("EELS Integrated")
-            integration_operation = Operation.OperationItem("line-profile-operation")
-            integration_operation.set_property("start", (midpoint, 0.0))
-            integration_operation.set_property("end", (midpoint, 1.0))
-            integration_operation.set_property("integration_width", integration_width)
-            integrated_data_item.add_operation(integration_operation)
-            integrated_data_item.add_data_source(data_item)
-            document_model.append_data_item(integrated_data_item)
-            workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(integrated_data_item)
+            eels_data_item = DataItem.DataItem()
+            eels_data_item.title = _("EELS Integrated")
+
+            crop_operation = Operation.OperationItem("crop-operation")
+            crop_operation.set_property("bounds", ((midpoint-integration_width, 0.0), (midpoint+integration_width, 1.0)))
+            crop_operation.establish_associated_region("crop", data_item, Region.RectRegion())
+            integration_operation = Operation.OperationItem("projection-operation")
+            eels_data_item.add_operation(crop_operation)
+            eels_data_item.add_operation(integration_operation)
+            eels_data_item.add_data_source(data_item)
+            document_model.append_data_item(eels_data_item)
+
+            workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(eels_data_item)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
             # grab the document model and workspace for convenience
@@ -155,7 +165,7 @@ class AcquireController(object):
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
-                data_element["spatial_calibrations"][0]["origin"]=(summed_image.shape[1]/2.0-np.sum(summed_image, axis=0).argmax())*data_element["spatial_calibrations"][0]["scale"]
+                data_element["spatial_calibrations"][0]["offset"] = (summed_image.shape[1]/2.0-np.sum(summed_image, axis=0).argmax())*data_element["spatial_calibrations"][0]["scale"]
                 data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "aligned and summed stack"))
 
@@ -164,7 +174,7 @@ class AcquireController(object):
                 top = np.argmax(differential)
                 bottom = np.argmin(differential)
                 _midpoint = np.mean([bottom, top])/dispersive_sum.shape[0]
-                _integration_width = np.abs(bottom-top)*data_element["spatial_calibrations"][1]["scale"]
+                _integration_width = np.abs(bottom-top) / summed_image.shape[0] #data_element["spatial_calibrations"][1]["scale"]
                 document_controller.queue_main_thread_task(functools.partial(add_line_profile, data_item, document_controller, "spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
