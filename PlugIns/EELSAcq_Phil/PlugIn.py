@@ -26,7 +26,10 @@ _ = gettext.gettext
 name = "PhilEELSAcquire"
 disp_name = _("Phil-Style EELS Acquire")
 
-energy_adjust_control = "EELS_Prism_Temp"
+# Daresbury
+#energy_adjust_control = "EELS_Prism_Temp"
+#Rutgers
+energy_adjust_control = "EELS_MagneticShift_Offset"
 blank_control = "C_Blank"
 
 class AcquireController(object):
@@ -138,9 +141,15 @@ class AcquireController(object):
             eels_data_item = DataItem.DataItem()
             eels_data_item.title = _("EELS Integrated")
 
+            logging.debug("midpoint: {:.4f}".format(midpoint))
+            logging.debug("width: {:.4f}".format(integration_width))
+            
             crop_operation = Operation.OperationItem("crop-operation")
-            crop_operation.set_property("bounds", ((midpoint-integration_width, 0.0), (midpoint+integration_width, 1.0)))
-            crop_operation.establish_associated_region("crop", data_item, Region.RectRegion())
+            #crop_operation.set_property("bounds", ((midpoint-integration_width/2, 0.0), (midpoint+integration_width/2, 1.0)))
+            crop_region=Region.RectRegion()
+            crop_operation.establish_associated_region("crop", data_item, crop_region)
+            crop_region.center = (midpoint, 0.5)
+            crop_region.size = (integration_width, 1)
             integration_operation = Operation.OperationItem("projection-operation")
             eels_data_item.add_operation(crop_operation)
             eels_data_item.add_operation(integration_operation)
@@ -165,7 +174,10 @@ class AcquireController(object):
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
                 data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
-                data_element["spatial_calibrations"][0]["offset"] = (summed_image.shape[1]/2.0-np.sum(summed_image, axis=0).argmax())*data_element["spatial_calibrations"][0]["scale"]
+                # set the energy dispersive calibration so that the ZLP is at zero eV
+                zlp_position_pixels = np.sum(summed_image, axis=0).argmax()
+                zlp_position_calibrated_units = -zlp_position_pixels * data_element["spatial_calibrations"][1]["scale"]
+                data_element["spatial_calibrations"][1]["offset"] = zlp_position_calibrated_units
                 data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "aligned and summed stack"))
 
@@ -174,7 +186,7 @@ class AcquireController(object):
                 top = np.argmax(differential)
                 bottom = np.argmin(differential)
                 _midpoint = np.mean([bottom, top])/dispersive_sum.shape[0]
-                _integration_width = np.abs(bottom-top) / summed_image.shape[0] #data_element["spatial_calibrations"][1]["scale"]
+                _integration_width = float(np.abs(bottom-top)) / dispersive_sum.shape[0] #* data_element["spatial_calibrations"][0]["scale"]
                 document_controller.queue_main_thread_task(functools.partial(add_line_profile, data_item, document_controller, "spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
