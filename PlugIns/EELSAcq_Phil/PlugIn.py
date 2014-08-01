@@ -61,8 +61,8 @@ class AcquireController(object):
 
         def set_offset_energy(offset, sleep_time=1):
             current_energy = autostem.TryGetVal(energy_adjust_control)
-            # built-in 150ms delay to avoid double peaks and ghosting
-            autostem.SetValWait(energy_adjust_control, float(current_energy[1])+offset, 150)
+            # this function waits until the value is confirmed to be the desired value (or until timeout)
+            autostem.SetValAndConfirm(energy_adjust_control, float(current_energy[1])+offset, 0, sleep_time*1000)
             # sleep 1 sec to avoid double peaks and ghosting
             sleep(sleep_time)
 
