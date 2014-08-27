@@ -18,6 +18,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import Operation
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Region
+from nion.ui import CanvasItem
 
 import ImageAlignment.register
 
@@ -242,15 +243,20 @@ class PhilEELSAcquireControlView(Panel.Panel):
             self.__workspace_controller = self.document_controller.create_workspace_controller()
         return self.__workspace_controller
 
+    def __create_canvas_widget_from_image_panel(self, image_panel):
+        image_panel.root_canvas_item = CanvasItem.RootCanvasItem(self.ui)
+        image_panel.root_canvas_item.add_canvas_item(image_panel.canvas_item)
+        return image_panel.root_canvas_item.canvas_widget
+
     def __configure_workspace(self, workspace, layout_id):
         column = self.ui.create_splitter_widget("vertical")
         image_panel1 = workspace.create_image_panel("spectrum")
         row = self.ui.create_splitter_widget("horizontal")
         image_panel2 = workspace.create_image_panel("stack")
         image_panel3 = workspace.create_image_panel("aligned and summed stack")
-        row.add(image_panel2.widget)
-        row.add(image_panel3.widget)
-        column.add(image_panel1.widget)
+        row.add(self.__create_canvas_widget_from_image_panel(image_panel2))
+        row.add(self.__create_canvas_widget_from_image_panel(image_panel3))
+        column.add(self.__create_canvas_widget_from_image_panel(image_panel1))
         column.add(row)
         return column, image_panel1, layout_id
 
