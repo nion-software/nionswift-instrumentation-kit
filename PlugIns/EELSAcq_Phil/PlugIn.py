@@ -164,7 +164,14 @@ class AcquireController(object):
             eels_data_item.add_data_source(data_item)
             document_model.append_data_item(eels_data_item)
 
-            workspace.get_image_panel_by_id(image_panel_id).set_displayed_data_item(eels_data_item)
+            # argh
+            found_image_panel = None
+            for image_panel in workspace.image_panels:
+                if image_panel.element_id == image_panel_id:
+                    found_image_panel = image_panel
+                    break
+            if found_image_panel:
+                found_image_panel.set_displayed_data_item(eels_data_item)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
             # grab the document model and workspace for convenience
