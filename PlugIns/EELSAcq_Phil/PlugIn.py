@@ -133,14 +133,7 @@ class AcquireController(object):
         def show_in_panel(data_item, document_controller, image_panel_id):
             workspace = document_controller.workspace
             document_controller.document_model.append_data_item(data_item)
-            # argh
-            found_image_panel = None
-            for image_panel in workspace.image_panels:
-                if image_panel.element_id == image_panel_id:
-                    found_image_panel = image_panel
-                    break
-            if found_image_panel:
-                found_image_panel.set_displayed_data_item(data_item)
+            workspace.display_data_item(data_item, panel_id=image_panel_id)
 
         def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=.25):
             document_model = document_controller.document_model
@@ -164,14 +157,7 @@ class AcquireController(object):
             eels_data_item.add_data_source(data_item)
             document_model.append_data_item(eels_data_item)
 
-            # argh
-            found_image_panel = None
-            for image_panel in workspace.image_panels:
-                if image_panel.element_id == image_panel_id:
-                    found_image_panel = image_panel
-                    break
-            if found_image_panel:
-                found_image_panel.set_displayed_data_item(eels_data_item)
+            workspace.display_data_item(eels_data_item, panel_id=image_panel_id)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
             # grab the document model and workspace for convenience
@@ -260,7 +246,9 @@ class PhilEELSAcquireControlView(Panel.Panel):
     def __create_canvas_widget_from_image_panel(self, image_panel):
         image_panel.root_canvas_item = CanvasItem.RootCanvasItem(self.ui)
         image_panel.root_canvas_item.add_canvas_item(image_panel.canvas_item)
-        return image_panel.root_canvas_item.canvas_widget
+        image_row = self.ui.create_row_widget()
+        image_row.add(image_panel.root_canvas_item.canvas_widget)
+        return image_row
 
     def __configure_workspace(self, workspace, layout_id):
         column = self.ui.create_splitter_widget("vertical")
