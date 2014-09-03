@@ -27,6 +27,8 @@ _ = gettext.gettext
 name = "PhilEELSAcquire"
 disp_name = _("Phil-Style EELS Acquire")
 
+eels_hardware_source_id = "eels_camera"
+
 # Daresbury
 #energy_adjust_control = "EELS_Prism_Temp"
 #Rutgers
@@ -55,7 +57,8 @@ class AcquireController(object):
         tv_pixel_angle = autostem.values["TVPixelAngle"]
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
-    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, document_controller):
+    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, document_controller,
+                                       final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
@@ -70,7 +73,7 @@ class AcquireController(object):
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
 
-            with HardwareSource.get_data_element_generator_by_id("eels_camera") as data_generator:
+            with HardwareSource.get_data_element_generator_by_id(eels_hardware_source_id) as data_generator:
                 # grab one frame to get image size
                 data_element = data_generator()
                 frame = data_element["data"]
@@ -86,7 +89,7 @@ class AcquireController(object):
                         sleep(4)
                         dark_string = " (dark)"
                     for frame in xrange(number_frames):
-                        with HardwareSource.get_data_element_generator_by_id("eels_camera") as data_generator:
+                        with HardwareSource.get_data_element_generator_by_id(eels_hardware_source_id) as data_generator:
                             if not dark:
                                 set_offset_energy(offset_per_spectrum, 1)
                             stack[frame] = data_generator()["data"]
@@ -159,14 +162,13 @@ class AcquireController(object):
 
             workspace.display_data_item(eels_data_item, panel_id=image_panel_id)
 
-        def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller):
+        def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
                 data_element = acquire_series(number_frames, energy_offset_per_frame, task)
                 data_element["title"] = "Spectrum stack"
-                data_item = ImportExportManager.create_data_item_from_data_element(data_element)
+                stack_data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 # add the stack to Swift
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "stack"))
 
                 # align and sum the stack
                 summed_image = align_stack(data_element["data"], task)
@@ -179,8 +181,8 @@ class AcquireController(object):
                 zlp_position_pixels = np.sum(summed_image, axis=0).argmax()
                 zlp_position_calibrated_units = -zlp_position_pixels * data_element["spatial_calibrations"][1]["scale"]
                 data_element["spatial_calibrations"][1]["offset"] = zlp_position_calibrated_units
-                data_item = ImportExportManager.create_data_item_from_data_element(data_element)
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, data_item, document_controller, "aligned and summed stack"))
+                sum_data_item = ImportExportManager.create_data_item_from_data_element(data_element)
+                
 
                 dispersive_sum = np.sum(summed_image, axis=1)
                 differential = np.diff(dispersive_sum)
@@ -188,12 +190,18 @@ class AcquireController(object):
                 bottom = np.argmin(differential)
                 _midpoint = np.mean([bottom, top])/dispersive_sum.shape[0]
                 _integration_width = float(np.abs(bottom-top)) / dispersive_sum.shape[0] #* data_element["spatial_calibrations"][0]["scale"]
-                document_controller.queue_main_thread_task(functools.partial(add_line_profile, data_item, document_controller, "spectrum", _midpoint, _integration_width))
+
+                
+                document_controller.queue_main_thread_task(final_layout_fn)
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, stack_data_item, document_controller, "stack"))
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, sum_data_item, document_controller, "aligned and summed stack"))
+                document_controller.queue_main_thread_task(functools.partial(add_line_profile, sum_data_item, document_controller, "spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
                                                                                      energy_offset_per_frame,
-                                                                                     document_controller))
+                                                                                     document_controller,
+                                                                                     final_layout_fn))
         self.__acquire_thread.start()
 
 
@@ -201,6 +209,10 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
     def __init__(self, document_controller, panel_id, properties):
         super(PhilEELSAcquireControlView, self).__init__(document_controller, panel_id, name)
+
+        # data items used to show live progress
+        self.__eels_raw_data_item = None
+        self.__eels_data_item = None
 
         ui = document_controller.ui
 
@@ -234,9 +246,76 @@ class PhilEELSAcquireControlView(Panel.Panel):
         self.__workspace_controller = None
 
     def acquire(self, number_frames, energy_offset):
+        self.show_initial_plots()
+        AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, self.document_controller,
+                                                           functools.partial(self.set_final_layout))
+        # wait for the acq to finish
+
+    def set_final_layout(self):
         # change to the EELS workspace layout
-        self.document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_workspace)
-        AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, self.document_controller)
+        self.document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_final_workspace)
+
+    def show_initial_plots(self):
+        document_controller = self.document_controller
+        document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_start_workspace)
+        document_model = document_controller.document_model
+        workspace = document_controller.workspace
+        # get the workspace controller, which is the object that will put acquisition items into the workspace
+        workspace_controller = self.document_controller.workspace_controller
+        HardwareSource.HardwareSourceManager().start_hardware_source(workspace_controller, eels_hardware_source_id)
+
+        # create an acquisition image and put it in the lower left panel. the idea here (for now) is to create
+        # an image that will be recognized by the workspace controller as 'the acquisition image'.
+        # NOTE: this code is a hack until a better solution is available.
+        if not self.__eels_raw_data_item:
+
+            # create the new data item, add it to the document, and save a reference to it in this class
+            eels_raw_data_item = DataItem.DataItem()
+            eels_raw_data_item.title = _("EELS Raw")
+            document_model.append_data_item(eels_raw_data_item)
+            self.__eels_raw_data_item = eels_raw_data_item
+
+            # display the image in the eels_raw panel
+            workspace.display_data_item(eels_raw_data_item, panel_id="raw image")
+
+            # this next section sets up the eels_raw_data_item to be the one that gets used as the acquisition
+            # NOTE: this code is a hack until a better solution is available.
+            resolved_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
+            with eels_raw_data_item.open_metadata("hardware_source") as metadata:
+                metadata["hardware_source_id"] = resolved_hardware_source.hardware_source_id  # use the resolved hardware source id so that workspace finds it when restarting
+                metadata["hardware_source_channel_id"] = 0
+            workspace_controller.setup_channel(resolved_hardware_source, 0, eels_raw_data_item)
+
+        else:
+            workspace.display_data_item(self.__eels_raw_data_item, panel_id="raw image")
+
+        # next, line profile through center of crop
+        if not self.__eels_data_item:
+
+            # create the new data item, add it to the document, and save a reference to it in this class
+            eels_data_item = DataItem.DataItem()
+            eels_data_item.title = _("EELS")
+            self.__eels_data_item = eels_data_item
+
+            # set up the crop and projection operation. the crop also gets a region on the source.
+            crop_operation = Operation.OperationItem("crop-operation")
+            crop_operation.set_property("bounds", ((0.25, 0.0), (0.5, 1.0)))
+            crop_operation.establish_associated_region("crop", self.__eels_raw_data_item, Region.RectRegion())
+            integration_operation = Operation.OperationItem("projection-operation")
+            eels_data_item.add_operation(crop_operation)
+            eels_data_item.add_operation(integration_operation)
+            eels_data_item.add_data_source(self.__eels_raw_data_item)
+
+            # display the image in the eels panel
+            workspace.display_data_item(eels_data_item, panel_id="spectrum")
+
+            # for this data item, put the append at the end. right now there is a bug in which
+            # data sources are only connected when the dependent data item is added to the document
+            # model.
+            # TODO: add test and fix bug where data source is set after data item is added to document model
+            document_model.append_data_item(eels_data_item)
+        else:
+            workspace.display_data_item(self.__eels_data_item, panel_id="spectrum")
 
     def __get_workspace_controller(self):
         if not self.__workspace_controller:
@@ -250,7 +329,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
         image_row.add(image_panel.root_canvas_item.canvas_widget)
         return image_row
 
-    def __configure_workspace(self, workspace, layout_id):
+    def __configure_final_workspace(self, workspace, layout_id):
         column = self.ui.create_splitter_widget("vertical")
         image_panel1 = workspace.create_image_panel("spectrum")
         row = self.ui.create_splitter_widget("horizontal")
@@ -262,6 +341,13 @@ class PhilEELSAcquireControlView(Panel.Panel):
         column.add(row)
         return column, image_panel1, layout_id
 
+    def __configure_start_workspace(self, workspace, layout_id):
+        column = self.ui.create_splitter_widget("vertical")
+        image_panel1 = workspace.create_image_panel("spectrum")
+        image_panel2 = workspace.create_image_panel("raw image")
+        column.add(self.__create_canvas_widget_from_image_panel(image_panel1))
+        column.add(self.__create_canvas_widget_from_image_panel(image_panel2))
+        return column, image_panel1, layout_id
 
 
 panel_name = name+"-control-panel"
