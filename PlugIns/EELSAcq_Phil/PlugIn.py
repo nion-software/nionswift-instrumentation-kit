@@ -147,10 +147,11 @@ class AcquireController(object):
 
             logging.debug("midpoint: {:.4f}".format(midpoint))
             logging.debug("width: {:.4f}".format(integration_width))
-            
+
             crop_operation = Operation.OperationItem("crop-operation")
             #crop_operation.set_property("bounds", ((midpoint-integration_width/2, 0.0), (midpoint+integration_width/2, 1.0)))
             crop_region=Region.RectRegion()
+            data_item.add_region(crop_region)
             crop_operation.establish_associated_region("crop", data_item, crop_region)
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
@@ -182,7 +183,7 @@ class AcquireController(object):
                 zlp_position_calibrated_units = -zlp_position_pixels * data_element["spatial_calibrations"][1]["scale"]
                 data_element["spatial_calibrations"][1]["offset"] = zlp_position_calibrated_units
                 sum_data_item = ImportExportManager.create_data_item_from_data_element(data_element)
-                
+
 
                 dispersive_sum = np.sum(summed_image, axis=1)
                 differential = np.diff(dispersive_sum)
@@ -191,7 +192,7 @@ class AcquireController(object):
                 _midpoint = np.mean([bottom, top])/dispersive_sum.shape[0]
                 _integration_width = float(np.abs(bottom-top)) / dispersive_sum.shape[0] #* data_element["spatial_calibrations"][0]["scale"]
 
-                
+
                 document_controller.queue_main_thread_task(final_layout_fn)
                 document_controller.queue_main_thread_task(functools.partial(show_in_panel, stack_data_item, document_controller, "stack"))
                 document_controller.queue_main_thread_task(functools.partial(show_in_panel, sum_data_item, document_controller, "aligned and summed stack"))
@@ -300,7 +301,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             # set up the crop and projection operation. the crop also gets a region on the source.
             crop_operation = Operation.OperationItem("crop-operation")
             crop_operation.set_property("bounds", ((0.25, 0.0), (0.5, 1.0)))
-            crop_operation.establish_associated_region("crop", self.__eels_raw_data_item, Region.RectRegion())
+            crop_operation.establish_associated_region("crop", self.__eels_raw_data_item)
             integration_operation = Operation.OperationItem("projection-operation")
             eels_data_item.add_operation(crop_operation)
             eels_data_item.add_operation(integration_operation)
