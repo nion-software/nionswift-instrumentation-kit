@@ -156,9 +156,9 @@ class AcquireController(object):
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
             integration_operation = Operation.OperationItem("projection-operation")
+            integration_operation.add_data_source(Operation.DataItemDataSource(data_item))
             eels_data_item.set_operation(crop_operation)
             eels_data_item.set_operation(integration_operation)
-            eels_data_item.add_data_source(data_item)
             document_model.append_data_item(eels_data_item)
 
             workspace.display_data_item(eels_data_item, panel_id=image_panel_id)
@@ -302,10 +302,10 @@ class PhilEELSAcquireControlView(Panel.Panel):
             crop_operation = Operation.OperationItem("crop-operation")
             crop_operation.set_property("bounds", ((0.25, 0.0), (0.5, 1.0)))
             crop_operation.establish_associated_region("crop", self.__eels_raw_data_item)
+            crop_operation.add_data_source(Operation.DataItemDataSource(self.__eels_raw_data_item))
             integration_operation = Operation.OperationItem("projection-operation")
             eels_data_item.set_operation(crop_operation)
             eels_data_item.set_operation(integration_operation)
-            eels_data_item.add_data_source(self.__eels_raw_data_item)
 
             # display the image in the eels panel
             workspace.display_data_item(eels_data_item, panel_id="spectrum")
