@@ -152,7 +152,7 @@ class AcquireController(object):
             #crop_operation.set_property("bounds", ((midpoint-integration_width/2, 0.0), (midpoint+integration_width/2, 1.0)))
             crop_region=Region.RectRegion()
             data_item.add_region(crop_region)
-            crop_operation.establish_associated_region("crop", data_item, crop_region)
+            crop_operation.establish_associated_region("crop", data_item.maybe_data_source, crop_region)
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
             integration_operation = Operation.OperationItem("projection-operation")
@@ -301,7 +301,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             # set up the crop and projection operation. the crop also gets a region on the source.
             crop_operation = Operation.OperationItem("crop-operation")
             crop_operation.set_property("bounds", ((0.25, 0.0), (0.5, 1.0)))
-            crop_operation.establish_associated_region("crop", self.__eels_raw_data_item)
+            crop_operation.establish_associated_region("crop", self.__eels_raw_data_item.maybe_data_source)
             crop_operation.add_data_source(Operation.DataItemDataSource(self.__eels_raw_data_item))
             integration_operation = Operation.OperationItem("projection-operation")
             eels_data_item.set_operation(crop_operation)
