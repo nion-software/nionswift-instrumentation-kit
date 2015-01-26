@@ -282,9 +282,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             # this next section sets up the eels_raw_data_item to be the one that gets used as the acquisition
             # NOTE: this code is a hack until a better solution is available.
             resolved_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
-            with eels_raw_data_item.open_metadata("hardware_source") as metadata:
-                metadata["hardware_source_id"] = resolved_hardware_source.hardware_source_id  # use the resolved hardware source id so that workspace finds it when restarting
-                metadata["hardware_source_channel_id"] = 0
+            # TODO: make it so that restarting acquisition chooses the eels_raw_data_item
             workspace_controller.setup_channel(resolved_hardware_source, 0, eels_raw_data_item)
 
         else:
