@@ -149,9 +149,7 @@ class AcquireController(object):
 
         def show_in_panel(data_item, document_controller, image_panel_id):
             document_controller.document_model.append_data_item(data_item)
-            # TODO
-            # workspace = document_controller.workspace
-            # workspace.display_data_item(data_item, panel_id=image_panel_id)
+            document_controller.workspace_controller.get_display_panel(image_panel_id).set_displayed_data_item(data_item)
 
         def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=.25):
             logging.debug("midpoint: {:.4f}".format(midpoint))
@@ -169,9 +167,7 @@ class AcquireController(object):
             self.__eels_data_item = display_specifier.data_item
             self.__eels_data_item.title = _("EELS Integrated")
 
-            # TODO
-            # workspace = document_controller.workspace
-            # workspace.display_data_item(eels_data_item, panel_id=image_panel_id)
+            document_controller.workspace_controller.get_display_panel(image_panel_id).set_displayed_data_item(self.__eels_data_item)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
@@ -204,9 +200,9 @@ class AcquireController(object):
 
 
                 document_controller.queue_main_thread_task(final_layout_fn)
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, stack_data_item, document_controller, "stack"))
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, sum_data_item, document_controller, "aligned and summed stack"))
-                document_controller.queue_main_thread_task(functools.partial(add_line_profile, sum_data_item, document_controller, "spectrum", _midpoint, _integration_width))
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, stack_data_item, document_controller, "eels_phil_stack"))
+                document_controller.queue_main_thread_task(functools.partial(show_in_panel, sum_data_item, document_controller, "eels_phil_aligned_summed_stack"))
+                document_controller.queue_main_thread_task(functools.partial(add_line_profile, sum_data_item, document_controller, "eels_phil_spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
@@ -234,19 +230,19 @@ class PhilEELSAcquireControlView(Panel.Panel):
         self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 50})
         self.energy_offset.text = "40"
 
-        self.acquire_button = ui.create_push_button_widget(_("Start"), properties={"width": 40, "height": 23})
+        self.acquire_button = ui.create_push_button_widget(_("Start"))
 
         dialog_row = ui.create_row_widget()
-        dialog_row.add(ui.create_label_widget(_("Number of frames:"), properties={"width": 96}))
+        dialog_row.add(ui.create_label_widget(_("Number of frames:")))
         dialog_row.add(self.number_frames)
         dialog_row.add_stretch()
         dialog_row2 = ui.create_row_widget()
-        dialog_row2.add(ui.create_label_widget(_("Energy offset/frame:"), properties={"width": 128}))
+        dialog_row2.add(ui.create_label_widget(_("Energy offset/frame:")))
         dialog_row2.add(self.energy_offset)
         dialog_row2.add_stretch()
         dialog_row3 = ui.create_row_widget()
         dialog_row3.add_stretch()
-        dialog_row3.add(self.acquire_button, alignment="right")
+        dialog_row3.add(self.acquire_button)
 
         self.acquire_button.on_clicked = lambda: self.acquire(int(self.number_frames.text),
                                                               float(self.energy_offset.text))
@@ -272,16 +268,13 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
     def set_final_layout(self):
         # change to the EELS workspace layout
-        # TODO
-        # self.document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_final_workspace)
-        pass
+        self.__configure_final_workspace(self.document_controller.workspace_controller)
 
     def show_initial_plots(self):
         document_controller = self.document_controller
         document_model = document_controller.document_model
 
-        # TODO
-        # document_controller.workspace.change_layout("Phil-Style EELS", layout_fn=self.__configure_start_workspace)
+        self.__configure_start_workspace(document_controller.workspace_controller)
 
         # get the workspace controller, which is the object that will put acquisition items into the workspace
         workspace_controller = self.document_controller.workspace_controller
@@ -304,8 +297,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             workspace_controller.setup_channel(eels_hardware_source.hardware_source_id, None, view_id, eels_raw_data_item)
             eels_raw_data_item.session_id = document_model.session_id
 
-        # TODO
-        # workspace.display_data_item(self.__eels_raw_data_item, panel_id="raw image")
+        workspace_controller.get_display_panel("eels_phil_raw").set_displayed_data_item(self.__eels_raw_data_item)
 
         # next, line profile through center of crop
         if not self.__eels_data_item:
@@ -323,8 +315,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             self.__eels_data_item.title = _("EELS")
 
         # display the eels data item
-        # TODO
-        # workspace.display_data_item(self.__eels_data_item, panel_id="spectrum")
+        workspace_controller.get_display_panel("eels_phil_spectrum").set_displayed_data_item(self.__eels_data_item)
 
         eels_hardware_source.start_playing()
 
@@ -335,25 +326,22 @@ class PhilEELSAcquireControlView(Panel.Panel):
         image_row.add(image_panel.root_canvas_item.canvas_widget)
         return image_row
 
-    def __configure_final_workspace(self, workspace, layout_id):
-        column = self.ui.create_splitter_widget("vertical")
-        image_panel1 = workspace.create_image_panel("spectrum")
-        row = self.ui.create_splitter_widget("horizontal")
-        image_panel2 = workspace.create_image_panel("stack")
-        image_panel3 = workspace.create_image_panel("aligned and summed stack")
-        row.add(self.__create_canvas_widget_from_image_panel(image_panel2))
-        row.add(self.__create_canvas_widget_from_image_panel(image_panel3))
-        column.add(self.__create_canvas_widget_from_image_panel(image_panel1))
-        column.add(row)
-        return column, image_panel1, layout_id
+    def __configure_final_workspace(self, workspace_controller):
+        spectrum_display = {"type": "image", "selected": True, "display_panel_id": "eels_phil_spectrum"}
+        stack_display = {"type": "image", "display_panel_id": "eels_phil_stack"}
+        aligned_summer_stack_display = {"type": "image", "display_panel_id": "eels_phil_aligned_summed_stack"}
+        layout_right_side = {"type": "splitter", "orientation": "horizontal", "splits": [0.5, 0.5],
+            "children": [stack_display, aligned_summer_stack_display]}
+        layout = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5],
+            "children": [spectrum_display, layout_right_side]}
+        workspace_controller.ensure_workspace(_("Phil-Style EELS Results"), layout, "eels_phil_results")
 
-    def __configure_start_workspace(self, workspace, layout_id):
-        column = self.ui.create_splitter_widget("vertical")
-        image_panel1 = workspace.create_image_panel("spectrum")
-        image_panel2 = workspace.create_image_panel("raw image")
-        column.add(self.__create_canvas_widget_from_image_panel(image_panel1))
-        column.add(self.__create_canvas_widget_from_image_panel(image_panel2))
-        return column, image_panel1, layout_id
+    def __configure_start_workspace(self, workspace_controller):
+        spectrum_display = {"type": "image", "selected": True, "display_panel_id": "eels_phil_spectrum"}
+        eels_raw_display = {"type": "image", "display_panel_id": "eels_phil_raw"}
+        layout = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5],
+            "children": [spectrum_display, eels_raw_display]}
+        workspace_controller.ensure_workspace(_("Phil-Style EELS"), layout, "eels_phil_acquisition")
 
 
 panel_name = name+"-control-panel"
