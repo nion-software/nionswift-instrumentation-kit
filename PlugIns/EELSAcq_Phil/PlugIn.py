@@ -92,33 +92,32 @@ class AcquireController(object):
                 # grab one frame to get image size
                 data_element = data_generator()
                 frame = data_element["data"]
-                image_stack = numpy.empty((number_frames, frame.shape[0], frame.shape[1]))
-                dark_stack = numpy.empty((number_frames, frame.shape[0], frame.shape[1]))
+                image_stack = numpy.empty((number_frames, frame.shape[0], frame.shape[1]), dtype=numpy.float)
+                dark_sum = numpy.zeros_like(frame)
+
                 reference_energy = autostem.TryGetVal(energy_adjust_control)
-                dark = False
-                dark_string = ""
-                for stack in [image_stack, dark_stack]:
-                    if dark:
-                        autostem.SetValWait(blank_control, 1.0, 200)
-                        # sleep 4 seconds to allow afterglow to die out
-                        sleep(4)
-                        dark_string = " (dark)"
-                    for frame in xrange(number_frames):
-                        if not dark:
-                            set_offset_energy(offset_per_spectrum, 1)
-                        stack[frame] = data_generator()["data"]
-                        if task_object is not None:
-                            task_object.update_progress(_("Grabbing {} frame {}.").format(dark_string, frame+1),
+                for frame in xrange(number_frames):
+                    set_offset_energy(offset_per_spectrum, 1)
+                    image_stack[frame] = data_generator()["data"]
+                    if task_object is not None:
+                            task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame+1),
                                                         (frame + 1, number_frames), None)
-                    if dark:
-                        autostem.SetVal(blank_control, 0)
-                    autostem.SetVal(energy_adjust_control, reference_energy[1])
-                    dark = not dark
-                data_element["data"] = image_stack-dark_stack
+
+                autostem.SetValWait(blank_control, 1.0, 200)
+                # sleep 4 seconds to allow afterglow to die out
+                sleep(4)
+                for frame in xrange(number_frames):
+                    dark_sum += data_generator()["data"]
+                    if task_object is not None:
+                            task_object.update_progress(_("Grabbing dark data frame {}.").format(frame+1),
+                                                        (frame + 1, number_frames), None)
+                autostem.SetVal(blank_control, 0)
+                autostem.SetVal(energy_adjust_control, reference_energy[1])
+                data_element["data"] = image_stack-dark_sum
                 # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
                 data_element["spatial_calibrations"] = [{"origin": 0.0,
                                                          "scale": 1,
-                                                         "units": "frame"},] + \
+                                                         "units": "frame"}, ] + \
                                                        data_element["spatial_calibrations"]
             return data_element
 
