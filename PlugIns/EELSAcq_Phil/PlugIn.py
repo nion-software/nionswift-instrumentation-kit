@@ -198,10 +198,10 @@ class AcquireController(object):
                 _integration_width = float(numpy.abs(bottom-top)) / dispersive_sum.shape[0] #* data_element["spatial_calibrations"][0]["scale"]
 
 
-                document_controller.queue_main_thread_task(final_layout_fn)
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, stack_data_item, document_controller, "eels_phil_stack"))
-                document_controller.queue_main_thread_task(functools.partial(show_in_panel, sum_data_item, document_controller, "eels_phil_aligned_summed_stack"))
-                document_controller.queue_main_thread_task(functools.partial(add_line_profile, sum_data_item, document_controller, "eels_phil_spectrum", _midpoint, _integration_width))
+                document_controller.queue_task(final_layout_fn)
+                document_controller.queue_task(functools.partial(show_in_panel, stack_data_item, document_controller, "eels_phil_stack"))
+                document_controller.queue_task(functools.partial(show_in_panel, sum_data_item, document_controller, "eels_phil_aligned_summed_stack"))
+                document_controller.queue_task(functools.partial(add_line_profile, sum_data_item, document_controller, "eels_phil_spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
