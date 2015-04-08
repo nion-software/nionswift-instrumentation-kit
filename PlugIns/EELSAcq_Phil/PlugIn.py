@@ -72,7 +72,7 @@ class AcquireController(object):
         tv_pixel_angle = autostem.values["TVPixelAngle"]
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
-    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, document_controller,
+    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller,
                                        final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
@@ -104,8 +104,8 @@ class AcquireController(object):
                                                         (frame + 1, number_frames), None)
 
                 autostem.SetValWait(blank_control, 1.0, 200)
-                # sleep 4 seconds to allow afterglow to die out
-                sleep(4)
+                # sleep to allow afterglow to die out
+                sleep(sleep_time)
                 for frame in xrange(number_frames):
                     dark_sum += data_generator()["data"]
                     if task_object is not None:
@@ -113,7 +113,8 @@ class AcquireController(object):
                                                         (frame + 1, number_frames), None)
                 autostem.SetVal(blank_control, 0)
                 autostem.SetVal(energy_adjust_control, reference_energy[1])
-                data_element["data"] = image_stack-dark_sum
+                image_stack -= dark_sum
+                data_element["data"] = image_stack
                 # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
                 data_element["spatial_calibrations"] = [{"origin": 0.0,
                                                          "scale": 1,
@@ -144,7 +145,7 @@ class AcquireController(object):
                 if task_object is not None:
                     task_object.update_progress(_("Summing frame {}.").format(index), (index + 1, number_frames), None)
                 sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
-            return sum_image
+            return sum_image, shifts
 
         def show_in_panel(data_item, document_controller, image_panel_id):
             document_controller.document_model.append_data_item(data_item)
@@ -177,7 +178,7 @@ class AcquireController(object):
                 # add the stack to Swift
 
                 # align and sum the stack
-                summed_image = align_stack(data_element["data"], task)
+                summed_image, shifts = align_stack(data_element["data"], task)
                 # add the summed image to Swift
                 data_element["data"] = summed_image
                 data_element["title"] = "Aligned and summed spectra"
@@ -228,6 +229,9 @@ class PhilEELSAcquireControlView(Panel.Panel):
         # TODO: how to get text to align right?
         self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 50})
         self.energy_offset.text = "40"
+        # TODO: how to get text to align right?
+        self.sleep_time = self.ui.create_line_edit_widget(properties={"width": 50})
+        self.sleep_time.text = "30"
 
         self.acquire_button = ui.create_push_button_widget(_("Start"))
 
@@ -240,11 +244,16 @@ class PhilEELSAcquireControlView(Panel.Panel):
         dialog_row2.add(self.energy_offset)
         dialog_row2.add_stretch()
         dialog_row3 = ui.create_row_widget()
+        dialog_row3.add(ui.create_label_widget(_("Sleep seconds after blank:")))
+        dialog_row3.add(self.sleep_time)
         dialog_row3.add_stretch()
-        dialog_row3.add(self.acquire_button)
+        dialog_row4 = ui.create_row_widget()
+        dialog_row4.add_stretch()
+        dialog_row4.add(self.acquire_button)
 
         self.acquire_button.on_clicked = lambda: self.acquire(int(self.number_frames.text),
-                                                              float(self.energy_offset.text))
+                                                              float(self.energy_offset.text),
+                                                              int(self.sleep_time.text))
 
         properties["margin"] = 6
         properties["spacing"] = 2
@@ -253,15 +262,16 @@ class PhilEELSAcquireControlView(Panel.Panel):
         column.add(dialog_row)
         column.add(dialog_row2)
         column.add(dialog_row3)
+        column.add(dialog_row4)
         column.add_stretch()
 
         self.widget = column
 
         self.__workspace_controller = None
 
-    def acquire(self, number_frames, energy_offset):
+    def acquire(self, number_frames, energy_offset, sleep_time):
         self.show_initial_plots()
-        AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, self.document_controller,
+        AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, sleep_time, self.document_controller,
                                                            functools.partial(self.set_final_layout))
         # wait for the acq to finish
 
@@ -286,7 +296,6 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
             # create the new data item, add it to the document, and save a reference to it in this class
             eels_raw_data_item = DataItem.DataItem(numpy.zeros((16, 16), numpy.float))
-            eels_raw_data_item.title = _("EELS Raw")
             document_model.append_data_item(eels_raw_data_item)
             self.__eels_raw_data_item = eels_raw_data_item
 
