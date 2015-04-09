@@ -88,39 +88,48 @@ class AcquireController(object):
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
 
-            with HardwareSource.get_data_element_generator_by_id(eels_hardware_source_id) as data_generator:
-                # grab one frame to get image size
-                data_element = data_generator()
-                frame = data_element["data"]
-                image_stack = numpy.empty((number_frames, frame.shape[0], frame.shape[1]), dtype=numpy.float)
-                dark_sum = numpy.zeros_like(frame)
+            hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(
+                eels_hardware_source_id)
 
-                reference_energy = autostem.TryGetVal(energy_adjust_control)
-                for frame in xrange(number_frames):
-                    set_offset_energy(offset_per_spectrum, 1)
-                    image_stack[frame] = data_generator()["data"]
-                    if task_object is not None:
-                            task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame+1),
-                                                        (frame + 1, number_frames), None)
+            # grab one frame to get image size
+            first_data = hardware_source.get_next_data_elements_to_start()["data"]
+            image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
+            image_stack_data_item = DataItem.DataItem(image_stack_data)
 
-                autostem.SetValWait(blank_control, 1.0, 200)
-                # sleep to allow afterglow to die out
-                sleep(sleep_time)
-                for frame in xrange(number_frames):
-                    dark_sum += data_generator()["data"]
-                    if task_object is not None:
-                            task_object.update_progress(_("Grabbing dark data frame {}.").format(frame+1),
-                                                        (frame + 1, number_frames), None)
-                autostem.SetVal(blank_control, 0)
-                autostem.SetVal(energy_adjust_control, reference_energy[1])
-                image_stack -= dark_sum
-                data_element["data"] = image_stack
-                # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
-                data_element["spatial_calibrations"] = [{"origin": 0.0,
-                                                         "scale": 1,
-                                                         "units": "frame"}, ] + \
-                                                       data_element["spatial_calibrations"]
-            return data_element
+            reference_energy = autostem.TryGetVal(energy_adjust_control)
+            for frame_index in xrange(number_frames):
+                set_offset_energy(offset_per_spectrum, 1)
+                # use next frame to start to make sure we're getting a frame with the new energy offset
+                image_stack_data[frame_index] = hardware_source.get_next_data_elements_to_start()["data"]
+                if task_object is not None:
+                    task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
+                                                (frame_index + 1, number_frames), None)
+
+            autostem.SetValWait(blank_control, 1.0, 200)
+            # sleep 4 seconds to allow afterglow to die out
+            sleep(sleep_time)
+            for frame_index in xrange(number_frames):
+                if frame_index == 0:
+                    # use next frame to start to make sure we're getting a blanked frame
+                    dark_sum = hardware_source.get_next_data_elements_to_start()["data"]
+                else:
+                    # but now use next frame to finish since we can know it's already blanked
+                    dark_sum += hardware_source.get_next_data_elements_to_finish()["data"]
+                if task_object is not None:
+                    task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
+                                                (frame_index + 1, number_frames), None)
+            autostem.SetVal(blank_control, 0)
+            autostem.SetVal(energy_adjust_control, reference_energy[1])
+            image_stack_data -= dark_sum / number_frames
+
+            # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
+            dimensional_calibrations = image_stack_data_item.dimensional_calibrations
+            dimensional_calibrations[0].origin = 0.0
+            dimensional_calibrations[0].scale = 1.0
+            dimensional_calibrations[0].units = "frame"
+            image_stack_data_item.set_dimensional_calibrations(dimensional_calibrations)
+
+            return image_stack_data_item
 
         def align_stack(stack, task_object=None):
             number_frames = stack.shape[0]
@@ -172,13 +181,13 @@ class AcquireController(object):
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
-                data_element = acquire_series(number_frames, energy_offset_per_frame, task)
-                data_element["title"] = "Spectrum stack"
-                stack_data_item = ImportExportManager.create_data_item_from_data_element(data_element)
-                # add the stack to Swift
+                # acquire the stack. it will be added to the document by queueing to the main thread at the end of this method.
+                stack_data_item = acquire_series(number_frames, energy_offset_per_frame, task)
+                stack_data_item.title = _("Spectrum Stack")
 
                 # align and sum the stack
-                summed_image, shifts = align_stack(data_element["data"], task)
+                data_element = dict()
+                summed_image, shifts = align_stack(stack_data_item.maybe_data_source.data, task)  # please don't copy use of 'maybe_data_source' without consulting Chris
                 # add the summed image to Swift
                 data_element["data"] = summed_image
                 data_element["title"] = "Aligned and summed spectra"
