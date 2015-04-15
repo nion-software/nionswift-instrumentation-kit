@@ -92,7 +92,7 @@ class AcquireController(object):
                 eels_hardware_source_id)
 
             # grab one frame to get image size
-            first_data = hardware_source.get_next_data_elements_to_start()["data"]
+            first_data = hardware_source.get_next_data_elements_to_start()[0]["data"]
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
             image_stack_data_item = DataItem.DataItem(image_stack_data)
 
@@ -100,7 +100,7 @@ class AcquireController(object):
             for frame_index in xrange(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
-                image_stack_data[frame_index] = hardware_source.get_next_data_elements_to_start()["data"]
+                image_stack_data[frame_index] = hardware_source.get_next_data_elements_to_start()[0]["data"]
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
@@ -111,10 +111,10 @@ class AcquireController(object):
             for frame_index in xrange(number_frames):
                 if frame_index == 0:
                     # use next frame to start to make sure we're getting a blanked frame
-                    dark_sum = hardware_source.get_next_data_elements_to_start()["data"]
+                    dark_sum = hardware_source.get_next_data_elements_to_start()[0]["data"]
                 else:
                     # but now use next frame to finish since we can know it's already blanked
-                    dark_sum += hardware_source.get_next_data_elements_to_finish()["data"]
+                    dark_sum += hardware_source.get_next_data_elements_to_finish()[0]["data"]
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
@@ -123,11 +123,11 @@ class AcquireController(object):
             image_stack_data -= dark_sum / number_frames
 
             # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
-            dimensional_calibrations = image_stack_data_item.dimensional_calibrations
-            dimensional_calibrations[0].origin = 0.0
+            dimensional_calibrations = image_stack_data_item.maybe_data_source.dimensional_calibrations
+            dimensional_calibrations[0].offset = 0.0
             dimensional_calibrations[0].scale = 1.0
             dimensional_calibrations[0].units = "frame"
-            image_stack_data_item.set_dimensional_calibrations(dimensional_calibrations)
+            image_stack_data_item.maybe_data_source.set_dimensional_calibrations(dimensional_calibrations)
 
             return image_stack_data_item
 
@@ -192,7 +192,12 @@ class AcquireController(object):
                 data_element["data"] = summed_image
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
-                data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
+                for dimensional_calibration in stack_data_item.maybe_data_source.dimensional_calibrations[1:]:
+                    data_element.setdefault("spatial_calibrations", list()).append({
+                        "origin": dimensional_calibration.offset,  # TODO: fix me
+                        "scale": dimensional_calibration.scale,
+                        "units": dimensional_calibration.units
+                    })
                 # set the energy dispersive calibration so that the ZLP is at zero eV
                 zlp_position_pixels = numpy.sum(summed_image, axis=0).argmax()
                 zlp_position_calibrated_units = -zlp_position_pixels * data_element["spatial_calibrations"][1]["scale"]
