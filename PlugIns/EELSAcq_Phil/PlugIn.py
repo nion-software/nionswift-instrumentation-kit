@@ -156,11 +156,11 @@ class AcquireController(object):
                 sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
             return sum_image, shifts
 
-        def show_in_panel(data_item, document_controller, image_panel_id):
+        def show_in_panel(data_item, document_controller, display_panel_id):
             document_controller.document_model.append_data_item(data_item)
-            document_controller.workspace_controller.get_display_panel(image_panel_id).set_displayed_data_item(data_item)
+            document_controller.workspace_controller.display_data_item_in_display_panel(data_item, display_panel_id)
 
-        def add_line_profile(data_item, document_controller, image_panel_id, midpoint=0.5, integration_width=.25):
+        def add_line_profile(data_item, document_controller, display_panel_id, midpoint=0.5, integration_width=.25):
             logging.debug("midpoint: {:.4f}".format(midpoint))
             logging.debug("width: {:.4f}".format(integration_width))
 
@@ -176,7 +176,7 @@ class AcquireController(object):
             self.__eels_data_item = display_specifier.data_item
             self.__eels_data_item.title = _("EELS Integrated")
 
-            document_controller.workspace_controller.get_display_panel(image_panel_id).set_displayed_data_item(self.__eels_data_item)
+            document_controller.workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, display_panel_id)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
@@ -319,7 +319,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             workspace_controller.setup_channel(eels_hardware_source.hardware_source_id, None, view_id, eels_raw_data_item)
             eels_raw_data_item.session_id = document_model.session_id
 
-        workspace_controller.get_display_panel("eels_phil_raw").set_displayed_data_item(self.__eels_raw_data_item)
+        workspace_controller.display_data_item_in_display_panel(self.__eels_raw_data_item, "eels_phil_raw")
 
         # next, line profile through center of crop
         if not self.__eels_data_item:
@@ -337,7 +337,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
             self.__eels_data_item.title = _("EELS")
 
         # display the eels data item
-        workspace_controller.get_display_panel("eels_phil_spectrum").set_displayed_data_item(self.__eels_data_item)
+        workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, "eels_phil_spectrum")
 
         eels_hardware_source.start_playing()
 
