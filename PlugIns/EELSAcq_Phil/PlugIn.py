@@ -35,7 +35,7 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Region
 from nion.ui import CanvasItem
 
-import ImageAlignment.register
+from EELSAcq_Phil.ImageAlignment import register
 
 _ = gettext.gettext
 
@@ -144,7 +144,7 @@ class AcquireController(object):
                 if task_object is not None:
                     task_object.update_progress(_("Cross correlating frame {}.").format(index), (index + 1, number_frames), None)
                 # TODO: make interpolation factor variable (it is hard-coded to 100 here.)
-                shifts[index] = ref_shift+numpy.array(ImageAlignment.register.get_shift(ref, _slice, 100))
+                shifts[index] = ref_shift+numpy.array(register.get_shift(ref, _slice, 100))
                 ref = _slice[:]
                 ref_shift = shifts[index]
             # sum image needs to be big enough for shifted images
@@ -153,7 +153,7 @@ class AcquireController(object):
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(_("Summing frame {}.").format(index), (index + 1, number_frames), None)
-                sum_image += ImageAlignment.register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
+                sum_image += register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
             return sum_image, shifts
 
         def show_in_panel(data_item, document_controller, display_panel_id):
