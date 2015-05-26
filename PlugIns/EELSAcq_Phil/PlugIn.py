@@ -97,7 +97,7 @@ class AcquireController(object):
             image_stack_data_item = DataItem.DataItem(image_stack_data)
 
             reference_energy = autostem.TryGetVal(energy_adjust_control)
-            for frame_index in xrange(number_frames):
+            for frame_index in range(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
                 image_stack_data[frame_index] = hardware_source.get_next_data_elements_to_start()[0]["data"]
@@ -108,7 +108,7 @@ class AcquireController(object):
             autostem.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
             sleep(sleep_time)
-            for frame_index in xrange(number_frames):
+            for frame_index in range(number_frames):
                 if frame_index == 0:
                     # use next frame to start to make sure we're getting a blanked frame
                     dark_sum = hardware_source.get_next_data_elements_to_start()[0]["data"]
