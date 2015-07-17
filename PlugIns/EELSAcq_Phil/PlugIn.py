@@ -9,7 +9,7 @@ import functools
 import numpy
 
 try:
-    import autostem
+    import _autostem
 except ImportError:
     class AutoSTEM(object):
         def __init__(self):
@@ -22,7 +22,9 @@ except ImportError:
             pass
         def SetVal(self, property_id, value):
             pass
-    autostem = AutoSTEM()
+        def GetVal(self, property_id, value):
+            pass
+    _autostem = AutoSTEM()
 
 # local libraries
 from nion.swift import Decorators
@@ -35,7 +37,7 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Region
 from nion.ui import CanvasItem
 
-from EELSAcq_Phil.ImageAlignment import register
+from .ImageAlignment import register
 
 _ = gettext.gettext
 
@@ -64,12 +66,12 @@ class AcquireController(object):
 
     def get_high_tension_v(self):
         # self.connect()
-        eht = autostem.values["EHT"]
+        eht = _autostem.values["EHT"]
         return float(eht) if eht is not None else None
 
     def get_ccd_pixel_angle_mrad(self):
         # self.connect()
-        tv_pixel_angle = autostem.values["TVPixelAngle"]
+        tv_pixel_angle = _autostem.values["TVPixelAngle"]
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
     def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller,
@@ -79,9 +81,9 @@ class AcquireController(object):
             return
 
         def set_offset_energy(offset, sleep_time=1):
-            current_energy = autostem.TryGetVal(energy_adjust_control)
+            current_energy = _autostem.TryGetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the desired value (or until timeout)
-            autostem.SetValAndConfirm(energy_adjust_control, float(current_energy[1])+offset, 0, sleep_time*1000)
+            _autostem.SetValAndConfirm(energy_adjust_control, float(current_energy[1])+offset, 0, sleep_time*1000)
             # sleep 1 sec to avoid double peaks and ghosting
             sleep(sleep_time)
 
@@ -96,7 +98,7 @@ class AcquireController(object):
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
             image_stack_data_item = DataItem.DataItem(image_stack_data)
 
-            reference_energy = autostem.TryGetVal(energy_adjust_control)
+            reference_energy = _autostem.TryGetVal(energy_adjust_control)
             for frame_index in range(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
@@ -105,7 +107,7 @@ class AcquireController(object):
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
 
-            autostem.SetValWait(blank_control, 1.0, 200)
+            _autostem.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
             sleep(sleep_time)
             for frame_index in range(number_frames):
@@ -118,8 +120,8 @@ class AcquireController(object):
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
-            autostem.SetVal(blank_control, 0)
-            autostem.SetVal(energy_adjust_control, reference_energy[1])
+            _autostem.SetVal(blank_control, 0)
+            _autostem.SetVal(energy_adjust_control, reference_energy[1])
             image_stack_data -= dark_sum / number_frames
 
             # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
