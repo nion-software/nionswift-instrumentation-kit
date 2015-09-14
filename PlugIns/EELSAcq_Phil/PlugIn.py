@@ -44,7 +44,7 @@ _ = gettext.gettext
 name = "PhilEELSAcquire"
 disp_name = _("Phil-Style EELS Acquire")
 
-eels_hardware_source_id = "eels_camera"
+eels_hardware_source_id = "phil_camera"
 
 # Daresbury
 #energy_adjust_control = "EELS_Prism_Temp"
