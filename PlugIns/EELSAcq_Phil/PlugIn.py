@@ -94,7 +94,8 @@ class AcquireController(object):
                 eels_hardware_source_id)
 
             # grab one frame to get image size
-            first_data = hardware_source.get_next_data_elements_to_start()[0]["data"]
+            first_data_element = hardware_source.get_next_data_elements_to_start()[0]
+            first_data = first_data_element["data"]
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
             image_stack_data_item = DataItem.DataItem(image_stack_data)
 
@@ -129,6 +130,12 @@ class AcquireController(object):
             dimensional_calibrations[0].offset = 0.0
             dimensional_calibrations[0].scale = 1.0
             dimensional_calibrations[0].units = "frame"
+            dimensional_calibrations[1].offset = first_data_element["spatial_calibrations"][0]["offset"]
+            dimensional_calibrations[1].scale = first_data_element["spatial_calibrations"][0]["scale"]
+            dimensional_calibrations[1].units = first_data_element["spatial_calibrations"][0]["units"]
+            dimensional_calibrations[2].offset = first_data_element["spatial_calibrations"][1]["offset"]
+            dimensional_calibrations[2].scale = first_data_element["spatial_calibrations"][1]["scale"]
+            dimensional_calibrations[2].units = first_data_element["spatial_calibrations"][1]["units"]
             image_stack_data_item.maybe_data_source.set_dimensional_calibrations(dimensional_calibrations)
 
             return image_stack_data_item
@@ -241,13 +248,13 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         # TODO: how to get text to align right?
         self.number_frames = self.ui.create_line_edit_widget(properties={"width": 30})
-        self.number_frames.text = "4"
+        self.number_frames.text = "30"
         # TODO: how to get text to align right?
         self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 50})
-        self.energy_offset.text = "40"
+        self.energy_offset.text = "0"
         # TODO: how to get text to align right?
         self.sleep_time = self.ui.create_line_edit_widget(properties={"width": 50})
-        self.sleep_time.text = "30"
+        self.sleep_time.text = "15"
 
         self.acquire_button = ui.create_push_button_widget(_("Start"))
 
