@@ -280,7 +280,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         properties["margin"] = 6
         properties["spacing"] = 2
-        column = ui.create_column_widget(properties)
+        column = ui.create_column_widget(properties=properties)
 
         column.add(dialog_row)
         column.add(dialog_row2)
