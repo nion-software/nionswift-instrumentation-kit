@@ -27,7 +27,6 @@ except ImportError:
     _autostem = AutoSTEM()
 
 # local libraries
-from nion.swift import Decorators
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import HardwareSource
@@ -35,6 +34,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import Operation
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Region
+from nion.swift.model import Utility
 from nion.ui import CanvasItem
 
 from .ImageAlignment import register
@@ -52,8 +52,7 @@ eels_hardware_source_id = "phil_camera"
 energy_adjust_control = "EELS_MagneticShift_Offset"
 blank_control = "C_Blank"
 
-class AcquireController(object):
-    __metaclass__ = Decorators.Singleton
+class AcquireController(metaclass=Utility.Singleton):
 
     """
         Provides access to the AutoSTEM objects. AutoSTEM refers to the overall microscope system of cameras,
