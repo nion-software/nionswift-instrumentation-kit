@@ -65,12 +65,12 @@ class AcquireController(metaclass=Utility.Singleton):
 
     def get_high_tension_v(self):
         # self.connect()
-        eht = _autostem.values["EHT"]
+        eht = _autostem.GetVal("EHT")
         return float(eht) if eht is not None else None
 
     def get_ccd_pixel_angle_mrad(self):
         # self.connect()
-        tv_pixel_angle = _autostem.values["TVPixelAngle"]
+        tv_pixel_angle = _autostem.GetVal["TVPixelAngle"]
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
     def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller,
