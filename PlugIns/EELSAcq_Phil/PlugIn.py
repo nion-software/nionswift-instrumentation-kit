@@ -350,10 +350,10 @@ class PhilEELSAcquireControlView(Panel.Panel):
         eels_hardware_source.start_playing()
 
     def __create_canvas_widget_from_image_panel(self, image_panel):
-        image_panel.root_canvas_item = CanvasItem.RootCanvasItem(self.ui)
-        image_panel.root_canvas_item.add_canvas_item(image_panel.canvas_item)
+        canvas_widget = self.ui.create_canvas_widget()
+        canvas_widget.canvas_item.add_canvas_item(image_panel.canvas_item)
         image_row = self.ui.create_row_widget()
-        image_row.add(image_panel.root_canvas_item.canvas_widget)
+        image_row.add(canvas_widget)
         return image_row
 
     def __configure_final_workspace(self, workspace_controller):
