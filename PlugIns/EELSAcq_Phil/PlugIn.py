@@ -323,8 +323,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
             # this next section sets up the eels_raw_data_item to be the one that gets used as the acquisition
             # NOTE: this code is a hack until a better solution is available.
-            view_id = eels_hardware_source.hardware_source_id
-            self.document_controller.document_model.setup_channel(eels_hardware_source.hardware_source_id, None, view_id, eels_raw_data_item)
+            self.document_controller.document_model.setup_channel(eels_hardware_source.hardware_source_id, None, eels_raw_data_item)
             eels_raw_data_item.session_id = document_model.session_id
 
         workspace_controller.display_data_item_in_display_panel(self.__eels_raw_data_item, "eels_phil_raw")
