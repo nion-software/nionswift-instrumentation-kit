@@ -1,9 +1,9 @@
 # standard libraries
+import functools
 import gettext
 import logging
 import threading
 from time import sleep
-import functools
 
 # third party libraries
 import numpy
@@ -31,11 +31,9 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import HardwareSource
 from nion.swift.model import DataItem
-from nion.swift.model import Operation
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Region
 from nion.swift.model import Utility
-from nion.ui import CanvasItem
 
 from .ImageAlignment import register
 
@@ -174,15 +172,17 @@ class AcquireController(metaclass=Utility.Singleton):
 
             # next, line profile through center of crop
             # please don't copy this bad example code!
-            operation = Operation.OperationItem("projection-operation")
-            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(data_item)
             crop_region = Region.RectRegion()
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
+            crop_region.is_bounds_constrained = True
+            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(data_item)
             buffered_data_source_specifier.buffered_data_source.add_region(crop_region)
-            display_specifier = document_controller.add_processing_operation(buffered_data_source_specifier, operation, crop_region=crop_region)
-            self.__eels_data_item = display_specifier.data_item
-            self.__eels_data_item.title = _("EELS Integrated")
+            eels_data_item = document_controller.document_model.get_projection_new(data_item, crop_region)
+            if eels_data_item:
+                eels_data_item.title = _("EELS Summed")
+                document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(eels_data_item))
+            self.__eels_data_item = eels_data_item
 
             document_controller.workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, display_panel_id)
 
@@ -330,18 +330,18 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         # next, line profile through center of crop
         if not self.__eels_data_item:
-
             # create the new data item, add it to the document, and save a reference to it in this class
             # set up the crop and projection operation. the crop also gets a region on the source.
-            operation = Operation.OperationItem("projection-operation")
-            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(self.__eels_raw_data_item)
             crop_region = Region.RectRegion()
             crop_region.center = (0.5, 0.5)
             crop_region.size = (0.5, 1.0)
+            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(self.__eels_raw_data_item)
             buffered_data_source_specifier.buffered_data_source.add_region(crop_region)
-            display_specifier = document_controller.add_processing_operation(buffered_data_source_specifier, operation, crop_region=crop_region)
-            self.__eels_data_item = display_specifier.data_item
-            self.__eels_data_item.title = _("EELS")
+            eels_data_item = document_controller.document_model.get_projection_new(self.__eels_raw_data_item, crop_region)
+            if eels_data_item:
+                eels_data_item.title = _("EELS")
+                document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(eels_data_item))
+            self.__eels_data_item = eels_data_item
 
         # display the eels data item
         workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, "eels_phil_spectrum")
