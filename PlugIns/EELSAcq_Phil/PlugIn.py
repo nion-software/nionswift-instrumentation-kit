@@ -3,7 +3,7 @@ import functools
 import gettext
 import logging
 import threading
-from time import sleep
+import time
 
 # third party libraries
 import numpy
@@ -29,10 +29,10 @@ except ImportError:
 # local libraries
 from nion.swift import Panel
 from nion.swift import Workspace
-from nion.swift.model import HardwareSource
 from nion.swift.model import DataItem
+from nion.swift.model import Graphics
+from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
-from nion.swift.model import Region
 from nion.swift.model import Utility
 
 from .ImageAlignment import register
@@ -82,7 +82,7 @@ class AcquireController(metaclass=Utility.Singleton):
             # this function waits until the value is confirmed to be the desired value (or until timeout)
             _autostem.SetValAndConfirm(energy_adjust_control, float(current_energy[1])+offset, 0, sleep_time*1000)
             # sleep 1 sec to avoid double peaks and ghosting
-            sleep(sleep_time)
+            time.sleep(sleep_time)
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None):
             logging.info("Starting image acquisition.")
@@ -107,7 +107,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
             _autostem.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
-            sleep(sleep_time)
+            time.sleep(sleep_time)
             for frame_index in range(number_frames):
                 if frame_index == 0:
                     # use next frame to start to make sure we're getting a blanked frame
@@ -172,12 +172,12 @@ class AcquireController(metaclass=Utility.Singleton):
 
             # next, line profile through center of crop
             # please don't copy this bad example code!
-            crop_region = Region.RectRegion()
+            crop_region = Graphics.RectangleGraphic()
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
             crop_region.is_bounds_constrained = True
-            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(data_item)
-            buffered_data_source_specifier.buffered_data_source.add_region(crop_region)
+            display_specifier = DataItem.DisplaySpecifier.from_data_item(data_item)
+            display_specifier.display.add_graphic(crop_region)
             eels_data_item = document_controller.document_model.get_projection_new(data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
@@ -332,11 +332,11 @@ class PhilEELSAcquireControlView(Panel.Panel):
         if not self.__eels_data_item:
             # create the new data item, add it to the document, and save a reference to it in this class
             # set up the crop and projection operation. the crop also gets a region on the source.
-            crop_region = Region.RectRegion()
+            crop_region = Graphics.RectangleGraphic()
             crop_region.center = (0.5, 0.5)
             crop_region.size = (0.5, 1.0)
-            buffered_data_source_specifier = DataItem.DisplaySpecifier.from_data_item(self.__eels_raw_data_item)
-            buffered_data_source_specifier.buffered_data_source.add_region(crop_region)
+            display_specifier = DataItem.DisplaySpecifier.from_data_item(self.__eels_raw_data_item)
+            display_specifier.display.add_graphic(crop_region)
             eels_data_item = document_controller.document_model.get_projection_new(self.__eels_raw_data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS")
