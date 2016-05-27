@@ -14,15 +14,15 @@ except ImportError:
     class AutoSTEM(object):
         def __init__(self):
             self.values = {"EHT": 100, "TVPixelAngle": 2/1000.0}
-        def TryGetVal(self, property_id):
+        def TryGetVal(self, s: str) -> (bool, float):
             return [1.0, 1.0]
-        def SetValAndConfirm(self, property_id, v1, v2, timeout):
+        def SetValAndConfirm(self, s: str, val: float, tolfactor: float, timeout_ms: int) -> bool:
             pass
-        def SetValWait(self, property_id, v1, timeout):
+        def SetValWait(self, property_id: str, v1: float, timeout_ms: int) -> bool:
             pass
-        def SetVal(self, property_id, value):
+        def SetVal(self, s: str, val: float) -> bool:
             pass
-        def GetVal(self, property_id, value):
+        def GetVal(self, s: str, default_value: float=None) -> float:
             pass
     _autostem = AutoSTEM()
 
@@ -68,7 +68,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
     def get_ccd_pixel_angle_mrad(self):
         # self.connect()
-        tv_pixel_angle = _autostem.GetVal["TVPixelAngle"]
+        tv_pixel_angle = _autostem.GetVal("TVPixelAngle")
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
     def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller,
@@ -108,8 +108,9 @@ class AcquireController(metaclass=Utility.Singleton):
             _autostem.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
             time.sleep(sleep_time)
+            dark_sum = None
             for frame_index in range(number_frames):
-                if frame_index == 0:
+                if dark_sum is None:
                     # use next frame to start to make sure we're getting a blanked frame
                     dark_sum = hardware_source.get_next_data_elements_to_start()[0]["data"]
                 else:
