@@ -35,7 +35,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 
-from .ImageAlignment import register
+from EELSAcq_Phil import register
 
 _ = gettext.gettext
 
