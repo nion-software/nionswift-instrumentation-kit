@@ -72,11 +72,11 @@ class ScanAcquisitionController(object):
                                         column = frame_index % scan_width
                                         row = frame_index // scan_width
                                         if data_ref.data is None:
-                                            data_ref.data = numpy.zeros((eels_data.shape[0],) + scan_parameters["size"], numpy.float)
+                                            data_ref.data = numpy.zeros(scan_parameters["size"] + (eels_data.shape[0],), numpy.float)
                                         if row >= scan_height:
                                             break
                                         if column < data_ref.data.shape[1]:
-                                            data_ref[:, row, column] = eels_data
+                                            data_ref[row, column, :] = eels_data
                                             self.acquisition_state_changed_event.fire({"message": "update", "position": (row, column + flyback_pixels)})
                                         data_and_metadata_list = eels_view_task.grab_earliest()
                                         eels_data_and_metadata = data_and_metadata_list[1]
