@@ -1,6 +1,7 @@
 # standard libraries
 import copy
 import queue
+import typing
 
 # typing
 # None
@@ -139,6 +140,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__camera_adapter.create_record_task(self.__record_parameters))
+
+    def acquire_sequence(self, n: int) -> typing.Dict:
+        return self.__camera_adapter.acquire_sequence(self.get_current_frame_parameters(), n)
 
     def set_frame_parameters(self, profile_index, frame_parameters):
         frame_parameters = copy.copy(frame_parameters)
