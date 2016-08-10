@@ -14,6 +14,7 @@ import numpy
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import HardwareSource_1_0 as HardwareSource
 from nion.typeshed import UI_1_0 as UserInterface
+from nion.swift.model import HardwareSource
 from nion.utils import Event
 
 _ = gettext.gettext
@@ -93,6 +94,46 @@ class ScanAcquisitionController(object):
                 traceback.print_exc()
 
         self.__thread = threading.Thread(target=acquire_spectrum_image, args=(self.__api, document_controller))
+        self.__thread.start()
+
+    def start_sequence(self, document_controller: API.DocumentController) -> None:
+
+        def acquire_sequence(api: API.API, document_controller: API.DocumentController) -> None:
+            try:
+                logging.debug("start")
+                self.acquisition_state_changed_event.fire({"message": "start"})
+                try:
+                    eels_camera = api.get_hardware_source_by_id("orca_camera", version="1.0")
+                    eels_camera_parameters = eels_camera.get_frame_parameters_for_profile_by_index(0)
+
+                    scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")
+                    scan_parameters = scan_controller.get_frame_parameters_for_profile_by_index(2)
+                    scan_max_size = 256
+                    scan_parameters["size"] = min(scan_max_size, scan_parameters["size"][0]), min(scan_max_size, scan_parameters["size"][1])
+                    scan_parameters["pixel_time_us"] = int(1000 * eels_camera_parameters["exposure_ms"] * 0.75)
+                    scan_parameters["external_clock_wait_time_ms"] = int(eels_camera_parameters["exposure_ms"] * 1.5)
+                    scan_parameters["external_clock_mode"] = 1
+
+                    library = document_controller.library
+
+                    flyback_pixels = 2
+                    with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
+                        scan_height = scan_parameters["size"][0]
+                        scan_width = scan_parameters["size"][1] + flyback_pixels
+                        data_element = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
+                        data_shape = data_element["data"].shape
+                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, data_shape[1])[:, 0:scan_width-flyback_pixels, :]
+                        data_and_metadata = HardwareSource.convert_data_element_to_data_and_metadata(data_element)
+                        data_item = library.create_data_item_from_data_and_metadata(data_and_metadata)
+                        document_controller.display_data_item(data_item)
+                finally:
+                    self.acquisition_state_changed_event.fire({"message": "end"})
+                    logging.debug("end")
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+
+        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_controller))
         self.__thread.start()
 
     def start_line_scan(self, document_controller, start, end, sample_count):
@@ -261,12 +302,25 @@ class PanelDelegate(object):
         line_samples_row.add(line_samples_edit_widget)
         line_samples_row.add_stretch()
 
+        def acquire_sequence():
+            self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
+            self.__scan_acquisition_controller.start_sequence(document_controller)
+
+        acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire Sequence"))
+        acquire_sequence_button_widget.on_clicked = acquire_sequence
+
+        acquire_sequence_button_row = ui.create_row_widget()
+        acquire_sequence_button_row.add(acquire_sequence_button_widget)
+        acquire_sequence_button_row.add_stretch()
+
         column.add_spacing(8)
         column.add(button_row)
         column.add(status_row)
         column.add_spacing(8)
         column.add(line_button_row)
         column.add(line_samples_row)
+        column.add_spacing(8)
+        column.add(acquire_sequence_button_row)
         column.add_spacing(8)
         column.add_stretch()
 
