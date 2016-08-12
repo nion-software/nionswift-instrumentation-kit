@@ -5,7 +5,6 @@ import logging
 import threading
 import time
 
-# third party libraries
 import numpy
 
 try:
@@ -27,6 +26,8 @@ except ImportError:
     _autostem = AutoSTEM()
 
 # local libraries
+from nion.data import Calibration
+from nion.data import DataAndMetadata
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
@@ -84,7 +85,7 @@ class AcquireController(metaclass=Utility.Singleton):
             # sleep 1 sec to avoid double peaks and ghosting
             time.sleep(sleep_time)
 
-        def acquire_series(number_frames, offset_per_spectrum, task_object=None):
+        def acquire_series(number_frames, offset_per_spectrum, task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
             hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(
@@ -93,8 +94,8 @@ class AcquireController(metaclass=Utility.Singleton):
             # grab one frame to get image size
             first_data_element = hardware_source.get_next_data_elements_to_start()[0]
             first_data = first_data_element["data"]
+
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
-            image_stack_data_item = DataItem.DataItem(image_stack_data)
 
             reference_energy = _autostem.TryGetVal(energy_adjust_control)
             for frame_index in range(number_frames):
@@ -123,18 +124,19 @@ class AcquireController(metaclass=Utility.Singleton):
             _autostem.SetVal(energy_adjust_control, reference_energy[1])
             image_stack_data -= dark_sum / number_frames
 
-            # TODO: replace frame index with acquisition time (this is effectively chronospectroscopy before the sum)
-            dimensional_calibrations = image_stack_data_item.maybe_data_source.dimensional_calibrations
-            dimensional_calibrations[0].offset = 0.0
-            dimensional_calibrations[0].scale = 1.0
-            dimensional_calibrations[0].units = "frame"
-            dimensional_calibrations[1].offset = first_data_element["spatial_calibrations"][0]["offset"]
-            dimensional_calibrations[1].scale = first_data_element["spatial_calibrations"][0]["scale"]
-            dimensional_calibrations[1].units = first_data_element["spatial_calibrations"][0]["units"]
-            dimensional_calibrations[2].offset = first_data_element["spatial_calibrations"][1]["offset"]
-            dimensional_calibrations[2].scale = first_data_element["spatial_calibrations"][1]["scale"]
-            dimensional_calibrations[2].units = first_data_element["spatial_calibrations"][1]["units"]
-            image_stack_data_item.maybe_data_source.set_dimensional_calibrations(dimensional_calibrations)
+            calibrations_dict0 = first_data_element["spatial_calibrations"][0]
+            calibrations_dict1 = first_data_element["spatial_calibrations"][1]
+            # TODO: replace frame calibration with acquisition time (this is effectively chronospectroscopy before the sum)
+            sequence_calibration = Calibration.Calibration(units="frame")
+            dimension_calibration0 = Calibration.Calibration(offset=calibrations_dict0["offset"], scale=calibrations_dict0["scale"], units=calibrations_dict0["units"])
+            dimension_calibration1 = Calibration.Calibration(offset=calibrations_dict1["offset"], scale=calibrations_dict1["scale"], units=calibrations_dict1["units"])
+            image_stack_data_item = DataItem.DataItem(numpy.zeros((8, 8)))  # dummy data
+            image_stack_data_item.maybe_data_source.set_data_and_metadata(DataAndMetadata.new_data_and_metadata(image_stack_data,
+                                                                                                                dimensional_calibrations=[sequence_calibration,
+                                                                                                                    dimension_calibration0,
+                                                                                                                    dimension_calibration1],
+                                                                                                                data_descriptor=DataAndMetadata.DataDescriptor(
+                                                                                                                    True, 0, 2)))
 
             return image_stack_data_item
 
