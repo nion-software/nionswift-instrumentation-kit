@@ -124,8 +124,10 @@ class ScanAcquisitionController(object):
                         data_shape = data_element["data"].shape
                         data_element["data"] = data_element["data"].reshape(scan_height, scan_width, data_shape[1])[:, 0:scan_width-flyback_pixels, :]
                         data_and_metadata = HardwareSource.convert_data_element_to_data_and_metadata(data_element)
-                        data_item = library.create_data_item_from_data_and_metadata(data_and_metadata)
-                        document_controller.display_data_item(data_item)
+                        def create_and_display_data_item():
+                            data_item = library.create_data_item_from_data_and_metadata(data_and_metadata)
+                            document_controller.display_data_item(data_item)
+                        document_controller.queue_task(create_and_display_data_item)  # must occur on UI thread
                 finally:
                     self.acquisition_state_changed_event.fire({"message": "end"})
                     logging.debug("end")
