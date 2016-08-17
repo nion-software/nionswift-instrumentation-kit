@@ -231,7 +231,7 @@ class TestScanControlClass(unittest.TestCase):
         data_item.maybe_data_source.displays[0].add_graphic(graphic)
         document_model.append_data_item(data_item)
         hardware_source = self._setup_hardware_source()
-        document_model.setup_channel(hardware_source.hardware_source_id, hardware_source.data_channels[0].channel_id, None, data_item)
+        document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, hardware_source.data_channels[0].channel_id), data_item)
         HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
         display = document_model.data_items[0].primary_display_specifier.display
         scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
