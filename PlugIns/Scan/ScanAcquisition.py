@@ -3,6 +3,7 @@ import contextlib
 import gettext
 import logging
 import threading
+import time
 
 # typing
 from typing import Optional
@@ -118,6 +119,7 @@ class ScanAcquisitionController(object):
 
                     flyback_pixels = 2
                     with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
+                        time.sleep(0.2)  # give the superscan time to get into first position. 200ms.
                         scan_height = scan_parameters["size"][0]
                         scan_width = scan_parameters["size"][1] + flyback_pixels
                         data_element = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
@@ -193,18 +195,6 @@ class ScanAcquisitionController(object):
         self.__aborted = True
 
 
-class MenuItemDelegate(object):
-
-    def __init__(self, api):
-        self.menu_item_name = _("Acquire Spectrum Image")  # menu item name
-        self.__api = api
-
-    def menu_item_execute(self, document_controller):
-
-        scan_acquisition_controller = ScanAcquisitionController(self.__api)
-        scan_acquisition_controller.start_spectrum_image(document_controller)
-
-
 class PanelDelegate(object):
 
     def __init__(self, api):
@@ -219,21 +209,21 @@ class PanelDelegate(object):
     def create_panel_widget(self, ui, document_controller):
         column = ui.create_column_widget()
 
-        button_widget = ui.create_push_button_widget(_("Start Spectrum Image"))
-        status_label = ui.create_label_widget()
-        def button_clicked():
+        old_start_button_widget = ui.create_push_button_widget(_("Start Spectrum Image"))
+        old_status_label = ui.create_label_widget()
+        def old_button_clicked():
             if self.__scan_acquisition_controller:
                 self.__scan_acquisition_controller.abort()
             else:
                 def update_button(state):
                     def update_ui():
                         if state["message"] == "start":
-                            button_widget.text = _("Abort Spectrum Image")
+                            old_start_button_widget.text = _("Abort Spectrum Image")
                         elif state["message"] == "end":
-                            button_widget.text = _("Start Spectrum Image")
-                            status_label.text = _("Using parameters from Record mode.")
+                            old_start_button_widget.text = _("Start Spectrum Image")
+                            old_status_label.text = _("Using parameters from Record mode.")
                         elif state["message"] == "update":
-                            status_label.text = "{}: {}".format(_("Position"), state["position"])
+                            old_status_label.text = "{}: {}".format(_("Position"), state["position"])
                     document_controller.queue_task(update_ui)
                     if state["message"] == "end":
                         self.__acquisition_state_changed_event.close()
@@ -242,17 +232,17 @@ class PanelDelegate(object):
                 self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
                 self.__acquisition_state_changed_event = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(update_button)
                 self.__scan_acquisition_controller.start_spectrum_image(document_controller)
-        button_widget.on_clicked = button_clicked
+        old_start_button_widget.on_clicked = old_button_clicked
 
-        button_row = ui.create_row_widget()
-        button_row.add(button_widget)
-        button_row.add_stretch()
+        old_button_row = ui.create_row_widget()
+        old_button_row.add(old_start_button_widget)
+        old_button_row.add_stretch()
 
-        status_row = ui.create_row_widget()
-        status_row.add(status_label)
-        status_row.add_stretch()
+        old_status_row = ui.create_row_widget()
+        old_status_row.add(old_status_label)
+        old_status_row.add_stretch()
 
-        status_label.text = _("Using parameters from Record mode.")
+        old_status_label.text = _("Using parameters from Record mode.")
 
         line_samples = [16]
 
@@ -315,12 +305,12 @@ class PanelDelegate(object):
         acquire_sequence_button_row.add(acquire_sequence_button_widget)
         acquire_sequence_button_row.add_stretch()
 
-        column.add_spacing(8)
-        column.add(button_row)
-        column.add(status_row)
-        column.add_spacing(8)
-        column.add(line_button_row)
-        column.add(line_samples_row)
+        # column.add_spacing(8)
+        # column.add(old_button_row)
+        # column.add(old_status_row)
+        # column.add_spacing(8)
+        # column.add(line_button_row)
+        # column.add(line_samples_row)
         column.add_spacing(8)
         column.add(acquire_sequence_button_row)
         column.add_spacing(8)
@@ -338,7 +328,6 @@ class ScanAcquisitionExtension(object):
         # grab the api object.
         api = api_broker.get_api(version=API.version, ui_version=UserInterface.version)
         # be sure to keep a reference or it will be closed immediately.
-        # self.__menu_item_ref = api.create_menu_item(MenuItemDelegate(api))
         self.__panel_ref = api.create_panel(PanelDelegate(api))
 
     def close(self):
