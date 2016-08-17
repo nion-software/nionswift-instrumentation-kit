@@ -104,7 +104,8 @@ class ScanAcquisitionController(object):
                 logging.debug("start")
                 self.acquisition_state_changed_event.fire({"message": "start"})
                 try:
-                    eels_camera = api.get_hardware_source_by_id("orca_camera", version="1.0")
+                    eels_camera_id = "orca_camera"
+                    eels_camera = api.get_hardware_source_by_id(eels_camera_id, version="1.0")
                     eels_camera_parameters = eels_camera.get_frame_parameters_for_profile_by_index(0)
 
                     scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")
@@ -127,7 +128,8 @@ class ScanAcquisitionController(object):
                         data_element["data"] = data_element["data"].reshape(scan_height, scan_width, data_shape[1])[:, 0:scan_width-flyback_pixels, :]
                         data_and_metadata = HardwareSource.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
-                            data_item = library.create_data_item_from_data_and_metadata(data_and_metadata)
+                            data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)
+                            data_item.set_data_and_metadata(data_and_metadata)
                             document_controller.display_data_item(data_item)
                         document_controller.queue_task(create_and_display_data_item)  # must occur on UI thread
                 finally:
