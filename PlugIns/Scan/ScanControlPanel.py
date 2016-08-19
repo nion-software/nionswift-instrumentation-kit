@@ -2,6 +2,7 @@
 import functools
 import gettext
 import sys
+import threading
 
 # third party libraries
 import math
@@ -333,10 +334,22 @@ class ScanControlStateController:
             self.__scan_hardware_source.abort_playing()
 
     # must be called on ui thread
-    def handle_record_clicked(self):
+    def handle_record_clicked(self, callback_fn):
         """ Call this when the user clicks the record button. """
+        assert callable(callback_fn)
         if self.__scan_hardware_source:
-            self.__scan_hardware_source.start_recording()
+            def record_thread():
+                self.__scan_hardware_source.start_recording()
+                data_elements = self.__scan_hardware_source.get_next_data_elements_to_finish()
+                data_and_metadata_list = [HardwareSource.convert_data_element_to_data_and_metadata(data_element) for data_element in data_elements]
+                for data_and_metadata in data_and_metadata_list:
+                    data_item = DataItem.DataItem()
+                    buffered_data_source = DataItem.BufferedDataSource()
+                    data_item.append_data_source(buffered_data_source)
+                    buffered_data_source.set_data_and_metadata(data_and_metadata)
+                    callback_fn(data_item)
+            self.__thread = threading.Thread(target=record_thread)
+            self.__thread.start()
 
     # must be called on ui thread
     def handle_record_abort_clicked(self):
@@ -473,7 +486,6 @@ class ScanControlStateController:
                 self.__captured_data_elements_available_event = None
             for data_element in data_elements:
                 def add_data_item(data_item):
-                    self.__document_model.append_data_item(data_item)
                     if self.on_display_new_data_item:
                         self.on_display_new_data_item(data_item)
 
@@ -793,6 +805,15 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
 
+        def handle_record_data_item(data_item):
+            def perform():
+                document_controller.document_model.append_data_item(data_item)
+                result_display_panel = document_controller.next_result_display_panel()
+                if result_display_panel:
+                    result_display_panel.set_displayed_data_item(data_item)
+                    result_display_panel.request_focus()
+            document_controller.queue_task(perform)
+
         open_controls_button = CanvasItem.BitmapButtonCanvasItem(document_controller.ui.load_rgba_data_from_file(Decorators.relative_file(__file__, "resources/sliders_icon_24.png")))
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
@@ -806,7 +827,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         abort_button.on_clicked = self.__state_controller.handle_abort_clicked
         record_state_label = ui.create_label_widget()
         record_button = ui.create_push_button_widget(_("Record"))
-        record_button.on_clicked = self.__state_controller.handle_record_clicked
+        record_button.on_clicked = functools.partial(self.__state_controller.handle_record_clicked, handle_record_data_item)
         record_abort_button = ui.create_push_button_widget(_("Abort"))
         record_abort_button.on_clicked = self.__state_controller.handle_record_abort_clicked
         probe_state_label = ui.create_label_widget(_("Unknown"))
@@ -1463,7 +1484,9 @@ class ScanDisplayPanelController:
             playback_controls_row.refresh_layout()
 
         def display_new_data_item(data_item):
-            result_display_panel = display_panel_content.document_controller.next_result_display_panel()
+            document_controller = display_panel_content.document_controller
+            document_controller.document_model.append_data_item(data_item)
+            result_display_panel = document_controller.next_result_display_panel()
             if result_display_panel:
                 result_display_panel.set_displayed_data_item(data_item)
                 result_display_panel.request_focus()
