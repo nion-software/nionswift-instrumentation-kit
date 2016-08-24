@@ -1,4 +1,5 @@
 # standard libraries
+import asyncio
 import functools
 import gettext
 import sys
@@ -18,6 +19,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.ui import CanvasItem
+from nion.ui import MouseTrackingCanvasItem
 from nion.utils import Geometry
 
 
@@ -678,8 +680,8 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.border_style_pressed = "rgb(128, 128, 128)"
         self.border_style_disabled = "rgb(192, 192, 192)"
         self.stroke_style = "#000"
-        self.on_button_clicked = None
         self.border_enabled = False
+        self.on_button_clicked = None
 
     def close(self):
         self.on_button_clicked = None
@@ -743,6 +745,117 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
             drawing_context.text_baseline = "bottom"
             drawing_context.fill_style = self.stroke_style
             drawing_context.fill_text(self.__char, center_x, center_y + text_base)
+
+
+class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
+
+    def __init__(self, ui, event_loop: asyncio.AbstractEventLoop):
+        super().__init__()
+        self.ui = ui
+        self.__event_loop = event_loop
+        self.wants_mouse_events = True
+        self.__mouse_inside = False
+        self.__mouse_pressed = False
+        self.fill_style = "rgb(255, 255, 255)"
+        self.fill_style_pressed = "rgb(128, 128, 128)"
+        self.fill_style_disabled = "rgb(192, 192, 192)"
+        self.border_style = "rgb(192, 192, 192)"
+        self.border_style_pressed = "rgb(128, 128, 128)"
+        self.border_style_disabled = "rgb(192, 192, 192)"
+        self.stroke_style = "#000"
+        self.border_enabled = False
+        self.enabled = True
+        self.__tracking_canvas_item = None
+        self.on_mouse_delta = None  # typing.Callable[[Geometry.IntPoint], None]
+        self.__label_canvas_item = None
+
+    @property
+    def text(self) -> str:
+        return self.__label_canvas_item.text if self.__label_canvas_item else str()
+
+    @text.setter
+    def text(self, value: str) -> None:
+        if self.__label_canvas_item:
+            self.__label_canvas_item.text = value
+
+    def mouse_entered(self):
+        self.__mouse_inside = True
+        self.update()
+
+    def mouse_exited(self):
+        self.__mouse_inside = False
+        self.update()
+
+    def mouse_pressed(self, x, y, modifiers):
+        self.__mouse_pressed = True
+        self.update()
+
+    def mouse_released(self, x, y, modifiers):
+        self.__mouse_pressed = False
+        self.update()
+
+    def mouse_clicked(self, x, y, modifiers):
+        if self.enabled:
+            # create the popup window content
+            background_canvas_item = CanvasItem.BackgroundCanvasItem("#00FA9A")
+            self.__label_canvas_item = CanvasItem.StaticTextCanvasItem()
+
+            def mouse_position_changed_by(mouse_delta):
+                if callable(self.on_mouse_delta):
+                    self.on_mouse_delta(mouse_delta)
+
+            canvas_item = CanvasItem.CanvasItemComposition()
+            canvas_item.add_canvas_item(background_canvas_item)
+            canvas_item.add_canvas_item(self.__label_canvas_item)
+
+            global_pos = self.root_container.canvas_widget.map_to_global(self.map_to_global(Geometry.IntPoint(x=x, y=y)))
+            MouseTrackingCanvasItem.start_mouse_tracker(self.ui, self.__event_loop, canvas_item, mouse_position_changed_by, global_pos, Geometry.IntSize(20, 80))
+        return True
+
+    def _repaint(self, drawing_context):
+        with drawing_context.saver():
+            canvas_size = self.canvas_size
+            center_x = int(canvas_size.width * 0.5)
+            center_y = int(canvas_size.height * 0.5)
+            drawing_context.begin_path()
+            height = 18 if sys.platform == "win32" else 20
+            drawing_context.round_rect(center_x - 7.5, center_y - 9.5, 14.0, height, 2.0)
+            if self.enabled:
+                if self.__mouse_inside and self.__mouse_pressed:
+                    if self.fill_style_pressed:
+                        drawing_context.fill_style = self.fill_style_pressed
+                        drawing_context.fill()
+                    if self.border_style_pressed:
+                        drawing_context.stroke_style = self.border_style_pressed
+                        drawing_context.stroke()
+                else:
+                    if self.fill_style:
+                        drawing_context.fill_style = self.fill_style
+                        drawing_context.fill()
+                    if self.border_style:
+                        drawing_context.stroke_style = self.border_style
+                        drawing_context.stroke()
+            else:
+                if self.fill_style_disabled:
+                    drawing_context.fill_style = self.fill_style_disabled
+                    drawing_context.fill()
+                if self.border_style_disabled:
+                    drawing_context.stroke_style = self.border_style_disabled
+                    drawing_context.stroke()
+            arrow_length = 10.0
+            feather_length = 2.0
+            half = arrow_length / 2
+            drawing_context.begin_path()
+            drawing_context.move_to(center_x - (half - feather_length), center_y - feather_length)
+            drawing_context.line_to(center_x - half, center_y)
+            drawing_context.line_to(center_x - (half - feather_length), center_y + feather_length)
+            drawing_context.move_to(center_x + (half - feather_length), center_y - feather_length)
+            drawing_context.line_to(center_x + half, center_y)
+            drawing_context.line_to(center_x + (half - feather_length), center_y + feather_length)
+            drawing_context.move_to(center_x - half, center_y)
+            drawing_context.line_to(center_x + half, center_y)
+            drawing_context.stroke_style = self.stroke_style
+            drawing_context.stroke()
 
 
 class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
@@ -1000,10 +1113,19 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         rotation_row.add(ui.create_label_widget(_("Rot. (deg)"), properties={"width": 68, "stylesheet": "qproperty-alignment: 'AlignVCenter | AlignRight'"}))  # note: this alignment technique will not work in future
         rotation_row.add_spacing(4)
         rotation_group = ui.create_row_widget(properties={"width": 84})
-        rotation_group.add_spacing(18)
+        canvas_widget = ui.create_canvas_widget(properties={"height": 21, "width": 18})
+        rotation_tracker = ArrowSliderCanvasItem(ui, document_controller.event_loop)
+        canvas_widget.canvas_item.add_canvas_item(rotation_tracker)
+        rotation_group.add(canvas_widget)
         rotation_group.add(rotation_field)
         rotation_group.add_spacing(18)
         rotation_row.add(rotation_group)
+
+        def rotation_tracker_mouse_delta(mouse_delta: Geometry.IntPoint):
+            text = str(float(rotation_field.text) + mouse_delta.x / 20)
+            self.__state_controller.handle_rotation_changed(text)
+
+        rotation_tracker.on_mouse_delta = rotation_tracker_mouse_delta
 
         time_column = ui.create_column_widget()
         time_column.add(time_row)
@@ -1118,6 +1240,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             time_field.text = str("{0:.1f}".format(float(frame_parameters.pixel_time_us)))
             fov_field.text = str("{0:.1f}".format(float(frame_parameters.fov_nm)))
             rotation_field.text = str("{0:.1f}".format(float(frame_parameters.rotation_rad) * 180.0 / math.pi))
+            rotation_tracker.text = rotation_field.text
             ac_line_sync_check_box.check_state = "checked" if frame_parameters.ac_line_sync else "unchecked"
             if width_field.focused:
                 width_field.select_all()
