@@ -54,12 +54,24 @@ class TestScanControlClass(unittest.TestCase):
 
     def __record_one(self, document_controller, hardware_source, scan_state_controller):
         frame_time = hardware_source.get_current_frame_time()
-        scan_state_controller.handle_record_clicked()
+
+        event = threading.Event()
+        def handle_record_data_item(data_item):  # called from thread
+            def perform():
+                document_controller.document_model.append_data_item(data_item)
+                result_display_panel = document_controller.next_result_display_panel()
+                if result_display_panel:
+                    result_display_panel.set_displayed_data_item(data_item)
+            document_controller.queue_task(perform)
+            event.set()
+
+        scan_state_controller.handle_record_clicked(handle_record_data_item)
         time.sleep(frame_time * 0.5)
         start_time = time.time()
         while hardware_source.is_recording:
             time.sleep(frame_time * 0.5)
             self.assertTrue(time.time() - start_time < 30.0)
+        self.assertTrue(event.wait(3.0))
         document_controller.periodic()
 
     def _setup_scan_hardware_source(self, channel_id=None):
@@ -456,6 +468,11 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.get_next_data_elements_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
+
+            def display_new_data_item(data_item):
+                document_model.append_data_item(data_item)
+
+            scan_state_controller.on_display_new_data_item = display_new_data_item
             scan_state_controller.handle_capture_clicked()
             hardware_source.stop_playing()
             hardware_source.get_next_data_elements_to_finish()
@@ -486,11 +503,14 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_record_frame_parameters(frame_parameters_0)
             hardware_source.set_channel_enabled(1, True)
             hardware_source.start_recording()
-            hardware_source.get_next_data_elements_to_finish()
+            recorded_data_elements = hardware_source.get_next_data_elements_to_finish()
             document_controller.periodic()
-            self.assertEqual(len(document_model.data_items), 4)  # 2 view images (always grabbed); 2 record images
-            self.assertEqual(document_model.data_items[2].data_sources[0].dimensional_shape, (200, 200))
-            self.assertEqual(document_model.data_items[3].data_sources[0].dimensional_shape, (200, 200))
+            self.assertEqual(len(document_model.data_items), 2)  # 2 view images (always grabbed)
+            self.assertEqual(len(recorded_data_elements), 2)  # 2 record images
+            self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, (200, 200))
+            self.assertEqual(document_model.data_items[1].data_sources[0].dimensional_shape, (200, 200))
+            self.assertEqual(recorded_data_elements[0]["data"].shape, (200, 200))
+            self.assertEqual(recorded_data_elements[1]["data"].shape, (200, 200))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
