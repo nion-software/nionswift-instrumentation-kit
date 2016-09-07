@@ -13,13 +13,13 @@ from nion.swift import DataItemThumbnailWidget
 from nion.swift import Decorators
 from nion.swift import DisplayPanel
 from nion.swift import Panel
-from nion.swift import Widgets
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
+from nion.ui import Widgets
 from nion.utils import Geometry
 
 
