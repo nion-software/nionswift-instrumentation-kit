@@ -1,6 +1,7 @@
 # standard libraries
 import copy
 import queue
+import threading
 import typing
 
 # typing
@@ -81,6 +82,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue = queue.Queue()
+        self.__latest_values_lock = threading.RLock()
+        self.__latest_values = dict()
 
     def close(self):
         self.__camera_adapter.on_selected_profile_index_changed = None
@@ -185,7 +188,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__task_queue.put(lambda: self.set_selected_profile_index(profile_index))
 
     def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
-        self.__task_queue.put(lambda: self.set_frame_parameters(profile_index, frame_parameters))
+        with self.__latest_values_lock:
+            self.__latest_values[profile_index] = frame_parameters
+        def do_update_parameters():
+            with self.__latest_values_lock:
+                for profile_index in self.__latest_values.keys():
+                    self.set_frame_parameters(profile_index, self.__latest_values[profile_index])
+                self.__latest_values = dict()
+        self.__task_queue.put(do_update_parameters)
 
     def get_frame_parameters_from_dict(self, d):
         return self.__camera_adapter.get_frame_parameters_from_dict(d)

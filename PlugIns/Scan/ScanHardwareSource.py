@@ -3,6 +3,7 @@ import copy
 import gettext
 import logging
 import queue
+import threading
 import weakref
 
 # third party libraries
@@ -309,6 +310,8 @@ class ScanHardwareSource(BaseScanHardwareSource):
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue = queue.Queue()
+        self.__latest_values_lock = threading.RLock()
+        self.__latest_values = dict()
 
     def close(self):
         self.__scan_adapter.on_selected_profile_index_changed = None
@@ -419,7 +422,14 @@ class ScanHardwareSource(BaseScanHardwareSource):
         # itself wouldn't be an issue unless the user makes multiple changes in quick succession). not setting
         # current values is different semantics than the scan control panel, which _does_ set current values if
         # the current profile is selected. Hrrmmm.
-        self.__task_queue.put(lambda: self.__update_frame_parameters(profile_index, frame_parameters))
+        with self.__latest_values_lock:
+            self.__latest_values[profile_index] = frame_parameters
+        def do_update_parameters():
+            with self.__latest_values_lock:
+                for profile_index in self.__latest_values.keys():
+                    self.__update_frame_parameters(profile_index, self.__latest_values[profile_index])
+                self.__latest_values = dict()
+        self.__task_queue.put(do_update_parameters)
 
     def __channel_states_changed(self, channel_states):
         # this method will be called when the device changes channels enabled (via dialog or script).
