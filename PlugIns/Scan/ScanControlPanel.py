@@ -494,7 +494,7 @@ class ScanControlStateController:
                 data_item = ImportExportManager.create_data_item_from_data_element(data_element)
                 display_name = data_element.get("properties", dict()).get("hardware_source_name")
                 display_name = display_name if display_name else _("Capture")
-                channel_name = data_element.get("properties", dict()).get("channel_name")
+                channel_name = data_element.get("channel_name")
                 data_item.title = "%s (%s)" % (display_name, channel_name) if channel_name else display_name
                 self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
