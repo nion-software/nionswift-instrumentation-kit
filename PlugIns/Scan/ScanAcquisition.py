@@ -28,9 +28,9 @@ class ScanAcquisitionController(object):
         self.__aborted = False
         self.acquisition_state_changed_event = Event.Event()
 
-    def start_spectrum_image(self, document_controller: API.DocumentController) -> None:
+    def start_spectrum_image(self, document_window: API.DocumentWindow) -> None:
 
-        def acquire_spectrum_image(api: API.API, document_controller: API.DocumentController) -> None:
+        def acquire_spectrum_image(api: API.API, document_window: API.DocumentWindow) -> None:
             try:
                 logging.debug("start")
                 self.acquisition_state_changed_event.fire({"message": "start"})
@@ -46,9 +46,9 @@ class ScanAcquisitionController(object):
                     scan_parameters["external_clock_wait_time_ms"] = int(eels_camera_parameters["exposure_ms"] * 1.5)
                     scan_parameters["external_clock_mode"] = 1
 
-                    library = document_controller.library
+                    library = document_window.library
                     data_item = library.create_data_item(_("Spectrum Image"))
-                    document_controller.display_data_item(data_item)
+                    document_window.display_data_item(data_item)
 
                     # force the data to be held in memory and write delayed by grabbing a data_ref.
                     with library.data_ref_for_data_item(data_item) as data_ref:
@@ -94,12 +94,12 @@ class ScanAcquisitionController(object):
                 import traceback
                 traceback.print_exc()
 
-        self.__thread = threading.Thread(target=acquire_spectrum_image, args=(self.__api, document_controller))
+        self.__thread = threading.Thread(target=acquire_spectrum_image, args=(self.__api, document_window))
         self.__thread.start()
 
-    def start_sequence(self, document_controller: API.DocumentController) -> None:
+    def start_sequence(self, document_window: API.DocumentWindow) -> None:
 
-        def acquire_sequence(api: API.API, document_controller: API.DocumentController) -> None:
+        def acquire_sequence(api: API.API, document_window: API.DocumentWindow) -> None:
             try:
                 logging.debug("start")
                 self.acquisition_state_changed_event.fire({"message": "start"})
@@ -116,7 +116,7 @@ class ScanAcquisitionController(object):
                     scan_parameters["external_clock_wait_time_ms"] = int(eels_camera_parameters["exposure_ms"] * 1.5)
                     scan_parameters["external_clock_mode"] = 1
 
-                    library = document_controller.library
+                    library = document_window.library
 
                     flyback_pixels = 2
                     with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
@@ -130,8 +130,8 @@ class ScanAcquisitionController(object):
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)
                             data_item.set_data_and_metadata(data_and_metadata)
-                            document_controller.display_data_item(data_item)
-                        document_controller.queue_task(create_and_display_data_item)  # must occur on UI thread
+                            document_window.display_data_item(data_item)
+                        document_window.queue_task(create_and_display_data_item)  # must occur on UI thread
                 finally:
                     self.acquisition_state_changed_event.fire({"message": "end"})
                     logging.debug("end")
@@ -139,7 +139,7 @@ class ScanAcquisitionController(object):
                 import traceback
                 traceback.print_exc()
 
-        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_controller))
+        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_window))
         self.__thread.start()
 
     def start_line_scan(self, document_controller, start, end, sample_count):
