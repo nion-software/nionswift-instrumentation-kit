@@ -185,18 +185,24 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def selected_profile_index(self):
         return self.__current_profile_index
 
+    def __do_update_parameters(self):
+        with self.__latest_values_lock:
+            if self.__latest_profile_index is not None:
+                self.set_selected_profile_index(self.__latest_profile_index)
+            self.__latest_profile_index = None
+            for profile_index in self.__latest_values.keys():
+                self.set_frame_parameters(profile_index, self.__latest_values[profile_index])
+            self.__latest_values = dict()
+
     def __selected_profile_index_changed(self, profile_index):
-        self.__task_queue.put(lambda: self.set_selected_profile_index(profile_index))
+        with self.__latest_values_lock:
+            self.__latest_profile_index = profile_index
+        self.__task_queue.put(self.__do_update_parameters)
 
     def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
         with self.__latest_values_lock:
             self.__latest_values[profile_index] = frame_parameters
-        def do_update_parameters():
-            with self.__latest_values_lock:
-                for profile_index in self.__latest_values.keys():
-                    self.set_frame_parameters(profile_index, self.__latest_values[profile_index])
-                self.__latest_values = dict()
-        self.__task_queue.put(do_update_parameters)
+        self.__task_queue.put(self.__do_update_parameters)
 
     def get_frame_parameters_from_dict(self, d):
         return self.__camera_adapter.get_frame_parameters_from_dict(d)
