@@ -175,10 +175,11 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.__record_parameters
 
     def set_selected_profile_index(self, profile_index):
-        self.__current_profile_index = profile_index
-        self.__camera_adapter.set_selected_profile_index(profile_index)
-        self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
-        self.profile_changed_event.fire(profile_index)
+        if self.__current_profile_index != profile_index:
+            self.__current_profile_index = profile_index
+            self.__camera_adapter.set_selected_profile_index(profile_index)
+            self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
+            self.profile_changed_event.fire(profile_index)
 
     @property
     def selected_profile_index(self):
