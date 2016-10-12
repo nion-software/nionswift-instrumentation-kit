@@ -511,6 +511,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(display.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_consecutive_frames_have_unique_data(self):
+        # this test will fail if the camera is saturated (or otherwise produces identical values naturally)
         numpy.random.seed(999)
         random.seed(999)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
