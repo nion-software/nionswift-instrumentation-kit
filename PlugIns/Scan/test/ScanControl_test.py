@@ -597,6 +597,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(hardware_source.get_next_data_elements_to_finish()[0]["properties"]["fov_nm"], 10)
 
     def test_consecutive_frames_have_unique_data(self):
+        # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             frame_parameters_0 = hardware_source.get_frame_parameters(0)
