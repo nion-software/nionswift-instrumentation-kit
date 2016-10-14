@@ -148,10 +148,10 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_selected_profile_index(0)
             hardware_source.start_playing()
             try:
-                self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, hardware_source.get_expected_dimensions(2))
+                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(2))
                 time.sleep(self.exposure * 0.1)
                 hardware_source.set_selected_profile_index(1)
-                self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, hardware_source.get_expected_dimensions(1))
+                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(1))
             finally:
                 hardware_source.abort_playing()
 
@@ -177,7 +177,7 @@ class TestCameraControlClass(unittest.TestCase):
                     time.sleep(self.exposure)
                     self.assertTrue(time.time() - start_time < 3.0)
                 # now it is playing, so synchronize to the end of a frame
-                hardware_source.get_next_data_elements_to_finish(10.0)
+                hardware_source.get_next_xdatas_to_finish(10.0)
                 # now wait long enough for the next frame to start, 50ms should be enough
                 time.sleep(0.05)
                 # now set the frame parameters. on the ccd1010, this takes a long time due to
@@ -185,10 +185,10 @@ class TestCameraControlClass(unittest.TestCase):
                 # is if 0.8 * exposure is greater than the total of the intentional delays.
                 # the ccd1010 currently sleeps 600ms. so exposure must be about 800ms.
                 hardware_source.set_frame_parameters(profile_index, frame_parameters)
-                self.assertEqual(hardware_source.get_next_data_elements_to_finish(10.0)[0]["data"].shape, hardware_source.get_expected_dimensions(2))
+                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(2))
                 # now verify that the frame parameters are actually applied to the _next_ frame.
                 time.sleep(frame_time * 0.8)
-                self.assertEqual(hardware_source.get_next_data_elements_to_finish(10.0)[0]["data"].shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(4))
             finally:
                 hardware_source.stop_playing()
 
@@ -198,14 +198,14 @@ class TestCameraControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             hardware_source.start_playing()
             try:
-                hardware_source.get_next_data_elements_to_finish(5)
+                hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
                 self.assertEqual(len(document_model.data_items), 1)
                 state_controller.handle_capture_clicked()
             finally:
                 hardware_source.stop_playing()
             # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
-            hardware_source.get_next_data_elements_to_finish(5)
+            hardware_source.get_next_xdatas_to_finish(5)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
 
@@ -217,7 +217,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_current_frame_parameters(frame_parameters_0)
             hardware_source.start_playing()
             try:
-                hardware_source.get_next_data_elements_to_finish(10)
+                hardware_source.get_next_xdatas_to_finish(10)
             finally:
                 hardware_source.stop_playing()
             start_time = time.time()
@@ -269,10 +269,10 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 time.sleep(self.exposure * 0.5)
-                hardware_source.get_next_data_elements_to_finish()  # view again
+                hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
                 self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
-                hardware_source.get_next_data_elements_to_finish()  # view again
+                hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
@@ -288,7 +288,7 @@ class TestCameraControlClass(unittest.TestCase):
             start = time.time()
             hardware_source.start_playing()
             try:
-                hardware_source.get_next_data_elements_to_finish()  # view again
+                hardware_source.get_next_xdatas_to_finish()  # view again
                 elapsed = time.time() - start
                 document_controller.periodic()
                 self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
@@ -307,7 +307,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 time.sleep(self.exposure * 0.5)
-                data_and_metadata = hardware_source.get_next_data_and_metadata_list_to_finish()[0]  # view again
+                data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # view again
                 self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(2))
             finally:
                 hardware_source.stop_playing()
@@ -319,7 +319,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 start = time.time()
-                data_and_metadata = hardware_source.get_next_data_and_metadata_list_to_finish()[0]  # frame now
+                data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # frame now
                 elapsed = time.time() - start
             finally:
                 hardware_source.abort_playing()
@@ -343,13 +343,13 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source._test_acquire_exception = lambda *args: None
             hardware_source.start_playing()
             try:
-                hardware_source.get_next_data_elements_to_finish()
+                hardware_source.get_next_xdatas_to_finish()
                 document_controller.periodic()
                 self.assertEqual(play_enabled[0], True)
                 self.assertEqual(play_state[0], "pause")
                 self.assertTrue(hardware_source.is_playing)
                 enabled[0] = True
-                hardware_source.get_next_data_elements_to_finish()
+                hardware_source.get_next_xdatas_to_finish()
                 # avoid a race condition and wait for is_playing to go false.
                 start_time = time.time()
                 while hardware_source.is_playing:
@@ -389,7 +389,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 for _ in range(4):
-                    hardware_source.get_next_data_elements_to_finish()
+                    hardware_source.get_next_xdatas_to_finish()
                     document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
@@ -411,7 +411,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 for _ in range(4):
-                    hardware_source.get_next_data_elements_to_finish()
+                    hardware_source.get_next_xdatas_to_finish()
                     document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
@@ -427,7 +427,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 for _ in range(4):
-                    hardware_source.get_next_data_elements_to_finish()
+                    hardware_source.get_next_xdatas_to_finish()
                     document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
@@ -519,10 +519,10 @@ class TestCameraControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             hardware_source.start_playing()
             try:
-                data = hardware_source.get_next_data_elements_to_finish()[0]["data"]
+                data = hardware_source.get_next_xdatas_to_finish()[0].data
                 last_average = numpy.average(data)
                 for _ in range(16):
-                    data = hardware_source.get_next_data_elements_to_finish()[0]["data"]
+                    data = hardware_source.get_next_xdatas_to_finish()[0].data
                     next_average = numpy.average(data)
                     self.assertNotEqual(last_average, next_average)
                     last_average = next_average

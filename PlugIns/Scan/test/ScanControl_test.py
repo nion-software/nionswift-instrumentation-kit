@@ -228,7 +228,7 @@ class TestScanControlClass(unittest.TestCase):
             display = document_model.data_items[0].primary_display_specifier.display
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
-            hardware_source.get_next_data_elements_to_finish()  # grab at least one frame
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             self.assertEqual(len(display.graphics), 0)
             hardware_source.stop_playing()
 
@@ -254,7 +254,7 @@ class TestScanControlClass(unittest.TestCase):
             self.__acquire_one(document_controller, hardware_source)
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
-            hardware_source.get_next_data_elements_to_finish()  # grab at least one frame
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             self.assertEqual(len(display.graphics), 0)
             hardware_source.stop_playing()
 
@@ -419,9 +419,9 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
             hardware_source.start_playing()
-            self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, (300, 300))
+            self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, (300, 300))
             hardware_source.set_selected_profile_index(1)
-            self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, (500, 500))
+            self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, (500, 500))
             hardware_source.abort_playing()
 
     def test_mutating_current_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
@@ -435,9 +435,9 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
             hardware_source.start_playing()
-            self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, (300, 300))
+            self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, (300, 300))
             hardware_source.set_frame_parameters(0, frame_parameters_1)
-            self.assertEqual(hardware_source.get_next_data_elements_to_start()[0]["data"].shape, (500, 500))
+            self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, (500, 500))
             hardware_source.abort_playing()
 
     def test_changing_frame_parameters_during_record_does_not_affect_recording(self):
@@ -450,7 +450,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.start_recording()
             time.sleep(frame_time * 0.6)
             hardware_source.set_frame_parameters(2, frame_parameters_2)
-            self.assertEqual(hardware_source.get_next_data_elements_to_finish(10.0)[0]["data"].shape, (1024, 1024))
+            self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (1024, 1024))
             start_time = time.time()
             while hardware_source.is_recording:
                 time.sleep(frame_time)
@@ -458,14 +458,14 @@ class TestScanControlClass(unittest.TestCase):
             # confirm that recording is done, then verify that the frame parameters are actually applied to the _next_ frame.
             hardware_source.start_recording()
             time.sleep(frame_time * 0.6)
-            self.assertEqual(hardware_source.get_next_data_elements_to_finish(10.0)[0]["data"].shape, (500, 500))
+            self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (500, 500))
 
     def test_capturing_during_view_captures_new_data_items(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             hardware_source.set_channel_enabled(1, True)
             hardware_source.start_playing()
-            hardware_source.get_next_data_elements_to_finish()
+            hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
 
@@ -475,7 +475,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.on_display_new_data_item = display_new_data_item
             scan_state_controller.handle_capture_clicked()
             hardware_source.stop_playing()
-            hardware_source.get_next_data_elements_to_finish()
+            hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 4)
 
@@ -487,9 +487,9 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_current_frame_parameters(frame_parameters_0)
             hardware_source.set_channel_enabled(1, True)
             hardware_source.start_playing()
-            hardware_source.get_next_data_elements_to_finish()
+            hardware_source.get_next_xdatas_to_finish()
             hardware_source.stop_playing()
-            #hardware_source.get_next_data_elements_to_finish()
+            #hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
             self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, (200, 200))
@@ -503,14 +503,14 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_record_frame_parameters(frame_parameters_0)
             hardware_source.set_channel_enabled(1, True)
             hardware_source.start_recording()
-            recorded_data_elements = hardware_source.get_next_data_elements_to_finish()
+            recorded_extended_data_list = hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)  # 2 view images (always grabbed)
-            self.assertEqual(len(recorded_data_elements), 2)  # 2 record images
+            self.assertEqual(len(recorded_extended_data_list), 2)  # 2 record images
             self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, (200, 200))
             self.assertEqual(document_model.data_items[1].data_sources[0].dimensional_shape, (200, 200))
-            self.assertEqual(recorded_data_elements[0]["data"].shape, (200, 200))
-            self.assertEqual(recorded_data_elements[1]["data"].shape, (200, 200))
+            self.assertEqual(recorded_extended_data_list[0].data.shape, (200, 200))
+            self.assertEqual(recorded_extended_data_list[1].data.shape, (200, 200))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
@@ -586,15 +586,15 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(2, frame_parameters_2)
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
-            self.assertEqual(hardware_source.get_next_data_elements_to_finish()[0]["properties"]["fov_nm"], 10)
+            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 10)
             # give view a chance to start before recording. this must finished _before_ the final segment of partial
             # acquisition for this test to work; otherwise the final segment finishes and notifies and gets picked up
             # in the first wait call after start_recording below.
             time.sleep(frame_time * 0.1)
             hardware_source.start_recording()
             time.sleep(frame_time * 0.1)  # give record a chance to start; starting record will abort view immediately
-            self.assertEqual(hardware_source.get_next_data_elements_to_finish()[0]["properties"]["fov_nm"], 100)
-            self.assertEqual(hardware_source.get_next_data_elements_to_finish()[0]["properties"]["fov_nm"], 10)
+            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 100)
+            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 10)
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
@@ -607,7 +607,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.start_playing()
             data_list = list()
             for _ in range(16):
-                data_list.append(hardware_source.get_next_data_elements_to_finish()[0]["data"])
+                data_list.append(hardware_source.get_next_xdatas_to_finish()[0].data)
             for row in range(0, 1024, 32):
                 s = slice(row, row+32), slice(0, 1024)
                 for data in data_list[1:]:
