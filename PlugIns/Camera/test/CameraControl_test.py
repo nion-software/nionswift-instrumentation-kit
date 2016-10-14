@@ -209,6 +209,44 @@ class TestCameraControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
 
+    def test_capturing_during_view_captures_eels_2d(self):
+        # NOTE: This fails on cameras where stop_playing does a synchronized stop rather than just requesting it to stop.
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish(5)
+                document_controller.periodic()
+                self.assertEqual(len(document_model.data_items), 2)
+                state_controller.use_processed_data = False
+                state_controller.handle_capture_clicked()
+            finally:
+                hardware_source.stop_playing()
+            # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
+            hardware_source.get_next_xdatas_to_finish(5)
+            document_controller.periodic()
+            self.assertEqual(len(document_model.data_items), 3)
+            self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 2)
+
+    def test_capturing_during_view_captures_eels_1d(self):
+        # NOTE: This fails on cameras where stop_playing does a synchronized stop rather than just requesting it to stop.
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish(5)
+                document_controller.periodic()
+                self.assertEqual(len(document_model.data_items), 2)
+                state_controller.use_processed_data = True
+                state_controller.handle_capture_clicked()
+            finally:
+                hardware_source.stop_playing()
+            # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
+            hardware_source.get_next_xdatas_to_finish(5)
+            document_controller.periodic()
+            self.assertEqual(len(document_model.data_items), 3)
+            self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 1)
+
     def test_ability_to_start_playing_with_custom_parameters(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
