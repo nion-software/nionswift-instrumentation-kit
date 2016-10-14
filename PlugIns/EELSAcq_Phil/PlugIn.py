@@ -92,8 +92,8 @@ class AcquireController(metaclass=Utility.Singleton):
                 eels_hardware_source_id)
 
             # grab one frame to get image size
-            first_data_element = hardware_source.get_next_data_elements_to_start()[0]
-            first_data = first_data_element["data"]
+            first_xdata = hardware_source.get_next_xdatas_to_start()[0]
+            first_data = first_xdata.data
 
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
 
@@ -101,7 +101,7 @@ class AcquireController(metaclass=Utility.Singleton):
             for frame_index in range(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
-                image_stack_data[frame_index] = hardware_source.get_next_data_elements_to_start()[0]["data"]
+                image_stack_data[frame_index] = hardware_source.get_next_xdatas_to_start()[0].data
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
@@ -113,10 +113,10 @@ class AcquireController(metaclass=Utility.Singleton):
             for frame_index in range(number_frames):
                 if dark_sum is None:
                     # use next frame to start to make sure we're getting a blanked frame
-                    dark_sum = hardware_source.get_next_data_elements_to_start()[0]["data"]
+                    dark_sum = hardware_source.get_next_xdatas_to_start()[0].data
                 else:
                     # but now use next frame to finish since we can know it's already blanked
-                    dark_sum += hardware_source.get_next_data_elements_to_finish()[0]["data"]
+                    dark_sum += hardware_source.get_next_xdatas_to_finish()[0].data
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
@@ -124,12 +124,10 @@ class AcquireController(metaclass=Utility.Singleton):
             _autostem.SetVal(energy_adjust_control, reference_energy[1])
             image_stack_data -= dark_sum / number_frames
 
-            calibrations_dict0 = first_data_element["spatial_calibrations"][0]
-            calibrations_dict1 = first_data_element["spatial_calibrations"][1]
+            dimension_calibration0 = first_xdata.dimensional_calibrations[0]
+            dimension_calibration1 = first_xdata.dimensional_calibrations[1]
             # TODO: replace frame calibration with acquisition time (this is effectively chronospectroscopy before the sum)
             sequence_calibration = Calibration.Calibration(units="frame")
-            dimension_calibration0 = Calibration.Calibration(offset=calibrations_dict0["offset"], scale=calibrations_dict0["scale"], units=calibrations_dict0["units"])
-            dimension_calibration1 = Calibration.Calibration(offset=calibrations_dict1["offset"], scale=calibrations_dict1["scale"], units=calibrations_dict1["units"])
             image_stack_data_item = DataItem.DataItem(numpy.zeros((8, 8)))  # dummy data
             image_stack_data_item.maybe_data_source.set_data_and_metadata(DataAndMetadata.new_data_and_metadata(image_stack_data,
                                                                                                                 dimensional_calibrations=[sequence_calibration,
