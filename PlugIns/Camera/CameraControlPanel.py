@@ -107,7 +107,7 @@ class CameraControlStateController:
         self.on_processed_data_item_changed = None
         self.on_log_messages = None
 
-        self.__captured_data_elements_available_event = None
+        self.__captured_xdatas_available_event = None
 
         self.__data_item = None
         data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
@@ -118,9 +118,9 @@ class CameraControlStateController:
         self.__eels_data_item_changed_event_listener = eels_data_item_reference.data_item_changed_event.listen(self.__update_display_data_item)
 
     def close(self):
-        if self.__captured_data_elements_available_event:
-            self.__captured_data_elements_available_event.close()
-            self.__captured_data_elements_available_event = None
+        if self.__captured_xdatas_available_event:
+            self.__captured_xdatas_available_event.close()
+            self.__captured_xdatas_available_event = None
         if self.__profile_changed_event_listener:
             self.__profile_changed_event_listener.close()
             self.__profile_changed_event_listener = None
@@ -164,7 +164,7 @@ class CameraControlStateController:
         if self.on_abort_button_state_changed:
             self.on_abort_button_state_changed(self.is_playing, self.is_playing)
         if self.on_capture_button_state_changed:
-            self.on_capture_button_state_changed(self.is_playing, not self.__captured_data_elements_available_event)
+            self.on_capture_button_state_changed(self.is_playing, not self.__captured_xdatas_available_event)
 
     def __update_buttons(self):
         self.__update_play_button_state()
@@ -293,25 +293,24 @@ class CameraControlStateController:
         self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
 
     def handle_capture_clicked(self):
-        def receive_new_data_elements(data_elements):
-            if self.__captured_data_elements_available_event:
-                self.__captured_data_elements_available_event.close()
-                self.__captured_data_elements_available_event = None
-            for data_element in data_elements:
+        def receive_new_xdatas(xdatas):
+            if self.__captured_xdatas_available_event:
+                self.__captured_xdatas_available_event.close()
+                self.__captured_xdatas_available_event = None
+            for xdata in xdatas:
                 def add_data_item(data_item):
                     self.__document_model.append_data_item(data_item)
                     if self.on_display_new_data_item:
                         self.on_display_new_data_item(data_item)
 
-                data_item = ImportExportManager.create_data_item_from_data_element(data_element)
-                display_name = data_element.get("properties", dict()).get("hardware_source_name")
+                data_item = DataItem.new_data_item(xdata)
+                display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                 display_name = display_name if display_name else _("Capture")
                 data_item.title = display_name
                 self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
-        self.__captured_data_elements_available_event = self.__hardware_source.data_elements_available_event.listen(
-            receive_new_data_elements)
+        self.__captured_xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(receive_new_xdatas)
         self.__update_buttons()
 
     # must be called on ui thread
@@ -331,9 +330,9 @@ class CameraControlStateController:
 
     # this message comes from the data buffer. it will always be invoked on the UI thread.
     def __acquisition_state_changed(self, is_acquiring):
-        if self.__captured_data_elements_available_event:
-            self.__captured_data_elements_available_event.close()
-            self.__captured_data_elements_available_event = None
+        if self.__captured_xdatas_available_event:
+            self.__captured_xdatas_available_event.close()
+            self.__captured_xdatas_available_event = None
         self.queue_task(self.__update_buttons)
 
     def __log_messages(self, messages, data_elements):
