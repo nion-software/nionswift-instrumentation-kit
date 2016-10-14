@@ -86,6 +86,7 @@ class CameraControlStateController:
     def __init__(self, camera_hardware_source, queue_task, document_model):
         self.__hardware_source = camera_hardware_source
         self.__is_eels_camera = self.__hardware_source and self.__hardware_source.features.get("is_eels_camera", False)
+        self.use_processed_data = False
         self.queue_task = queue_task
         self.__document_model = document_model
         self.__profile_changed_event_listener = None
@@ -297,17 +298,18 @@ class CameraControlStateController:
             if self.__captured_xdatas_available_event:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
-            for xdata in xdatas:
+            for index, xdata in enumerate(xdatas):
                 def add_data_item(data_item):
                     self.__document_model.append_data_item(data_item)
                     if self.on_display_new_data_item:
                         self.on_display_new_data_item(data_item)
 
-                data_item = DataItem.new_data_item(xdata)
-                display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
-                display_name = display_name if display_name else _("Capture")
-                data_item.title = display_name
-                self.queue_task(functools.partial(add_data_item, data_item))
+                if index == (1 if self.use_processed_data else 0):
+                    data_item = DataItem.new_data_item(xdata)
+                    display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                    display_name = display_name if display_name else _("Capture")
+                    data_item.title = display_name
+                    self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
         self.__captured_xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(receive_new_xdatas)
@@ -839,6 +841,7 @@ class CameraDisplayPanelController:
         if self.__state_controller.has_processed_data:
             self.__show_processed_checkbox = CanvasItem.CheckBoxCanvasItem()
             self.__show_processed_checkbox.check_state = "checked" if show_processed_data else "unchecked"
+            self.__state_controller.use_processed_data = show_processed_data
             playback_controls_row.add_canvas_item(self.__show_processed_checkbox)
         playback_controls_row.add_canvas_item(hardware_source_display_name_canvas_item)
         self.__playback_controls_composition.add_canvas_item(CanvasItem.BackgroundCanvasItem("#98FB98"))
@@ -916,6 +919,7 @@ class CameraDisplayPanelController:
 
         def display_data_item_changed(data_item):
             if not self.__show_processed_checkbox or not self.__show_processed_checkbox.check_state == "checked":
+                self.__state_controller.use_processed_data = False  # for capture
                 display_panel_content.set_displayed_data_item(data_item)
                 # hack below to get inspector to update. cem.
                 display_panel_content.document_controller.notify_selected_data_item_changed(data_item)
@@ -923,6 +927,7 @@ class CameraDisplayPanelController:
 
         def processed_data_item_changed(data_item):
             if self.__show_processed_checkbox and self.__show_processed_checkbox.check_state == "checked":
+                self.__state_controller.use_processed_data = True  # for capture
                 display_panel_content.set_displayed_data_item(data_item)
                 # hack below to get inspector to update. cem.
                 display_panel_content.document_controller.notify_selected_data_item_changed(data_item)
