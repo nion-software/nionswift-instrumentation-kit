@@ -1,5 +1,6 @@
 # system imports
 import contextlib
+import copy
 import gettext
 import logging
 import threading
@@ -123,9 +124,16 @@ class ScanAcquisitionController(object):
                         time.sleep(0.2)  # give the superscan time to get into first position. 200ms.
                         scan_height = scan_parameters["size"][0]
                         scan_width = scan_parameters["size"][1] + flyback_pixels
-                        data_element = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
+                        data_elements = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
+                        data_element = data_elements[0]
+                        scan_data_list = scan_task.grab()
                         data_shape = data_element["data"].shape
                         data_element["data"] = data_element["data"].reshape(scan_height, scan_width, data_shape[1])[:, 0:scan_width-flyback_pixels, :]
+                        if len(scan_data_list) > 0:
+                            calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
+                        else:
+                            calibrations = [{}, {}] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
+                        data_element["spatial_calibrations"] = calibrations
                         data_and_metadata = HardwareSource.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)

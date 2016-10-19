@@ -144,7 +144,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__camera_adapter.create_record_task(self.__record_parameters))
 
-    def acquire_sequence(self, n: int) -> typing.Dict:
+    def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
         return self.__camera_adapter.acquire_sequence(self.get_current_frame_parameters(), n)
 
     def set_frame_parameters(self, profile_index, frame_parameters):
