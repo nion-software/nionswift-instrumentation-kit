@@ -84,6 +84,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__task_queue = queue.Queue()
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = dict()
+        self.__latest_profile_index = None
 
     def close(self):
         self.__camera_adapter.on_selected_profile_index_changed = None
