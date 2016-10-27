@@ -5,9 +5,7 @@ import gettext
 import logging
 import threading
 import time
-
-# typing
-from typing import Optional
+import typing
 
 # third part imports
 import numpy
@@ -16,7 +14,7 @@ import numpy
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import HardwareSource_1_0 as HardwareSource
 from nion.typeshed import UI_1_0 as UserInterface
-from nion.swift.model import HardwareSource
+from nion.swift.model import ImportExportManager
 from nion.utils import Event
 
 _ = gettext.gettext
@@ -134,7 +132,7 @@ class ScanAcquisitionController(object):
                         else:
                             calibrations = [{}, {}] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
                         data_element["spatial_calibrations"] = calibrations
-                        data_and_metadata = HardwareSource.convert_data_element_to_data_and_metadata(data_element)
+                        data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)
                             data_item.set_data_and_metadata(data_and_metadata)
@@ -163,7 +161,7 @@ class ScanAcquisitionController(object):
                     library = document_controller.library
                     data_item = library.create_data_item(_("Spectrum Scan"))
 
-                    scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")  # type: HardwareSource
+                    scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")  # type: HardwareSource.HardwareSource
                     old_probe_state = scan_controller.get_property_as_str("static_probe_state")
                     old_probe_position = scan_controller.get_property_as_float_point("probe_position")
 
@@ -213,7 +211,7 @@ class PanelDelegate(object):
         self.panel_name = _("Scan Acquisition")
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
-        self.__scan_acquisition_controller = None  # type: Optional[ScanAcquisitionController]
+        self.__scan_acquisition_controller = None  # type: typing.Optional[ScanAcquisitionController]
         self.__line_scan_acquisition_controller = None
 
     def create_panel_widget(self, ui, document_controller):
