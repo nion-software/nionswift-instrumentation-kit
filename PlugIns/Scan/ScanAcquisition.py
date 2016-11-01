@@ -131,6 +131,7 @@ class ScanAcquisitionController(object):
                             calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
                         else:
                             calibrations = [{}, {}] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
+                        data_element["collection_dimension_count"] = 2
                         data_element["spatial_calibrations"] = calibrations
                         data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
