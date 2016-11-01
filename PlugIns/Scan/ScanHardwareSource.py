@@ -392,15 +392,7 @@ class ScanHardwareSource(BaseScanHardwareSource):
     def set_channel_enabled(self, channel_index, enabled):
         changed = self.__scan_adapter.set_channel_enabled(channel_index, enabled)
         if changed:
-            channel_id, channel_name, _ = self.get_channel_state(channel_index)
-            self.channel_state_changed_event.fire(channel_index, channel_id, channel_name, enabled)
-        at_least_one_enabled = False
-        for channel_index in range(self.channel_count):
-            if self.get_channel_state(channel_index).enabled:
-                at_least_one_enabled = True
-                break
-        if not at_least_one_enabled:
-            self.stop_playing()
+            self.__channel_states_changed([self.get_channel_state(i_channel_index) for i_channel_index in range(self.channel_count)])
 
     def set_selected_profile_index(self, profile_index):
         self.__current_profile_index = profile_index
@@ -435,6 +427,7 @@ class ScanHardwareSource(BaseScanHardwareSource):
         # this method will be called when the device changes channels enabled (via dialog or script).
         # it updates the channels internally but does not send out a message to set the channels to the
         # hardware, since they're already set, and doing so can cause strange change loops.
+        assert len(channel_states) == self.channel_count
         def channel_states_changed():
             for channel_index, channel_state in enumerate(channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
