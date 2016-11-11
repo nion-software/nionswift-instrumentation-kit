@@ -96,7 +96,7 @@ class ScanAcquisitionController(object):
         self.__thread = threading.Thread(target=acquire_spectrum_image, args=(self.__api, document_window))
         self.__thread.start()
 
-    def start_sequence(self, document_window: API.DocumentWindow) -> None:
+    def start_sequence(self, document_window: API.DocumentWindow, sum_frames: bool) -> None:
 
         def acquire_sequence(api: API.API, document_window: API.DocumentWindow) -> None:
             try:
@@ -106,6 +106,8 @@ class ScanAcquisitionController(object):
                     eels_camera_id = "orca_camera"
                     eels_camera = api.get_hardware_source_by_id(eels_camera_id, version="1.0")
                     eels_camera_parameters = eels_camera.get_frame_parameters_for_profile_by_index(0)
+                    if sum_frames:
+                        eels_camera_parameters["processing"] = "sum_project"
 
                     scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")
                     scan_parameters = scan_controller.get_frame_parameters_for_profile_by_index(2)
@@ -122,20 +124,27 @@ class ScanAcquisitionController(object):
                         time.sleep(0.2)  # give the superscan time to get into first position. 200ms.
                         scan_height = scan_parameters["size"][0]
                         scan_width = scan_parameters["size"][1] + flyback_pixels
+                        eels_camera.set_frame_parameters(eels_camera_parameters)
                         data_elements = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
                         data_element = data_elements[0]
                         scan_data_list = scan_task.grab()
                         data_shape = data_element["data"].shape
-                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, data_shape[1])[:, 0:scan_width-flyback_pixels, :]
+                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, 0:scan_width-flyback_pixels, :]
                         if len(scan_data_list) > 0:
-                            calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
+                            collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
                         else:
-                            calibrations = [{}, {}] + [copy.deepcopy(data_element["spatial_calibrations"][-1]), ]
+                            collection_calibrations = [{}, {}]
+                        if "spatial_calibrations" in data_element:
+                            datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
+                        else:
+                            datum_calibrations = [{} for i in range(len(data_element["data"].shape) - 2)]
+                        # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
                         data_element["collection_dimension_count"] = 2
-                        data_element["spatial_calibrations"] = calibrations
+                        data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
                         data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)
+                            data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
                             data_item.set_data_and_metadata(data_and_metadata)
                             document_window.display_data_item(data_item)
                         document_window.queue_task(create_and_display_data_item)  # must occur on UI thread
@@ -303,9 +312,16 @@ class PanelDelegate(object):
         line_samples_row.add(line_samples_edit_widget)
         line_samples_row.add_stretch()
 
+        sum_project_frames_check_box_widget = ui.create_check_box_widget(_("Sum Project Frames"))
+        sum_project_frames_check_box_widget.checked = True
+
+        sum_project_frames_row = ui.create_row_widget()
+        sum_project_frames_row.add(sum_project_frames_check_box_widget)
+        sum_project_frames_row.add_stretch()
+
         def acquire_sequence():
             self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
-            self.__scan_acquisition_controller.start_sequence(document_controller)
+            self.__scan_acquisition_controller.start_sequence(document_controller, sum_project_frames_check_box_widget.checked)
 
         acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire Sequence"))
         acquire_sequence_button_widget.on_clicked = acquire_sequence
@@ -322,6 +338,8 @@ class PanelDelegate(object):
         # column.add(line_samples_row)
         column.add_spacing(8)
         column.add(acquire_sequence_button_row)
+        column.add_spacing(8)
+        column.add(sum_project_frames_row)
         column.add_spacing(8)
         column.add_stretch()
 
