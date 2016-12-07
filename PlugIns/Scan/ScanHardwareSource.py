@@ -43,10 +43,11 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
         super().close()
 
     # watch for property changes on the graphic.
-    def __property_changed(self, property_name, property_value):
+    def __property_changed(self, property_name):
         if property_name == self.__graphic_property_name:
             old_property_value = getattr(self.source, self.__region_property_name)
             # to prevent message loops, check to make sure it changed
+            property_value = getattr(self.__graphic, property_name)
             if property_value != old_property_value:
                 self.update_source(property_value)
 
