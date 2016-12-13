@@ -1323,8 +1323,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_column.remove_all()
 
             document_model = document_controller.document_model
+            event_loop = document_controller.event_loop
             data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, channel_id))
-            data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, data_item_reference, document_model.dispatch_task)
+            data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, data_item_reference, event_loop)
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
             def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
