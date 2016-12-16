@@ -72,8 +72,7 @@ class AcquireController(metaclass=Utility.Singleton):
         tv_pixel_angle = _autostem.GetVal("TVPixelAngle")
         return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
 
-    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller,
-                                       final_layout_fn):
+    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller, final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
@@ -88,8 +87,7 @@ class AcquireController(metaclass=Utility.Singleton):
         def acquire_series(number_frames, offset_per_spectrum, task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
-            hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(
-                eels_hardware_source_id)
+            hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
 
             # grab one frame to get image size
             first_xdata = hardware_source.get_next_xdatas_to_start()[0]
@@ -183,9 +181,8 @@ class AcquireController(metaclass=Utility.Singleton):
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
                 document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(eels_data_item))
-            self.__eels_data_item = eels_data_item
 
-            document_controller.workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, display_panel_id)
+            document_controller.workspace_controller.display_data_item_in_display_panel(eels_data_item, display_panel_id)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
@@ -239,10 +236,6 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
     def __init__(self, document_controller, panel_id, properties):
         super(PhilEELSAcquireControlView, self).__init__(document_controller, panel_id, name)
-
-        # data items used to show live progress
-        self.__eels_raw_data_item = None
-        self.__eels_data_item = None
 
         ui = document_controller.ui
 
@@ -303,50 +296,13 @@ class PhilEELSAcquireControlView(Panel.Panel):
         self.__configure_final_workspace(self.document_controller.workspace_controller)
 
     def show_initial_plots(self):
-        document_controller = self.document_controller
-        document_model = document_controller.document_model
-
-        self.__configure_start_workspace(document_controller.workspace_controller)
-
-        # get the workspace controller, which is the object that will put acquisition items into the workspace
-        workspace_controller = self.document_controller.workspace_controller
+        # use the eels_hardware_source
         eels_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
 
-        # create an acquisition image and put it in the lower left panel. the idea here (for now) is to create
-        # an image that will be recognized by the workspace controller as 'the acquisition image'.
-        # NOTE: this code is a hack until a better solution is available.
-        if not self.__eels_raw_data_item:
+        # setup the workspace layout
+        self.__configure_start_workspace(self.document_controller.workspace_controller, eels_hardware_source.hardware_source_id)
 
-            # create the new data item, add it to the document, and save a reference to it in this class
-            eels_raw_data_item = DataItem.DataItem(numpy.zeros((16, 16), numpy.float))
-            document_model.append_data_item(eels_raw_data_item)
-            self.__eels_raw_data_item = eels_raw_data_item
-
-            # this next section sets up the eels_raw_data_item to be the one that gets used as the acquisition
-            # NOTE: this code is a hack until a better solution is available.
-            document_model.setup_channel(document_model.make_data_item_reference_key(eels_hardware_source.hardware_source_id), eels_raw_data_item)
-            eels_raw_data_item.session_id = document_model.session_id
-
-        workspace_controller.display_data_item_in_display_panel(self.__eels_raw_data_item, "eels_phil_raw")
-
-        # next, line profile through center of crop
-        if not self.__eels_data_item:
-            # create the new data item, add it to the document, and save a reference to it in this class
-            # set up the crop and projection operation. the crop also gets a region on the source.
-            crop_region = Graphics.RectangleGraphic()
-            crop_region.center = (0.5, 0.5)
-            crop_region.size = (0.5, 1.0)
-            display_specifier = DataItem.DisplaySpecifier.from_data_item(self.__eels_raw_data_item)
-            display_specifier.display.add_graphic(crop_region)
-            eels_data_item = document_controller.document_model.get_projection_new(self.__eels_raw_data_item, crop_region)
-            if eels_data_item:
-                eels_data_item.title = _("EELS")
-                document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(eels_data_item))
-            self.__eels_data_item = eels_data_item
-
-        # display the eels data item
-        workspace_controller.display_data_item_in_display_panel(self.__eels_data_item, "eels_phil_spectrum")
-
+        # start the EELS acquisition
         eels_hardware_source.start_playing()
 
     def __create_canvas_widget_from_image_panel(self, image_panel):
@@ -366,9 +322,9 @@ class PhilEELSAcquireControlView(Panel.Panel):
             "children": [spectrum_display, layout_right_side]}
         workspace_controller.ensure_workspace(_("Phil-Style EELS Results"), layout, "eels_phil_results")
 
-    def __configure_start_workspace(self, workspace_controller):
-        spectrum_display = {"type": "image", "selected": True, "display_panel_id": "eels_phil_spectrum"}
-        eels_raw_display = {"type": "image", "display_panel_id": "eels_phil_raw"}
+    def __configure_start_workspace(self, workspace_controller, hardware_source_id):
+        spectrum_display = {'type': 'image', 'hardware_source_id': hardware_source_id, 'controller_type': 'camera-live', 'show_processed_data': True}
+        eels_raw_display = {'type': 'image', 'hardware_source_id': hardware_source_id, 'controller_type': 'camera-live', 'show_processed_data': False}
         layout = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5],
             "children": [spectrum_display, eels_raw_display]}
         workspace_controller.ensure_workspace(_("Phil-Style EELS"), layout, "eels_phil_acquisition")
