@@ -193,7 +193,6 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing()
 
     def test_capturing_during_view_captures_new_data_items(self):
-        # NOTE: This fails on cameras where stop_playing does a synchronized stop rather than just requesting it to stop.
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             hardware_source.start_playing()
@@ -202,15 +201,13 @@ class TestCameraControlClass(unittest.TestCase):
                 document_controller.periodic()
                 self.assertEqual(len(document_model.data_items), 1)
                 state_controller.handle_capture_clicked()
+                hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing()
-            # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
-            hardware_source.get_next_xdatas_to_finish(5)
+                hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
 
     def test_capturing_during_view_captures_eels_2d(self):
-        # NOTE: This fails on cameras where stop_playing does a synchronized stop rather than just requesting it to stop.
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             hardware_source.start_playing()
@@ -220,16 +217,14 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(len(document_model.data_items), 2)
                 state_controller.use_processed_data = False
                 state_controller.handle_capture_clicked()
+                hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing()
-            # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
-            hardware_source.get_next_xdatas_to_finish(5)
+                hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
             self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 2)
 
     def test_capturing_during_view_captures_eels_1d(self):
-        # NOTE: This fails on cameras where stop_playing does a synchronized stop rather than just requesting it to stop.
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             hardware_source.start_playing()
@@ -239,10 +234,9 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(len(document_model.data_items), 2)
                 state_controller.use_processed_data = True
                 state_controller.handle_capture_clicked()
+                hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing()
-            # if stop is synchronized, the next statement will fail, since the hardware source is fully stopped already.
-            hardware_source.get_next_xdatas_to_finish(5)
+                hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
             self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 1)
