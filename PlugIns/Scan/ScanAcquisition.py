@@ -147,6 +147,14 @@ class ScanAcquisitionController(object):
                             data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
                             data_item.set_data_and_metadata(data_and_metadata)
                             document_window.display_data_item(data_item)
+                            for scan_data_and_metadata in scan_data_list:
+                                scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
+                                scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
+                                channel_id = eels_camera_id + "_" + scan_channel_id
+                                data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=channel_id, create_if_needed=True)
+                                data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
+                                data_item.set_data_and_metadata(scan_data_and_metadata)
+                                document_window.display_data_item(data_item)
                         document_window.queue_task(create_and_display_data_item)  # must occur on UI thread
                 finally:
                     self.acquisition_state_changed_event.fire({"message": "end"})
