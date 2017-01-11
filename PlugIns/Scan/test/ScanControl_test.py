@@ -580,9 +580,9 @@ class TestScanControlClass(unittest.TestCase):
         # NOTE: requires stages_per_frame == 2
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            hardware_source.exposure = 0.1
             frame_parameters_0 = hardware_source.get_frame_parameters(0)
             frame_parameters_0.fov_nm = 10
+            frame_parameters_0.pixel_time_us = 10
             hardware_source.set_frame_parameters(0, frame_parameters_0)
             frame_parameters_2 = hardware_source.get_frame_parameters(2)
             frame_parameters_2.fov_nm = 100
@@ -593,6 +593,7 @@ class TestScanControlClass(unittest.TestCase):
             # give view a chance to start before recording. this must finished _before_ the final segment of partial
             # acquisition for this test to work; otherwise the final segment finishes and notifies and gets picked up
             # in the first wait call after start_recording below.
+            # Also, time of partial acquisition  must be less than 50% of the frame time
             time.sleep(frame_time * 0.1)
             hardware_source.start_recording()
             time.sleep(frame_time * 0.1)  # give record a chance to start; starting record will abort view immediately
