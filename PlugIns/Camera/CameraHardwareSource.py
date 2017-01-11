@@ -101,17 +101,20 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__handle_log_messages_event()
 
     def __handle_executing_task_queue(self):
-        try:
+        # gather the pending tasks, then execute them.
+        # doing it this way prevents tasks from triggering more tasks in an endless loop.
+        tasks = list()
+        while not self.__task_queue.empty():
             task = self.__task_queue.get(False)
+            tasks.append(task)
+            self.__task_queue.task_done()
+        for task in tasks:
             try:
                 task()
             except Exception as e:
                 import traceback
                 traceback.print_exc()
                 traceback.print_stack()
-            self.__task_queue.task_done()
-        except queue.Empty as e:
-            pass
 
     def __handle_log_messages_event(self):
         if callable(self.__periodic_logger_fn):
