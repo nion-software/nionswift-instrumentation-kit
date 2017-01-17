@@ -143,7 +143,7 @@ class ScanAcquisitionController(object):
                         data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
                         data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
-                            data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True)
+                            data_item = library.get_data_item_for_hardware_source(scan_controller, channel_id=eels_camera_id, processor_id="summed", create_if_needed=True, large_format=True)
                             data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
                             data_item.set_data_and_metadata(data_and_metadata)
                             document_window.display_data_item(data_item)
