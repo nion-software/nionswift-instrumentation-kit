@@ -119,6 +119,8 @@ class ScanAcquisitionController(object):
 
                     library = document_window.library
 
+                    eels_camera._hardware_source.acquire_sequence_prepare()
+
                     flyback_pixels = 2
                     with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
                         time.sleep(0.2)  # give the superscan time to get into first position. 200ms.
