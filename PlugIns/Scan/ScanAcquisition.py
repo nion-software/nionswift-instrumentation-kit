@@ -118,24 +118,26 @@ class ScanAcquisitionController(object):
                     scan_max_size = 256
                     scan_parameters["size"] = min(scan_max_size, scan_parameters["size"][0]), min(scan_max_size, scan_parameters["size"][1])
                     scan_parameters["pixel_time_us"] = int(1000 * eels_camera_parameters["exposure_ms"] * 0.75)
-                    scan_parameters["external_clock_wait_time_ms"] = int(eels_camera_parameters["exposure_ms"] * 1.5)
+                    # long timeout is needed until memory allocation is outside of the acquire_sequence call.
+                    scan_parameters["external_clock_wait_time_ms"] = 20000 # int(eels_camera_parameters["exposure_ms"] * 1.5)
                     scan_parameters["external_clock_mode"] = 1
+                    scan_parameters["ac_line_sync"] = False
+                    scan_parameters["ac_frame_sync"] = False
 
                     library = document_window.library
 
+                    eels_camera.set_frame_parameters(eels_camera_parameters)
                     eels_camera._hardware_source.acquire_sequence_prepare()
 
                     flyback_pixels = 2
                     with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
-                        time.sleep(0.2)  # give the superscan time to get into first position. 200ms.
                         scan_height = scan_parameters["size"][0]
                         scan_width = scan_parameters["size"][1] + flyback_pixels
-                        eels_camera.set_frame_parameters(eels_camera_parameters)
                         data_elements = eels_camera._hardware_source.acquire_sequence(scan_width * scan_height)
                         data_element = data_elements[0]
                         scan_data_list = scan_task.grab()
                         data_shape = data_element["data"].shape
-                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, 0:scan_width-flyback_pixels, :]
+                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
                         if len(scan_data_list) > 0:
                             collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
                         else:
