@@ -280,7 +280,10 @@ class CameraControlStateController:
     # must be called on ui thread
     def handle_exposure_changed(self, exposure):
         frame_parameters = self.__hardware_source.get_frame_parameters(self.__hardware_source.selected_profile_index)
-        frame_parameters.exposure_ms = float(exposure)
+        try:
+            frame_parameters.exposure_ms = float(exposure)
+        except ValueError:
+            pass
         self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
 
     def handle_decrease_exposure(self):

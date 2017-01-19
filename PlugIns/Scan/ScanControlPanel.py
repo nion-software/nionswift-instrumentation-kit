@@ -16,7 +16,6 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
-from nion.swift.model import ImportExportManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
 from nion.ui import Widgets
