@@ -15,7 +15,11 @@ from nion.typeshed import API_1_0 as API
 from nion.typeshed import HardwareSource_1_0 as HardwareSource
 from nion.typeshed import UI_1_0 as UserInterface
 from nion.swift.model import ImportExportManager
+from nion.swift.model import HardwareSource as HardwareSourceModule
+from nion.utils import Binding
+from nion.utils import Converter
 from nion.utils import Event
+from nion.utils import Model
 
 _ = gettext.gettext
 
@@ -228,11 +232,16 @@ class PanelDelegate(object):
     def __init__(self, api):
         self.__api = api
         self.panel_id = "scan-acquisition-panel"
-        self.panel_name = _("Scan Acquisition")
+        self.panel_name = _("Spectrum Imaging / 4d Scan Acquisition")
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
         self.__scan_acquisition_controller = None  # type: typing.Optional[ScanAcquisitionController]
         self.__line_scan_acquisition_controller = None
+        self.__eels_frame_parameters_changed_event_listener = None
+        self.__scan_frame_parameters_changed_event_listener = None
+        self.__exposure_time_ms_value_model = None
+        self.__scan_width_model = None
+        self.__scan_height_model = None
 
     def create_panel_widget(self, ui, document_controller):
         column = ui.create_column_widget()
@@ -333,8 +342,36 @@ class PanelDelegate(object):
             self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
             self.__scan_acquisition_controller.start_sequence(document_controller, sum_project_frames_check_box_widget.checked)
 
-        acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire Sequence"))
+        acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
         acquire_sequence_button_widget.on_clicked = acquire_sequence
+
+        self.__scan_width_widget = ui.create_line_edit_widget()
+        self.__scan_height_widget = ui.create_line_edit_widget()
+
+        self.__exposure_time_widget = ui.create_line_edit_widget()
+
+        self.__estimate_label_widget = ui.create_label_widget()
+
+        scan_size_row = ui.create_row_widget()
+        scan_size_row.add_spacing(12)
+        scan_size_row.add(ui.create_label_widget("Scan Size (pixels)"))
+        scan_size_row.add_spacing(12)
+        scan_size_row.add(self.__scan_width_widget)
+        scan_size_row.add_spacing(12)
+        scan_size_row.add(self.__scan_height_widget)
+        scan_size_row.add_stretch()
+
+        eels_exposure_row = ui.create_row_widget()
+        eels_exposure_row.add_stretch()
+        eels_exposure_row.add(ui.create_label_widget("Camera Exposure Time (ms)"))
+        eels_exposure_row.add_spacing(12)
+        eels_exposure_row.add(self.__exposure_time_widget)
+        eels_exposure_row.add_spacing(12)
+
+        estimate_row = ui.create_row_widget()
+        estimate_row.add_spacing(12)
+        estimate_row.add(self.__estimate_label_widget)
+        estimate_row.add_stretch()
 
         acquire_sequence_button_row = ui.create_row_widget()
         acquire_sequence_button_row.add(acquire_sequence_button_widget)
@@ -347,13 +384,125 @@ class PanelDelegate(object):
         # column.add(line_button_row)
         # column.add(line_samples_row)
         column.add_spacing(8)
+        column.add(scan_size_row)
+        column.add_spacing(8)
+        column.add(eels_exposure_row)
+        column.add_spacing(8)
+        column.add(estimate_row)
+        column.add_spacing(8)
         column.add(acquire_sequence_button_row)
         column.add_spacing(8)
         column.add(sum_project_frames_row)
         column.add_spacing(8)
         column.add_stretch()
 
+        def hardware_source_added(hardware_source):
+            if hardware_source == self.__api.get_hardware_source_by_id("orca_camera", version="1.0")._hardware_source:
+                self.connect_eels_controller()
+            if hardware_source == self.__api.get_hardware_source_by_id("scan_controller", version="1.0")._hardware_source:
+                self.connect_scan_controller()
+
+        self.__hardware_source_added_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_added_event.listen(hardware_source_added)
+
+        for hardware_source in HardwareSourceModule.HardwareSourceManager().hardware_sources:
+            hardware_source_added(hardware_source)
+
         return column
+
+    def __update_estimate(self):
+        if self.__exposure_time_ms_value_model and self.__scan_width_model and self.__scan_height_model:
+            pixels = (self.__scan_width_model.value + 2) * self.__scan_height_model.value
+            time_s = 2.0 * self.__exposure_time_ms_value_model.value * pixels / 1000
+            if time_s > 3600:
+                time_str = "{0:.1f} hours".format((int(time_s) + 3599) / 3600)
+            elif time_s > 90:
+                time_str = "{0:.1f} minutes".format((int(time_s) + 59) / 60)
+            else:
+                time_str = "{} seconds".format(int(time_s))
+            memory = pixels * 2048 * 128 * 4
+            if memory > 1024 * 1024 * 1024:
+                size_str = "{0:.1f}GB".format(memory / (1024 * 1024 * 1024))
+            elif memory > 1024 * 1024:
+                size_str = "{0:.1f}MB".format(memory / (1024 * 1024))
+            else:
+                size_str = "{0:.1f}KB".format(memory / 1024)
+            self.__estimate_label_widget.text = "Estimated Time: {0}  Size: {1}".format(time_str, size_str)
+        else:
+            self.__estimate_label_widget.text = None
+
+    def connect_eels_controller(self):
+        eels_controller = self.__api.get_hardware_source_by_id("orca_camera", version="1.0")._hardware_source
+
+        self.__exposure_time_ms_value_model = Model.PropertyModel()
+
+        def update_exposure_time_ms(exposure_time_ms):
+            if exposure_time_ms > 0:
+                frame_parameters = eels_controller.get_frame_parameters(0)
+                frame_parameters.exposure_ms = exposure_time_ms
+                eels_controller.set_frame_parameters(0, frame_parameters)
+            self.__update_estimate()
+
+        self.__exposure_time_ms_value_model.on_value_changed = update_exposure_time_ms
+
+        exposure_time_ms_value_binding = Binding.PropertyBinding(self.__exposure_time_ms_value_model, "value", converter=Converter.FloatToStringConverter("{0:.1f}"))
+
+        def eels_profile_parameters_changed(profile_index, frame_parameters):
+            if profile_index == 0:
+                self.__exposure_time_ms_value_model.value = frame_parameters.exposure_ms
+
+        self.__eels_frame_parameters_changed_event_listener = eels_controller.frame_parameters_changed_event.listen(eels_profile_parameters_changed)
+
+        eels_profile_parameters_changed(0, eels_controller.get_frame_parameters(0))
+
+        self.__exposure_time_widget._widget.bind_text(exposure_time_ms_value_binding)  # the widget will close the binding
+
+    def connect_scan_controller(self):
+        scan_controller = self.__api.get_hardware_source_by_id("scan_controller", version="1.0")._hardware_source
+
+        self.__scan_width_model = Model.PropertyModel()
+        self.__scan_height_model = Model.PropertyModel()
+
+        def update_scan_width(scan_width):
+            if scan_width > 0:
+                frame_parameters = scan_controller.get_frame_parameters(2)
+                frame_parameters.size = frame_parameters.size[0], scan_width
+                scan_controller.set_frame_parameters(2, frame_parameters)
+            self.__update_estimate()
+
+        def update_scan_height(scan_height):
+            if scan_height > 0:
+                frame_parameters = scan_controller.get_frame_parameters(2)
+                frame_parameters.size = scan_height, frame_parameters.size[1]
+                scan_controller.set_frame_parameters(2, frame_parameters)
+            self.__update_estimate()
+
+        self.__scan_width_model.on_value_changed = update_scan_width
+        self.__scan_height_model.on_value_changed = update_scan_height
+
+        scan_width_binding = Binding.PropertyBinding(self.__scan_width_model, "value", converter=Converter.IntegerToStringConverter())
+        scan_height_binding = Binding.PropertyBinding(self.__scan_height_model, "value", converter=Converter.IntegerToStringConverter())
+
+        def scan_profile_parameters_changed(profile_index, frame_parameters):
+            if profile_index == 2:
+                self.__scan_width_model.value = frame_parameters.size[1]
+                self.__scan_height_model.value = frame_parameters.size[0]
+
+        self.__scan_frame_parameters_changed_event_listener = scan_controller.frame_parameters_changed_event.listen(scan_profile_parameters_changed)
+
+        scan_profile_parameters_changed(2, scan_controller.get_frame_parameters(2))
+
+        self.__scan_width_widget._widget.bind_text(scan_width_binding)  # the widget will close the binding
+        self.__scan_height_widget._widget.bind_text(scan_height_binding)  # the widget will close the binding
+
+    def close(self):
+        if self.__scan_frame_parameters_changed_event_listener:
+            self.__scan_frame_parameters_changed_event_listener.close()
+            self.__scan_frame_parameters_changed_event_listener = None
+        if self.__eels_frame_parameters_changed_event_listener:
+            self.__eels_frame_parameters_changed_event_listener.close()
+            self.__eels_frame_parameters_changed_event_listener = None
+        self.__hardware_source_added_event_listener.close()
+        self.__hardware_source_added_event_listener = None
 
 
 class ScanAcquisitionExtension(object):
