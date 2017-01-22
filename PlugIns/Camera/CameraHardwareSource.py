@@ -61,6 +61,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__camera_adapter = camera_adapter
         self.__camera_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
         self.__camera_adapter.on_profile_frame_parameters_changed = self.__profile_frame_parameters_changed
+        self.features["is_camera"] = True
         self.features.update(self.__camera_adapter.features)
         self.add_data_channel()
         if self.__camera_adapter.processor:
