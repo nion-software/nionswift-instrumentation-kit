@@ -228,6 +228,33 @@ class ScanAcquisitionController:
         self.__aborted = True
 
 
+# see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
+def sizeof_fmt(num, suffix='B'):
+    for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Y', suffix)
+
+
+def calculate_time_size(scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time):
+    pixels = (scan_width + 2) * scan_height
+    time_s = exposure_time * pixels
+    if time_s > 3600:
+        time_str = "{0:.1f} hours".format((int(time_s) + 3599) / 3600)
+    elif time_s > 90:
+        time_str = "{0:.1f} minutes".format((int(time_s) + 59) / 60)
+    else:
+        time_str = "{} seconds".format(int(time_s))
+    memory_acquire = pixels * camera_width * camera_height * 4
+    if is_summed:
+        memory_storage = pixels * camera_width * 4
+        size_str = "{} ({})".format(sizeof_fmt(memory_acquire), sizeof_fmt(memory_storage))
+    else:
+        size_str = sizeof_fmt(memory_acquire)
+    return time_str, size_str
+
+
 class PanelDelegate:
 
     def __init__(self, api):
@@ -245,6 +272,8 @@ class PanelDelegate:
         self.__scan_height_model = None
         self.__scan_hardware_source_choice = None
         self.__camera_hardware_source_choice = None
+        self.__camera_width_ref = [0]
+        self.__camera_height_ref = [0]
         self.__scan_acquisition_preference_panel = None
 
     def create_panel_widget(self, ui, document_controller):
@@ -344,9 +373,8 @@ class PanelDelegate:
         sum_project_frames_check_box_widget = ui.create_check_box_widget(_("Sum Project Frames"))
         sum_project_frames_check_box_widget.checked = True
 
-        sum_project_frames_row = ui.create_row_widget()
-        sum_project_frames_row.add(sum_project_frames_check_box_widget)
-        sum_project_frames_row.add_stretch()
+        self.__style_combo_box = ui.create_combo_box_widget([_("2d x 1d (SI)"), _("2d x 2d (4d)")])
+        self.__style_combo_box.current_index = 0
 
         def acquire_sequence():
             scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
@@ -376,6 +404,8 @@ class PanelDelegate:
         camera_row = ui.create_row_widget()
         camera_row.add_spacing(12)
         camera_row.add(ComboBoxWidget(self.__camera_hardware_source_choice.create_combo_box(ui._ui)))
+        camera_row.add_spacing(12)
+        camera_row.add(self.__style_combo_box)
         camera_row.add_stretch()
 
         scan_size_row = ui.create_row_widget()
@@ -420,8 +450,6 @@ class PanelDelegate:
         column.add_spacing(8)
         column.add(acquire_sequence_button_row)
         column.add_spacing(8)
-        column.add(sum_project_frames_row)
-        column.add_spacing(8)
         column.add_stretch()
 
         def camera_hardware_source_changed(hardware_source):
@@ -438,26 +466,23 @@ class PanelDelegate:
         self.__scan_hardware_changed_event_listener = self.__scan_hardware_source_choice.hardware_source_changed_event.listen(scan_hardware_source_changed)
         scan_hardware_source_changed(self.__scan_hardware_source_choice.hardware_source)
 
+        def style_current_item_changed(current_item):
+            self.__update_estimate()
+
+        self.__style_combo_box.on_current_item_changed = style_current_item_changed
+
         return column
 
     def __update_estimate(self):
         if self.__exposure_time_ms_value_model and self.__scan_width_model and self.__scan_height_model:
-            pixels = (self.__scan_width_model.value + 2) * self.__scan_height_model.value
-            time_s = 2.0 * self.__exposure_time_ms_value_model.value * pixels / 1000
-            if time_s > 3600:
-                time_str = "{0:.1f} hours".format((int(time_s) + 3599) / 3600)
-            elif time_s > 90:
-                time_str = "{0:.1f} minutes".format((int(time_s) + 59) / 60)
-            else:
-                time_str = "{} seconds".format(int(time_s))
-            memory = pixels * 2048 * 128 * 4
-            if memory > 1024 * 1024 * 1024:
-                size_str = "{0:.1f}GB".format(memory / (1024 * 1024 * 1024))
-            elif memory > 1024 * 1024:
-                size_str = "{0:.1f}MB".format(memory / (1024 * 1024))
-            else:
-                size_str = "{0:.1f}KB".format(memory / 1024)
-            self.__estimate_label_widget.text = "Estimated Time: {0}  Size: {1}".format(time_str, size_str)
+            camera_width = self.__camera_width_ref[0]
+            camera_height = self.__camera_height_ref[0]
+            scan_width = self.__scan_width_model.value
+            scan_height = self.__scan_height_model.value
+            is_summed = self.__style_combo_box.current_index == 0
+            exposure_time = self.__exposure_time_ms_value_model.value / 1000
+            time_str, size_str = calculate_time_size(scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time)
+            self.__estimate_label_widget.text = "{0} / {1}".format(time_str, size_str)
         else:
             self.__estimate_label_widget.text = None
 
@@ -478,7 +503,11 @@ class PanelDelegate:
 
         def eels_profile_parameters_changed(profile_index, frame_parameters):
             if profile_index == 0:
+                expected_dimensions = camera_hardware_source.get_expected_dimensions(frame_parameters.binning)
+                self.__camera_width_ref[0] = expected_dimensions[1]
+                self.__camera_height_ref[0] = expected_dimensions[0]
                 self.__exposure_time_ms_value_model.value = frame_parameters.exposure_ms
+                self.__update_estimate()
 
         self.__eels_frame_parameters_changed_event_listener = camera_hardware_source.frame_parameters_changed_event.listen(eels_profile_parameters_changed)
 
