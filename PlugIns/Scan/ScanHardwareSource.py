@@ -53,15 +53,8 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
 
 
 
-class ProbeGraphicConnection(object):
-
-    """Manage the connection between the hardware and the graphics representing the probe on a display.
-
-    This object does not change any state; it only facilitates the connection between the graphic and
-    the scan hardware source."""
-
-    # TODO: translate position to physical position using display
-
+class ProbeGraphicConnection:
+    """Manage the connection between the hardware and the graphics representing the probe on a display."""
     def __init__(self, display, probe_position_value):
         self.display = display
         self.probe_position_value = probe_position_value
@@ -156,7 +149,7 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
             self._set_blanker(value == "blanked")
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
             for probe_graphic_connection in self.__probe_graphic_connections:
-                probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state)
+                self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
 
     @property
     def static_probe_state(self):
@@ -201,7 +194,7 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
         # update the probe position for listeners and also explicitly update for probe_graphic_connections.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
         for probe_graphic_connection in self.__probe_graphic_connections:
-            probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state)
+            self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
 
     def validate_probe_position(self):
         """Validate the probe position.
@@ -223,14 +216,14 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
                     probe_position_value = Model.PropertyModel()
                     probe_position_value.on_value_changed = lambda value: setattr(self, "probe_position", value)
                     probe_graphic_connection = ProbeGraphicConnection(display, probe_position_value)
-                    probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state)
+                    self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
                     self.__probe_graphic_connections.append(probe_graphic_connection)
         else:
             # scanning, remove all known probe graphic connections.
             probe_graphic_connections = copy.copy(self.__probe_graphic_connections)
             self.__probe_graphic_connections = list()
             for probe_graphic_connection in probe_graphic_connections:
-                probe_graphic_connection.close()
+                self._call_soon(probe_graphic_connection.close)
 
         self.__last_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
 
@@ -507,7 +500,7 @@ class ScanHardwareSource(BaseScanHardwareSource):
         if Utility.compare_versions(version, actual_version) > 0:
             raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
 
-        class CameraFacade(object):
+        class CameraFacade:
 
             def __init__(self):
                 pass

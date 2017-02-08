@@ -188,6 +188,7 @@ class TestScanControlClass(unittest.TestCase):
             self.__acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
             scan_state_controller.handle_positioned_check_box(True)
+            document_controller.periodic()
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 1)
 
     def test_disable_positioned_after_one_frame_acquisition_should_remove_graphic(self):
@@ -197,6 +198,7 @@ class TestScanControlClass(unittest.TestCase):
             self.__acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 1)
             scan_state_controller.handle_positioned_check_box(False)
+            document_controller.periodic()
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
 
     def test_deleting_probe_graphic_after_one_frame_acquisition_should_disable_positioned(self):
@@ -229,6 +231,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
             hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
             self.assertEqual(len(display.graphics), 0)
             hardware_source.stop_playing()
 
@@ -255,6 +258,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
             hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
             self.assertEqual(len(display.graphics), 0)
             hardware_source.stop_playing()
 
@@ -698,6 +702,7 @@ class TestScanControlClass(unittest.TestCase):
             probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
             self.assertFalse(probe_graphic._closed)
             scan_state_controller.handle_positioned_check_box(False)
+            document_controller.periodic()
             self.assertIsNone(hardware_source.probe_position)
             self.assertTrue(probe_graphic._closed)
 
