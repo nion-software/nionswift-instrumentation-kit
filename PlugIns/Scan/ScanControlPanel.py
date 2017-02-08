@@ -1537,6 +1537,10 @@ class ScanDisplayPanelController:
                 self.__playback_controls_composition.refresh_layout()
 
         def update_status_text():
+            # first check whether we're closed or not; this particular method may be queued to the
+            # front thread and may execute after closing.
+            if not self.__display_panel_content:
+                return
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                 "partial": _("Acquiring"), "marked": _("Stopping")}
             for data_item_state in self.__data_item_states:
@@ -1579,8 +1583,9 @@ class ScanDisplayPanelController:
             update_abort_button()
 
         def data_item_states_changed(data_item_states):
+            # This will be called on a thread, but updating the status must occur on main thread.
             self.__data_item_states = data_item_states
-            update_status_text()
+            display_panel_content.document_controller.queue_task(update_status_text)
 
         def channel_state_changed(channel_index, channel_id, channel_name, enabled):
             if channel_id == self.__hardware_source_channel_id:
