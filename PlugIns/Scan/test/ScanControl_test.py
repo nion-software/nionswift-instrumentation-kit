@@ -136,11 +136,6 @@ class TestScanControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             HardwareSource_test._test_get_next_data_elements_to_finish_returns_full_frames(self, hardware_source, document_controller)
 
-    def test_get_next_data_elements_to_finish_produces_data_item_full_frames(self):
-        document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
-        with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            HardwareSource_test._test_get_next_data_elements_to_finish_produces_data_item_full_frames(self, hardware_source, document_controller)
-
     def test_exception_during_view_halts_scan(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
