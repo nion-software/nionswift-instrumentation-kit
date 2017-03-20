@@ -374,8 +374,14 @@ class PanelDelegate:
         self.__style_combo_box.current_index = 0
 
         def acquire_sequence():
-            scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
-            camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+            if self.__scan_hardware_source_choice.hardware_source:
+                scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+            else:
+                scan_hardware_source = None
+            if self.__camera_hardware_source_choice.hardware_source:
+                camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+            else:
+                camera_hardware_source = None
             if scan_hardware_source and camera_hardware_source:
                 self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
                 self.__scan_acquisition_controller.start_sequence(document_controller, scan_hardware_source, camera_hardware_source, self.__style_combo_box.current_index == 0)
@@ -451,14 +457,16 @@ class PanelDelegate:
 
         def camera_hardware_source_changed(hardware_source):
             self.disconnect_camera_hardware_source()
-            self.connect_camera_hardware_source(hardware_source)
+            if hardware_source:
+                self.connect_camera_hardware_source(hardware_source)
 
         self.__camera_hardware_changed_event_listener = self.__camera_hardware_source_choice.hardware_source_changed_event.listen(camera_hardware_source_changed)
         camera_hardware_source_changed(self.__camera_hardware_source_choice.hardware_source)
 
         def scan_hardware_source_changed(hardware_source):
             self.disconnect_scan_hardware_source()
-            self.connect_scan_hardware_source(hardware_source)
+            if hardware_source:
+                self.connect_scan_hardware_source(hardware_source)
 
         self.__scan_hardware_changed_event_listener = self.__scan_hardware_source_choice.hardware_source_changed_event.listen(scan_hardware_source_changed)
         scan_hardware_source_changed(self.__scan_hardware_source_choice.hardware_source)
