@@ -370,9 +370,6 @@ class PanelDelegate:
         line_samples_row.add(line_samples_edit_widget)
         line_samples_row.add_stretch()
 
-        sum_project_frames_check_box_widget = ui.create_check_box_widget(_("Sum Project Frames"))
-        sum_project_frames_check_box_widget.checked = True
-
         self.__style_combo_box = ui.create_combo_box_widget([_("2d x 1d (SI)"), _("2d x 2d (4d)")])
         self.__style_combo_box.current_index = 0
 
@@ -381,7 +378,7 @@ class PanelDelegate:
             camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
             if scan_hardware_source and camera_hardware_source:
                 self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
-                self.__scan_acquisition_controller.start_sequence(document_controller, scan_hardware_source, camera_hardware_source, sum_project_frames_check_box_widget.checked)
+                self.__scan_acquisition_controller.start_sequence(document_controller, scan_hardware_source, camera_hardware_source, self.__style_combo_box.current_index == 0)
 
         acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
         acquire_sequence_button_widget.on_clicked = acquire_sequence
