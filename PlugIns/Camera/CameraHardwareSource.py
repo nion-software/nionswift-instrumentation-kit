@@ -128,6 +128,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.__camera_adapter.sensor_dimensions
 
     @property
+    def binning_values(self) -> typing.Sequence[int]:
+        return self.__camera_adapter.binning_values
+
+    @property
     def readout_area(self):
         return self.__camera_adapter.readout_area
 
