@@ -279,6 +279,13 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertIsNotNone(frame_parameters_ref[0])
             self.assertEqual(frame_parameters_ref[0].binning, 4)
 
+    def test_binning_values_are_not_empty(self):
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            binning_values = hardware_source.binning_values
+            self.assertTrue(len(binning_values) > 0)
+            self.assertTrue(all(map(lambda x: isinstance(x, int), binning_values)))
+
     def test_changing_binning_is_reflected_in_new_acquisition(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):

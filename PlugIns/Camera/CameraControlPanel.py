@@ -69,6 +69,7 @@ class CameraControlStateController:
 
     Clients can respond to:
         on_display_name_changed(display_name)
+        on_binning_values_changed(binning_values)
         on_profiles_changed(profile_label_list)
         on_profile_changed(profile_label)
         on_frame_parameters_changed(frame_parameters)
@@ -95,6 +96,7 @@ class CameraControlStateController:
         self.__acquisition_state_changed_event_listener = None
         self.__log_messages_event_listener = None
         self.on_display_name_changed = None
+        self.on_binning_values_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -142,6 +144,7 @@ class CameraControlStateController:
         self.__eels_data_item_changed_event_listener.close()
         self.__eels_data_item_changed_event_listener = None
         self.on_display_name_changed = None
+        self.on_binning_values_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -217,6 +220,8 @@ class CameraControlStateController:
             self.__log_messages_event_listener = self.__hardware_source.log_messages_event.listen(self.__log_messages)
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
+        if self.on_binning_values_changed:
+            self.on_binning_values_changed(self.__hardware_source.binning_values)
         if self.on_monitor_button_state_changed:
             has_monitor = self.__hardware_source and self.__hardware_source.features.get("has_monitor", False)
             self.on_monitor_button_state_changed(has_monitor, has_monitor)
@@ -586,7 +591,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             button_row1a.visible = visible
 
         binning_combo = ui.create_combo_box_widget(properties={"min-width":72})
-        binning_combo.items = ["1", "2", "4", "8", "16"]
         binning_combo.on_current_text_changed = self.__state_controller.handle_binning_changed
 
         def handle_exposure_changed(text):
@@ -671,6 +675,9 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
         profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
 
+        def binning_values_changed(binning_values):
+            binning_combo.items = [str(binning_value) for binning_value in binning_values]
+
         def profiles_changed(items):
             profile_combo.items = items
 
@@ -713,6 +720,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 document_controller.add_data_element(data_element)
 
         self.__state_controller.on_display_name_changed = None
+        self.__state_controller.on_binning_values_changed = binning_values_changed
         self.__state_controller.on_profiles_changed = profiles_changed
         self.__state_controller.on_profile_changed = profile_changed
         self.__state_controller.on_frame_parameters_changed = frame_parameters_changed
@@ -952,6 +960,7 @@ class CameraDisplayPanelController:
             self.__show_processed_checkbox.on_check_state_changed = show_processed_checkbox_changed
 
         self.__state_controller.on_display_name_changed = display_name_changed
+        self.__state_controller.on_binning_values_changed = None
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = data_item_states_changed
