@@ -119,6 +119,8 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
         self.probe_state_changed_event = Event.Event()
         self.__last_data_items = list()
         self.__probe_graphic_connections = list()
+        self.__probe_state_updates = list()
+        self.__probe_state_updates_lock = threading.RLock()
 
     def init_probe_state(self, state):
         self.__probe_state_stack[0] = state
@@ -148,8 +150,10 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
             self.__probe_state_stack[0] = value
             self._set_blanker(value == "blanked")
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-            for probe_graphic_connection in self.__probe_graphic_connections:
-                self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
+            with self.__probe_state_updates_lock:
+                for probe_graphic_connection in self.__probe_graphic_connections:
+                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
+            self._call_soon(self.__update_probe_states)
 
     @property
     def static_probe_state(self):
@@ -188,13 +192,16 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
             probe_position = Geometry.FloatPoint.make(probe_position)
             probe_position = Geometry.FloatPoint(y=max(min(probe_position.y, 1.0), 0.0),
                                                  x=max(min(probe_position.x, 1.0), 0.0))
-        self.__probe_position = probe_position
-        # subclasses will override _set_probe_position
-        self._set_probe_position(probe_position)
-        # update the probe position for listeners and also explicitly update for probe_graphic_connections.
-        self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-        for probe_graphic_connection in self.__probe_graphic_connections:
-            self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
+        if ((self.__probe_position is None) != (probe_position is None)) or (self.__probe_position != probe_position):
+            self.__probe_position = probe_position
+            # subclasses will override _set_probe_position
+            self._set_probe_position(probe_position)
+            # update the probe position for listeners and also explicitly update for probe_graphic_connections.
+            self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+            with self.__probe_state_updates_lock:
+                for probe_graphic_connection in self.__probe_graphic_connections:
+                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
+            self._call_soon(self.__update_probe_states)
 
     def validate_probe_position(self):
         """Validate the probe position.
@@ -216,7 +223,9 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
                     probe_position_value = Model.PropertyModel()
                     probe_position_value.on_value_changed = lambda value: setattr(self, "probe_position", value)
                     probe_graphic_connection = ProbeGraphicConnection(display, probe_position_value)
-                    self._call_soon(lambda: probe_graphic_connection.update_probe_state(self.probe_position, self.static_probe_state))
+                    with self.__probe_state_updates_lock:
+                        self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
+                    self._call_soon(self.__update_probe_states)
                     self.__probe_graphic_connections.append(probe_graphic_connection)
         else:
             # scanning, remove all known probe graphic connections.
@@ -226,6 +235,14 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
                 self._call_soon(probe_graphic_connection.close)
 
         self.__last_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
+
+    def __update_probe_states(self):
+        import time
+        with self.__probe_state_updates_lock:
+            probe_state_updates = self.__probe_state_updates
+            self.__probe_state_updates = list()
+        for probe_graphic_connection, probe_position, static_probe_state in probe_state_updates:
+            probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
