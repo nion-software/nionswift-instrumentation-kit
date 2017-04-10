@@ -701,6 +701,21 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(hardware_source.probe_position)
             self.assertTrue(probe_graphic._closed)
 
+    def test_probe_appears_on_all_channels(self):
+        document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(1, True)
+            scan_state_controller.handle_positioned_check_box(True)
+            self.__acquire_one(document_controller, hardware_source)
+            self.assertIsNotNone(document_model.data_items[0].primary_display_specifier.display.graphics[0])
+            self.assertIsNotNone(document_model.data_items[1].primary_display_specifier.display.graphics[0])
+            scan_state_controller.handle_positioned_check_box(False)
+            document_controller.periodic()
+            self.assertIsNone(hardware_source.probe_position)
+            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
 
