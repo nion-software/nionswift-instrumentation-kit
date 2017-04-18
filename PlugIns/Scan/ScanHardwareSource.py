@@ -1,9 +1,13 @@
 # standard libraries
+import collections
 import copy
 import gettext
 import logging
 import queue
 import threading
+import time
+import typing
+import uuid
 import weakref
 
 # third party libraries
@@ -20,6 +24,8 @@ from nion.utils import Model
 from nion.utils import Event
 
 _ = gettext.gettext
+
+AUTOSTEM_CONTROLLER_ID = "autostem_controller"
 
 
 class PropertyToGraphicBinding(Binding.PropertyBinding):
@@ -523,3 +529,332 @@ class ScanHardwareSource(BaseScanHardwareSource):
                 pass
 
         return CameraFacade()
+
+
+class ScanFrameParameters:
+
+    def __init__(self, d=None):
+        d = d or dict()
+        self.size = d.get("size", (512, 512))
+        self.center_nm = d.get("center_nm", (0, 0))
+        self.pixel_time_us = d.get("pixel_time_us", 10)
+        self.fov_nm = d.get("fov_nm", 8)
+        self.rotation_rad = d.get("rotation_rad", 0)
+        self.external_clock_wait_time_ms = d.get("external_clock_wait_time_ms", 0)
+        self.external_clock_mode = d.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.ac_line_sync = d.get("ac_line_sync", False)
+        self.ac_frame_sync = d.get("ac_frame_sync", True)
+        self.flyback_time_us = d.get("flyback_time_us", 30.0)
+
+    def as_dict(self):
+        return {
+            "size": self.size,
+            "center_nm": self.center_nm,
+            "pixel_time_us": self.pixel_time_us,
+            "fov_nm": self.fov_nm,
+            "rotation_rad": self.rotation_rad,
+            "external_clock_wait_time_ms": self.external_clock_wait_time_ms,
+            "external_clock_mode": self.external_clock_mode,
+            "ac_line_sync": self.ac_line_sync,
+            "ac_frame_sync": self.ac_frame_sync,
+            "flyback_time_us": self.flyback_time_us,
+        }
+
+    def __repr__(self):
+        return "size pixels: " + str(self.size) +\
+               "\ncenter nm: " + str(self.center_nm) +\
+               "\npixel time: " + str(self.pixel_time_us) +\
+               "\nfield of view: " + str(self.fov_nm) +\
+               "\nrotation: " + str(self.rotation_rad) +\
+               "\nexternal clock wait time: " + str(self.external_clock_wait_time_ms) +\
+               "\nexternal clock mode: " + str(self.external_clock_mode) +\
+               "\nac line sync: " + str(self.ac_line_sync) +\
+               "\nac frame sync: " + str(self.ac_frame_sync) +\
+               "\nflyback time: " + str(self.flyback_time_us)
+
+
+class ScanAdapterAcquisitionTask:
+
+    def __init__(self, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+        self.__device = device
+        self.hardware_source_id = hardware_source_id
+        self.is_continuous = is_continuous
+        self.__display_name = display_name
+        self.__hardware_source_id = hardware_source_id
+        self.__frame_parameters = copy.deepcopy(frame_parameters)
+        self.__frame_number = None
+        self.__scan_id = None
+        self.__last_scan_id = None
+        self.__pixels_to_skip = 0
+        self.__channel_states = channel_states
+        self.__last_read_time = 0
+
+    def set_frame_parameters(self, frame_parameters):
+        self.__frame_parameters = copy.deepcopy(frame_parameters)
+        self.__activate_frame_parameters()
+
+    @property
+    def frame_parameters(self):
+        return self.__frame_parameters
+
+    def start_acquisition(self) -> bool:
+        if not any(self.__device.channels_enabled):
+            return False
+        self.resume_acquisition()
+        self.__frame_number = None
+        self.__scan_id = None
+        return True
+
+    def request_abort_acquisition(self) -> None:
+        pass
+
+    def abort_acquisition(self) -> None:
+        self.suspend_acquisition()
+
+    def suspend_acquisition(self) -> None:
+        self.__device.cancel()
+        self.__device.stop()
+        start_time = time.time()
+        while self.__device.is_scanning and time.time() - start_time < 1.0:
+            time.sleep(0.01)
+        self.__last_scan_id = self.__scan_id
+
+    def resume_acquisition(self) -> None:
+        self.__activate_frame_parameters()
+        self.__frame_number = self.__device.start_frame(self.is_continuous)
+        self.__scan_id = self.__last_scan_id
+        self.__pixels_to_skip = 0
+
+    def mark_acquisition(self) -> None:
+        self.__device.stop()
+
+    def stop_acquisition(self) -> None:
+        self.__device.stop()
+        start_time = time.time()
+        while self.__device.is_scanning and time.time() - start_time < 1.0:
+            time.sleep(0.01)
+        self.__frame_number = None
+        self.__scan_id = None
+
+    def acquire_data_elements(self):
+
+        # and now we set the calibrations for this image
+        def update_calibration_metadata(data_element, scan_id, frame_number, channel_name, channel_id, image_metadata):
+            if "properties" not in data_element:
+                pixel_time_us = float(image_metadata["pixel_time_us"])
+                pixels_x = float(image_metadata["pixels_x"])
+                pixels_y = float(image_metadata["pixels_y"])
+                center_x_nm = float(image_metadata["center_x_nm"])
+                center_y_nm = float(image_metadata["center_y_nm"])
+                fov_nm = float(image_metadata["fov_nm"])
+                data_element["title"] = channel_name
+                data_element["version"] = 1
+                data_element["channel_id"] = channel_id  # needed to match to the channel
+                data_element["channel_name"] = channel_name  # needed to match to the channel
+                pixel_size_nm = fov_nm / max(pixels_x, pixels_y)
+                data_element["spatial_calibrations"] = (
+                    {"offset": center_y_nm, "scale": pixel_size_nm, "units": "nm"},
+                    {"offset": center_x_nm, "scale": pixel_size_nm, "units": "nm"}
+                )
+                properties = dict()
+                if image_metadata is not None:
+                    properties["autostem"] = copy.deepcopy(image_metadata)
+                    # TODO: file format: remove extra_high_tension
+                    high_tension_v = image_metadata.get("high_tension_v")
+                    if high_tension_v:
+                        properties["extra_high_tension"] = high_tension_v
+                exposure_s = pixels_x * pixels_y * pixel_time_us / 1000000
+                properties["hardware_source_name"] = self.__display_name
+                properties["hardware_source_id"] = self.__hardware_source_id
+                properties["exposure"] = exposure_s
+                properties["frame_index"] = frame_number
+                properties["channel_id"] = channel_id  # needed for info after acquisition
+                properties["channel_name"] = channel_name  # needed for info after acquisition
+                properties["scan_id"] = str(scan_id)
+                properties["center_x_nm"] = center_x_nm
+                properties["center_y_nm"] = center_y_nm
+                properties["pixel_time_us"] = pixel_time_us
+                properties["fov_nm"] = fov_nm
+                properties["rotation_deg"] = float(image_metadata["rotation_deg"])
+                properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
+                data_element["properties"] = properties
+
+        def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
+            channel_name = self.__device.get_channel_name(channel_index)
+            channel_id = self.__channel_states[channel_index].channel_id
+            update_calibration_metadata(data_element, scan_id, frame_number, channel_name, channel_id, autostem_properties)
+            data_element["data"] = npdata
+            data_element["sub_area"] = sub_area
+            data_element["state"] = "complete" if complete else "partial"
+            data_element["properties"]["valid_rows"] = sub_area[0][0] + sub_area[1][0]
+
+        def get_autostem_properties():
+            autostem_properties = None
+            autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
+            if autostem:
+                try:
+                    autostem_properties = autostem.get_autostem_properties()
+                except Exception as e:
+                    logging.info("autostem.get_autostem_properties has failed")
+            return autostem_properties
+
+        _data_elements, complete, bad_frame, sub_area, self.__frame_number, self.__pixels_to_skip = self.__device.read_partial(self.__frame_number, self.__pixels_to_skip)
+
+        min_period = 0.075
+        current_time = time.time()
+        if current_time - self.__last_read_time < min_period:
+            time.sleep(min_period - (current_time - self.__last_read_time))
+        self.__last_read_time = time.time()
+
+        if not self.__scan_id:
+            self.__scan_id = uuid.uuid4()
+
+        autostem_properties = get_autostem_properties()
+
+        # merge the _data_elements into data_elements
+        data_elements = []
+        for _data_element in _data_elements:
+            _data_element["properties"].update(autostem_properties)
+            # calculate the valid sub area for this iteration
+            channel_index = int(_data_element["properties"]["channel_id"])
+            _data = _data_element["data"]
+            _properties = _data_element["properties"]
+            # create the 'data_element' in the format that must be returned from this method
+            # '_data_element' is the format returned from the Device.
+            data_element = dict()
+            update_data_element(data_element, channel_index, complete, sub_area, _data, _properties, self.__frame_number, self.__scan_id)
+            data_elements.append(data_element)
+
+        if complete or bad_frame:
+            # proceed to next frame
+            self.__frame_number = None
+            self.__scan_id = None
+            self.__pixels_to_skip = 0
+
+        return data_elements
+
+    def __activate_frame_parameters(self):
+        frame_parameters = self.__frame_parameters
+        self.__device.set_frame_parameters(self.__frame_parameters)
+
+
+class ScanAdapter:
+
+    def __init__(self, device, hardware_source_id, display_name):
+        self.hardware_source_id = hardware_source_id
+        self.display_name = display_name
+        ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
+        self.__device = device
+        self.__device.on_device_state_changed = self.__device_state_changed
+        self.channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
+        self.initial_state_probe_state = "blanked" if self.__device.blanker_enabled else "parked"
+        self.features = dict()
+        self.on_selected_profile_index_changed = None
+        self.on_profile_frame_parameters_changed = None
+        self.on_channel_states_changed = None
+        self.on_static_probe_state_changed = None
+        self.__current_profile_index = 0
+
+    def close(self):
+        self.__device.save_frame_parameters()
+        self.__device.close()
+
+    def get_initial_profiles(self) -> typing.List[typing.Any]:
+        profiles = list()
+        profiles.append(self.__get_frame_parameters(0))
+        profiles.append(self.__get_frame_parameters(1))
+        profiles.append(self.__get_frame_parameters(2))
+        return profiles
+
+    def get_initial_profile_index(self) -> int:
+        return 0
+
+    def set_selected_profile_index(self, profile_index: int) -> None:
+        self.__current_profile_index = profile_index
+
+    def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
+        self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
+
+    def create_acquisition_task(self, frame_parameters):
+        channel_states = [self.get_channel_state(i) for i in range(4)]
+        acquisition_task = ScanAdapterAcquisitionTask(self.__device, self.hardware_source_id, True, frame_parameters, channel_states, self.display_name)
+        return acquisition_task
+
+    def create_record_task(self, frame_parameters):
+        channel_states = [self.get_channel_state(i) for i in range(4)]
+        record_task = ScanAdapterAcquisitionTask(self.__device, self.hardware_source_id, False, frame_parameters, channel_states, self.display_name)
+        return record_task
+
+    def get_channel_state(self, channel_index):
+        channels_enabled = self.__device.channels_enabled
+        assert 0 <= channel_index < len(channels_enabled)
+        name = self.__device.get_channel_name(channel_index)
+        return self.__make_channel_state(channel_index, name, channels_enabled[channel_index])
+
+    def set_channel_enabled(self, channel_index, enabled) -> bool:
+        return self.__device.set_channel_enabled(channel_index, enabled)
+
+    def open_configuration_interface(self):
+        self.__device.open_configuration_interface()
+
+    def get_frame_parameters_from_dict(self, d):
+        return ScanFrameParameters(d)
+
+    def set_probe_position(self, probe_position):
+        if probe_position is not None:
+            self.__device.set_idle_position_by_percentage(probe_position.x, probe_position.y)
+        else:
+            # pass magic value to position to default position which may be top left or center depending on configuration.
+            self.__device.set_idle_position_by_percentage(-1.0, -1.0)
+
+    def set_blanker(self, blanker_on):
+        self.__device.blanker_enabled = blanker_on
+
+    @property
+    def actual_blanker(self):
+        return self.__device.blanker_enabled
+
+    def shift_click(self, mouse_position, camera_shape):
+        autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
+        if autostem:
+            pixx, pixy, centerx, centery, pixtime, size = self.__device.current_frame_parameters
+            pixel_size = size / max(pixx, pixy)
+            dx = 1e-9 * pixel_size * (mouse_position[1] - (camera_shape[1] / 2))
+            dy = 1e-9 * pixel_size * (mouse_position[0] - (camera_shape[0] / 2))
+            logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
+            autostem.set_value("SShft.u", autostem.get_value("SShft.u") - dx)
+            autostem.set_value("SShft.v", autostem.get_value("SShft.v") - dy)
+
+    def increase_pmt(self, channel_index):
+        self.__device.change_pmt(channel_index, True)
+
+    def decrease_pmt(self, channel_index):
+        self.__device.change_pmt(channel_index, False)
+
+    def get_property(self, name):
+        return getattr(self, name)
+
+    def set_property(self, name, value):
+        setattr(self, name, value)
+
+    def __get_frame_parameters(self, profile_index: int) -> ScanFrameParameters:
+        return self.__device.get_profile_frame_parameters(profile_index)
+
+    def __make_channel_id(self, channel_index) -> str:
+        return "abcdefgh"[channel_index]
+
+    def __make_channel_state(self, channel_index, channel_name, channel_enabled):
+        ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
+        return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
+
+    def __device_state_changed(self, profile_frame_parameters_list, device_channel_states, static_probe_state) -> None:
+        if callable(self.on_profile_frame_parameters_changed):
+            for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
+                self.on_profile_frame_parameters_changed(profile_index, profile_frame_parameters)
+        if callable(self.on_channel_states_changed):
+            channel_states = list()
+            for channel_index, (channel_name, channel_enabled) in enumerate(device_channel_states):
+                channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))
+            self.on_channel_states_changed(channel_states)
+        if callable(self.on_static_probe_state_changed):
+            self.on_static_probe_state_changed(static_probe_state)
