@@ -4,6 +4,7 @@ import functools
 import gettext
 import sys
 import threading
+import time
 
 # third party libraries
 import math
@@ -340,7 +341,10 @@ class ScanControlStateController:
         assert callable(callback_fn)
         if self.__scan_hardware_source:
             def record_thread():
-                self.__scan_hardware_source.start_recording()
+                current_frame_time = self.__scan_hardware_source.get_current_frame_time()
+                record_frame_time = self.__scan_hardware_source.get_record_frame_time()
+                self.__scan_hardware_source.start_recording(current_frame_time)
+                time.sleep(record_frame_time * 0.1)  # ensure that recording has started. ugh.
                 data_and_metadata_list = self.__scan_hardware_source.get_next_xdatas_to_finish()
                 record_index = self.__scan_hardware_source.record_index
                 for data_and_metadata in data_and_metadata_list:
