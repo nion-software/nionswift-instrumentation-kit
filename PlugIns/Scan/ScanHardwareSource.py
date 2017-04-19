@@ -329,6 +329,7 @@ class ScanHardwareSource(BaseScanHardwareSource):
         self.__task_queue = queue.Queue()
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = dict()
+        self.record_index = 1  # use to give unique name to recorded images
 
     def close(self):
         self.__scan_adapter.on_selected_profile_index_changed = None
