@@ -476,6 +476,10 @@ class ScanHardwareSource(BaseScanHardwareSource):
         frame_parameters = self.get_current_frame_parameters()
         return frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1000000.0
 
+    def get_record_frame_time(self):
+        frame_parameters = self.get_record_frame_parameters()
+        return frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1000000.0
+
     def clean_data_item(self, data_item: DataItem.DataItem, data_channel: HardwareSource.DataChannel) -> None:
         display = data_item.maybe_data_source.displays[0]
         for graphic in copy.copy(display.graphics):
