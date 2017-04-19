@@ -52,10 +52,13 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(time.time() - start_time < 3.0)
         document_controller.periodic()
 
-    def __record_one(self, document_controller, hardware_source, scan_state_controller):
+    def _record_one(self, document_controller, hardware_source, scan_state_controller):
         frame_time = hardware_source.get_current_frame_time()
 
+        enabled_channel_count = sum(hardware_source.get_channel_state(channel_index).enabled for channel_index in range(hardware_source.channel_count))
+
         event = threading.Event()
+        event_count_ref = [0]
         def handle_record_data_item(data_item):  # called from thread
             def perform():
                 document_controller.document_model.append_data_item(data_item)
@@ -63,7 +66,9 @@ class TestScanControlClass(unittest.TestCase):
                 if result_display_panel:
                     result_display_panel.set_displayed_data_item(data_item)
             document_controller.queue_task(perform)
-            event.set()
+            event_count_ref[0] += 1
+            if event_count_ref[0] == enabled_channel_count:
+                event.set()
 
         scan_state_controller.handle_record_clicked(handle_record_data_item)
         time.sleep(frame_time * 0.5)
@@ -166,7 +171,7 @@ class TestScanControlClass(unittest.TestCase):
             def display_data_item_changed(data_item):
                 displayed_data_item[0] = data_item
             scan_state_controller.on_display_data_item_changed = display_data_item_changed
-            self.__record_one(document_controller, hardware_source, scan_state_controller)
+            self._record_one(document_controller, hardware_source, scan_state_controller)
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
             self.assertTrue(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
@@ -176,6 +181,17 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
             # clean up
             hardware_source.abort_playing()
+
+    def test_record_names_results_correctly(self):
+        document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(1, True)
+            self._record_one(document_controller, hardware_source, scan_state_controller)
+            self.assertTrue(document_model.data_items[2].title.startswith(document_model.data_items[0].title))
+            self.assertTrue(len(document_model.data_items[2].title) > len(document_model.data_items[0].title))
+            self.assertTrue(document_model.data_items[3].title.startswith(document_model.data_items[1].title))
+            self.assertTrue(len(document_model.data_items[3].title) > len(document_model.data_items[1].title))
 
     def test_enable_positioned_after_one_frame_acquisition_should_add_graphic(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
@@ -391,7 +407,7 @@ class TestScanControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             for i in range(3):
-                self.__record_one(document_controller, hardware_source, scan_state_controller)
+                self._record_one(document_controller, hardware_source, scan_state_controller)
             self.assertEqual(len(document_model.data_items), 4)  # 1 view image (always acquired), 3 records
 
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition(self):

@@ -342,12 +342,21 @@ class ScanControlStateController:
             def record_thread():
                 self.__scan_hardware_source.start_recording()
                 data_and_metadata_list = self.__scan_hardware_source.get_next_xdatas_to_finish()
+                record_index = self.__scan_hardware_source.record_index
                 for data_and_metadata in data_and_metadata_list:
                     data_item = DataItem.DataItem()
+
+                    display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                    display_name = display_name if display_name else _("Record")
+                    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
+                    title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
+                    data_item.title = "{} {}".format(title_base, record_index)
+
                     buffered_data_source = DataItem.BufferedDataSource()
                     data_item.append_data_source(buffered_data_source)
                     buffered_data_source.set_data_and_metadata(data_and_metadata)
                     callback_fn(data_item)
+                self.__scan_hardware_source.record_index += 1
             self.__thread = threading.Thread(target=record_thread)
             self.__thread.start()
 
