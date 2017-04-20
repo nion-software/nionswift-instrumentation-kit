@@ -822,10 +822,12 @@ class ScanAdapter:
     def shift_click(self, mouse_position, camera_shape):
         autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
         if autostem:
-            pixx, pixy, centerx, centery, pixtime, size = self.__device.current_frame_parameters
-            pixel_size = size / max(pixx, pixy)
-            dx = 1e-9 * pixel_size * (mouse_position[1] - (camera_shape[1] / 2))
-            dy = 1e-9 * pixel_size * (mouse_position[0] - (camera_shape[0] / 2))
+            frame_parameters = self.__device.current_frame_parameters
+            width, height = frame_parameters.size
+            fov_nm = frame_parameters.fov_nm
+            pixel_size_nm = fov_nm / max(width, height)
+            dx = 1e-9 * pixel_size_nm * (mouse_position[1] - (camera_shape[1] / 2))
+            dy = 1e-9 * pixel_size_nm * (mouse_position[0] - (camera_shape[0] / 2))
             logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
             autostem.set_value("SShft.u", autostem.get_value("SShft.u") - dx)
             autostem.set_value("SShft.v", autostem.get_value("SShft.v") - dy)
