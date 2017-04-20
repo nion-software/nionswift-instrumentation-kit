@@ -644,19 +644,17 @@ class ScanAdapterAcquisitionTask:
     def acquire_data_elements(self):
 
         # and now we set the calibrations for this image
-        def update_calibration_metadata(data_element, scan_id, frame_number, channel_name, channel_id, image_metadata):
+        def update_calibration_metadata(data_element, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata):
             if "properties" not in data_element:
                 pixel_time_us = float(image_metadata["pixel_time_us"])
-                pixels_x = float(image_metadata["pixels_x"])
-                pixels_y = float(image_metadata["pixels_y"])
-                center_x_nm = float(image_metadata["center_x_nm"])
-                center_y_nm = float(image_metadata["center_y_nm"])
+                center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
+                center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
                 fov_nm = float(image_metadata["fov_nm"])
+                pixel_size_nm = fov_nm / max(data_shape)
                 data_element["title"] = channel_name
                 data_element["version"] = 1
                 data_element["channel_id"] = channel_id  # needed to match to the channel
                 data_element["channel_name"] = channel_name  # needed to match to the channel
-                pixel_size_nm = fov_nm / max(pixels_x, pixels_y)
                 data_element["spatial_calibrations"] = (
                     {"offset": center_y_nm, "scale": pixel_size_nm, "units": "nm"},
                     {"offset": center_x_nm, "scale": pixel_size_nm, "units": "nm"}
@@ -668,7 +666,7 @@ class ScanAdapterAcquisitionTask:
                     high_tension_v = image_metadata.get("high_tension_v")
                     if high_tension_v:
                         properties["extra_high_tension"] = high_tension_v
-                exposure_s = pixels_x * pixels_y * pixel_time_us / 1000000
+                exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
                 properties["hardware_source_name"] = self.__display_name
                 properties["hardware_source_id"] = self.__hardware_source_id
                 properties["exposure"] = exposure_s
@@ -687,7 +685,7 @@ class ScanAdapterAcquisitionTask:
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
-            update_calibration_metadata(data_element, scan_id, frame_number, channel_name, channel_id, autostem_properties)
+            update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
             data_element["data"] = npdata
             data_element["sub_area"] = sub_area
             data_element["state"] = "complete" if complete else "partial"
@@ -719,7 +717,8 @@ class ScanAdapterAcquisitionTask:
         # merge the _data_elements into data_elements
         data_elements = []
         for _data_element in _data_elements:
-            _data_element["properties"].update(autostem_properties)
+            if autostem_properties is not None:
+                _data_element["properties"].update(autostem_properties)
             # calculate the valid sub area for this iteration
             channel_index = int(_data_element["properties"]["channel_id"])
             _data = _data_element["data"]
@@ -781,12 +780,14 @@ class ScanAdapter:
         self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
 
     def create_acquisition_task(self, frame_parameters):
-        channel_states = [self.get_channel_state(i) for i in range(4)]
+        channel_count = self.__device.channel_count
+        channel_states = [self.get_channel_state(i) for i in range(channel_count)]
         acquisition_task = ScanAdapterAcquisitionTask(self.__device, self.hardware_source_id, True, frame_parameters, channel_states, self.display_name)
         return acquisition_task
 
     def create_record_task(self, frame_parameters):
-        channel_states = [self.get_channel_state(i) for i in range(4)]
+        channel_count = self.__device.channel_count
+        channel_states = [self.get_channel_state(i) for i in range(channel_count)]
         record_task = ScanAdapterAcquisitionTask(self.__device, self.hardware_source_id, False, frame_parameters, channel_states, self.display_name)
         return record_task
 
