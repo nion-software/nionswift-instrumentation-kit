@@ -415,6 +415,21 @@ class ScanHardwareSource(BaseScanHardwareSource):
         if changed:
             self.__channel_states_changed([self.get_channel_state(i_channel_index) for i_channel_index in range(self.channel_count)])
 
+    def record_async(self, callback_fn):
+        """ Call this when the user clicks the record button. """
+        assert callable(callback_fn)
+
+        def record_thread():
+            current_frame_time = self.get_current_frame_time()
+
+            def handle_finished(xdatas):
+                callback_fn(xdatas)
+
+            self.start_recording(current_frame_time, finished_callback_fn=handle_finished)
+
+        self.__thread = threading.Thread(target=record_thread)
+        self.__thread.start()
+
     def set_selected_profile_index(self, profile_index):
         self.__current_profile_index = profile_index
         self.__scan_adapter.set_selected_profile_index(profile_index)
