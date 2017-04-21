@@ -182,6 +182,22 @@ class TestScanControlClass(unittest.TestCase):
             # clean up
             hardware_source.abort_playing()
 
+    def test_record_gets_correct_data_when_record_started_during_view(self):
+        document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.pixel_time_us = 1
+            hardware_source.set_frame_parameters(0, frame_parameters)
+            frame_time = hardware_source.get_current_frame_time()
+            hardware_source.start_playing()
+            time.sleep(frame_time * 0.25)
+            self._record_one(document_controller, hardware_source, scan_state_controller)
+            self.assertEqual(len(document_model.data_items), 2)  # check assumptions
+            hardware_source.stop_playing(3.0)
+            document_controller.periodic()
+            self.assertEqual(document_model.data_items[1].maybe_data_source.dimensional_shape, hardware_source.get_frame_parameters(2).size)
+            self.assertNotEqual(document_model.data_items[0].maybe_data_source.dimensional_shape, document_model.data_items[1].maybe_data_source.dimensional_shape)
+
     def test_record_names_results_correctly(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):

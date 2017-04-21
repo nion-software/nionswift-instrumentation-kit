@@ -340,12 +340,8 @@ class ScanControlStateController:
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
         if self.__scan_hardware_source:
-            def record_thread():
-                current_frame_time = self.__scan_hardware_source.get_current_frame_time()
-                record_frame_time = self.__scan_hardware_source.get_record_frame_time()
-                self.__scan_hardware_source.start_recording(current_frame_time)
-                time.sleep(record_frame_time * 0.1)  # ensure that recording has started. ugh.
-                data_and_metadata_list = self.__scan_hardware_source.get_next_xdatas_to_finish()
+
+            def finish_record(data_and_metadata_list):
                 record_index = self.__scan_hardware_source.record_index
                 for data_and_metadata in data_and_metadata_list:
                     data_item = DataItem.DataItem()
@@ -361,8 +357,8 @@ class ScanControlStateController:
                     buffered_data_source.set_data_and_metadata(data_and_metadata)
                     callback_fn(data_item)
                 self.__scan_hardware_source.record_index += 1
-            self.__thread = threading.Thread(target=record_thread)
-            self.__thread.start()
+
+            self.__scan_hardware_source.record_async(finish_record)
 
     # must be called on ui thread
     def handle_record_abort_clicked(self):
