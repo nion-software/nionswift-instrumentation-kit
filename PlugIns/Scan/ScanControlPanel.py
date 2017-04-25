@@ -1522,7 +1522,6 @@ class ScanDisplayPanelController:
             if hardware_source_display_name_canvas_item.text != new_text:
                 hardware_source_display_name_canvas_item.text = new_text
                 hardware_source_display_name_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
-                self.__playback_controls_composition.refresh_layout()
 
         def update_play_button():
             map_play_button_state_to_text = {"scan": _("Scan"), "stop": _("Stop")}
@@ -1533,7 +1532,6 @@ class ScanDisplayPanelController:
                 scan_button_canvas_item.enabled = new_enabled
                 scan_button_canvas_item.text = new_text
                 scan_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
-                self.__playback_controls_composition.refresh_layout()
 
         def update_abort_button():
             abort_button_visible = self.__channel_enabled and self.__abort_button_visible
@@ -1543,7 +1541,6 @@ class ScanDisplayPanelController:
                 abort_button_canvas_item.text = new_text
                 abort_button_canvas_item.enabled = abort_button_enabled
                 abort_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
-                self.__playback_controls_composition.refresh_layout()
 
         def update_status_text():
             # first check whether we're closed or not; this particular method may be queued to the
@@ -1566,13 +1563,11 @@ class ScanDisplayPanelController:
                     if status_text_canvas_item.text != new_text:
                         status_text_canvas_item.text = new_text
                         status_text_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
-                        self.__playback_controls_composition.refresh_layout()
                     return
             new_text = map_channel_state_to_text["stopped"]
             if status_text_canvas_item.text != new_text:
                 status_text_canvas_item.text = new_text
                 status_text_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
-                self.__playback_controls_composition.refresh_layout()
 
         def update_channel_enabled_check_box():
             channel_enabled_check_box.check_state = "checked" if self.__channel_enabled else "unchecked"
@@ -1615,7 +1610,6 @@ class ScanDisplayPanelController:
                 capture_button.enabled = False
                 capture_button.text = str()
                 capture_button.size_to_content(display_panel_content.image_panel_get_font_metrics)
-            playback_controls_row.refresh_layout()
 
         def display_new_data_item(data_item):
             document_controller = display_panel_content.document_controller
