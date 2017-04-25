@@ -1,4 +1,5 @@
 # standard libraries
+import abc
 import copy
 import gettext
 import logging
@@ -284,9 +285,106 @@ class CameraFrameParameters(object):
         }
 
 
+class Camera(abc.ABC):
+
+    @abc.abstractmethod
+    def close(self) -> None:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def sensor_dimensions(self) -> (int, int):
+        ...
+
+    @property
+    @abc.abstractmethod
+    def readout_area(self) -> (int, int, int, int):
+        ...
+
+    @readout_area.setter
+    @abc.abstractmethod
+    def readout_area(self, readout_area_TLBR: (int, int, int, int)) -> None:
+        ...
+
+    @abc.abstractmethod
+    def start_live(self) -> None:
+        ...
+
+    @abc.abstractmethod
+    def stop_live(self) -> None:
+        ...
+
+    @abc.abstractmethod
+    def acquire_image(self) -> dict:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def calibration(self) -> typing.List[dict]:
+        """A calibration for each dimension, can include scale, offset, units."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def mode(self):
+        ...
+
+    @mode.setter
+    @abc.abstractmethod
+    def mode(self, mode) -> None:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def mode_as_index(self) -> int:
+        ...
+
+    @abc.abstractmethod
+    def get_exposure_ms(self, mode_id) -> float:
+        ...
+
+    @abc.abstractmethod
+    def set_exposure_ms(self, exposure_ms: float, mode_id) -> None:
+        ...
+
+    @abc.abstractmethod
+    def get_binning(self, mode_id) -> int:
+        ...
+
+    @abc.abstractmethod
+    def set_binning(self, binning: int, mode_id) -> None:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def binning_values(self) -> typing.List[int]:
+        ...
+
+    @abc.abstractmethod
+    def get_expected_dimensions(self, binning: int) -> (int, int):
+        ...
+
+    @abc.abstractmethod
+    def acquire_sequence_prepare(self) -> None:
+        ...
+
+    @abc.abstractmethod
+    def acquire_sequence(self, n: int) -> dict:
+        ...
+
+    @abc.abstractmethod
+    def show_config_window(self) -> None:
+        ...
+
+    @abc.abstractmethod
+    def start_monitor(self) -> None:
+        ...
+
+
+
 class CameraAdapterAcquisitionTask:
 
-    def __init__(self, hardware_source_id, is_continuous: bool, camera, frame_parameters, display_name):
+    def __init__(self, hardware_source_id, is_continuous: bool, camera: Camera, frame_parameters, display_name):
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
@@ -371,7 +469,7 @@ class CameraAdapterAcquisitionTask:
 
 class CameraAdapter:
 
-    def __init__(self, hardware_source_id, camera_category, display_name, camera):
+    def __init__(self, hardware_source_id, camera_category, display_name, camera: Camera):
         self.hardware_source_id = hardware_source_id
         self.display_name = display_name
         self.camera = camera
@@ -407,6 +505,9 @@ class CameraAdapter:
     def close(self):
         # unlisten for events from the image panel
         self.camera.on_low_level_parameter_changed = None
+        close_method = getattr(self.camera, "close", None)
+        if callable(close_method):
+            close_method()
 
     def get_initial_profiles(self) -> typing.List[typing.Any]:
         # copy the frame parameters from the camera object to self.__profiles
