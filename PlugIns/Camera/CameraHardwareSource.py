@@ -1,6 +1,7 @@
 # standard libraries
 import abc
 import copy
+import datetime
 import gettext
 import logging
 import queue
@@ -431,6 +432,7 @@ class CameraAdapterAcquisitionTask:
         data_element["version"] = 1
         data_element["sub_area"] = sub_area
         data_element["state"] = "complete"
+        data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
         # add optional calibration properties
         if "spatial_calibrations" in data_element["properties"]:
             data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
