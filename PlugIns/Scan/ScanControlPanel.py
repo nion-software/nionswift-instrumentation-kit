@@ -814,7 +814,7 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
             canvas_item.add_canvas_item(background_canvas_item)
             canvas_item.add_canvas_item(self.__label_canvas_item)
 
-            global_pos = self.root_container.canvas_widget.map_to_global(self.map_to_global(Geometry.IntPoint(x=x, y=y)))
+            global_pos = self.map_to_global(Geometry.IntPoint(x=x, y=y))
             MouseTrackingCanvasItem.start_mouse_tracker(self.ui, self.__event_loop, canvas_item, mouse_position_changed_by, global_pos, Geometry.IntSize(20, 80))
         return True
 
