@@ -133,6 +133,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 self.log_messages_event.fire(messages, data_elements)
 
     @property
+    def camera_adapter(self) -> "CameraAdapter":
+        return self.__camera_adapter
+
+    @property
+    def camera(self) -> "Camera":
+        return self.__camera_adapter.camera
+
+    @property
     def sensor_dimensions(self):
         return self.__camera_adapter.sensor_dimensions
 
@@ -288,97 +296,247 @@ class CameraFrameParameters(object):
 
 class Camera(abc.ABC):
 
+    # TODO: dimensional and intensity calibrations should be returned at top level of data element
+    # TODO: camera hardware source should query the camera for list of possible modes
+
     @abc.abstractmethod
     def close(self) -> None:
+        """Close the camera."""
         ...
 
     @property
     @abc.abstractmethod
     def sensor_dimensions(self) -> (int, int):
+        """Read-only property for the native sensor size (no binning).
+
+        Returns (height, width) in pixels.
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
         ...
 
     @property
     @abc.abstractmethod
     def readout_area(self) -> (int, int, int, int):
+        """Return the detector readout area.
+
+        Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
+
+        There are restrictions on the valid values, depending on camera. This property should use the closest
+        appropriate values, rounding up when necessary.
+
+        This is a global property, meaning it affects all profiles.
+        """
         ...
 
     @readout_area.setter
     @abc.abstractmethod
     def readout_area(self, readout_area_TLBR: (int, int, int, int)) -> None:
-        ...
+        """Set the detector readout area.
 
-    @abc.abstractmethod
-    def start_live(self) -> None:
-        ...
+        The coordinates, top, left, bottom, right, are specified in sensor coordinates.
 
-    @abc.abstractmethod
-    def stop_live(self) -> None:
-        ...
+        There are restrictions on the valid values, depending on camera. This property should always return
+        valid values.
 
-    @abc.abstractmethod
-    def acquire_image(self) -> dict:
+        This is a global property, meaning it affects all profiles.
+        """
         ...
 
     @property
     @abc.abstractmethod
-    def calibration(self) -> typing.List[dict]:
-        """A calibration for each dimension, can include scale, offset, units."""
+    def flip(self):
+        """Return whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @flip.setter
+    @abc.abstractmethod
+    def flip(self, do_flip):
+        """Set whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        return self._controller.SetFlip(do_flip)
+
+    @property
+    @abc.abstractmethod
+    def binning_values(self) -> typing.List[int]:
+        """Return a list of valid binning values (int's).
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_expected_dimensions(self, binning: int) -> (int, int):
+        """Read-only property for the expected image size (binning and readout area included).
+
+        Returns (height, width).
+
+        Cameras are allowed to bin in one dimension and not the other.
+        """
         ...
 
     @property
     @abc.abstractmethod
-    def mode(self):
+    def mode(self) -> str:
+        """Return the current mode of the camera, as a case-insensitive string identifier.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
         ...
 
     @mode.setter
     @abc.abstractmethod
-    def mode(self, mode) -> None:
+    def mode(self, mode: str) -> None:
+        """Set the current mode of the camera, using a case-insensitive string identifier.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
         ...
 
     @property
     @abc.abstractmethod
     def mode_as_index(self) -> int:
+        """Return the index of the current mode of the camera.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
         ...
 
     @abc.abstractmethod
-    def get_exposure_ms(self, mode_id) -> float:
+    def get_exposure_ms(self, mode_id: str) -> float:
+        """Return the exposure (in milliseconds) for the mode."""
         ...
 
     @abc.abstractmethod
-    def set_exposure_ms(self, exposure_ms: float, mode_id) -> None:
+    def set_exposure_ms(self, exposure_ms: float, mode_id: str) -> None:
+        """Set the exposure (in milliseconds) for the mode.
+
+        Setting the exposure for the currently live mode (if there is one) should change the exposure as soon
+        as possible, which may be immediately or may be the next exposed frame.
+        """
         ...
 
     @abc.abstractmethod
-    def get_binning(self, mode_id) -> int:
+    def get_binning(self, mode_id: str) -> int:
+        """Return the binning for the mode."""
         ...
 
     @abc.abstractmethod
-    def set_binning(self, binning: int, mode_id) -> None:
+    def set_binning(self, binning: int, mode_id: str) -> None:
+        """Set the binning for the mode.
+
+        Binning should be one of the values returned from `binning_values`.
+
+        Setting the binning for the currently live mode (if there is one) should change the binning as soon
+        as possible, which may be immediately or may be the next frame.
+        """
         ...
 
     @property
     @abc.abstractmethod
-    def binning_values(self) -> typing.List[int]:
+    def exposure_ms(self) -> float:
+        """Return the exposure (in milliseconds) for the current mode."""
+        ...
+
+    @exposure_ms.setter
+    @abc.abstractmethod
+    def exposure_ms(self, value: float) -> None:
+        """Set the exposure (in milliseconds) for the current mode."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def binning(self) -> int:
+        """Return the binning for the current mode."""
+        ...
+
+    @binning.setter
+    @abc.abstractmethod
+    def binning(self, value: int) -> None:
+        """Set the binning for the current mode."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def processing(self) -> str:
+        """Return processing actions for the current mode.
+
+        Processing may be 'sum_project' or None.
+        """
+        ...
+
+    @processing.setter
+    @abc.abstractmethod
+    def processing(self, value: str) -> None:
+        """Set processing actions for the current mode.
+
+        Processing may be 'sum_project' or None.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def calibration(self) -> typing.List[dict]:
+        """Return list of calibration for each dimension.
+
+        Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
+
+        This method is deprecated but must be implemented.
+        """
         ...
 
     @abc.abstractmethod
-    def get_expected_dimensions(self, binning: int) -> (int, int):
+    def start_live(self) -> None:
+        """Start live acquisition. Required before using acquire_image."""
+        ...
+
+    @abc.abstractmethod
+    def stop_live(self) -> None:
+        """Stop live acquisition."""
+        ...
+
+    @abc.abstractmethod
+    def acquire_image(self) -> dict:
+        """Acquire the most recent image and return a data element dict.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict. Inside the 'properties' dict you must include 'frame_number' as an int.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+        """
         ...
 
     @abc.abstractmethod
     def acquire_sequence_prepare(self) -> None:
+        """Prepare for acquire_sequence."""
         ...
 
     @abc.abstractmethod
     def acquire_sequence(self, n: int) -> dict:
+        """Acquire a sequence of n images. Return a data element.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+        """
         ...
 
     @abc.abstractmethod
     def show_config_window(self) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         ...
 
     @abc.abstractmethod
     def start_monitor(self) -> None:
+        """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
         ...
 
 
