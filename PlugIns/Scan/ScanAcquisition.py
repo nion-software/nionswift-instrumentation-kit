@@ -134,6 +134,8 @@ class ScanAcquisitionController:
                         scan_width = scan_frame_parameters["size"][1] + flyback_pixels
                         data_elements = camera_hardware_source._hardware_source.acquire_sequence(scan_width * scan_height)
                         data_element = data_elements[0]
+                        # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
+                        # quickly. see note below.
                         scan_data_list = scan_task.grab()
                         data_shape = data_element["data"].shape
                         data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
@@ -152,7 +154,12 @@ class ScanAcquisitionController:
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
                             data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
+                            # the data item should not have any other 'clients' at this point; so setting the
+                            # data and metadata will immediately unload the data (and write to disk). this is important,
+                            # because the data (up to this point) can be shared data from the DLL.
                             data_item.set_data_and_metadata(data_and_metadata)
+                            # assert not data_item._data_item.maybe_data_source.is_data_loaded
+                            # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
                             document_window.display_data_item(data_item)
                             for scan_data_and_metadata in scan_data_list:
                                 scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
