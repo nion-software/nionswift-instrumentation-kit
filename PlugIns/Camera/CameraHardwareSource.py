@@ -655,7 +655,8 @@ class CameraAdapterAcquisitionTask:
         mode_id = self.__camera.mode
         self.__camera.set_exposure_ms(self.__frame_parameters.exposure_ms, mode_id)
         self.__camera.set_binning(self.__frame_parameters.binning, mode_id)
-        self.__camera.set_integration_count(self.__frame_parameters.integration_count, mode_id)
+        if hasattr(self.__camera, "set_integration_count"):
+            self.__camera.set_integration_count(self.__frame_parameters.integration_count, mode_id)
 
 
 class CameraAdapter:
