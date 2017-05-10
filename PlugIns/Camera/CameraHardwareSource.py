@@ -285,12 +285,14 @@ class CameraFrameParameters(object):
         self.exposure_ms = d.get("exposure_ms", 125)
         self.binning = d.get("binning", 1)
         self.processing = d.get("processing")
+        self.integration_count = d.get("integration_count")
 
     def as_dict(self):
         return {
             "exposure_ms": self.exposure_ms,
             "binning": self.binning,
             "processing": self.processing,
+            "integration_count": self.integration_count,
         }
 
 
@@ -437,6 +439,16 @@ class Camera(abc.ABC):
         """
         ...
 
+    def set_integration_count(self, integration_count: int, mode_id: str) -> None:
+        """Set the integration code for the mode.
+
+        Integration count can be ignored, in which case integration is performed by higher level code.
+
+        Setting the integration count for the currently live mode (if there is one) should update acquisition as soon
+        as possible, which may be immediately or may be the next frame.
+        """
+        pass
+
     @property
     @abc.abstractmethod
     def exposure_ms(self) -> float:
@@ -509,6 +521,10 @@ class Camera(abc.ABC):
 
         The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
         released (Python reference count goes to zero).
+
+        If integration_count is non-zero and is handled directly in this method, the 'properties' should also contain
+        a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
+        value of 1 is assumed.
         """
         ...
 
@@ -583,10 +599,23 @@ class CameraAdapterAcquisitionTask:
         frame_parameters = self.__frame_parameters
         exposure_ms = frame_parameters.exposure_ms
         binning = frame_parameters.binning
-        data_element = self.__camera.acquire_image()
+        integration_count = frame_parameters.integration_count if frame_parameters.integration_count else 1
+        cumulative_frame_count = 0  # used for integration_count
+        cumulative_data = None
+        data_element = None  # avoid use-before-set warning
+        while cumulative_frame_count < integration_count:
+            data_element = self.__camera.acquire_image()
+            frames_acquired = data_element["properties"].get("integration_count", 1)
+            if cumulative_data is None:
+                cumulative_data = data_element["data"]
+            else:
+                cumulative_data += data_element["data"]
+            cumulative_frame_count += frames_acquired
+            assert cumulative_frame_count <= integration_count
         if self.__stop_after_acquire:
             self.__camera.stop_live()
-        sub_area = (0, 0), data_element["data"].shape
+        sub_area = (0, 0), cumulative_data.shape
+        data_element["data"] = cumulative_data
         data_element["version"] = 1
         data_element["sub_area"] = sub_area
         data_element["state"] = "complete"
@@ -617,6 +646,7 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["binning"] = binning
         data_element["properties"]["valid_rows"] = sub_area[0][0] + sub_area[1][0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
+        data_element["properties"]["integration_count"] = cumulative_frame_count
         return [data_element]
 
     def __activate_frame_parameters(self):
@@ -625,6 +655,7 @@ class CameraAdapterAcquisitionTask:
         mode_id = self.__camera.mode
         self.__camera.set_exposure_ms(self.__frame_parameters.exposure_ms, mode_id)
         self.__camera.set_binning(self.__frame_parameters.binning, mode_id)
+        self.__camera.set_integration_count(self.__frame_parameters.integration_count, mode_id)
 
 
 class CameraAdapter:

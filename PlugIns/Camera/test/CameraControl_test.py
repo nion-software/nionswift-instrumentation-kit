@@ -565,6 +565,21 @@ class TestCameraControlClass(unittest.TestCase):
             numpy.random.seed()
             random.seed()
 
+    def test_integrating_frames_updates_frame_count_by_integration_count(self):
+        document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.integration_count = 4
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.start_playing()
+            try:
+                frame0_integration_count = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["integration_count"]
+                frame1_integration_count = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["integration_count"]
+                self.assertEqual(frame0_integration_count, 4)
+                self.assertEqual(frame1_integration_count, 4)
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+
     def test_facade_frame_parameter_methods(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
