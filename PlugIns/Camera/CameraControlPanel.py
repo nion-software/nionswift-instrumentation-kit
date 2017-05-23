@@ -590,20 +590,24 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             monitor_button.enabled = enabled
             button_row1a.visible = visible
 
+        def binning_combo_text_changed(text):
+            self.__state_controller.handle_binning_changed(text)
+            binning_combo.request_refocus()
+
         binning_combo = ui.create_combo_box_widget(properties={"min-width":72})
-        binning_combo.on_current_text_changed = self.__state_controller.handle_binning_changed
+        binning_combo.on_current_text_changed = binning_combo_text_changed
 
         def handle_exposure_changed(text):
             self.__state_controller.handle_exposure_changed(text)
-            exposure_field.select_all()
+            exposure_field.request_refocus()
 
         def handle_decrease_exposure():
             self.__state_controller.handle_decrease_exposure()
-            exposure_field.select_all()
+            exposure_field.request_refocus()
 
         def handle_increase_exposure():
             self.__state_controller.handle_increase_exposure()
-            exposure_field.select_all()
+            exposure_field.request_refocus()
 
         exposure_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         exposure_field.on_editing_finished = handle_exposure_changed
@@ -671,9 +675,13 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column.add(button_row)
         column.add_stretch()
 
+        def profile_combo_text_changed(text):
+            self.__state_controller.handle_change_profile(text)
+            profile_combo.request_refocus()
+
         open_controls_button.on_button_clicked = self.__state_controller.handle_settings_button_clicked
         monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
-        profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
+        profile_combo.on_current_text_changed = profile_combo_text_changed
 
         def binning_values_changed(binning_values):
             binning_combo.items = [str(binning_value) for binning_value in binning_values]
@@ -689,7 +697,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         def frame_parameters_changed(frame_parameters):
             exposure_field.text = str("{0:.1f}".format(float(frame_parameters.exposure_ms)))
             if exposure_field.focused:
-                exposure_field.select_all()
+                exposure_field.request_refocus()
             binning_combo.current_text = str(frame_parameters.binning)
 
         def play_button_state_changed(enabled, play_button_state):

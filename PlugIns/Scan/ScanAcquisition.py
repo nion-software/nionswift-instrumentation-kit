@@ -332,12 +332,12 @@ class PanelDelegate:
         line_button_widget = ui.create_push_button_widget(_("Start Line Scan"))
         line_samples_label = ui.create_label_widget(_("Samples"))
         line_samples_edit_widget = ui.create_line_edit_widget(str(line_samples[0]))
-        line_samples_edit_widget.select_all()
+        line_samples_edit_widget.request_refocus()
 
         def change_line_samples(text):
             line_samples[0] = max(min(int(text), 1024), 1)
             line_samples_edit_widget.text = str(line_samples[0])
-            line_samples_edit_widget.select_all()
+            line_samples_edit_widget.request_refocus()
         line_samples_edit_widget.on_editing_finished = change_line_samples
 
         def scan_button_clicked():
