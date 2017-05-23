@@ -962,67 +962,67 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         def handle_width_changed(text):
             self.__state_controller.handle_width_changed(text)
-            width_field.select_all()
+            width_field.request_refocus()
 
         def handle_decrease_width():
             self.__state_controller.handle_decrease_width()
-            width_field.select_all()
+            width_field.request_refocus()
 
         def handle_increase_width():
             self.__state_controller.handle_increase_width()
-            width_field.select_all()
+            width_field.request_refocus()
 
         width_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         width_field.on_editing_finished = handle_width_changed
 
         def handle_height_changed(text):
             self.__state_controller.handle_height_changed(text)
-            height_field.select_all()
+            height_field.request_refocus()
 
         def handle_decrease_height():
             self.__state_controller.handle_decrease_height()
-            height_field.select_all()
+            height_field.request_refocus()
 
         def handle_increase_height():
             self.__state_controller.handle_increase_height()
-            height_field.select_all()
+            height_field.request_refocus()
 
         height_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         height_field.on_editing_finished = handle_height_changed
 
         def handle_time_changed(text):
             self.__state_controller.handle_time_changed(text)
-            time_field.select_all()
+            time_field.request_refocus()
 
         def handle_decrease_time():
             self.__state_controller.handle_decrease_time()
-            time_field.select_all()
+            time_field.request_refocus()
 
         def handle_increase_time():
             self.__state_controller.handle_increase_time()
-            time_field.select_all()
+            time_field.request_refocus()
 
         time_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         time_field.on_editing_finished = handle_time_changed
 
         def handle_fov_changed(text):
             self.__state_controller.handle_fov_changed(text)
-            fov_field.select_all()
+            fov_field.request_refocus()
 
         def handle_decrease_fov():
             self.__state_controller.handle_decrease_fov()
-            time_field.select_all()
+            time_field.request_refocus()
 
         def handle_increase_fov():
             self.__state_controller.handle_increase_fov()
-            time_field.select_all()
+            time_field.request_refocus()
 
         fov_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         fov_field.on_editing_finished = handle_fov_changed
 
         def handle_rotation_changed(text):
             self.__state_controller.handle_rotation_changed(text)
-            rotation_field.select_all()
+            rotation_field.request_refocus()
 
         rotation_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         rotation_field.on_editing_finished = handle_rotation_changed
@@ -1091,7 +1091,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def handle_linked_changed(linked):
             self.__state_controller.handle_linked_changed(linked)
             if linked:
-                width_field.select_all()
+                width_field.request_refocus()
 
         link_checkbox.on_checked_changed = handle_linked_changed
 
@@ -1249,15 +1249,15 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             rotation_tracker.text = rotation_field.text
             ac_line_sync_check_box.check_state = "checked" if frame_parameters.ac_line_sync else "unchecked"
             if width_field.focused:
-                width_field.select_all()
+                width_field.request_refocus()
             if height_field.focused:
-                height_field.select_all()
+                height_field.request_refocus()
             if time_field.focused:
-                time_field.select_all()
+                time_field.request_refocus()
             if fov_field.focused:
-                fov_field.select_all()
+                fov_field.request_refocus()
             if rotation_field.focused:
-                rotation_field.select_all()
+                rotation_field.request_refocus()
 
         def linked_changed(linked):
             link_checkbox.checked = linked
