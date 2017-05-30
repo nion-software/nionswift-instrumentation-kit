@@ -38,18 +38,10 @@ class TestScanControlClass(unittest.TestCase):
     def tearDown(self):
         HardwareSource.HardwareSourceManager()._close_hardware_sources()
 
-    def __acquire_one(self, document_controller, hardware_source):
+    def _acquire_one(self, document_controller, hardware_source):
         frame_time = hardware_source.get_current_frame_time()
-        hardware_source.start_playing()
-        start_time = time.time()
-        while not hardware_source.is_playing:
-            time.sleep(frame_time)
-            self.assertTrue(time.time() - start_time < 3.0)
-        hardware_source.stop_playing()
-        start_time = time.time()
-        while hardware_source.is_playing:
-            time.sleep(frame_time)
-            self.assertTrue(time.time() - start_time < 3.0)
+        hardware_source.start_playing(3.0)
+        hardware_source.stop_playing(3.0)
         document_controller.periodic()
 
     def _record_one(self, document_controller, hardware_source, scan_state_controller):
@@ -175,7 +167,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
             self.assertTrue(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
             self.assertFalse(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
@@ -212,7 +204,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_enable_positioned_after_one_frame_acquisition_should_add_graphic(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
             scan_state_controller.handle_positioned_check_box(True)
             document_controller.periodic()
@@ -222,7 +214,7 @@ class TestScanControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 1)
             scan_state_controller.handle_positioned_check_box(False)
             document_controller.periodic()
@@ -232,7 +224,7 @@ class TestScanControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             display = document_model.data_items[0].primary_display_specifier.display
             probe_graphic = display.graphics[0]
             display.remove_graphic(probe_graphic)
@@ -243,17 +235,20 @@ class TestScanControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             data_item = document_model.data_items[0]
             document_model.remove_data_item(data_item)
             self.assertEqual(len(document_model.data_items), 0)
             self.assertIsNone(hardware_source.probe_position)
 
+    # TODO: test case where one of two displays is deleted, what happens to probe graphic on other one?
+    # TODO: test case where probe graphic should be removed when a channel is disabled
+
     def test_start_playing_after_stopping_should_remove_probe_position_graphic(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             display = document_model.data_items[0].primary_display_specifier.display
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
@@ -281,7 +276,7 @@ class TestScanControlClass(unittest.TestCase):
         self.assertEqual(len(display.graphics), 0)
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(display.graphics), 1)
             hardware_source.start_playing()
             hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
@@ -324,7 +319,7 @@ class TestScanControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             hardware_source.set_channel_enabled(0, True)
             hardware_source.set_channel_enabled(2, True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
             metadata0 = document_model.data_items[0].data_sources[0].metadata
             metadata1 = document_model.data_items[1].data_sources[0].metadata
@@ -338,13 +333,13 @@ class TestScanControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             hardware_source.set_channel_enabled(0, True)
             hardware_source.set_channel_enabled(2, True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
             metadata0 = document_model.data_items[0].data_sources[0].metadata
             metadata1 = document_model.data_items[1].data_sources[0].metadata
             scan_id00 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id01 = metadata1.get("hardware_source", dict()).get("scan_id")
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             metadata0 = document_model.data_items[0].data_sources[0].metadata
             metadata1 = document_model.data_items[1].data_sources[0].metadata
             scan_id10 = metadata0.get("hardware_source", dict()).get("scan_id")
@@ -383,7 +378,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_disabling_all_channels_during_play_stops_playback(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            self.__acquire_one(document_controller, hardware_source)  # throw out first scan, which can take longer due to initial conditions
+            self._acquire_one(document_controller, hardware_source)  # throw out first scan, which can take longer due to initial conditions
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
             time.sleep(frame_time * 0.25)
@@ -436,10 +431,10 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters_1.size = (500, 500)
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, (300, 300))
             hardware_source.set_selected_profile_index(1)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, (500, 500))
 
     def test_change_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
@@ -599,12 +594,12 @@ class TestScanControlClass(unittest.TestCase):
     def test_changing_size_is_reflected_in_new_acquisition(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
             scan_state_controller.handle_linked_changed(False)
             scan_state_controller.handle_decrease_width()
             scan_state_controller.handle_decrease_height()
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (128, 128))
 
     def test_record_during_view_uses_record_mode(self):
@@ -651,20 +646,20 @@ class TestScanControlClass(unittest.TestCase):
     def test_changing_width_when_linked_changes_height_too(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
             scan_state_controller.handle_decrease_width()
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (128, 128))
 
     def test_changing_width_when_unlinked_does_not_change_height(self):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
             scan_state_controller.handle_linked_changed(False)
             scan_state_controller.handle_decrease_width()
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 128))
 
     def test_obscenely_large_scan_does_not_crash(self):
@@ -725,7 +720,7 @@ class TestScanControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, scan_state_controller = self._setup_scan_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(scan_state_controller):
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
             self.assertFalse(probe_graphic._closed)
             scan_state_controller.handle_positioned_check_box(False)
@@ -739,7 +734,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(0, True)
             hardware_source.set_channel_enabled(1, True)
             scan_state_controller.handle_positioned_check_box(True)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertIsNotNone(document_model.data_items[0].primary_display_specifier.display.graphics[0])
             self.assertIsNotNone(document_model.data_items[1].primary_display_specifier.display.graphics[0])
             scan_state_controller.handle_positioned_check_box(False)

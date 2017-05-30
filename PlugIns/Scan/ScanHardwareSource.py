@@ -718,7 +718,7 @@ class ScanAdapterAcquisitionTask:
 
         _data_elements, complete, bad_frame, sub_area, self.__frame_number, self.__pixels_to_skip = self.__device.read_partial(self.__frame_number, self.__pixels_to_skip)
 
-        min_period = 0.075
+        min_period = 0.05
         current_time = time.time()
         if current_time - self.__last_read_time < min_period:
             time.sleep(min_period - (current_time - self.__last_read_time))
