@@ -112,86 +112,53 @@ class ProbeGraphicConnection:
             self.graphic = None
 
 
-class BaseScanHardwareSource(HardwareSource.HardwareSource):
+class STEMController:
+    """An interface to a STEM microscope.
 
-    def __init__(self, hardware_source_id, hardware_source_name):
-        super().__init__(hardware_source_id, hardware_source_name)
-        self.features["is_scanning"] = True
-        self.profile_changed_event = Event.Event()
-        self.frame_parameters_changed_event = Event.Event()
+    Methods and properties starting with a single underscore are called internally and shouldn't be called by general
+    clients.
+
+    Methods starting with double underscores are private.
+
+    Probe
+    -----
+    probe_state
+    probe_position
+    set_probe_position
+    validate_probe_position
+    static_probe_state
+    set_static_probe_state
+
+    probe_state_changed_event (probe_state, probe_position, static_probe_state)
+    """
+
+    def __init__(self):
+        self.__last_data_items = list()
         self.__probe_position = None
         self.__probe_state_stack = list()
         self.__probe_state_stack.append("parked")
-        self.probe_state_changed_event = Event.Event()
-        self.__last_data_items = list()
-        self.__probe_graphic_connections = list()
         self.__probe_state_updates = list()
         self.__probe_state_updates_lock = threading.RLock()
-
-    def init_probe_state(self, state):
-        self.__probe_state_stack[0] = state
+        self.__probe_graphic_connections = list()
+        self.probe_state_changed_event = Event.Event()
 
     def close(self):
-        # when overriding hardware source close, the acquisition loop may still be running
-        # so nothing can be changed here that will make the acquisition loop fail.
         self.__last_data_items = list()
-        super().close()
 
     def _enter_scanning_state(self):
         self.__probe_state_stack.append("scanning")
-        self._set_blanker(self.probe_state == "blanked")
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
 
     def _exit_scanning_state(self):
         self.__probe_state_stack.pop()
-        self._set_blanker(self.probe_state == "blanked")
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-
-    def _set_static_probe_state(self, value, propogate=True):
-        # propogate is whether the value gets set back to hardware; pass False to prevent change loops
-        if self.probe_state != value:
-            if value != "parked" and value != "blanked":
-                logging.warning("static_probe_state must be 'parked' or 'blanked'")
-                value = "parked"
-            self.__probe_state_stack[0] = value
-            self._set_blanker(value == "blanked")
-            self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-            with self.__probe_state_updates_lock:
-                for probe_graphic_connection in self.__probe_graphic_connections:
-                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-            self._call_soon(self.__update_probe_states)
-
-    @property
-    def static_probe_state(self):
-        return self.__probe_state_stack[0]
-
-    @static_probe_state.setter
-    def static_probe_state(self, value):
-        self._set_static_probe_state(value)
-
-    @property
-    def probe_state(self):
-        return self.__probe_state_stack[-1]
-
-    def _set_probe_position(self, probe_position):
-        """Subclasses should override this method. Called when probe position changes."""
-        pass
-
-    def _set_blanker(self, blanker_on):
-        """Subclasses should override this method. Called when blanker state changes."""
-        pass
-
-    @property
-    def _actual_blanker(self):
-        raise NotImplementedError()
 
     @property
     def probe_position(self):
         """ Return the probe position, in normalized coordinates with origin at top left. """
         return self.__probe_position
 
-    @probe_position.setter
-    def probe_position(self, probe_position):
+    def set_probe_position(self, probe_position, call_soon_fn):
         """ Set the probe position, in normalized coordinates with origin at top left. """
         if probe_position is not None:
             # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
@@ -200,23 +167,20 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
                                                  x=max(min(probe_position.x, 1.0), 0.0))
         if ((self.__probe_position is None) != (probe_position is None)) or (self.__probe_position != probe_position):
             self.__probe_position = probe_position
-            # subclasses will override _set_probe_position
-            self._set_probe_position(probe_position)
             # update the probe position for listeners and also explicitly update for probe_graphic_connections.
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
             with self.__probe_state_updates_lock:
                 for probe_graphic_connection in self.__probe_graphic_connections:
                     self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-            self._call_soon(self.__update_probe_states)
+            call_soon_fn(self.__update_probe_states)
 
-    def validate_probe_position(self):
+    def validate_probe_position(self, call_soon_fn):
         """Validate the probe position.
 
         This is called when the user switches from not controlling to controlling the position."""
-        self.probe_position = Geometry.FloatPoint(y=0.5, x=0.5)
+        self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5), call_soon_fn)
 
-    # override from the HardwareSource parent class.
-    def data_item_states_changed(self, data_item_states):
+    def _data_item_states_changed(self, data_item_states, call_soon_fn):
         if len(data_item_states) == 0:
             for data_item in self.__last_data_items:
                 # scanning has stopped, figure out the displays that might be used to display the probe position
@@ -227,23 +191,48 @@ class BaseScanHardwareSource(HardwareSource.HardwareSource):
                     # the probe position value object gives the ProbeGraphicConnection the ability to
                     # get, set, and watch for changes to the probe position.
                     probe_position_value = Model.PropertyModel()
-                    probe_position_value.on_value_changed = lambda value: setattr(self, "probe_position", value)
+                    probe_position_value.on_value_changed = lambda value: self.set_probe_position(value, call_soon_fn)
                     probe_graphic_connection = ProbeGraphicConnection(display, probe_position_value)
                     with self.__probe_state_updates_lock:
                         self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-                    self._call_soon(self.__update_probe_states)
+                    call_soon_fn(self.__update_probe_states)
                     self.__probe_graphic_connections.append(probe_graphic_connection)
         else:
             # scanning, remove all known probe graphic connections.
             probe_graphic_connections = copy.copy(self.__probe_graphic_connections)
             self.__probe_graphic_connections = list()
             for probe_graphic_connection in probe_graphic_connections:
-                self._call_soon(probe_graphic_connection.close)
+                call_soon_fn(probe_graphic_connection.close)
 
         self.__last_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
 
+    def set_static_probe_state(self, value: str, call_soon_fn) -> None:
+        """Set the static probe state.
+
+        Static probe state is the state of the probe when not scanning. Valid values are 'parked' or 'blanked'.
+        """
+        if self.probe_state != value:
+            if value != "parked" and value != "blanked":
+                logging.warning("static_probe_state must be 'parked' or 'blanked'")
+                value = "parked"
+            self.__probe_state_stack[0] = value
+            self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+            with self.__probe_state_updates_lock:
+                for probe_graphic_connection in self.__probe_graphic_connections:
+                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
+            call_soon_fn(self.__update_probe_states)
+
+    @property
+    def static_probe_state(self):
+        """Static probe state is the default when not scanning and can be 'blanked' or 'parked'."""
+        return self.__probe_state_stack[0]
+
+    @property
+    def probe_state(self) -> str:
+        """Probe state is the current probe state and can be 'blanked', 'parked', or 'scanning'."""
+        return self.__probe_state_stack[-1]
+
     def __update_probe_states(self):
-        import time
         with self.__probe_state_updates_lock:
             probe_state_updates = self.__probe_state_updates
             self.__probe_state_updates = list()
@@ -302,10 +291,18 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         return self.__delegate.acquire_data_elements()
 
 
-class ScanHardwareSource(BaseScanHardwareSource):
+class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, scan_adapter):
         super().__init__(scan_adapter.hardware_source_id, scan_adapter.display_name)
+
+        self.features["is_scanning"] = True
+        self.profile_changed_event = Event.Event()
+        self.frame_parameters_changed_event = Event.Event()
+        self.probe_state_changed_event = Event.Event()
+        self.__stem_controller = STEMController()
+        self.probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+
         self.__scan_adapter = scan_adapter
         self.__scan_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
         self.__scan_adapter.on_profile_frame_parameters_changed = self.__profile_frame_parameters_changed
@@ -334,7 +331,18 @@ class ScanHardwareSource(BaseScanHardwareSource):
     def close(self):
         self.__scan_adapter.on_selected_profile_index_changed = None
         self.__scan_adapter.on_profile_frame_parameters_changed = None
+
+        # thread needs to close before closing the stem controller. so use this method to
+        # do it slightly out of order for this class.
+        self.close_thread()
+        # when overriding hardware source close, the acquisition loop may still be running
+        # so nothing can be changed here that will make the acquisition loop fail.
+        self.probe_state_changed_event_listener.close()
+        self.probe_state_changed_event_listener = None
+        self.__stem_controller.close()
+        self.__stem_controller = None
         super().close()
+
         # keep the scan adapter around until super close is called, since super
         # may do something that requires the scan adapter (blanker).
         self.__scan_adapter.close()
@@ -476,14 +484,6 @@ class ScanHardwareSource(BaseScanHardwareSource):
                 self.stop_playing()
         self.__task_queue.put(channel_states_changed)
 
-    def __static_probe_state_changed(self, static_probe_state):
-        # this method will be called when the device changes probe state (via dialog or script).
-        # it updates the channels internally but does not send out a message to set the probe state
-        # to the hardware, since it's already set, and doing so can cause strange change loops.
-        def static_probe_state_changed():
-            self._set_static_probe_state(static_probe_state, propogate=False)
-        self.__task_queue.put(static_probe_state_changed)
-
     def get_frame_parameters_from_dict(self, d):
         return self.__scan_adapter.get_frame_parameters_from_dict(d)
 
@@ -501,6 +501,36 @@ class ScanHardwareSource(BaseScanHardwareSource):
             if graphic.graphic_id == "probe":
                 display.remove_graphic(graphic)
 
+    def __probe_state_changed(self, probe_state, probe_position, static_probe_state):
+        # subclasses will override _set_probe_position
+        self._set_blanker(probe_state == "blanked")
+        self._set_probe_position(probe_position)
+        # update the probe position for listeners and also explicitly update for probe_graphic_connections.
+        self.probe_state_changed_event.fire(probe_state, probe_position, static_probe_state)
+
+    def _enter_scanning_state(self):
+        """Enter scanning state. Acquisition task will call this. Tell the STEM controller."""
+        self.__stem_controller._enter_scanning_state()
+
+    def _exit_scanning_state(self):
+        """Exit scanning state. Acquisition task will call this. Tell the STEM controller."""
+        self.__stem_controller._exit_scanning_state()
+
+    def _set_static_probe_state(self, value):
+        self.__stem_controller.set_static_probe_state(value, self._call_soon)
+
+    @property
+    def static_probe_state(self):
+        return self.__stem_controller.static_probe_state
+
+    @static_probe_state.setter
+    def static_probe_state(self, value):
+        self._set_static_probe_state(value)
+
+    @property
+    def probe_state(self):
+        return self.__stem_controller.probe_state
+
     # override from BaseScanHardwareSource
     def _set_probe_position(self, probe_position):
         self.__scan_adapter.set_probe_position(probe_position)
@@ -512,6 +542,29 @@ class ScanHardwareSource(BaseScanHardwareSource):
     @property
     def _actual_blanker(self):
         return self.__scan_adapter.actual_blanker
+
+    @property
+    def probe_position(self):
+        return self.__stem_controller.probe_position
+
+    @probe_position.setter
+    def probe_position(self, probe_position):
+        self.__stem_controller.set_probe_position(probe_position, self._call_soon)
+
+    def validate_probe_position(self):
+        self.__stem_controller.validate_probe_position(self._call_soon)
+
+    # override from the HardwareSource parent class.
+    def data_item_states_changed(self, data_item_states):
+        self.__stem_controller._data_item_states_changed(data_item_states, self._call_soon)
+
+    def __static_probe_state_changed(self, static_probe_state):
+        # this method will be called when the device changes probe state (via dialog or script).
+        # it updates the channels internally but does not send out a message to set the probe state
+        # to the hardware, since it's already set, and doing so can cause strange change loops.
+        def static_probe_state_changed():
+            self._set_static_probe_state(static_probe_state)
+        self.__task_queue.put(static_probe_state_changed)
 
     @property
     def use_hardware_simulator(self):
