@@ -69,7 +69,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         super().__init__(camera_adapter.hardware_source_id, camera_adapter.display_name)
         self.__camera_adapter = camera_adapter
         self.__camera_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
-        self.__camera_adapter.on_profile_frame_parameters_changed = self.__profile_frame_parameters_changed
+        self.__camera_adapter.on_profile_frame_parameter_changed = self.__profile_frame_parameter_changed
         self.features["is_camera"] = True
         self.features.update(self.__camera_adapter.features)
         self.add_data_channel()
@@ -93,12 +93,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue = queue.Queue()
         self.__latest_values_lock = threading.RLock()
-        self.__latest_values = dict()
+        self.__latest_values = list()
         self.__latest_profile_index = None
 
     def close(self):
         self.__camera_adapter.on_selected_profile_index_changed = None
-        self.__camera_adapter.on_profile_frame_parameters_changed = None
+        self.__camera_adapter.on_profile_frame_parameter_changed = None
         self.__periodic_logger_fn = None
         super().close()
         # keep the camera adapter around until super close is called, since super
@@ -186,8 +186,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.set_record_frame_parameters(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
-    def get_frame_parameters(self, profile):
-        return copy.copy(self.__profiles[profile])
+    def get_frame_parameters(self, profile_index):
+        return copy.copy(self.__profiles[profile_index])
 
     def set_current_frame_parameters(self, frame_parameters):
         if self.__acquisition_task:
@@ -219,18 +219,22 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if self.__latest_profile_index is not None:
                 self.set_selected_profile_index(self.__latest_profile_index)
             self.__latest_profile_index = None
-            for profile_index in self.__latest_values.keys():
-                self.set_frame_parameters(profile_index, self.__latest_values[profile_index])
-            self.__latest_values = dict()
+            for profile_index, parameter, value in self.__latest_values:
+                frame_parameters = self.get_frame_parameters(profile_index)
+                if getattr(frame_parameters, parameter) != value:
+                    setattr(frame_parameters, parameter, value)
+                    self.set_frame_parameters(profile_index, frame_parameters)
+            self.__latest_values = list()
 
     def __selected_profile_index_changed(self, profile_index):
         with self.__latest_values_lock:
             self.__latest_profile_index = profile_index
         self.__task_queue.put(self.__do_update_parameters)
 
-    def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
+    def __profile_frame_parameter_changed(self, profile_index, frame_parameter, value):
+        # this is the preferred technique for camera adapters to indicate changes
         with self.__latest_values_lock:
-            self.__latest_values[profile_index] = frame_parameters
+            self.__latest_values.append((profile_index, frame_parameter, value))
         self.__task_queue.put(self.__do_update_parameters)
 
     def get_frame_parameters_from_dict(self, d):
@@ -675,26 +679,52 @@ class CameraAdapter:
             self.features["is_eels_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
         self.on_selected_profile_index_changed = None
-        self.on_profile_frame_parameters_changed = None
+        self.on_profile_frame_parameter_changed = None
+
+        # on_low_level_parameter_changed is handled for backwards compatibility (old DLLs with new hardware source).
+        # new DLLs should call on_mode_changed and on_mode_parameter_changed (handled below) and should NOT call
+        # on_low_level_parameter_changed.
+        # handling of on_low_level_parameter_changed can be removed once all users have updated to new DLLs (2017-06-23)
 
         def low_level_parameter_changed(parameter_name):
+            # updates all profiles with new exposure/binning values (if changed)
+            # parameter_name is ignored
             profile_index = self.camera.mode_as_index
             if parameter_name == "exposureTimems" or parameter_name == "binning":
-                if callable(self.on_profile_frame_parameters_changed):
-                    mode_id = self.camera.mode
-                    exposure_ms = self.camera.get_exposure_ms(mode_id)
-                    binning = self.camera.get_binning(mode_id)
-                    frame_parameters = CameraFrameParameters({"exposure_ms": exposure_ms, "binning": binning})
-                    self.on_profile_frame_parameters_changed(profile_index, frame_parameters)
+                if callable(self.on_profile_frame_parameter_changed):
+                    for i, mode_id in enumerate(self.modes):
+                        exposure_ms = self.camera.get_exposure_ms(mode_id)
+                        binning = self.camera.get_binning(mode_id)
+                        self.on_profile_frame_parameter_changed(i, "exposure_ms", exposure_ms)
+                        self.on_profile_frame_parameter_changed(i, "binning", binning)
             elif parameter_name == "mode":
                 if callable(self.on_selected_profile_index_changed):
                     self.on_selected_profile_index_changed(profile_index)
 
         self.camera.on_low_level_parameter_changed = low_level_parameter_changed
 
+        def mode_changed(mode: str) -> None:
+            for index, i_mode in enumerate(self.modes):
+                if mode == i_mode:
+                    if callable(self.on_selected_profile_index_changed):
+                        self.on_selected_profile_index_changed(index)
+                    break
+
+        def mode_parameter_changed(mode: str, parameter_name: str, value) -> None:
+            for index, i_mode in enumerate(self.modes):
+                if mode == i_mode:
+                    if callable(self.on_profile_frame_parameter_changed):
+                        self.on_profile_frame_parameter_changed(index, parameter_name, value)
+                    break
+
+        self.camera.on_mode_changed = mode_changed
+        self.camera.on_mode_parameter_changed = mode_parameter_changed
+
     def close(self):
         # unlisten for events from the image panel
         self.camera.on_low_level_parameter_changed = None
+        self.camera.on_mode_changed = None
+        self.camera.on_mode_parameter_changed = None
         close_method = getattr(self.camera, "close", None)
         if callable(close_method):
             close_method()
