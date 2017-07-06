@@ -274,6 +274,8 @@ class PanelDelegate:
         self.__line_scan_acquisition_controller = None
         self.__eels_frame_parameters_changed_event_listener = None
         self.__scan_frame_parameters_changed_event_listener = None
+        self.__camera_hardware_changed_event_listener = None
+        self.__scan_hardware_changed_event_listener = None
         self.__exposure_time_ms_value_model = None
         self.__scan_width_model = None
         self.__scan_height_model = None
@@ -593,10 +595,12 @@ class PanelDelegate:
         if self.__eels_frame_parameters_changed_event_listener:
             self.__eels_frame_parameters_changed_event_listener.close()
             self.__eels_frame_parameters_changed_event_listener = None
-        self.__camera_hardware_changed_event_listener.close()
-        self.__camera_hardware_changed_event_listener = None
-        self.__scan_hardware_changed_event_listener.close()
-        self.__scan_hardware_changed_event_listener = None
+        if self.__camera_hardware_changed_event_listener:
+            self.__camera_hardware_changed_event_listener.close()
+            self.__camera_hardware_changed_event_listener = None
+        if self.__scan_hardware_changed_event_listener:
+            self.__scan_hardware_changed_event_listener.close()
+            self.__scan_hardware_changed_event_listener = None
         if self.__scan_hardware_source_choice:
             self.__scan_hardware_source_choice.close()
             self.__scan_hardware_source_choice = None
