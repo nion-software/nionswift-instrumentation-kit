@@ -15,6 +15,7 @@ from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
+from Microscope import STEMController
 from Scan import ScanControlPanel
 from Scan import ScanHardwareSource
 
@@ -39,7 +40,6 @@ class TestScanControlClass(unittest.TestCase):
         HardwareSource.HardwareSourceManager()._close_hardware_sources()
 
     def _acquire_one(self, document_controller, hardware_source):
-        frame_time = hardware_source.get_current_frame_time()
         hardware_source.start_playing(3.0)
         hardware_source.stop_playing(3.0)
         document_controller.periodic()
@@ -74,19 +74,31 @@ class TestScanControlClass(unittest.TestCase):
     def _setup_scan_hardware_source(self, channel_id=None):
         document_model = DocumentModel.DocumentModel()
         document_controller = DocumentController.DocumentController(self.app.ui, document_model, workspace_id="library")
-        hardware_source = self._setup_hardware_source()
+        instrument = self._setup_instrument()
+        hardware_source = self._setup_hardware_source(instrument)
         HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
         scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, channel_id)
         scan_state_controller.initialize_state()
-        return document_controller, document_model, hardware_source, scan_state_controller
+        return document_controller, document_model, instrument, hardware_source, scan_state_controller
 
-    def _setup_hardware_source(self) -> ScanHardwareSource.ScanHardwareSource:
+    def _setup_instrument(self):
         raise NotImplementedError()
 
-    def _close_scan_hardware_source(self, document_controller, document_model, hardware_source, scan_state_controller):
+    def _close_instrument(self, instrument) -> None:
+        raise NotImplementedError()
+
+    def _setup_hardware_source(self, instrument) -> ScanHardwareSource.ScanHardwareSource:
+        raise NotImplementedError()
+
+    def _close_hardware_source(self) -> None:
+        raise NotImplementedError()
+
+    def _close_scan_hardware_source(self, document_controller, document_model, instrument, hardware_source, scan_state_controller):
         scan_state_controller.close()
         hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
+        self._close_hardware_source()
+        self._close_instrument(instrument)
         document_controller.close()
 
     def _make_scan_context(self, channel_id=None):
@@ -97,17 +109,21 @@ class TestScanControlClass(unittest.TestCase):
                 self.__scan_test = scan_test
 
             def __enter__(self):
-                document_controller, document_model, hardware_source, scan_state_controller = self.__scan_test._setup_scan_hardware_source(channel_id)
+                document_controller, document_model, instrument, hardware_source, scan_state_controller = self.__scan_test._setup_scan_hardware_source(channel_id)
 
                 self.document_controller = document_controller
                 self.document_model = document_model
+                self.instrument = instrument
                 self.hardware_source = hardware_source
                 self.scan_state_controller = scan_state_controller
+                self.probe_view = STEMController.ProbeView(self.instrument, document_controller.event_loop)
 
                 return self
 
             def __exit__(self, *exc_details):
-                self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.hardware_source, self.scan_state_controller)
+                self.probe_view.close()
+                self.probe_view = None
+                self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.instrument, self.hardware_source, self.scan_state_controller)
 
             @property
             def objects(self):
@@ -299,16 +315,18 @@ class TestScanControlClass(unittest.TestCase):
         graphic.is_bounds_constrained = True
         data_item.maybe_data_source.displays[0].add_graphic(graphic)
         document_model.append_data_item(data_item)
-        hardware_source = self._setup_hardware_source()
+        instrument = self._setup_instrument()
+        hardware_source = self._setup_hardware_source(instrument)
         document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, hardware_source.data_channels[0].channel_id), data_item)
         HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
         display = document_model.data_items[0].primary_display_specifier.display
         scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
         scan_state_controller.initialize_state()
+        probe_view = STEMController.ProbeView(instrument, document_controller.event_loop)
         self.assertEqual(len(display.graphics), 0)
         with contextlib.closing(document_controller):
             try:
-                with contextlib.closing(hardware_source), contextlib.closing(scan_state_controller):
+                with contextlib.closing(hardware_source), contextlib.closing(probe_view), contextlib.closing(scan_state_controller):
                     scan_state_controller.handle_positioned_check_box(True)
                     self._acquire_one(document_controller, hardware_source)
                     self.assertEqual(len(display.graphics), 1)
@@ -319,6 +337,8 @@ class TestScanControlClass(unittest.TestCase):
                     hardware_source.stop_playing()
             finally:
                 HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
+                self._close_hardware_source()
+                self._close_instrument(instrument)
 
     def test_blanker_is_controlled_by_check_box(self):
         with self._make_scan_context() as scan_context:
@@ -778,6 +798,49 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(hardware_source.probe_position)
             self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
             self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+
+    def test_probe_on_multiple_channels_shuts_down_properly(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(1, True)
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.periodic()
+            document_model.data_items[0].primary_display_specifier.display.graphics[0].position = 0.3, 0.4
+            document_controller.periodic()
+            # will output extraneous messages when it fails
+
+    def test_probe_on_multiple_channels_deletes_properly(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(1, True)
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.periodic()
+            display = document_model.data_items[0].primary_display_specifier.display
+            probe_graphic = display.graphics[0]
+            display.remove_graphic(probe_graphic)
+            document_controller.periodic()
+            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+            self.assertIsNone(hardware_source.probe_position)
+            # will output extraneous messages when it fails
+
+    def test_probe_on_multiple_channels_sets_to_none_properly(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(1, True)
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.periodic()
+            scan_state_controller.handle_positioned_check_box(False)
+            document_controller.periodic()
+            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+            self.assertIsNone(hardware_source.probe_position)
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

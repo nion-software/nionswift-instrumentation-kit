@@ -3,8 +3,6 @@ import asyncio
 import functools
 import gettext
 import sys
-import threading
-import time
 
 # third party libraries
 import math

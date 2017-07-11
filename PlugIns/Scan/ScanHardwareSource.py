@@ -18,8 +18,6 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
 
-from Microscope import STEMController
-
 
 AUTOSTEM_CONTROLLER_ID = "autostem_controller"
 
@@ -123,7 +121,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.close_thread()
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
-        self.__get_stem_controller().disconnect_probe_connections(self._call_soon)
+        self.__get_stem_controller().disconnect_probe_connections()
         if self.probe_state_changed_event_listener:
             self.probe_state_changed_event_listener.close()
             self.probe_state_changed_event_listener = None
@@ -309,7 +307,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__get_stem_controller()._exit_scanning_state()
 
     def _set_static_probe_state(self, value):
-        self.__get_stem_controller().set_static_probe_state(value, self._call_soon)
+        self.__get_stem_controller().set_static_probe_state(value)
 
     @property
     def static_probe_state(self):
@@ -341,14 +339,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     @probe_position.setter
     def probe_position(self, probe_position):
-        self.__get_stem_controller().set_probe_position(probe_position, self._call_soon)
+        self.__get_stem_controller().set_probe_position(probe_position)
 
     def validate_probe_position(self):
-        self.__get_stem_controller().validate_probe_position(self._call_soon)
+        self.__get_stem_controller().validate_probe_position()
 
     # override from the HardwareSource parent class.
     def data_item_states_changed(self, data_item_states):
-        self.__get_stem_controller()._data_item_states_changed(data_item_states, self._call_soon)
+        self.__get_stem_controller()._data_item_states_changed(data_item_states)
 
     def __static_probe_state_changed(self, static_probe_state):
         # this method will be called when the device changes probe state (via dialog or script).

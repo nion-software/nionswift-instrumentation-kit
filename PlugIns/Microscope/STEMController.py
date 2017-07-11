@@ -1,4 +1,5 @@
 # standard libraries
+import asyncio
 import copy
 import gettext
 import logging
@@ -30,7 +31,9 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
         self.__graphic_property_changed_listener = graphic.property_changed_event.listen(self.__property_changed)
         self.__graphic_property_name = graphic_property_name
         self.__region_property_name = region_property_name
-        self.target_setter = lambda value: setattr(self.__graphic, graphic_property_name, value)
+        def set_target_value(value):
+            setattr(self.__graphic, graphic_property_name, value)
+        self.target_setter = set_target_value
 
     def close(self):
         self.__graphic_property_changed_listener.close()
@@ -50,12 +53,13 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
 
 class ProbeGraphicConnection:
     """Manage the connection between the hardware and the graphics representing the probe on a display."""
-    def __init__(self, display, probe_position_value):
+    def __init__(self, display, probe_position_value, hide_probe_graphics_fn):
         self.display = display
         self.probe_position_value = probe_position_value
         self.graphic = None
         self.binding = None
         self.remove_region_graphic_event_listener = None
+        self.hide_probe_graphics_fn = hide_probe_graphics_fn
 
     def close(self):
         graphic = self.graphic
@@ -86,9 +90,14 @@ class ProbeGraphicConnection:
             self.binding = PropertyToGraphicBinding(self.probe_position_value, "value", self.graphic, "position")
             def graphic_removed():
                 self.hide_probe_graphic()
+                # next make sure all other probe graphics get hidden so that setting the probe_position_value
+                # doesn't set graphics positions to None
+                self.hide_probe_graphics_fn()
                 self.probe_position_value.value = None
+            def display_removed():
+                self.hide_probe_graphic()
             self.remove_region_graphic_event_listener = self.graphic.about_to_be_removed_event.listen(graphic_removed)
-            self.display_about_to_be_removed_listener = self.display.about_to_be_removed_event.listen(graphic_removed)
+            self.display_about_to_be_removed_listener = self.display.about_to_be_removed_event.listen(display_removed)
 
     def hide_probe_graphic(self):
         if self.graphic:
@@ -111,28 +120,27 @@ class STEMController:
 
     Probe
     -----
-    probe_state
-    probe_position
-    set_probe_position
-    validate_probe_position
-    static_probe_state
-    set_static_probe_state
+    probe_state (parked, blanked, scanning)
+    probe_position (fractional coordinates, optional)
+    set_probe_position(probe_position)
+    validate_probe_position()
+    static_probe_state (parked, blanked)
+    set_static_probe_state(static_probe_state)
 
     probe_state_changed_event (probe_state, probe_position, static_probe_state)
     """
 
     def __init__(self):
-        self.__last_data_items = list()
+        self.__probe_position_value = Model.PropertyModel()
+        self.__probe_position_value.on_value_changed = self.set_probe_position
         self.__probe_position = None
         self.__probe_state_stack = list()
         self.__probe_state_stack.append("parked")
-        self.__probe_state_updates = list()
-        self.__probe_state_updates_lock = threading.RLock()
-        self.__probe_graphic_connections = list()
         self.probe_state_changed_event = Event.Event()
+        self.probe_data_items_changed_event = Event.Event()
 
     def close(self):
-        self.__last_data_items = list()
+        pass
 
     def _enter_scanning_state(self):
         self.__probe_state_stack.append("scanning")
@@ -147,7 +155,7 @@ class STEMController:
         """ Return the probe position, in normalized coordinates with origin at top left. """
         return self.__probe_position
 
-    def set_probe_position(self, probe_position, call_soon_fn):
+    def set_probe_position(self, probe_position):
         """ Set the probe position, in normalized coordinates with origin at top left. """
         if probe_position is not None:
             # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
@@ -158,47 +166,25 @@ class STEMController:
             self.__probe_position = probe_position
             # update the probe position for listeners and also explicitly update for probe_graphic_connections.
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-            with self.__probe_state_updates_lock:
-                for probe_graphic_connection in self.__probe_graphic_connections:
-                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-            call_soon_fn(self.__update_probe_states)
 
-    def validate_probe_position(self, call_soon_fn):
+    def validate_probe_position(self):
         """Validate the probe position.
 
         This is called when the user switches from not controlling to controlling the position."""
-        self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5), call_soon_fn)
+        self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
 
-    def disconnect_probe_connections(self, call_soon_fn):
-        probe_graphic_connections = copy.copy(self.__probe_graphic_connections)
-        self.__probe_graphic_connections = list()
-        for probe_graphic_connection in probe_graphic_connections:
-            call_soon_fn(probe_graphic_connection.close)
+    @property
+    def probe_position_value(self):
+        return self.__probe_position_value
 
-    def _data_item_states_changed(self, data_item_states, call_soon_fn):
-        if len(data_item_states) == 0:
-            for data_item in self.__last_data_items:
-                # scanning has stopped, figure out the displays that might be used to display the probe position
-                # then watch for changes to that list. changes will include the display being removed by the user
-                # or newer more appropriate displays becoming available.
-                display = data_item.primary_display_specifier.display
-                if display:
-                    # the probe position value object gives the ProbeGraphicConnection the ability to
-                    # get, set, and watch for changes to the probe position.
-                    probe_position_value = Model.PropertyModel()
-                    probe_position_value.on_value_changed = lambda value: self.set_probe_position(value, call_soon_fn)
-                    probe_graphic_connection = ProbeGraphicConnection(display, probe_position_value)
-                    with self.__probe_state_updates_lock:
-                        self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-                    call_soon_fn(self.__update_probe_states)
-                    self.__probe_graphic_connections.append(probe_graphic_connection)
-        else:
-            # scanning, remove all known probe graphic connections.
-            self.disconnect_probe_connections(call_soon_fn)
+    def disconnect_probe_connections(self):
+        self.probe_data_items_changed_event.fire(list())
 
-        self.__last_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
+    def _data_item_states_changed(self, data_item_states):
+        if len(data_item_states) > 0:
+            self.probe_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
 
-    def set_static_probe_state(self, value: str, call_soon_fn) -> None:
+    def set_static_probe_state(self, value: str) -> None:
         """Set the static probe state.
 
         Static probe state is the state of the probe when not scanning. Valid values are 'parked' or 'blanked'.
@@ -209,10 +195,6 @@ class STEMController:
                 value = "parked"
             self.__probe_state_stack[0] = value
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-            with self.__probe_state_updates_lock:
-                for probe_graphic_connection in self.__probe_graphic_connections:
-                    self.__probe_state_updates.append((probe_graphic_connection, self.probe_position, self.static_probe_state))
-            call_soon_fn(self.__update_probe_states)
 
     @property
     def static_probe_state(self):
@@ -224,9 +206,123 @@ class STEMController:
         """Probe state is the current probe state and can be 'blanked', 'parked', or 'scanning'."""
         return self.__probe_state_stack[-1]
 
-    def __update_probe_states(self):
-        with self.__probe_state_updates_lock:
-            probe_state_updates = self.__probe_state_updates
-            self.__probe_state_updates = list()
-        for probe_graphic_connection, probe_position, static_probe_state in probe_state_updates:
+
+class ProbeView:
+    """Observes the probe (STEM controller) and updates data items and graphics."""
+
+    def __init__(self, stem_controller: STEMController, event_loop: asyncio.AbstractEventLoop):
+        assert event_loop is not None
+        self.__event_loop = event_loop
+        self.__last_data_items_lock = threading.RLock()
+        self.__last_data_items = list()
+        self.__probe_state = None
+        self.__probe_graphic_connections = list()
+        self.__probe_position_value = stem_controller.probe_position_value
+        self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+        self.__probe_data_items_changed_listener = stem_controller.probe_data_items_changed_event.listen(self.__probe_data_items_changed)
+
+    def close(self):
+        self.__probe_data_items_changed_listener.close()
+        self.__probe_data_items_changed_listener = None
+        self.__probe_state_changed_listener.close()
+        self.__probe_state_changed_listener = None
+        self.__last_data_items = list()
+        self.__event_loop = None
+
+    def __probe_data_items_changed(self, data_items):
+        # thread safe.
+        with self.__last_data_items_lock:
+            self.__last_data_items = copy.copy(data_items)
+
+    def __probe_state_changed(self, probe_state, probe_position, static_probe_state):
+        # thread safe. move actual call to main thread using the event loop.
+        self.__event_loop.create_task(self.__update_probe_state(probe_state, probe_position, static_probe_state))
+
+    async def __update_probe_state(self, probe_state, probe_position, static_probe_state):
+        # thread unsafe. always called on main thread (via event loop).
+        if probe_state != self.__probe_state:
+            if probe_state == "scanning":
+                self.__hide_probe_graphics()
+            else:
+                self.__show_probe_graphics(probe_position, static_probe_state)
+            self.__probe_state = probe_state
+        self.__update_probe_graphics(probe_position, static_probe_state)
+
+    def __hide_probe_graphics(self):
+        # thread unsafe.
+        probe_graphic_connections = copy.copy(self.__probe_graphic_connections)
+        self.__probe_graphic_connections = list()
+        for probe_graphic_connection in probe_graphic_connections:
+            probe_graphic_connection.close()
+
+    def __show_probe_graphics(self, probe_position, static_probe_state):
+        # thread unsafe.
+        with self.__last_data_items_lock:
+            data_items = self.__last_data_items
+            # self.__last_data_items = list()
+        for data_item in data_items:
+            # scanning has stopped, figure out the displays that might be used to display the probe position
+            # then watch for changes to that list. changes will include the display being removed by the user
+            # or newer more appropriate displays becoming available.
+            display = data_item.primary_display_specifier.display
+            if display:
+                # the probe position value object gives the ProbeGraphicConnection the ability to
+                # get, set, and watch for changes to the probe position.
+                probe_graphic_connection = ProbeGraphicConnection(display, self.__probe_position_value, self.__hide_probe_graphics)
+                probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
+                self.__probe_graphic_connections.append(probe_graphic_connection)
+
+    def __update_probe_graphics(self, probe_position, static_probe_state):
+        # thread unsafe.
+        for probe_graphic_connection in self.__probe_graphic_connections:
             probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
+
+
+from nion.swift.model import HardwareSource
+
+
+class ProbeViewController:
+    """Manage a ProbeView for each instrument (STEMController) that gets registered."""
+
+    def __init__(self, event_loop):
+        assert event_loop is not None
+        self.__event_loop = event_loop
+        # be sure to keep a reference or it will be closed immediately.
+        self.__instrument_added_event_listener = None
+        self.__instrument_removed_event_listener = None
+        self.__instrument_added_event_listener = HardwareSource.HardwareSourceManager().instrument_added_event.listen(self.register_instrument)
+        self.__instrument_removed_event_listener = HardwareSource.HardwareSourceManager().instrument_removed_event.listen(self.unregister_instrument)
+        for instrument in HardwareSource.HardwareSourceManager().instruments:
+            self.register_instrument(instrument)
+
+    def close(self):
+        # close will be called when the extension is unloaded. in turn, close any references so they get closed. this
+        # is not strictly necessary since the references will be deleted naturally when this object is deleted.
+        self.__instrument_added_event_listener.close()
+        self.__instrument_added_event_listener = None
+        self.__instrument_removed_event_listener.close()
+        self.__instrument_removed_event_listener = None
+
+    def register_instrument(self, instrument):
+        if hasattr(instrument, "probe_position_value"):
+            instrument._probe_view = ProbeView(instrument, self.__event_loop)
+
+    def unregister_instrument(self, instrument):
+        if hasattr(instrument, "_probe_view"):
+            instrument._probe_view.close()
+            instrument._probe_view = None
+
+
+class STEMControllerExtension:
+
+    # required for Swift to recognize this as an extension class.
+    extension_id = "nion.stem_controller"
+
+    def __init__(self, api_broker):
+        # grab the api object.
+        api = api_broker.get_api(version="1", ui_version="1")
+        self.__probe_view_controller = ProbeViewController(api.application._application.event_loop)
+
+    def close(self):
+        self.__probe_view_controller.close()
+        self.__probe_view_controller = None
