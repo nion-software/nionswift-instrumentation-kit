@@ -675,9 +675,12 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column.add(button_row)
         column.add_stretch()
 
+        self.__profile_combo_change_blocked = False
+
         def profile_combo_text_changed(text):
-            self.__state_controller.handle_change_profile(text)
-            profile_combo.request_refocus()
+            if not self.__profile_combo_change_blocked:
+                self.__state_controller.handle_change_profile(text)
+                profile_combo.request_refocus()
 
         open_controls_button.on_button_clicked = self.__state_controller.handle_settings_button_clicked
         monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
@@ -689,10 +692,19 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         def profiles_changed(items):
             profile_combo.items = items
 
+        def change_profile_combo(profile_label):
+            blocked = self.__profile_combo_change_blocked
+            self.__profile_combo_change_blocked = True
+            try:
+                profile_combo.current_text = profile_label
+                profile_combo.request_refocus()
+            finally:
+                self.__profile_combo_change_blocked = blocked
+
         # thread safe
         def profile_changed(profile_label):
             # the current_text must be set on ui thread
-            self.document_controller.queue_task(lambda: setattr(profile_combo, "current_text", profile_label))
+            self.document_controller.queue_task(functools.partial(change_profile_combo, profile_label))
 
         def frame_parameters_changed(frame_parameters):
             exposure_field.text = str("{0:.1f}".format(float(frame_parameters.exposure_ms)))
