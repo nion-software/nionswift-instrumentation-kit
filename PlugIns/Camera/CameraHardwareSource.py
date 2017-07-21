@@ -234,6 +234,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def __profile_frame_parameter_changed(self, profile_index, frame_parameter, value):
         # this is the preferred technique for camera adapters to indicate changes
         with self.__latest_values_lock:
+            # rebuild the list to remove anything matching our new profile_index/frame_parameter combo.
+            latest_values = list()
+            for profile_index_, parameter_, value_ in self.__latest_values:
+                if profile_index != profile_index_ or frame_parameter != parameter_:
+                    latest_values.append((profile_index_, parameter_, value_))
+            self.__latest_values = latest_values
             self.__latest_values.append((profile_index, frame_parameter, value))
         self.__task_queue.put(self.__do_update_parameters)
 
