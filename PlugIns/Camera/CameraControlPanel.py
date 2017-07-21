@@ -545,6 +545,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         self.__shift_click_state = None
 
+        self.__changes_blocked = False
+
         ui = document_controller.ui
 
         self.__key_pressed_event_listener = DisplayPanel.DisplayPanelManager().key_pressed_event.listen(self.image_panel_key_pressed)
@@ -591,8 +593,9 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             button_row1a.visible = visible
 
         def binning_combo_text_changed(text):
-            self.__state_controller.handle_binning_changed(text)
-            binning_combo.request_refocus()
+            if not self.__changes_blocked:
+                self.__state_controller.handle_binning_changed(text)
+                binning_combo.request_refocus()
 
         binning_combo = ui.create_combo_box_widget(properties={"min-width":72})
         binning_combo.on_current_text_changed = binning_combo_text_changed
@@ -675,10 +678,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column.add(button_row)
         column.add_stretch()
 
-        self.__profile_combo_change_blocked = False
-
         def profile_combo_text_changed(text):
-            if not self.__profile_combo_change_blocked:
+            if not self.__changes_blocked:
                 self.__state_controller.handle_change_profile(text)
                 profile_combo.request_refocus()
 
@@ -693,13 +694,13 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             profile_combo.items = items
 
         def change_profile_combo(profile_label):
-            blocked = self.__profile_combo_change_blocked
-            self.__profile_combo_change_blocked = True
+            blocked = self.__changes_blocked
+            self.__changes_blocked = True
             try:
                 profile_combo.current_text = profile_label
                 profile_combo.request_refocus()
             finally:
-                self.__profile_combo_change_blocked = blocked
+                self.__changes_blocked = blocked
 
         # thread safe
         def profile_changed(profile_label):
@@ -707,10 +708,15 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             self.document_controller.queue_task(functools.partial(change_profile_combo, profile_label))
 
         def frame_parameters_changed(frame_parameters):
-            exposure_field.text = str("{0:.1f}".format(float(frame_parameters.exposure_ms)))
-            if exposure_field.focused:
-                exposure_field.request_refocus()
-            binning_combo.current_text = str(frame_parameters.binning)
+            blocked = self.__changes_blocked
+            self.__changes_blocked = True
+            try:
+                exposure_field.text = str("{0:.1f}".format(float(frame_parameters.exposure_ms)))
+                if exposure_field.focused:
+                    exposure_field.request_refocus()
+                binning_combo.current_text = str(frame_parameters.binning)
+            finally:
+                self.__changes_blocked = blocked
 
         def play_button_state_changed(enabled, play_button_state):
             play_button_text = { "play": _("Play"), "pause": _("Pause") }
