@@ -18,6 +18,7 @@ import numpy
 from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
+from nion.utils import Registry
 
 
 _ = gettext.gettext
@@ -870,3 +871,27 @@ class CameraAdapter:
             logging.info("Tilting (%s,%s) rad.\n", da, db)
             autostem.set_value("STilt.x", autostem.get_value("STilt.x") - da)
             autostem.set_value("STilt.y", autostem.get_value("STilt.y") - db)
+
+
+_component_registered_listener = None
+_component_unregistered_listener = None
+
+def run():
+    def component_registered(component, component_types):
+        if "camera_device" in component_types:
+            camera_adapter = CameraAdapter(component.camera_id, component.camera_type, component.camera_name, component)
+            camera_hardware_source = CameraHardwareSource(camera_adapter)
+            HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+
+    def component_unregistered(component, component_types):
+        if "camera_device" in component_types:
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
+
+    global _component_registered_listener
+    global _component_unregistered_listener
+
+    _component_registered_listener = Registry.listen_component_registered_event(component_registered)
+    _component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
+
+    for component in Registry.get_components_by_type("camera_device"):
+        component_registered(component, {"camera_device"})
