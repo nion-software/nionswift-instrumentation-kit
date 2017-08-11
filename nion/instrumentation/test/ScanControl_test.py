@@ -15,9 +15,9 @@ from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
-from Microscope import STEMController
-from Scan import ScanControlPanel
-from Scan import ScanHardwareSource
+from nion.instrumentation import stem_controller
+from nion.instrumentation import scan_base
+from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 
 """
 # running in Swift
@@ -87,7 +87,7 @@ class TestScanControlClass(unittest.TestCase):
     def _close_instrument(self, instrument) -> None:
         raise NotImplementedError()
 
-    def _setup_hardware_source(self, instrument) -> ScanHardwareSource.ScanHardwareSource:
+    def _setup_hardware_source(self, instrument) -> scan_base.ScanHardwareSource:
         raise NotImplementedError()
 
     def _close_hardware_source(self) -> None:
@@ -116,7 +116,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.instrument = instrument
                 self.hardware_source = hardware_source
                 self.scan_state_controller = scan_state_controller
-                self.probe_view = STEMController.ProbeView(self.instrument, document_controller.event_loop)
+                self.probe_view = stem_controller.ProbeView(self.instrument, document_controller.event_loop)
 
                 return self
 
@@ -322,7 +322,7 @@ class TestScanControlClass(unittest.TestCase):
         display = document_model.data_items[0].primary_display_specifier.display
         scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
         scan_state_controller.initialize_state()
-        probe_view = STEMController.ProbeView(instrument, document_controller.event_loop)
+        probe_view = stem_controller.ProbeView(instrument, document_controller.event_loop)
         self.assertEqual(len(display.graphics), 0)
         with contextlib.closing(document_controller):
             try:
