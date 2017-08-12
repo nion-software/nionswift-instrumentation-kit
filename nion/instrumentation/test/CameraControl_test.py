@@ -14,12 +14,12 @@ from nion.swift import Facade
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
-from Camera import CameraControlPanel
+from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
 
 """
 # running in Swift
 import sys, unittest
-from Camera import CameraControl_test
+from nionswift_plugin.nion_instrumentation_ui import CameraControl_test
 suite = unittest.TestLoader().loadTestsFromTestCase(CameraControl_test.TestCameraControlClass)
 result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
