@@ -16,6 +16,7 @@ setuptools.setup(
     description="Library and UI kit for STEM instrumentation (Camera, Scan, Microscope) with Nion Swift.",
     url="https://github.com/nion-software/nionswift-instrumentation-kit",
     packages=["nion.instrumentation", "nionswift_plugin.nion_instrumentation_ui"],
+    install_requires=['nionswift'],
     license='GPLv3',
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
