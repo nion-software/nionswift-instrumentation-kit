@@ -152,7 +152,7 @@ class STEMController:
 
     @property
     def probe_position(self):
-        """ Return the probe position, in normalized coordinates with origin at top left. """
+        """ Return the probe position, in normalized coordinates with origin at top left. Only valid if probe_state is 'parked'."""
         return self.__probe_position
 
     def set_probe_position(self, probe_position):
@@ -174,7 +174,8 @@ class STEMController:
         self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
 
     @property
-    def probe_position_value(self):
+    def _probe_position_value(self):
+        """Internal use."""
         return self.__probe_position_value
 
     def disconnect_probe_connections(self):
@@ -217,7 +218,7 @@ class ProbeView:
         self.__last_data_items = list()
         self.__probe_state = None
         self.__probe_graphic_connections = list()
-        self.__probe_position_value = stem_controller.probe_position_value
+        self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__probe_data_items_changed_listener = stem_controller.probe_data_items_changed_event.listen(self.__probe_data_items_changed)
 
@@ -304,7 +305,8 @@ class ProbeViewController:
         self.__instrument_removed_event_listener = None
 
     def register_instrument(self, instrument):
-        if hasattr(instrument, "probe_position_value"):
+        # if this is a stem controller, add a probe view
+        if hasattr(instrument, "_probe_position_value"):
             instrument._probe_view = ProbeView(instrument, self.__event_loop)
 
     def unregister_instrument(self, instrument):
