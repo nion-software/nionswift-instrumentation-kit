@@ -1,6 +1,7 @@
 from . import CameraControlPanel
 from . import ScanControlPanel
 from . import ScanAcquisition
+from . import MultipleShiftEELSAcquire
 
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
@@ -25,3 +26,4 @@ def run():
     camera_base.run()
     CameraControlPanel.run()
     ScanControlPanel.run()
+    MultipleShiftEELSAcquire.run()

@@ -7,27 +7,10 @@ import time
 
 import numpy
 
-try:
-    import _autostem
-except ImportError:
-    class AutoSTEM(object):
-        def __init__(self):
-            self.values = {"EHT": 100, "TVPixelAngle": 2/1000.0}
-        def TryGetVal(self, s: str) -> (bool, float):
-            return [1.0, 1.0]
-        def SetValAndConfirm(self, s: str, val: float, tolfactor: float, timeout_ms: int) -> bool:
-            pass
-        def SetValWait(self, property_id: str, v1: float, timeout_ms: int) -> bool:
-            pass
-        def SetVal(self, s: str, val: float) -> bool:
-            pass
-        def GetVal(self, s: str, default_value: float=None) -> float:
-            pass
-    _autostem = AutoSTEM()
-
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
+from nion.data import xdata_1_0 as xd
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
@@ -36,20 +19,23 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 
-from EELSAcq_Phil import register
+from . import ScanAcquisition
 
 _ = gettext.gettext
 
-name = "PhilEELSAcquire"
-disp_name = _("Phil-Style EELS Acquire")
+name = "MultipleShiftEELSAcquire"
+disp_name = _("Multiple Shift EELS Acquire")
 
-eels_hardware_source_id = "phil_camera"
+eels_hardware_source_id = "eels_camera"
 
 # Daresbury
 #energy_adjust_control = "EELS_Prism_Temp"
 #Rutgers
 energy_adjust_control = "EELS_MagneticShift_Offset"
 blank_control = "C_Blank"
+
+STEM_CONTROLLER_ID = "autostem_controller"
+
 
 class AcquireController(metaclass=Utility.Singleton):
 
@@ -62,64 +48,52 @@ class AcquireController(metaclass=Utility.Singleton):
         super(AcquireController, self).__init__()
         self.__acquire_thread = None
 
-    def get_high_tension_v(self):
-        # self.connect()
-        eht = _autostem.GetVal("EHT")
-        return float(eht) if eht is not None else None
-
-    def get_ccd_pixel_angle_mrad(self):
-        # self.connect()
-        tv_pixel_angle = _autostem.GetVal("TVPixelAngle")
-        return float(tv_pixel_angle * 1000.0) if tv_pixel_angle else None
-
-    def start_threaded_acquire_and_sum(self, number_frames, energy_offset_per_frame, sleep_time, document_controller, final_layout_fn):
+    def start_threaded_acquire_and_sum(self, autostem_controller, camera, number_frames, energy_offset_per_frame, sleep_time, document_controller, final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
 
         def set_offset_energy(offset, sleep_time=1):
-            current_energy = _autostem.TryGetVal(energy_adjust_control)
+            current_energy = autostem_controller.GetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the desired value (or until timeout)
-            _autostem.SetValAndConfirm(energy_adjust_control, float(current_energy[1])+offset, 0, sleep_time*1000)
+            autostem_controller.SetValAndConfirm(energy_adjust_control, float(current_energy)+offset, 1, int(sleep_time*1000))
             # sleep 1 sec to avoid double peaks and ghosting
             time.sleep(sleep_time)
 
         def acquire_series(number_frames, offset_per_spectrum, task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
-            hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
-
             # grab one frame to get image size
-            first_xdata = hardware_source.get_next_xdatas_to_start()[0]
+            first_xdata = camera.get_next_xdatas_to_start()[0]
             first_data = first_xdata.data
 
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
 
-            reference_energy = _autostem.TryGetVal(energy_adjust_control)
+            reference_energy = autostem_controller.GetVal(energy_adjust_control)
             for frame_index in range(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
-                image_stack_data[frame_index] = hardware_source.get_next_xdatas_to_start()[0].data
+                image_stack_data[frame_index] = camera.get_next_xdatas_to_start()[0].data
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
 
-            _autostem.SetValWait(blank_control, 1.0, 200)
+            autostem_controller.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
             time.sleep(sleep_time)
             dark_sum = None
             for frame_index in range(number_frames):
                 if dark_sum is None:
                     # use next frame to start to make sure we're getting a blanked frame
-                    dark_sum = hardware_source.get_next_xdatas_to_start()[0].data
+                    dark_sum = camera.get_next_xdatas_to_start()[0].data
                 else:
                     # but now use next frame to finish since we can know it's already blanked
-                    dark_sum += hardware_source.get_next_xdatas_to_finish()[0].data
+                    dark_sum += camera.get_next_xdatas_to_finish()[0].data
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
-            _autostem.SetVal(blank_control, 0)
-            _autostem.SetVal(energy_adjust_control, reference_energy[1])
+            autostem_controller.SetVal(blank_control, 0)
+            autostem_controller.SetVal(energy_adjust_control, reference_energy)
             image_stack_data -= dark_sum / number_frames
 
             dimension_calibration0 = first_xdata.dimensional_calibrations[0]
@@ -149,7 +123,9 @@ class AcquireController(metaclass=Utility.Singleton):
                 if task_object is not None:
                     task_object.update_progress(_("Cross correlating frame {}.").format(index), (index + 1, number_frames), None)
                 # TODO: make interpolation factor variable (it is hard-coded to 100 here.)
-                shifts[index] = ref_shift+numpy.array(register.get_shift(ref, _slice, 100))
+                ref_xdata = DataAndMetadata.new_data_and_metadata(ref)
+                _slice_xdata = DataAndMetadata.new_data_and_metadata(_slice)
+                shifts[index] = ref_shift + numpy.array(xd.register_translation(ref_xdata, _slice_xdata, 100))
                 ref = _slice[:]
                 ref_shift = shifts[index]
             # sum image needs to be big enough for shifted images
@@ -158,7 +134,8 @@ class AcquireController(metaclass=Utility.Singleton):
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(_("Summing frame {}.").format(index), (index + 1, number_frames), None)
-                sum_image += register.shift_image(_slice, shifts[index, 0], shifts[index, 1])
+                _slice_xdata = DataAndMetadata.new_data_and_metadata(_slice)
+                sum_image += xd.shift(_slice_xdata, shifts[index]).data
             return sum_image, shifts
 
         def show_in_panel(data_item, document_controller, display_panel_id):
@@ -186,7 +163,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
-            with document_controller.create_task_context_manager(_("Phil-Style EELS Acquire"), "table") as task:
+            with document_controller.create_task_context_manager(_("Multiple Shift EELS Acquire"), "table") as task:
                 # acquire the stack. it will be added to the document by queueing to the main thread at the end of this method.
                 stack_data_item = acquire_series(number_frames, energy_offset_per_frame, task)
                 stack_data_item.title = _("Spectrum Stack")
@@ -220,9 +197,9 @@ class AcquireController(metaclass=Utility.Singleton):
 
 
                 document_controller.queue_task(final_layout_fn)
-                document_controller.queue_task(functools.partial(show_in_panel, stack_data_item, document_controller, "eels_phil_stack"))
-                document_controller.queue_task(functools.partial(show_in_panel, sum_data_item, document_controller, "eels_phil_aligned_summed_stack"))
-                document_controller.queue_task(functools.partial(add_line_profile, sum_data_item, document_controller, "eels_phil_spectrum", _midpoint, _integration_width))
+                document_controller.queue_task(functools.partial(show_in_panel, stack_data_item, document_controller, "multiple_shift_eels_stack"))
+                document_controller.queue_task(functools.partial(show_in_panel, sum_data_item, document_controller, "multiple_shift_eels_aligned_summed_stack"))
+                document_controller.queue_task(functools.partial(add_line_profile, sum_data_item, document_controller, "multiple_shift_eels_spectrum", _midpoint, _integration_width))
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum, args=(number_frames,
@@ -232,12 +209,14 @@ class AcquireController(metaclass=Utility.Singleton):
         self.__acquire_thread.start()
 
 
-class PhilEELSAcquireControlView(Panel.Panel):
+class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
     def __init__(self, document_controller, panel_id, properties):
-        super(PhilEELSAcquireControlView, self).__init__(document_controller, panel_id, name)
+        super().__init__(document_controller, panel_id, name)
 
         ui = document_controller.ui
+
+        self.__eels_camera_choice = ScanAcquisition.HardwareSourceChoice(ui, "eels_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_eels_camera"))
 
         # TODO: how to get text to align right?
         self.number_frames = self.ui.create_line_edit_widget(properties={"width": 30})
@@ -250,6 +229,11 @@ class PhilEELSAcquireControlView(Panel.Panel):
         self.sleep_time.text = "15"
 
         self.acquire_button = ui.create_push_button_widget(_("Start"))
+
+        camera_row = ui.create_row_widget()
+        camera_row.add_spacing(12)
+        camera_row.add(self.__eels_camera_choice.create_combo_box(ui))
+        camera_row.add_stretch()
 
         dialog_row = ui.create_row_widget()
         dialog_row.add(ui.create_label_widget(_("Number of frames:")))
@@ -275,6 +259,7 @@ class PhilEELSAcquireControlView(Panel.Panel):
         properties["spacing"] = 2
         column = ui.create_column_widget(properties=properties)
 
+        column.add(camera_row)
         column.add(dialog_row)
         column.add(dialog_row2)
         column.add(dialog_row3)
@@ -285,25 +270,26 @@ class PhilEELSAcquireControlView(Panel.Panel):
 
         self.__workspace_controller = None
 
+    def close(self):
+        self.__eels_camera_choice.close()
+        self.__eels_camera_choice = None
+        super().close()
+
     def acquire(self, number_frames, energy_offset, sleep_time):
-        self.show_initial_plots()
-        AcquireController().start_threaded_acquire_and_sum(number_frames, energy_offset, sleep_time, self.document_controller,
-                                                           functools.partial(self.set_final_layout))
-        # wait for the acq to finish
+        eels_camera = self.__eels_camera_choice.hardware_source
+        if eels_camera:
+            # setup the workspace layout
+            self.__configure_start_workspace(self.document_controller.workspace_controller, eels_camera.hardware_source_id)
+            # start the EELS acquisition
+            eels_camera.start_playing()
+            autostem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(STEM_CONTROLLER_ID)
+            AcquireController().start_threaded_acquire_and_sum(autostem_controller, eels_camera, number_frames,
+                                                               energy_offset, sleep_time, self.document_controller,
+                                                               functools.partial(self.set_final_layout))
 
     def set_final_layout(self):
         # change to the EELS workspace layout
         self.__configure_final_workspace(self.document_controller.workspace_controller)
-
-    def show_initial_plots(self):
-        # use the eels_hardware_source
-        eels_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(eels_hardware_source_id)
-
-        # setup the workspace layout
-        self.__configure_start_workspace(self.document_controller.workspace_controller, eels_hardware_source.hardware_source_id)
-
-        # start the EELS acquisition
-        eels_hardware_source.start_playing()
 
     def __create_canvas_widget_from_image_panel(self, image_panel):
         canvas_widget = self.ui.create_canvas_widget()
@@ -313,23 +299,24 @@ class PhilEELSAcquireControlView(Panel.Panel):
         return image_row
 
     def __configure_final_workspace(self, workspace_controller):
-        spectrum_display = {"type": "image", "selected": True, "display_panel_id": "eels_phil_spectrum"}
-        stack_display = {"type": "image", "display_panel_id": "eels_phil_stack"}
-        aligned_summer_stack_display = {"type": "image", "display_panel_id": "eels_phil_aligned_summed_stack"}
+        spectrum_display = {"type": "image", "selected": True, "display_panel_id": "multiple_shift_eels_spectrum"}
+        stack_display = {"type": "image", "display_panel_id": "multiple_shift_eels_stack"}
+        aligned_summer_stack_display = {"type": "image", "display_panel_id": "multiple_shift_eels_aligned_summed_stack"}
         layout_right_side = {"type": "splitter", "orientation": "horizontal", "splits": [0.5, 0.5],
             "children": [stack_display, aligned_summer_stack_display]}
         layout = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5],
             "children": [spectrum_display, layout_right_side]}
-        workspace_controller.ensure_workspace(_("Phil-Style EELS Results"), layout, "eels_phil_results")
+        workspace_controller.ensure_workspace(_("Multiple Shift EELS Results"), layout, "multiple_shift_eels_results")
 
     def __configure_start_workspace(self, workspace_controller, hardware_source_id):
         spectrum_display = {'type': 'image', 'hardware_source_id': hardware_source_id, 'controller_type': 'camera-live', 'show_processed_data': True}
         eels_raw_display = {'type': 'image', 'hardware_source_id': hardware_source_id, 'controller_type': 'camera-live', 'show_processed_data': False}
         layout = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5],
             "children": [spectrum_display, eels_raw_display]}
-        workspace_controller.ensure_workspace(_("Phil-Style EELS"), layout, "eels_phil_acquisition")
+        workspace_controller.ensure_workspace(_("Multiple Shift EELS"), layout, "multiple_shift_eels_acquisition")
 
 
-panel_name = name+"-control-panel"
-workspace_manager = Workspace.WorkspaceManager()
-workspace_manager.register_panel(PhilEELSAcquireControlView, panel_name, disp_name, ["left", "right"], "left")
+def run():
+    panel_name = name+"-control-panel"
+    workspace_manager = Workspace.WorkspaceManager()
+    workspace_manager.register_panel(MultipleShiftEELSAcquireControlView, panel_name, disp_name, ["left", "right"], "left")
