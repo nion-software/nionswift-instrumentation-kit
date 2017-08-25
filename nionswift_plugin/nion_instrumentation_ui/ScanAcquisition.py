@@ -158,7 +158,7 @@ class ScanAcquisitionController:
                             # data and metadata will immediately unload the data (and write to disk). this is important,
                             # because the data (up to this point) can be shared data from the DLL.
                             data_item.set_data_and_metadata(data_and_metadata)
-                            # assert not data_item._data_item.maybe_data_source.is_data_loaded
+                            # assert not data_item._data_item.is_data_loaded
                             # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
                             document_window.display_data_item(data_item)
                             for scan_data_and_metadata in scan_data_list:

@@ -286,7 +286,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1000000.0
 
     def clean_data_item(self, data_item: DataItem.DataItem, data_channel: HardwareSource.DataChannel) -> None:
-        display = data_item.maybe_data_source.displays[0]
+        display = data_item.displays[0]
         for graphic in copy.copy(display.graphics):
             if graphic.graphic_id == "probe":
                 display.remove_graphic(graphic)

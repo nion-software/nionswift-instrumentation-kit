@@ -214,11 +214,11 @@ class TestScanControlClass(unittest.TestCase):
             self._record_one(document_controller, hardware_source, scan_state_controller)
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
-            self.assertTrue(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
+            self.assertTrue(numpy.array_equal(document_model.data_items[0].data, document_model.data_items[1].data))
             self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
-            self.assertFalse(numpy.array_equal(document_model.data_items[0].maybe_data_source.data, document_model.data_items[1].maybe_data_source.data))
+            self.assertFalse(numpy.array_equal(document_model.data_items[0].data, document_model.data_items[1].data))
             # clean up
             hardware_source.abort_playing()
 
@@ -235,8 +235,8 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 2)  # check assumptions
             hardware_source.stop_playing(3.0)
             document_controller.periodic()
-            self.assertEqual(document_model.data_items[1].maybe_data_source.dimensional_shape, hardware_source.get_frame_parameters(2).size)
-            self.assertNotEqual(document_model.data_items[0].maybe_data_source.dimensional_shape, document_model.data_items[1].maybe_data_source.dimensional_shape)
+            self.assertEqual(document_model.data_items[1].dimensional_shape, hardware_source.get_frame_parameters(2).size)
+            self.assertNotEqual(document_model.data_items[0].dimensional_shape, document_model.data_items[1].dimensional_shape)
 
     def test_record_names_results_correctly(self):
         with self._make_scan_context() as scan_context:
@@ -313,7 +313,7 @@ class TestScanControlClass(unittest.TestCase):
         graphic.graphic_id = "probe"
         graphic.position = 0.5, 0.5
         graphic.is_bounds_constrained = True
-        data_item.maybe_data_source.displays[0].add_graphic(graphic)
+        data_item.displays[0].add_graphic(graphic)
         document_model.append_data_item(data_item)
         instrument = self._setup_instrument()
         hardware_source = self._setup_hardware_source(instrument)
@@ -377,8 +377,8 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].data_sources[0].metadata
-            metadata1 = document_model.data_items[1].data_sources[0].metadata
+            metadata0 = document_model.data_items[0].d_metadata
+            metadata1 = document_model.data_items[1].d_metadata
             scan_id0 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id1 = metadata1.get("hardware_source", dict()).get("scan_id")
             self.assertIsNotNone(scan_id0)
@@ -391,13 +391,13 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].data_sources[0].metadata
-            metadata1 = document_model.data_items[1].data_sources[0].metadata
+            metadata0 = document_model.data_items[0].d_metadata
+            metadata1 = document_model.data_items[1].d_metadata
             scan_id00 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id01 = metadata1.get("hardware_source", dict()).get("scan_id")
             self._acquire_one(document_controller, hardware_source)
-            metadata0 = document_model.data_items[0].data_sources[0].metadata
-            metadata1 = document_model.data_items[1].data_sources[0].metadata
+            metadata0 = document_model.data_items[0].d_metadata
+            metadata1 = document_model.data_items[1].d_metadata
             scan_id10 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id11 = metadata1.get("hardware_source", dict()).get("scan_id")
             self.assertIsNotNone(scan_id00)
@@ -488,10 +488,10 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, (300, 300))
+            self.assertEqual(document_model.data_items[0].data_shape, (300, 300))
             hardware_source.set_selected_profile_index(1)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, (500, 500))
+            self.assertEqual(document_model.data_items[0].data_shape, (500, 500))
 
     def test_change_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
         with self._make_scan_context() as scan_context:
@@ -577,8 +577,8 @@ class TestScanControlClass(unittest.TestCase):
             #hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
-            self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, (200, 200))
-            self.assertEqual(document_model.data_items[1].data_sources[0].dimensional_shape, (200, 200))
+            self.assertEqual(document_model.data_items[0].dimensional_shape, (200, 200))
+            self.assertEqual(document_model.data_items[1].dimensional_shape, (200, 200))
 
     def test_ability_to_start_recording_with_custom_parameters(self):
         with self._make_scan_context() as scan_context:
@@ -592,8 +592,8 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)  # 2 view images (always grabbed)
             self.assertEqual(len(recorded_extended_data_list), 2)  # 2 record images
-            self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, (200, 200))
-            self.assertEqual(document_model.data_items[1].data_sources[0].dimensional_shape, (200, 200))
+            self.assertEqual(document_model.data_items[0].dimensional_shape, (200, 200))
+            self.assertEqual(document_model.data_items[1].dimensional_shape, (200, 200))
             self.assertEqual(recorded_extended_data_list[0].data.shape, (200, 200))
             self.assertEqual(recorded_extended_data_list[1].data.shape, (200, 200))
 
@@ -651,12 +651,12 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
+            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
             scan_state_controller.handle_linked_changed(False)
             scan_state_controller.handle_decrease_width()
             scan_state_controller.handle_decrease_height()
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (128, 128))
+            self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
 
     def test_record_during_view_uses_record_mode(self):
         # NOTE: requires stages_per_frame == 2
@@ -703,20 +703,20 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
+            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
             scan_state_controller.handle_decrease_width()
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (128, 128))
+            self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
 
     def test_changing_width_when_unlinked_does_not_change_height(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 256))
+            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
             scan_state_controller.handle_linked_changed(False)
             scan_state_controller.handle_decrease_width()
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, (256, 128))
+            self.assertEqual(document_model.data_items[0].data_shape, (256, 128))
 
     def test_obscenely_large_scan_does_not_crash(self):
         with self._make_scan_context() as scan_context:

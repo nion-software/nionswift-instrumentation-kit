@@ -343,6 +343,7 @@ class ScanControlStateController:
                 record_index = self.__scan_hardware_source.record_index
                 for data_and_metadata in data_and_metadata_list:
                     data_item = DataItem.DataItem()
+                    data_item.ensure_data_source()
 
                     display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                     display_name = display_name if display_name else _("Record")
@@ -350,9 +351,7 @@ class ScanControlStateController:
                     title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
                     data_item.title = "{} {}".format(title_base, record_index)
 
-                    buffered_data_source = DataItem.BufferedDataSource()
-                    data_item.append_data_source(buffered_data_source)
-                    buffered_data_source.set_data_and_metadata(data_and_metadata)
+                    data_item.set_xdata(data_and_metadata)
                     callback_fn(data_item)
                 self.__scan_hardware_source.record_index += 1
 
@@ -1288,13 +1287,12 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             if len(data_item_states) > 0:
                 data_item_state = data_item_states[0]
                 data_item = data_item_state["data_item"]
-                buffered_data_source = data_item.maybe_data_source
                 channel_state = data_item_state["channel_state"]
                 partial_str = str()
-                hardware_source_metadata = buffered_data_source.metadata.get("hardware_source", dict())
+                hardware_source_metadata = data_item.d_metadata.get("hardware_source", dict())
                 scan_position = hardware_source_metadata.get("scan_position")
                 if scan_position is not None:
-                    partial_str = " " + str(int(100 * scan_position["y"] / buffered_data_source.dimensional_shape[0])) + "%"
+                    partial_str = " " + str(int(100 * scan_position["y"] / data_item.dimensional_shape[0])) + "%"
                 play_state_label.text = map_channel_state_to_text[channel_state] + partial_str
             else:
                 play_state_label.text = map_channel_state_to_text["stopped"]
@@ -1386,11 +1384,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
     def image_panel_mouse_pressed(self, display_panel, display_specifier, image_position, modifiers):
-        buffered_data_source = display_specifier.buffered_data_source if display_specifier else None
-        hardware_source_id = buffered_data_source and buffered_data_source.metadata.get("hardware_source", dict()).get("hardware_source_id")
+        data_item = display_specifier.data_item if display_specifier else None
+        hardware_source_id = data_item and data_item.d_metadata.get("hardware_source", dict()).get("hardware_source_id")
         if self.__shift_click_state == "shift":
             mouse_position = image_position
-            camera_shape = buffered_data_source.dimensional_shape
+            camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape)
             return self.__mouse_pressed
         return False
@@ -1550,13 +1548,12 @@ class ScanDisplayPanelController:
             for data_item_state in self.__data_item_states:
                 if data_item_state["channel_id"] == self.__hardware_source_channel_id:
                     data_item = data_item_state["data_item"]
-                    buffered_data_source = data_item.maybe_data_source
                     channel_state = data_item_state["channel_state"]
                     partial_str = str()
-                    hardware_source_metadata = buffered_data_source.metadata.get("hardware_source", dict())
+                    hardware_source_metadata = data_item.d_metadata.get("hardware_source", dict())
                     scan_position = hardware_source_metadata.get("scan_position")
                     if scan_position is not None:
-                        partial_str = " " + str(int(100 * scan_position["y"] / buffered_data_source.dimensional_shape[0])) + "%"
+                        partial_str = " " + str(int(100 * scan_position["y"] / data_item.dimensional_shape[0])) + "%"
                     new_text = map_channel_state_to_text[channel_state] + partial_str
                     if status_text_canvas_item.text != new_text:
                         status_text_canvas_item.text = new_text

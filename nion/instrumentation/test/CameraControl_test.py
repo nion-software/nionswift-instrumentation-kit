@@ -126,10 +126,10 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
             self.__acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, hardware_source.get_expected_dimensions(2))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
             hardware_source.set_selected_profile_index(1)
             self.__acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_sources[0].data_shape, hardware_source.get_expected_dimensions(1))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(1))
 
     def test_change_to_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -217,7 +217,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
-            self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 2)
+            self.assertEqual(len(document_model.data_items[2].dimensional_shape), 2)
 
     def test_capturing_during_view_captures_eels_1d(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
@@ -234,7 +234,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
-            self.assertEqual(len(document_model.data_items[2].maybe_data_source.dimensional_shape), 1)
+            self.assertEqual(len(document_model.data_items[2].dimensional_shape), 1)
 
     def test_ability_to_start_playing_with_custom_parameters(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -253,7 +253,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertTrue(time.time() - start_time < 3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 1)
-            self.assertEqual(document_model.data_items[0].data_sources[0].dimensional_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].dimensional_shape, hardware_source.get_expected_dimensions(4))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -290,10 +290,10 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             self.__acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(2))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
             state_controller.handle_binning_changed("4")
             self.__acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
 
     def test_first_view_uses_correct_mode(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -305,12 +305,12 @@ class TestCameraControlClass(unittest.TestCase):
                 time.sleep(self.exposure * 0.5)
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
-                self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
-            self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
 
     def test_first_view_uses_correct_exposure(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -325,7 +325,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 elapsed = time.time() - start
                 document_controller.periodic()
-                self.assertEqual(document_model.data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
                 self.assertTrue(elapsed > long_exposure)
             finally:
                 hardware_source.abort_playing()
@@ -428,8 +428,8 @@ class TestCameraControlClass(unittest.TestCase):
             finally:
                 hardware_source.abort_playing()
             document_model.recompute_all()
-            self.assertEqual(data_items[0].maybe_data_source.data_shape, hardware_source.get_expected_dimensions(2))
-            self.assertEqual(data_items[1].maybe_data_source.data_shape, (hardware_source.get_expected_dimensions(2)[1], ))
+            self.assertEqual(data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
+            self.assertEqual(data_items[1].data_shape, (hardware_source.get_expected_dimensions(2)[1], ))
 
     def test_processed_data_is_reused(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
@@ -516,8 +516,8 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self.__acquire_one(document_controller, hardware_source)
-            self.assertEqual(len(document_model.data_items[0].maybe_data_source.displays[0].graphics), 1)
-            self.assertEqual(document_model.data_items[0].maybe_data_source.displays[0].graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
+            self.assertEqual(len(document_model.data_items[0].displays[0].graphics), 1)
+            self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_changing_processed_bounds_updates_region(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
@@ -525,21 +525,21 @@ class TestCameraControlClass(unittest.TestCase):
             self.__acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
             hardware_source.data_channels[1].processor.bounds = new_bounds
-            self.assertEqual(document_model.data_items[0].maybe_data_source.displays[0].graphics[0].bounds, new_bounds)
+            self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, new_bounds)
 
     def test_changing_region_on_processed_view_updates_processor(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self.__acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
-            document_model.data_items[0].maybe_data_source.displays[0].graphics[0].bounds = new_bounds
+            document_model.data_items[0].displays[0].graphics[0].bounds = new_bounds
             self.assertEqual(hardware_source.data_channels[1].processor.bounds, new_bounds)
 
     def test_restarting_processed_view_recreates_region_after_it_has_been_deleted(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self.__acquire_one(document_controller, hardware_source)
-            display = document_model.data_items[0].maybe_data_source.displays[0]
+            display = document_model.data_items[0].displays[0]
             display.remove_graphic(display.graphics[0])
             self.__acquire_one(document_controller, hardware_source)
             self.assertEqual(display.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)

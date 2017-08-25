@@ -779,16 +779,16 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
     def image_panel_mouse_pressed(self, display_panel, display_specifier, image_position, modifiers):
-        buffered_data_source = display_specifier.buffered_data_source if display_specifier else None
-        hardware_source_id = buffered_data_source and buffered_data_source.metadata.get("hardware_source", dict()).get("hardware_source_id")
+        data_item = display_specifier.data_item if display_specifier else None
+        hardware_source_id = data_item and data_item.d_metadata.get("hardware_source", dict()).get("hardware_source_id")
         if self.__shift_click_state == "shift":
             mouse_position = image_position
-            camera_shape = buffered_data_source.dimensional_shape
+            camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape)
             return self.__mouse_pressed
         if self.__shift_click_state == "tilt":
             mouse_position = image_position
-            camera_shape = buffered_data_source.dimensional_shape
+            camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, camera_shape)
             return self.__mouse_pressed
         return False

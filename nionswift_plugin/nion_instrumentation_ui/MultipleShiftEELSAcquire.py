@@ -101,12 +101,13 @@ class AcquireController(metaclass=Utility.Singleton):
             # TODO: replace frame calibration with acquisition time (this is effectively chronospectroscopy before the sum)
             sequence_calibration = Calibration.Calibration(units="frame")
             image_stack_data_item = DataItem.DataItem(numpy.zeros((8, 8)))  # dummy data
-            image_stack_data_item.maybe_data_source.set_data_and_metadata(DataAndMetadata.new_data_and_metadata(image_stack_data,
-                                                                                                                dimensional_calibrations=[sequence_calibration,
-                                                                                                                    dimension_calibration0,
-                                                                                                                    dimension_calibration1],
-                                                                                                                data_descriptor=DataAndMetadata.DataDescriptor(
-                                                                                                                    True, 0, 2)))
+            image_stack_data_item.set_xdata(DataAndMetadata.new_data_and_metadata(image_stack_data,
+                                                                                  dimensional_calibrations=[
+                                                                                      sequence_calibration,
+                                                                                      dimension_calibration0,
+                                                                                      dimension_calibration1],
+                                                                                  data_descriptor=DataAndMetadata.DataDescriptor(
+                                                                                      True, 0, 2)))
 
             return image_stack_data_item
 
@@ -170,12 +171,12 @@ class AcquireController(metaclass=Utility.Singleton):
 
                 # align and sum the stack
                 data_element = dict()
-                summed_image, shifts = align_stack(stack_data_item.maybe_data_source.data, task)  # please don't copy use of 'maybe_data_source' without consulting Chris
+                summed_image, shifts = align_stack(stack_data_item.data, task)
                 # add the summed image to Swift
                 data_element["data"] = summed_image
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
-                for dimensional_calibration in stack_data_item.maybe_data_source.dimensional_calibrations[1:]:
+                for dimensional_calibration in stack_data_item.dimensional_calibrations[1:]:
                     data_element.setdefault("spatial_calibrations", list()).append({
                         "origin": dimensional_calibration.offset,  # TODO: fix me
                         "scale": dimensional_calibration.scale,
