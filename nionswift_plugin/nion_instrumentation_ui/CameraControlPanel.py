@@ -780,7 +780,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
     # must be called on ui thread
     def image_panel_mouse_pressed(self, display_panel, display_specifier, image_position, modifiers):
         data_item = display_specifier.data_item if display_specifier else None
-        hardware_source_id = data_item and data_item.d_metadata.get("hardware_source", dict()).get("hardware_source_id")
+        hardware_source_id = data_item and data_item.metadata.get("hardware_source", dict()).get("hardware_source_id")
         if self.__shift_click_state == "shift":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape

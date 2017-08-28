@@ -377,8 +377,8 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].d_metadata
-            metadata1 = document_model.data_items[1].d_metadata
+            metadata0 = document_model.data_items[0].metadata
+            metadata1 = document_model.data_items[1].metadata
             scan_id0 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id1 = metadata1.get("hardware_source", dict()).get("scan_id")
             self.assertIsNotNone(scan_id0)
@@ -391,13 +391,13 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].d_metadata
-            metadata1 = document_model.data_items[1].d_metadata
+            metadata0 = document_model.data_items[0].metadata
+            metadata1 = document_model.data_items[1].metadata
             scan_id00 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id01 = metadata1.get("hardware_source", dict()).get("scan_id")
             self._acquire_one(document_controller, hardware_source)
-            metadata0 = document_model.data_items[0].d_metadata
-            metadata1 = document_model.data_items[1].d_metadata
+            metadata0 = document_model.data_items[0].metadata
+            metadata1 = document_model.data_items[1].metadata
             scan_id10 = metadata0.get("hardware_source", dict()).get("scan_id")
             scan_id11 = metadata1.get("hardware_source", dict()).get("scan_id")
             self.assertIsNotNone(scan_id00)
