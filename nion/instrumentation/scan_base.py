@@ -514,8 +514,8 @@ class ScanAdapterAcquisitionTask:
                 data_element["channel_id"] = channel_id  # needed to match to the channel
                 data_element["channel_name"] = channel_name  # needed to match to the channel
                 data_element["spatial_calibrations"] = (
-                    {"offset": center_y_nm, "scale": pixel_size_nm, "units": "nm"},
-                    {"offset": center_x_nm, "scale": pixel_size_nm, "units": "nm"}
+                    {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
                 )
                 properties = dict()
                 if image_metadata is not None:
