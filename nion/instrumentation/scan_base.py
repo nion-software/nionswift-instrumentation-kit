@@ -366,8 +366,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def set_property(self, name, value):
         self.__scan_adapter.set_property(name, value)
 
-    def open_configuration_interface(self):
-        self.__scan_adapter.open_configuration_interface()
+    def open_configuration_interface(self, api_broker):
+        self.__scan_adapter.open_configuration_interface(api_broker)
 
     def shift_click(self, mouse_position, scan_shape):
         if hasattr(self.__scan_adapter, "shift_click") and callable(self.__scan_adapter.shift_click):
@@ -658,8 +658,11 @@ class ScanAdapter:
     def set_channel_enabled(self, channel_index, enabled) -> bool:
         return self.__device.set_channel_enabled(channel_index, enabled)
 
-    def open_configuration_interface(self):
-        self.__device.open_configuration_interface()
+    def open_configuration_interface(self, api_broker):
+        if hasattr(self.__device, "open_configuration_interface"):
+            self.__device.open_configuration_interface()
+        if hasattr(self.__device, "show_configuration_dialog"):
+            self.__device.show_configuration_dialog(api_broker)
 
     def get_frame_parameters_from_dict(self, d):
         return ScanFrameParameters(d)

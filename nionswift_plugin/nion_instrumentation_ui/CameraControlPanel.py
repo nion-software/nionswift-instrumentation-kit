@@ -12,7 +12,7 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
-from nion.swift.model import ImportExportManager
+from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import Widgets
 from nion.utils import Geometry
@@ -45,7 +45,7 @@ class CameraControlStateController:
         (method) set_current_frame_parameters(frame_parameters)
         (method) get_current_frame_parameters()
         (method) shift_click(mouse_position, camera_shape)
-        (method) open_configuration_interface()
+        (method) open_configuration_interface(api_broker)
         (method) open_monitor()
         (method) periodic()
 
@@ -62,7 +62,7 @@ class CameraControlStateController:
         handle_exposure_changed(exposure_str)
         handle_increase_exposure()
         handle_decrease_exposure()
-        handle_settings_button_clicked()
+        handle_settings_button_clicked(api_broker)
         handle_monitor_button_clicked()
         handle_periodic()
         handle_capture_clicked()
@@ -253,9 +253,9 @@ class CameraControlStateController:
             self.__hardware_source.abort_playing()
 
     # must be called on ui thread
-    def handle_settings_button_clicked(self):
+    def handle_settings_button_clicked(self, api_broker):
         if self.__hardware_source:
-            self.__hardware_source.open_configuration_interface()
+            self.__hardware_source.open_configuration_interface(api_broker)
 
     # must be called on ui thread
     def handle_monitor_button_clicked(self):
@@ -683,7 +683,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 self.__state_controller.handle_change_profile(text)
                 profile_combo.request_refocus()
 
-        open_controls_button.on_button_clicked = self.__state_controller.handle_settings_button_clicked
+        open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
         profile_combo.on_current_text_changed = profile_combo_text_changed
 

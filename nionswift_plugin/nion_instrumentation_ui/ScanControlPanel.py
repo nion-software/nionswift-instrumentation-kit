@@ -15,6 +15,7 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
+from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
 from nion.ui import Widgets
@@ -61,7 +62,7 @@ class ScanControlStateController:
         (method) set_current_frame_parameters(frame_parameters)
         (method) get_current_frame_parameters()
         (method) set_record_frame_parameters(frame_parameters)
-        (method) open_configuration_interface()
+        (method) open_configuration_interface(api_broker)
         (method) start_simulator()
         (method) shift_click(mouse_position, camera_shape)
         (method) validate_probe_position()
@@ -76,7 +77,7 @@ class ScanControlStateController:
         handle_record_clicked()
         handle_simulate_clicked()
         handle_enable_channel(channel_index, enabled)
-        handle_settings_button_clicked()
+        handle_settings_button_clicked(api_broker)
         handle_shift_click(hardware_source_id, mouse_position, image_dimensions)
         handle_blanked_check_box(checked)
         handle_positioned_check_box(checked)
@@ -372,8 +373,8 @@ class ScanControlStateController:
         self.__scan_hardware_source.set_channel_enabled(channel_index, enabled)
 
     # must be called on ui thread
-    def handle_settings_button_clicked(self):
-        self.__scan_hardware_source.open_configuration_interface()
+    def handle_settings_button_clicked(self, api_broker):
+        self.__scan_hardware_source.open_configuration_interface(api_broker)
 
     # must be called on ui thread
     def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape):
@@ -1223,7 +1224,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             self.__state_controller.handle_ac_line_sync_check_box(check_state == "checked")
 
         simulate_button.on_clicked = self.__state_controller.handle_simulate_clicked
-        open_controls_button.on_button_clicked = self.__state_controller.handle_settings_button_clicked
+        open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
         blanked_check_box.on_check_state_changed = blanked_check_box_changed
         positioned_check_box.on_check_state_changed = positioned_check_box_changed

@@ -256,8 +256,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def set_mode(self, mode):
         self.set_selected_profile_index(self.modes.index(mode))
 
-    def open_configuration_interface(self):
-        self.__camera_adapter.open_configuration_interface()
+    def open_configuration_interface(self, api_broker):
+        self.__camera_adapter.open_configuration_interface(api_broker)
 
     def open_monitor(self):
         self.__camera_adapter.open_monitor()
@@ -554,15 +554,17 @@ class Camera(abc.ABC):
         """
         return None
 
-    @abc.abstractmethod
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
-        ...
+        pass
 
-    @abc.abstractmethod
+    def show_configuration_dialog(self, api_broker) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
     def start_monitor(self) -> None:
         """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
-        ...
+        pass
 
 
 
@@ -836,8 +838,11 @@ class CameraAdapter:
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
         return [data_element]
 
-    def open_configuration_interface(self):
-        self.camera.show_config_window()
+    def open_configuration_interface(self, api_broker):
+        if hasattr(self.camera, "show_config_window"):
+            self.camera.show_config_window()
+        if hasattr(self.camera, "show_configuration_dialog"):
+            self.camera.show_configuration_dialog(api_broker)
 
     def open_monitor(self):
         self.camera.start_monitor()
