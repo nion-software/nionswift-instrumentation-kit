@@ -151,9 +151,25 @@ class STEMController:
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
 
     @property
+    def _probe_position_value(self):
+        """Internal use."""
+        return self.__probe_position_value
+
+    def disconnect_probe_connections(self):
+        self.probe_data_items_changed_event.fire(list())
+
+    def _data_item_states_changed(self, data_item_states):
+        if len(data_item_states) > 0:
+            self.probe_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
+
+    @property
     def probe_position(self):
         """ Return the probe position, in normalized coordinates with origin at top left. Only valid if probe_state is 'parked'."""
         return self.__probe_position
+
+    @probe_position.setter
+    def probe_position(self, value):
+        self.set_probe_position(value)
 
     def set_probe_position(self, probe_position):
         """ Set the probe position, in normalized coordinates with origin at top left. """
@@ -173,18 +189,6 @@ class STEMController:
         This is called when the user switches from not controlling to controlling the position."""
         self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
 
-    @property
-    def _probe_position_value(self):
-        """Internal use."""
-        return self.__probe_position_value
-
-    def disconnect_probe_connections(self):
-        self.probe_data_items_changed_event.fire(list())
-
-    def _data_item_states_changed(self, data_item_states):
-        if len(data_item_states) > 0:
-            self.probe_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
-
     def set_static_probe_state(self, value: str) -> None:
         """Set the static probe state.
 
@@ -198,14 +202,84 @@ class STEMController:
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
 
     @property
-    def static_probe_state(self):
+    def static_probe_state(self) -> str:
         """Static probe state is the default when not scanning and can be 'blanked' or 'parked'."""
         return self.__probe_state_stack[0]
+
+    @static_probe_state.setter
+    def static_probe_state(self, value: str) -> None:
+        self.set_static_probe_state(value)
 
     @property
     def probe_state(self) -> str:
         """Probe state is the current probe state and can be 'blanked', 'parked', or 'scanning'."""
         return self.__probe_state_stack[-1]
+
+    # instrument API
+
+    def set_control_output(self, name, value, options=None):
+        options = options if options else dict()
+        value_type = options.get("value_type", "output")
+        inform = options.get("inform", False)
+        confirm = options.get("confirm", False)
+        confirm_tolerance_factor = options.get("confirm_tolerance_factor", 1.0)  # instrument keeps track of default; this is a factor applied to the default
+        confirm_timeout = options.get("confirm_timeout", 16.0)
+        if value_type == "output":
+            if inform:
+                self.InformControl(name, value)
+            elif confirm:
+                if not self.SetValAndConfirm(name, value, confirm_tolerance_factor, int(confirm_timeout * 1000)):
+                    raise TimeoutError("Setting '" + name + "'.")
+            else:
+                self.SetVal(name, value)
+        elif value_type == "delta" and not inform:
+            self.SetValDelta(name, value)
+        else:
+            raise NotImplemented()
+
+    def get_control_output(self, name):
+        return self.GetVal(name)
+
+    def get_control_state(self, name):
+        value_exists, value = self.TryGetVal(name)
+        return "unknown" if value_exists else None
+
+    def get_property(self, name):
+        if name in ("probe_position", "static_probe_state", "probe_state"):
+            return getattr(self, name)
+        return self.get_control_output(name)
+
+    def set_property(self, name, value):
+        if name in ("probe_position", "static_probe_state"):
+            return setattr(self, name, value)
+        return self.set_control_output(name, value)
+
+    # end instrument API
+
+    # required functions (templates). subclasses should override.
+
+    def TryGetVal(self, s: str) -> (bool, float):
+        return False, None
+
+    def GetVal(self, s: str, default_value: float=None) -> float:
+        raise Exception("No element named '{}' exists! Cannot get value.".format(s))
+
+    def SetVal(self, s: str, val: float) -> bool:
+        return False
+
+    def SetValWait(self, s: str, val: float, timeout_ms: int) -> bool:
+        return False
+
+    def SetValAndConfirm(self, s: str, val: float, tolfactor: float, timeout_ms: int) -> bool:
+        return False
+
+    def SetValDelta(self, s: str, delta: float) -> bool:
+        return False
+
+    def InformControl(self, s: str, val: float) -> bool:
+        return False
+
+    # end required functions
 
 
 class ProbeView:
