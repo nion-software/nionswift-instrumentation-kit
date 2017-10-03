@@ -520,10 +520,6 @@ class ScanAdapterAcquisitionTask:
                 properties = dict()
                 if image_metadata is not None:
                     properties["autostem"] = copy.deepcopy(image_metadata)
-                    # TODO: file format: remove extra_high_tension
-                    high_tension_v = image_metadata.get("high_tension_v")
-                    if high_tension_v:
-                        properties["extra_high_tension"] = high_tension_v
                 exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
                 properties["hardware_source_name"] = self.__display_name
                 properties["hardware_source_id"] = self.__hardware_source_id

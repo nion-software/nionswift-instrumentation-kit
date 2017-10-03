@@ -644,10 +644,6 @@ class CameraAdapterAcquisitionTask:
             try:
                 autostem_properties = autostem.get_autostem_properties()
                 data_element["properties"].setdefault("autostem", dict()).update(copy.deepcopy(autostem_properties))
-                # TODO: file format: remove extra_high_tension
-                high_tension_v = autostem_properties.get("high_tension_v")
-                if high_tension_v:
-                    data_element["properties"]["extra_high_tension"] = high_tension_v
             except Exception as e:
                 pass
         data_element["properties"]["hardware_source_name"] = self.__display_name
@@ -825,10 +821,6 @@ class CameraAdapter:
             try:
                 autostem_properties = autostem.get_autostem_properties()
                 data_element["properties"].setdefault("autostem", dict()).update(copy.deepcopy(autostem_properties))
-                # TODO: file format: remove extra_high_tension
-                high_tension_v = autostem_properties.get("high_tension_v")
-                if high_tension_v:
-                    data_element["properties"]["extra_high_tension"] = high_tension_v
             except Exception as e:
                 pass
         data_element["properties"]["hardware_source_name"] = self.display_name
