@@ -17,6 +17,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
+from nion.utils import Registry
 
 
 AUTOSTEM_CONTROLLER_ID = "autostem_controller"
@@ -723,3 +724,27 @@ class ScanAdapter:
             self.on_channel_states_changed(channel_states)
         if callable(self.on_static_probe_state_changed):
             self.on_static_probe_state_changed(static_probe_state)
+
+
+_component_registered_listener = None
+_component_unregistered_listener = None
+
+def run():
+    def component_registered(component, component_types):
+        if "scan_device" in component_types:
+            scan_adapter = ScanAdapter(component, component.scan_device_id, component.scan_device_name)
+            scan_hardware_source = ScanHardwareSource(scan_adapter, component.stem_controller_id)
+            HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
+
+    def component_unregistered(component, component_types):
+        if "scan_device" in component_types:
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
+
+    global _component_registered_listener
+    global _component_unregistered_listener
+
+    _component_registered_listener = Registry.listen_component_registered_event(component_registered)
+    _component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
+
+    for component in Registry.get_components_by_type("scan_device"):
+        component_registered(component, {"scan_device"})
