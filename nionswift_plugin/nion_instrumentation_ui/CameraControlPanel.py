@@ -14,8 +14,10 @@ from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
+from nion.ui import Declarative
 from nion.ui import Widgets
 from nion.utils import Geometry
+from nion.utils import Registry
 
 _ = gettext.gettext
 
@@ -815,7 +817,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 class CameraControlPanel(Panel.Panel):
 
     def __init__(self, document_controller, panel_id, properties):
-        super(CameraControlPanel, self).__init__(document_controller, panel_id, "camera-control-panel")
+        super().__init__(document_controller, panel_id, "camera-control-panel")
         ui = document_controller.ui
         self.widget = ui.create_column_widget()
         self.hardware_source_id = properties["hardware_source_id"]
@@ -825,6 +827,29 @@ class CameraControlPanel(Panel.Panel):
             self.widget.add(camera_control_widget)
             self.widget.add_spacing(12)
             self.widget.add_stretch()
+
+
+def create_camera_panel(document_controller, panel_id, properties):
+    camera_panel_type = properties.get("camera_panel_type")
+    for component in Registry.get_components_by_type("camera_panel"):
+        if component.camera_panel_type == camera_panel_type:
+            hardware_source_id = properties["hardware_source_id"]
+            hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
+            camera_device = getattr(hardware_source, "camera", None)
+            ui_handler = component.get_ui_handler(PlugInManager.APIBroker(), document_controller.event_loop, hardware_source_id, camera_device)
+            panel = Panel.Panel(document_controller, panel_id, properties)
+            finishes = list()
+            panel.widget = Declarative.construct(document_controller.ui, None, ui_handler.ui_view, ui_handler)
+            for finish in finishes:
+                finish()
+            if ui_handler and hasattr(ui_handler, "init_handler"):
+                ui_handler.init_handler()
+            def close_handler():
+                if ui_handler and hasattr(ui_handler, "close"):
+                    ui_handler.close()
+            panel.on_close = close_handler
+            return panel
+    return None
 
 
 class CameraDisplayPanelController:
@@ -1019,19 +1044,30 @@ class CameraDisplayPanelController:
     def key_released(self, key):
         return False
 
+
 hardware_source_added_event_listener = None
 hardware_source_removed_event_listener = None
+
+
+_component_registered_listener = None
+_component_unregistered_listener = None
+
 
 def run():
     global hardware_source_added_event_listener, hardware_source_removed_event_listener
     camera_control_panels = dict()
 
     def register_camera_panel(hardware_source):
-        if hardware_source.features.get("is_nion_camera", False):
+        """Called when a hardware source is added to the hardware source manager."""
+
+        # check to see if we handle this hardware source.
+        is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
+        is_eels_camera = hardware_source.features.get("is_eels_camera", False)
+        if is_ronchigram_camera or is_eels_camera:
+
             panel_id = "camera-control-panel-" + hardware_source.hardware_source_id
             name = hardware_source.display_name + " " + _("Camera Control")
             camera_control_panels[hardware_source.hardware_source_id] = panel_id
-            properties = {"hardware_source_id": hardware_source.hardware_source_id}
 
             class CameraDisplayPanelControllerFactory:
                 def __init__(self):
@@ -1065,10 +1101,21 @@ def run():
                     return None
 
             DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraDisplayPanelControllerFactory())
-            Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", properties)
+
+            panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
+
+            camera_panel_type = hardware_source.features.get("camera_panel_type")
+            if not camera_panel_type or camera_panel_type in ("ronchigram", "eels"):
+                Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
+            else:
+                panel_properties["camera_panel_type"] = camera_panel_type
+                Workspace.WorkspaceManager().register_panel(create_camera_panel, panel_id, name, ["left", "right"], "left", panel_properties)
 
     def unregister_camera_panel(hardware_source):
-        if hardware_source.features.get("is_nion_camera", False):
+        """Called when a hardware source is removed from the hardware source manager."""
+        is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
+        is_eels_camera = hardware_source.features.get("is_eels_camera", False)
+        if is_ronchigram_camera or is_eels_camera:
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
             panel_id = camera_control_panels.get(hardware_source.hardware_source_id)
             if panel_id:

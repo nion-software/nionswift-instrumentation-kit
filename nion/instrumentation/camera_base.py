@@ -674,11 +674,10 @@ class CameraAdapter:
         self.modes = ["Run", "Tune", "Snap"]
         self.binning_values = self.camera.binning_values
         self.features = dict()
-        self.features["is_nion_camera"] = True
         self.features["has_monitor"] = True
         self.processor = None
         if camera_category.lower() == "ronchigram":
-            pass  # put ronchi-specific features here
+            self.features["is_ronchigram_camera"] = True
         if camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
@@ -875,6 +874,8 @@ def run():
     def component_registered(component, component_types):
         if "camera_device" in component_types:
             camera_adapter = CameraAdapter(component.camera_id, component.camera_type, component.camera_name, component)
+            if hasattr(component, "camera_panel_type"):
+                camera_adapter.features["camera_panel_type"] = component.camera_panel_type
             camera_hardware_source = CameraHardwareSource(camera_adapter)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
 
