@@ -839,7 +839,7 @@ def create_camera_panel(document_controller, panel_id, properties):
             ui_handler = component.get_ui_handler(PlugInManager.APIBroker(), document_controller.event_loop, hardware_source_id, camera_device)
             panel = Panel.Panel(document_controller, panel_id, properties)
             finishes = list()
-            panel.widget = Declarative.construct(document_controller.ui, None, ui_handler.ui_view, ui_handler)
+            panel.widget = Declarative.construct(document_controller.ui, None, ui_handler.ui_view, ui_handler, finishes)
             for finish in finishes:
                 finish()
             if ui_handler and hasattr(ui_handler, "init_handler"):
