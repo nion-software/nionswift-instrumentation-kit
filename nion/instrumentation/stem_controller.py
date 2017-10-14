@@ -10,6 +10,7 @@ import threading
 
 # local libraries
 from nion.swift.model import Graphics
+from nion.swift.model import HardwareSource
 from nion.utils import Binding
 from nion.utils import Geometry
 from nion.utils import Model
@@ -17,97 +18,6 @@ from nion.utils import Event
 
 
 _ = gettext.gettext
-
-
-class PropertyToGraphicBinding(Binding.PropertyBinding):
-
-    """
-        Binds a property of an operation item to a property of a graphic item.
-    """
-
-    def __init__(self, region, region_property_name, graphic, graphic_property_name):
-        super().__init__(region, region_property_name)
-        self.__graphic = graphic
-        self.__graphic_property_changed_listener = graphic.property_changed_event.listen(self.__property_changed)
-        self.__graphic_property_name = graphic_property_name
-        self.__region_property_name = region_property_name
-        def set_target_value(value):
-            setattr(self.__graphic, graphic_property_name, value)
-        self.target_setter = set_target_value
-
-    def close(self):
-        self.__graphic_property_changed_listener.close()
-        self.__graphic_property_changed_listener = None
-        self.__graphic = None
-        super().close()
-
-    # watch for property changes on the graphic.
-    def __property_changed(self, property_name):
-        if property_name == self.__graphic_property_name:
-            old_property_value = getattr(self.source, self.__region_property_name)
-            # to prevent message loops, check to make sure it changed
-            property_value = getattr(self.__graphic, property_name)
-            if property_value != old_property_value:
-                self.update_source(property_value)
-
-
-class ProbeGraphicConnection:
-    """Manage the connection between the hardware and the graphics representing the probe on a display."""
-    def __init__(self, display, probe_position_value, hide_probe_graphics_fn):
-        self.display = display
-        self.probe_position_value = probe_position_value
-        self.graphic = None
-        self.binding = None
-        self.remove_region_graphic_event_listener = None
-        self.hide_probe_graphics_fn = hide_probe_graphics_fn
-
-    def close(self):
-        graphic = self.graphic
-        self.hide_probe_graphic()
-        if graphic:
-            self.display.remove_graphic(graphic)
-
-    def update_probe_state(self, probe_position, static_probe_state):
-        if probe_position is not None:
-            self.probe_position_value.value = probe_position
-            self.show_probe_graphic()
-        else:
-            graphic = self.graphic
-            self.hide_probe_graphic()
-            if graphic:
-                self.display.remove_graphic(graphic)
-        if self.graphic:
-            self.graphic.color = "#FF0" if static_probe_state == "blanked" else "#F80"
-
-    def show_probe_graphic(self):
-        if not self.graphic:
-            self.graphic = Graphics.PointGraphic()
-            self.graphic.graphic_id = "probe"
-            self.graphic.label = _("Probe")
-            self.graphic.position = self.probe_position_value.value
-            self.graphic.is_bounds_constrained = True
-            self.display.add_graphic(self.graphic)
-            self.binding = PropertyToGraphicBinding(self.probe_position_value, "value", self.graphic, "position")
-            def graphic_removed():
-                self.hide_probe_graphic()
-                # next make sure all other probe graphics get hidden so that setting the probe_position_value
-                # doesn't set graphics positions to None
-                self.hide_probe_graphics_fn()
-                self.probe_position_value.value = None
-            def display_removed():
-                self.hide_probe_graphic()
-            self.remove_region_graphic_event_listener = self.graphic.about_to_be_removed_event.listen(graphic_removed)
-            self.display_about_to_be_removed_listener = self.display.about_to_be_removed_event.listen(display_removed)
-
-    def hide_probe_graphic(self):
-        if self.graphic:
-            self.binding.close()
-            self.binding = None
-            self.remove_region_graphic_event_listener.close()
-            self.remove_region_graphic_event_listener = None
-            self.display_about_to_be_removed_listener.close()
-            self.display_about_to_be_removed_listener = None
-            self.graphic = None
 
 
 class STEMController:
@@ -282,6 +192,97 @@ class STEMController:
     # end required functions
 
 
+class PropertyToGraphicBinding(Binding.PropertyBinding):
+
+    """
+        Binds a property of an operation item to a property of a graphic item.
+    """
+
+    def __init__(self, region, region_property_name, graphic, graphic_property_name):
+        super().__init__(region, region_property_name)
+        self.__graphic = graphic
+        self.__graphic_property_changed_listener = graphic.property_changed_event.listen(self.__property_changed)
+        self.__graphic_property_name = graphic_property_name
+        self.__region_property_name = region_property_name
+        def set_target_value(value):
+            setattr(self.__graphic, graphic_property_name, value)
+        self.target_setter = set_target_value
+
+    def close(self):
+        self.__graphic_property_changed_listener.close()
+        self.__graphic_property_changed_listener = None
+        self.__graphic = None
+        super().close()
+
+    # watch for property changes on the graphic.
+    def __property_changed(self, property_name):
+        if property_name == self.__graphic_property_name:
+            old_property_value = getattr(self.source, self.__region_property_name)
+            # to prevent message loops, check to make sure it changed
+            property_value = getattr(self.__graphic, property_name)
+            if property_value != old_property_value:
+                self.update_source(property_value)
+
+
+class ProbeGraphicConnection:
+    """Manage the connection between the hardware and the graphics representing the probe on a display."""
+    def __init__(self, display, probe_position_value, hide_probe_graphics_fn):
+        self.display = display
+        self.probe_position_value = probe_position_value
+        self.graphic = None
+        self.binding = None
+        self.remove_region_graphic_event_listener = None
+        self.hide_probe_graphics_fn = hide_probe_graphics_fn
+
+    def close(self):
+        graphic = self.graphic
+        self.hide_probe_graphic()
+        if graphic:
+            self.display.remove_graphic(graphic)
+
+    def update_probe_state(self, probe_position, static_probe_state):
+        if probe_position is not None:
+            self.probe_position_value.value = probe_position
+            self.show_probe_graphic()
+        else:
+            graphic = self.graphic
+            self.hide_probe_graphic()
+            if graphic:
+                self.display.remove_graphic(graphic)
+        if self.graphic:
+            self.graphic.color = "#FF0" if static_probe_state == "blanked" else "#F80"
+
+    def show_probe_graphic(self):
+        if not self.graphic:
+            self.graphic = Graphics.PointGraphic()
+            self.graphic.graphic_id = "probe"
+            self.graphic.label = _("Probe")
+            self.graphic.position = self.probe_position_value.value
+            self.graphic.is_bounds_constrained = True
+            self.display.add_graphic(self.graphic)
+            self.binding = PropertyToGraphicBinding(self.probe_position_value, "value", self.graphic, "position")
+            def graphic_removed():
+                self.hide_probe_graphic()
+                # next make sure all other probe graphics get hidden so that setting the probe_position_value
+                # doesn't set graphics positions to None
+                self.hide_probe_graphics_fn()
+                self.probe_position_value.value = None
+            def display_removed():
+                self.hide_probe_graphic()
+            self.remove_region_graphic_event_listener = self.graphic.about_to_be_removed_event.listen(graphic_removed)
+            self.display_about_to_be_removed_listener = self.display.about_to_be_removed_event.listen(display_removed)
+
+    def hide_probe_graphic(self):
+        if self.graphic:
+            self.binding.close()
+            self.binding = None
+            self.remove_region_graphic_event_listener.close()
+            self.remove_region_graphic_event_listener = None
+            self.display_about_to_be_removed_listener.close()
+            self.display_about_to_be_removed_listener = None
+            self.graphic = None
+
+
 class ProbeView:
     """Observes the probe (STEM controller) and updates data items and graphics."""
 
@@ -351,9 +352,6 @@ class ProbeView:
         # thread unsafe.
         for probe_graphic_connection in self.__probe_graphic_connections:
             probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
-
-
-from nion.swift.model import HardwareSource
 
 
 class ProbeViewController:
