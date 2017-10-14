@@ -15,6 +15,8 @@ import typing
 import numpy
 
 # local libraries
+from nion.data import Core
+from nion.data import DataAndMetadata
 from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
@@ -780,21 +782,34 @@ class CameraAdapter:
         if callable(getattr(self.camera, "acquire_sequence_prepare", None)):
             self.camera.acquire_sequence_prepare()
 
-    def __acquire_sequence(self, n: int):
+    def __acquire_sequence(self, n: int, processing: str) -> dict:
         if callable(getattr(self.camera, "acquire_sequence", None)):
             data_element = self.camera.acquire_sequence(n)
             if data_element is not None:
                 return data_element
         self.camera.start_live()
-        properties = None
-        data = None
-        for index in range(n):
-            frame_data_element = self.camera.acquire_image()
-            frame_data = frame_data_element["data"]
-            if data is None:
-                data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
-            data[index] = frame_data
-            properties = frame_data_element["properties"]
+        try:
+            properties = None
+            data = None
+            for index in range(n):
+                frame_data_element = self.camera.acquire_image()
+                frame_data = frame_data_element["data"]
+                if data is None:
+                    if processing == "sum_project":
+                        data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
+                    else:
+                        data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
+                if processing == "sum_project":
+                    data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
+                else:
+                    data[index] = frame_data
+                properties = frame_data_element["properties"]
+                if processing == "sum_project":
+                    spatial_properties = properties.get("spatial_calibrations")
+                    if spatial_properties is not None:
+                        properties["spatial_properties"] = spatial_properties[1:]
+        finally:
+            self.camera.stop_live()
         data_element = dict()
         data_element["data"] = data
         data_element["properties"] = properties
@@ -804,7 +819,7 @@ class CameraAdapter:
         self.camera.exposure_ms = frame_parameters.exposure_ms
         self.camera.binning = frame_parameters.binning
         self.camera.processing = frame_parameters.processing
-        data_element = self.__acquire_sequence(n)
+        data_element = self.__acquire_sequence(n, frame_parameters.processing)
         data_element["version"] = 1
         data_element["state"] = "complete"
         # add optional calibration properties
