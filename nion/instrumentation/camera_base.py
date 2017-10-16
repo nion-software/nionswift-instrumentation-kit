@@ -633,13 +633,15 @@ class CameraAdapterAcquisitionTask:
         data_element["sub_area"] = sub_area
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
-        # add optional calibration properties
-        if "spatial_calibrations" in data_element["properties"]:
-            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
-        else:  # handle backwards compatible case for nionccd1010
-            data_element["spatial_calibrations"] = self.__camera.calibration
-        if "intensity_calibration" in data_element["properties"]:
-            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
+        # add optional calibration properties. this section should be removed once NionCCD1010 is updated.
+        if "spatial_calibrations" not in data_element:
+            if "spatial_calibrations" in data_element["properties"]:
+                data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
+            else:  # handle backwards compatible case for nionccd1010
+                data_element["spatial_calibrations"] = self.__camera.calibration
+        if "intensity_calibration" not in data_element:
+            if "intensity_calibration" in data_element["properties"]:
+                data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
         # grab metadata from the autostem
         autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
         if autostem:
