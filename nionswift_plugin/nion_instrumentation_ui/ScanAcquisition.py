@@ -418,7 +418,14 @@ class PanelDelegate:
         camera_row.add(ComboBoxWidget(self.__camera_hardware_source_choice.create_combo_box(ui._ui)))
         camera_row.add_spacing(12)
         camera_row.add(self.__style_combo_box)
+        camera_row.add_spacing(12)
         camera_row.add_stretch()
+
+        scan_row = ui.create_row_widget()
+        scan_row.add_spacing(12)
+        scan_row.add(ComboBoxWidget(self.__scan_hardware_source_choice.create_combo_box(ui._ui)))
+        scan_row.add_spacing(12)
+        scan_row.add_stretch()
 
         scan_size_row = ui.create_row_widget()
         scan_size_row.add_spacing(12)
@@ -427,6 +434,7 @@ class PanelDelegate:
         scan_size_row.add(self.__scan_width_widget)
         scan_size_row.add_spacing(12)
         scan_size_row.add(self.__scan_height_widget)
+        scan_size_row.add_spacing(12)
         scan_size_row.add_stretch()
 
         eels_exposure_row = ui.create_row_widget()
@@ -451,6 +459,9 @@ class PanelDelegate:
         # column.add_spacing(8)
         # column.add(line_button_row)
         # column.add(line_samples_row)
+        if self.__scan_hardware_source_choice.hardware_source_count > 1:
+            column.add_spacing(8)
+            column.add(scan_row)
         column.add_spacing(8)
         column.add(camera_row)
         column.add_spacing(8)
@@ -671,6 +682,10 @@ class HardwareSourceChoice:
         self.__hardware_source_removed_event_listener = None
         self.__property_changed_event_listener.close()
         self.__property_changed_event_listener = None
+
+    @property
+    def hardware_source_count(self) -> int:
+        return len(self.hardware_sources_model.value)
 
     @property
     def hardware_source(self):
