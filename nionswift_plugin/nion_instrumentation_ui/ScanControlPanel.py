@@ -53,6 +53,7 @@ class ScanControlStateController:
         (read-only property) probe_state
         (read/write property) probe_position may be None
         (read-only property) channel_count
+        (read-only property) data_channel_count
         (method) set_selected_profile_index(profile_index): change the profile index
         (method) get_frame_parameters(profile_index)
         (method) set_frame_parameters(profile_index, frame_parameters)
@@ -113,6 +114,7 @@ class ScanControlStateController:
         on_simulate_button_state_changed(visible, enabled)
         on_display_new_data_item(data_item)
         (thread) on_channel_state_changed(channel_index, channel_id, channel_name, enabled)
+        (thread) on_data_channel_state_changed(data_channel_index, data_channel_id, data_channel_name, enabled)
         (thread) on_data_item_states_changed(data_item_states)
         (thread) on_probe_state_changed(probe_state, probe_position)  parked, scanning
         (thread) on_positioned_check_box_changed(checked)
@@ -144,6 +146,7 @@ class ScanControlStateController:
         self.on_linked_changed = None
         self.on_channel_count_changed = None
         self.on_channel_state_changed = None
+        self.on_data_channel_state_changed = None
         self.on_scan_button_state_changed = None
         self.on_abort_button_state_changed = None
         self.on_record_button_state_changed = None
@@ -203,6 +206,7 @@ class ScanControlStateController:
         self.on_linked_changed = None
         self.on_channel_count_changed = None
         self.on_channel_state_changed = None
+        self.on_data_channel_state_changed = None
         self.on_scan_button_state_changed = None
         self.on_abort_button_state_changed = None
         self.on_record_button_state_changed = None
@@ -546,6 +550,10 @@ class ScanControlStateController:
             if not name:
                 name = "Channel " + str(channel_id)
             self.on_channel_state_changed(channel_index, channel_id, name, enabled)
+        if callable(self.on_data_channel_state_changed):
+            self.on_data_channel_state_changed(channel_index, channel_id, name, enabled)
+            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.__scan_hardware_source.get_subscan_channel_info(channel_index, channel_id, name)
+            self.on_data_channel_state_changed(subscan_channel_index, subscan_channel_id, subscan_channel_name, enabled)
         was_any_channel_enabled = any(self.__channel_enabled)
         self.__channel_enabled[channel_index] = enabled
         is_any_channel_enabled = any(self.__channel_enabled)
@@ -1424,13 +1432,13 @@ class ScanDisplayPanelController:
 
     type = "scan-live"
 
-    def __init__(self, display_panel, hardware_source_id, hardware_source_channel_id):
+    def __init__(self, display_panel, hardware_source_id, data_channel_id):
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         self.type = ScanDisplayPanelController.type
 
         self.__hardware_source_id = hardware_source_id
-        self.__hardware_source_channel_id = hardware_source_channel_id
+        self.__data_channel_id = data_channel_id
 
         # configure the user interface
         self.__display_name = str()
@@ -1492,7 +1500,7 @@ class ScanDisplayPanelController:
         self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
 
         # configure the hardware source state controller
-        self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model, hardware_source_channel_id)
+        self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model, data_channel_id)
 
         def update_display_name():
             new_text = "%s (%s)" % (self.__display_name, self.__channel_name)
@@ -1527,7 +1535,7 @@ class ScanDisplayPanelController:
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                 "partial": _("Acquiring"), "marked": _("Stopping")}
             for data_item_state in self.__data_item_states:
-                if data_item_state["channel_id"] == self.__hardware_source_channel_id:
+                if data_item_state["channel_id"] == self.__data_channel_id:
                     data_item = data_item_state["data_item"]
                     channel_state = data_item_state["channel_state"]
                     partial_str = str()
@@ -1567,9 +1575,9 @@ class ScanDisplayPanelController:
             self.__data_item_states = data_item_states
             display_panel.document_controller.queue_task(update_status_text)
 
-        def channel_state_changed(channel_index, channel_id, channel_name, enabled):
-            if channel_id == self.__hardware_source_channel_id:
-                self.__channel_index = channel_index
+        def data_channel_state_changed(data_channel_index, data_channel_id, channel_name, enabled):
+            if data_channel_id == self.__data_channel_id:
+                self.__channel_index = hardware_source.get_channel_index_for_data_channel_index(data_channel_index)
                 self.__channel_name = channel_name
                 self.__channel_enabled = enabled
                 update_display_name()
@@ -1599,7 +1607,7 @@ class ScanDisplayPanelController:
         self.__state_controller.on_scan_button_state_changed = scan_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = data_item_states_changed
-        self.__state_controller.on_channel_state_changed = channel_state_changed
+        self.__state_controller.on_data_channel_state_changed = data_channel_state_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
         self.__state_controller.on_display_new_data_item = display_new_data_item
         self.__state_controller.on_display_data_item_changed = display_panel.set_displayed_data_item
@@ -1626,8 +1634,8 @@ class ScanDisplayPanelController:
 
     def save(self, d):
         d["hardware_source_id"] = self.__hardware_source_id
-        if self.__hardware_source_channel_id is not None:
-            d["channel_id"] = self.__hardware_source_channel_id
+        if self.__data_channel_id is not None:
+            d["channel_id"] = self.__data_channel_id
 
     def key_pressed(self, key):
         if key.text == " ":
@@ -1662,8 +1670,8 @@ def run():
                 def build_menu(self, display_type_menu, selected_display_panel):
                     # return a list of actions that have been added to the menu.
                     actions = list()
-                    for channel_index in range(hardware_source.channel_count):
-                        channel_id, channel_name, __ = hardware_source.get_channel_state(channel_index)  # hack since there is no get_channel_info call
+                    for channel_index in range(hardware_source.data_channel_count):
+                        channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
                         def switch_to_live_controller(hardware_source, channel_id):
                             d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                             selected_display_panel.change_display_panel_content(d)
@@ -1685,8 +1693,8 @@ def run():
                     return None
 
                 def match(self, document_model, data_item: DataItem.DataItem) -> dict:
-                    for channel_index in range(hardware_source.channel_count):
-                        channel_id, channel_name, __ = hardware_source.get_channel_state(channel_index)  # hack since there is no get_channel_info call
+                    for channel_index in range(hardware_source.data_channel_count):
+                        channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
                         if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
                             return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                     return None

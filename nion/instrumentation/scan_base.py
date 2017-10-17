@@ -1,6 +1,7 @@
 # standard libraries
 import collections
 import copy
+import gettext
 import logging
 import queue
 import threading
@@ -18,6 +19,9 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Registry
+
+
+_ = gettext.gettext
 
 
 class ScanFrameParameters:
@@ -254,6 +258,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
         for channel_info in channel_info_list:
             self.add_data_channel(channel_info.channel_id, channel_info.name)
+        # add an associated sub-scan channel for each device channel
+        for channel_index, channel_info in enumerate(channel_info_list):
+            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
+            self.add_data_channel(subscan_channel_id, subscan_channel_name)
 
         self.__last_idle_position = None  # used for testing
 
@@ -271,6 +279,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = dict()
         self.record_index = 1  # use to give unique name to recorded images
+        self.__subscan_enabled = False
 
     def close(self):
         # thread needs to close before closing the stem controller. so use this method to
@@ -407,6 +416,31 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if changed:
             self.__channel_states_changed([self.get_channel_state(i_channel_index) for i_channel_index in range(self.channel_count)])
 
+    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
+        return channel_index + self.channel_count, channel_id + ".subscan", " ".join((channel_name, _("SubScan")))
+
+    def get_data_channel_state(self, channel_index):
+        # channel indexes larger than then the channel count will be subscan channels
+        if channel_index < self.channel_count:
+            channel_id, name, enabled = self.get_channel_state(channel_index)
+            return channel_id, name, enabled if not self.__subscan_enabled else False
+        else:
+            channel_id, name, enabled = self.get_channel_state(channel_index - self.channel_count)
+            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_id, name)
+            return subscan_channel_id, subscan_channel_name, enabled if self.__subscan_enabled else False
+
+    def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
+        return data_channel_index % self.channel_count
+
+    def convert_data_channel_id_to_channel_id(self, data_channel_id: int) -> int:
+        channel_count = self.channel_count
+        for channel_index in range(channel_count):
+            if data_channel_id == self.get_data_channel_state(channel_index)[0]:
+                return channel_index
+            if data_channel_id == self.get_data_channel_state(channel_index + channel_count)[0]:
+                return channel_index
+        assert False
+
     def record_async(self, callback_fn):
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
@@ -451,12 +485,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # this method will be called when the device changes channels enabled (via dialog or script).
         # it updates the channels internally but does not send out a message to set the channels to the
         # hardware, since they're already set, and doing so can cause strange change loops.
-        assert len(channel_states) == self.channel_count
+        channel_count = self.channel_count
+        assert len(channel_states) == channel_count
         def channel_states_changed():
             for channel_index, channel_state in enumerate(channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
             at_least_one_enabled = False
-            for channel_index in range(self.channel_count):
+            for channel_index in range(channel_count):
                 if self.get_channel_state(channel_index).enabled:
                     at_least_one_enabled = True
                     break
