@@ -210,6 +210,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_record_frame_parameters(self):
         return self.__record_parameters
 
+    @property
+    def channel_count(self) -> int:
+        return self.__scan_adapter.channel_count
+
     def get_channel_state(self, channel_index):
         return self.__scan_adapter.get_channel_state(channel_index)
 
@@ -649,6 +653,10 @@ class ScanAdapter:
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
         record_task = ScanAdapterAcquisitionTask(self.__device, self.hardware_source_id, False, frame_parameters, channel_states, self.display_name)
         return record_task
+
+    @property
+    def channel_count(self) -> int:
+        return len(self.__device.channels_enabled)
 
     def get_channel_state(self, channel_index):
         channels_enabled = self.__device.channels_enabled
