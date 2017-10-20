@@ -653,7 +653,7 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = exposure_ms / 1000.0
         data_element["properties"]["binning"] = binning
-        data_element["properties"]["valid_rows"] = cumulative_data.shape
+        data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
         return [data_element]
