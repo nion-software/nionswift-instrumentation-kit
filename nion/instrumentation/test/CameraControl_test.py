@@ -39,7 +39,7 @@ class TestCameraControlClass(unittest.TestCase):
     def tearDown(self):
         HardwareSource.HardwareSourceManager()._close_hardware_sources()
 
-    def __acquire_one(self, document_controller, hardware_source):
+    def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing()
         try:
             start_time = time.time()
@@ -110,9 +110,9 @@ class TestCameraControlClass(unittest.TestCase):
     def test_view_generates_a_data_item(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
-            self.__acquire_one(document_controller, hardware_source)
-            self.__acquire_one(document_controller, hardware_source)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 1)
 
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition(self):
@@ -125,10 +125,10 @@ class TestCameraControlClass(unittest.TestCase):
             frame_parameters_1.binning = 1
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
             hardware_source.set_selected_profile_index(1)
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(1))
 
     def test_change_to_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
@@ -289,10 +289,10 @@ class TestCameraControlClass(unittest.TestCase):
     def test_changing_binning_is_reflected_in_new_acquisition(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
             state_controller.handle_binning_changed("4")
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
 
     def test_first_view_uses_correct_mode(self):
@@ -472,15 +472,15 @@ class TestCameraControlClass(unittest.TestCase):
     def test_processed_data_is_regenerated_if_necessary(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             document_model.recompute_all()
             self.assertEqual(len(document_model.data_items), 2)
             document_model.remove_data_item(document_model.data_items[1])
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             document_model.recompute_all()
             self.assertEqual(len(document_model.data_items), 2)
             document_model.remove_data_item(document_model.data_items[0])
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             document_model.recompute_all()
             self.assertEqual(len(document_model.data_items), 2)
 
@@ -515,14 +515,14 @@ class TestCameraControlClass(unittest.TestCase):
     def test_starting_processed_view_initializes_source_region(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items[0].displays[0].graphics), 1)
             self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_changing_processed_bounds_updates_region(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
             hardware_source.data_channels[1].processor.bounds = new_bounds
             self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, new_bounds)
@@ -530,7 +530,7 @@ class TestCameraControlClass(unittest.TestCase):
     def test_changing_region_on_processed_view_updates_processor(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
             document_model.data_items[0].displays[0].graphics[0].bounds = new_bounds
             self.assertEqual(hardware_source.data_channels[1].processor.bounds, new_bounds)
@@ -538,10 +538,10 @@ class TestCameraControlClass(unittest.TestCase):
     def test_restarting_processed_view_recreates_region_after_it_has_been_deleted(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             display = document_model.data_items[0].displays[0]
             display.remove_graphic(display.graphics[0])
-            self.__acquire_one(document_controller, hardware_source)
+            self._acquire_one(document_controller, hardware_source)
             self.assertEqual(display.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_consecutive_frames_have_unique_data(self):
