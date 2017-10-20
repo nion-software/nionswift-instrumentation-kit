@@ -627,10 +627,9 @@ class CameraAdapterAcquisitionTask:
             assert cumulative_frame_count <= integration_count
         if self.__stop_after_acquire:
             self.__camera.stop_live()
-        sub_area = (0, 0), cumulative_data.shape
+        # camera data is always assumed to be full frame, otherwise deal with subarea 1d and 2d
         data_element["data"] = cumulative_data
         data_element["version"] = 1
-        data_element["sub_area"] = sub_area
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
         # add optional calibration properties. this section should be removed once NionCCD1010 is updated.
@@ -654,7 +653,7 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = exposure_ms / 1000.0
         data_element["properties"]["binning"] = binning
-        data_element["properties"]["valid_rows"] = sub_area[0][0] + sub_area[1][0]
+        data_element["properties"]["valid_rows"] = cumulative_data.shape
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
         return [data_element]
