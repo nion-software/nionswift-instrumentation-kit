@@ -43,7 +43,6 @@ class STEMController:
     def __init__(self):
         self.__probe_position_value = Model.PropertyModel()
         self.__probe_position_value.on_value_changed = self.set_probe_position
-        self.__probe_position = None
         self.__probe_state_stack = list()
         self.__probe_state_stack.append("parked")
         self.probe_state_changed_event = Event.Event()
@@ -75,21 +74,22 @@ class STEMController:
     @property
     def probe_position(self):
         """ Return the probe position, in normalized coordinates with origin at top left. Only valid if probe_state is 'parked'."""
-        return self.__probe_position
+        return self.__probe_position_value.value
 
     @probe_position.setter
     def probe_position(self, value):
         self.set_probe_position(value)
 
-    def set_probe_position(self, probe_position):
+    def set_probe_position(self, new_probe_position):
         """ Set the probe position, in normalized coordinates with origin at top left. """
-        if probe_position is not None:
+        if new_probe_position is not None:
             # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
-            probe_position = Geometry.FloatPoint.make(probe_position)
-            probe_position = Geometry.FloatPoint(y=max(min(probe_position.y, 1.0), 0.0),
-                                                 x=max(min(probe_position.x, 1.0), 0.0))
-        if ((self.__probe_position is None) != (probe_position is None)) or (self.__probe_position != probe_position):
-            self.__probe_position = probe_position
+            new_probe_position = Geometry.FloatPoint.make(new_probe_position)
+            new_probe_position = Geometry.FloatPoint(y=max(min(new_probe_position.y, 1.0), 0.0),
+                                                     x=max(min(new_probe_position.x, 1.0), 0.0))
+        old_probe_position = self.__probe_position_value.value
+        if ((old_probe_position is None) != (new_probe_position is None)) or (old_probe_position != new_probe_position):
+            self.__probe_position_value.value = new_probe_position
             # update the probe position for listeners and also explicitly update for probe_graphic_connections.
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
 
@@ -205,7 +205,8 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
         self.__graphic_property_name = graphic_property_name
         self.__region_property_name = region_property_name
         def set_target_value(value):
-            setattr(self.__graphic, graphic_property_name, value)
+            if value is not None:
+                setattr(self.__graphic, graphic_property_name, value)
         self.target_setter = set_target_value
 
     def close(self):
@@ -220,6 +221,8 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
             old_property_value = getattr(self.source, self.__region_property_name)
             # to prevent message loops, check to make sure it changed
             property_value = getattr(self.__graphic, property_name)
+            if property_value is not None:
+                property_value = Geometry.FloatPoint(y=property_value[0], x=property_value[1])
             if property_value != old_property_value:
                 self.update_source(property_value)
 

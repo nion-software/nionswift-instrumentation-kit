@@ -842,6 +842,32 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
             self.assertIsNone(hardware_source.probe_position)
 
+    def test_setting_probe_position_updates_probe_graphic(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            scan_context.instrument.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.periodic()
+            probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
+            self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
+            scan_context.instrument.set_probe_position(Geometry.FloatPoint(y=0.45, x=0.65))
+            document_controller.periodic()
+            self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
+
+    def test_setting_probe_graphic_updates_probe_position(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            scan_context.instrument.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.periodic()
+            probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
+            self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
+            probe_graphic.position = Geometry.FloatPoint(y=0.45, x=0.65)
+            document_controller.periodic()
+            self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
+
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
 
