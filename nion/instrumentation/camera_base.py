@@ -572,10 +572,11 @@ class Camera(abc.ABC):
 
 class CameraAdapterAcquisitionTask:
 
-    def __init__(self, hardware_source_id, is_continuous: bool, camera: Camera, frame_parameters, display_name):
+    def __init__(self, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
+        self.__camera_category = camera_category
         self.__display_name = display_name
         self.__frame_parameters = None
         self.__pending_frame_parameters = copy.copy(frame_parameters)
@@ -656,6 +657,8 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
+        if self.__camera_category in ("eels", "ronchigram"):
+            data_element["properties"]["signal_type"] = self.__camera_category
         return [data_element]
 
     def __activate_frame_parameters(self):
@@ -674,6 +677,7 @@ class CameraAdapter:
         self.hardware_source_id = hardware_source_id
         self.display_name = display_name
         self.camera = camera
+        self.__camera_category = camera_category
         self.modes = ["Run", "Tune", "Snap"]
         self.binning_values = self.camera.binning_values
         self.features = dict()
@@ -772,11 +776,11 @@ class CameraAdapter:
         return self.camera.get_expected_dimensions(binning)
 
     def create_acquisition_task(self, frame_parameters):
-        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.camera, frame_parameters, self.display_name)
+        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.camera, self.__camera_category, frame_parameters, self.display_name)
         return acquisition_task
 
     def create_record_task(self, frame_parameters):
-        record_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.camera, frame_parameters, self.display_name)
+        record_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.camera, self.__camera_category, frame_parameters, self.display_name)
         return record_task
 
     def acquire_sequence_prepare(self):

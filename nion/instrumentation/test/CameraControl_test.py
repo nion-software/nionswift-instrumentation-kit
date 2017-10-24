@@ -544,6 +544,21 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(display.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
+    def test_acquiring_eels_sets_signal_type_for_both_copies(self):
+        # assumes EELS camera produces two data items
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
+        with contextlib.closing(document_controller):
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(document_model.data_items[0].metadata["hardware_source"]["signal_type"], "eels")
+            self.assertEqual(document_model.data_items[1].metadata["hardware_source"]["signal_type"], "eels")
+
+    def test_acquiring_ronchigram_sets_signal_type(self):
+        # assumes EELS camera produces two data items
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
+        with contextlib.closing(document_controller):
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(document_model.data_items[0].metadata["hardware_source"]["signal_type"], "ronchigram")
+
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the camera is saturated (or otherwise produces identical values naturally)
         numpy.random.seed(999)
