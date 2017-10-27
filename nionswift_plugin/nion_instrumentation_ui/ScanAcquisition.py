@@ -141,8 +141,10 @@ class ScanAcquisitionController:
                         data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
                         if len(scan_data_list) > 0:
                             collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
+                            scan_properties = scan_data_list[0].metadata
                         else:
                             collection_calibrations = [{}, {}]
+                            scan_properties = {}
                         if "spatial_calibrations" in data_element:
                             datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
                         else:
@@ -150,6 +152,7 @@ class ScanAcquisitionController:
                         # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
                         data_element["collection_dimension_count"] = 2
                         data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
+                        data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
                         data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         def create_and_display_data_item():
                             data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
