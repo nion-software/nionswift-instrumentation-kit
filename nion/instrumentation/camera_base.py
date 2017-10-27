@@ -787,34 +787,46 @@ class CameraAdapter:
         if callable(getattr(self.camera, "acquire_sequence_prepare", None)):
             self.camera.acquire_sequence_prepare()
 
-    def __acquire_sequence(self, n: int, processing: str) -> dict:
+    def __acquire_sequence(self, n: int, frame_parameters) -> dict:
         if callable(getattr(self.camera, "acquire_sequence", None)):
             data_element = self.camera.acquire_sequence(n)
             if data_element is not None:
                 return data_element
-        self.camera.start_live()
+        processing = frame_parameters.processing
+        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.camera, self.__camera_category, frame_parameters, self.display_name)
+        acquisition_task.start_acquisition()
         try:
             properties = None
             data = None
             for index in range(n):
-                frame_data_element = self.camera.acquire_image()
-                frame_data = frame_data_element["data"]
-                if data is None:
+                frame_data_elements = acquisition_task.acquire_data_elements()
+                if len(frame_data_elements) == 1 or processing != "sum_project":
+                    frame_data_element = frame_data_elements[0]
+                    frame_data = frame_data_element["data"]
+                    if data is None:
+                        if processing == "sum_project":
+                            data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
+                        else:
+                            data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
                     if processing == "sum_project":
-                        data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
+                        data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
                     else:
-                        data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
-                if processing == "sum_project":
-                    data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
-                else:
+                        data[index] = frame_data
+                    properties = copy.deepcopy(frame_data_element["properties"])
+                elif len(frame_data_elements) == 2:
+                    frame_data_element = frame_data_elements[1]
+                    frame_data = frame_data_element["data"]
+                    if data is None:
+                        data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
                     data[index] = frame_data
-                properties = frame_data_element["properties"]
+                    properties = copy.deepcopy(frame_data_element["properties"])
                 if processing == "sum_project":
+                    properties["valid_rows"] = 1
                     spatial_properties = properties.get("spatial_calibrations")
                     if spatial_properties is not None:
                         properties["spatial_properties"] = spatial_properties[1:]
         finally:
-            self.camera.stop_live()
+            acquisition_task.stop_acquisition()
         data_element = dict()
         data_element["data"] = data
         data_element["properties"] = properties
@@ -824,7 +836,7 @@ class CameraAdapter:
         self.camera.exposure_ms = frame_parameters.exposure_ms
         self.camera.binning = frame_parameters.binning
         self.camera.processing = frame_parameters.processing
-        data_element = self.__acquire_sequence(n, frame_parameters.processing)
+        data_element = self.__acquire_sequence(n, frame_parameters)
         data_element["version"] = 1
         data_element["state"] = "complete"
         # add optional calibration properties
