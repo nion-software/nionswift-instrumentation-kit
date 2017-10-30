@@ -2,7 +2,9 @@
 import functools
 import gettext
 import logging
+import numpy
 import sys
+import time
 
 # local libraries
 from nion.swift import DataItemThumbnailWidget
@@ -110,9 +112,14 @@ class CameraControlStateController:
         self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
         self.on_processed_data_item_changed = None
+        self.on_camera_current_changed = None
         self.on_log_messages = None
 
         self.__captured_xdatas_available_event = None
+
+        self.__camera_current = None
+        self.__last_camera_current_time = 0
+        self.__xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
 
         self.__data_item = None
         data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
@@ -162,9 +169,11 @@ class CameraControlStateController:
         self.__hardware_source = None
 
     def __update_play_button_state(self):
+        enabled = self.__hardware_source is not None
         if self.on_play_button_state_changed:
-            enabled = self.__hardware_source is not None
             self.on_play_button_state_changed(enabled, "pause" if self.is_playing else "play")
+        if enabled and not self.is_playing and callable(self.on_camera_current_changed):
+            self.on_camera_current_changed(None)
 
     def __update_abort_button_state(self):
         if self.on_abort_button_state_changed:
@@ -211,6 +220,22 @@ class CameraControlStateController:
             self.__eels_data_item = eels_data_item_reference.data_item
             if self.on_processed_data_item_changed:
                 self.on_processed_data_item_changed(self.__eels_data_item)
+
+    def __receive_new_xdatas(self, xdatas):
+        current_time = time.time()
+        if current_time - self.__last_camera_current_time > 5.0 and len(xdatas) > 0 and callable(self.on_camera_current_changed):
+            xdata = xdatas[0]
+            counts_per_electron = xdata.metadata.get("hardware_source", dict()).get("counts_per_electron")
+            exposure = xdata.metadata.get("hardware_source", dict()).get("exposure")
+            if xdata.intensity_calibration.units == "counts" and counts_per_electron and exposure:
+                sum_counts = xdata.intensity_calibration.convert_to_calibrated_value(numpy.sum(xdatas[0].data))
+                detector_current = sum_counts / exposure / counts_per_electron / 6.242e18
+                if detector_current != self.__camera_current:
+                    self.__camera_current = detector_current
+                    def update_camera_current():
+                        self.on_camera_current_changed(self.__camera_current)
+                    self.queue_task(update_camera_current)
+            self.__last_camera_current_time = current_time
 
     def initialize_state(self):
         """ Call this to initialize the state of the UI after everything has been connected. """
@@ -304,7 +329,7 @@ class CameraControlStateController:
         self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
 
     def handle_capture_clicked(self):
-        def receive_new_xdatas(xdatas):
+        def capture_xdatas(xdatas):
             if self.__captured_xdatas_available_event:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
@@ -322,7 +347,7 @@ class CameraControlStateController:
                     self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
-        self.__captured_xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(receive_new_xdatas)
+        self.__captured_xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(capture_xdatas)
         self.__update_buttons()
 
     # must be called on ui thread
@@ -561,6 +586,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
         monitor_button = ui.create_push_button_widget(_("Monitor View..."))
+        camera_current_label = ui.create_label_widget()
         profile_label = ui.create_label_widget(_("Mode: "), properties={"margin":4})
         profile_combo = ui.create_combo_box_widget(properties={"min-width":72})
         play_state_label = ui.create_label_widget()
@@ -588,6 +614,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         button_row1a = ui.create_row_widget(properties={"spacing": 2})
         button_row1a.add(monitor_button)
         button_row1a.add_stretch()
+        button_row1a.add(camera_current_label)
 
         def monitor_button_state_changed(visible, enabled):
             monitor_button.visible = visible
@@ -739,6 +766,13 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             else:
                 play_state_label.text = map_channel_state_to_text["stopped"]
 
+        def camera_current_changed(camera_current):
+            if camera_current:
+                camera_current_label.text = str(int(camera_current * 1e12)) + _("pA")
+                camera_current_label.text_color = "black"
+            else:
+                camera_current_label.text_color = "gray"
+
         def log_messages(messages, data_elements):
             while len(messages) > 0:
                 message = messages.pop(0)
@@ -756,6 +790,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
         self.__state_controller.on_monitor_button_state_changed = monitor_button_state_changed
+        self.__state_controller.on_camera_current_changed = camera_current_changed
         self.__state_controller.on_log_messages = log_messages
 
         self.__state_controller.initialize_state()
