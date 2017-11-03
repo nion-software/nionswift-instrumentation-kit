@@ -114,8 +114,12 @@ class ScanAcquisitionController:
                         camera_frame_parameters["processing"] = "sum_project"
 
                     scan_frame_parameters = scan_hardware_source.get_frame_parameters_for_profile_by_index(2)
-                    scan_max_size = 256
-                    scan_frame_parameters["size"] = min(scan_max_size, scan_frame_parameters["size"][0]), min(scan_max_size, scan_frame_parameters["size"][1])
+                    scan_max_area = 256 * 256
+                    scan_param_height = scan_frame_parameters["size"][0]
+                    scan_param_width = scan_frame_parameters["size"][1]
+                    if scan_param_height * scan_param_width > scan_max_area:
+                        scan_param_height = scan_max_area // scan_param_width
+                    scan_frame_parameters["size"] = scan_param_height, scan_param_width
                     scan_frame_parameters["pixel_time_us"] = int(1000 * camera_frame_parameters["exposure_ms"] * 0.75)
                     # long timeout is needed until memory allocation is outside of the acquire_sequence call.
                     scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
