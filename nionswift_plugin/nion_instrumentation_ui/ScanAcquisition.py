@@ -128,7 +128,7 @@ class ScanAcquisitionController:
                     camera_hardware_source.set_frame_parameters(camera_frame_parameters)
                     camera_hardware_source._hardware_source.acquire_sequence_prepare()
 
-                    flyback_pixels = 2
+                    flyback_pixels = scan_hardware_source._hardware_source.flyback_pixels  # using internal API
                     with contextlib.closing(scan_hardware_source.create_record_task(scan_frame_parameters)) as scan_task:
                         scan_height = scan_frame_parameters["size"][0]
                         scan_width = scan_frame_parameters["size"][1] + flyback_pixels
@@ -138,7 +138,10 @@ class ScanAcquisitionController:
                         # quickly. see note below.
                         scan_data_list = scan_task.grab()
                         data_shape = data_element["data"].shape
-                        data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
+                        if flyback_pixels > 0:
+                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
+                        else:
+                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])
                         if len(scan_data_list) > 0:
                             collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
                             scan_properties = scan_data_list[0].metadata

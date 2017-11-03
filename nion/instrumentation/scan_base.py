@@ -152,6 +152,18 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 traceback.print_exc()
                 traceback.print_stack()
 
+    @property
+    def scan_adapter(self) -> "ScanAdapter":
+        return self.__scan_adapter
+
+    @property
+    def scan_device(self):
+        return self.__scan_adapter.scan_device
+
+    @property
+    def flyback_pixels(self):
+        return self.__scan_adapter.flyback_pixels
+
     def __get_stem_controller(self):
         if not self.__stem_controller:
             self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
@@ -625,6 +637,14 @@ class ScanAdapter:
     def close(self):
         self.__device.save_frame_parameters()
         self.__device.close()
+
+    @property
+    def scan_device(self):
+        return self.__device
+
+    @property
+    def flyback_pixels(self):
+        return self.__device.flyback_pixels
 
     def get_initial_profiles(self) -> typing.List[typing.Any]:
         profiles = list()
