@@ -867,6 +867,7 @@ class TestScanControlClass(unittest.TestCase):
             probe_graphic.position = Geometry.FloatPoint(y=0.45, x=0.65)
             document_controller.periodic()
             self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
+            self.assertEqual(scan_context.instrument.probe_position, hardware_source.scan_adapter._get_last_idle_position_for_test())
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

@@ -89,9 +89,11 @@ class STEMController:
                                                      x=max(min(new_probe_position.x, 1.0), 0.0))
         old_probe_position = self.__probe_position_value.value
         if ((old_probe_position is None) != (new_probe_position is None)) or (old_probe_position != new_probe_position):
+            # this path is only taken if set_probe_position is not called as a result of the probe_position model
+            # value changing.
             self.__probe_position_value.value = new_probe_position
-            # update the probe position for listeners and also explicitly update for probe_graphic_connections.
-            self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+        # update the probe position for listeners and also explicitly update for probe_graphic_connections.
+        self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
 
     def validate_probe_position(self):
         """Validate the probe position.

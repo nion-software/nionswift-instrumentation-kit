@@ -633,6 +633,7 @@ class ScanAdapter:
         self.on_channel_states_changed = None
         self.on_static_probe_state_changed = None
         self.__current_profile_index = 0
+        self.__last_idle_position = None  # used for testing
 
     def close(self):
         self.__device.save_frame_parameters()
@@ -699,9 +700,14 @@ class ScanAdapter:
     def set_probe_position(self, probe_position):
         if probe_position is not None:
             self.__device.set_idle_position_by_percentage(probe_position.x, probe_position.y)
+            self.__last_idle_position = probe_position
         else:
             # pass magic value to position to default position which may be top left or center depending on configuration.
             self.__device.set_idle_position_by_percentage(-1.0, -1.0)
+            self.__last_idle_position = -1.0, -1.0
+
+    def _get_last_idle_position_for_test(self):
+        return self.__last_idle_position
 
     def set_blanker(self, blanker_on):
         self.__device.blanker_enabled = blanker_on
