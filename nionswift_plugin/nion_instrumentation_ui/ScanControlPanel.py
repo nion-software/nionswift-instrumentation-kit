@@ -46,12 +46,11 @@ class ScanControlStateController:
             (method) abort_recording()
         (event) profile_changed_event(profile_index)
         (event) frame_parameters_changed_event(profile_index, frame_parameters)
-        (event) probe_state_changed_event(probe_state, probe_position): "parked", "blanked", "scanning"
+        (event) probe_state_changed_event(probe_state, probe_position): "parked", "scanning"
         (event) channel_state_changed_event(channel_index, channel_id, channel_name, enabled)
         (read-only property) selected_profile_index: return current profile index
         (read-only property) use_hardware_simulator: return True to use hardware simulator
         (read-only property) probe_state
-        (read/write property) static_probe_state "parked" "blanked"
         (read/write property) probe_position may be None
         (read-only property) channel_count
         (method) set_selected_profile_index(profile_index): change the profile index
@@ -79,7 +78,6 @@ class ScanControlStateController:
         handle_enable_channel(channel_index, enabled)
         handle_settings_button_clicked(api_broker)
         handle_shift_click(hardware_source_id, mouse_position, image_dimensions)
-        handle_blanked_check_box(checked)
         handle_positioned_check_box(checked)
         handle_width_changed(width_str)
         handle_increase_width()
@@ -116,8 +114,7 @@ class ScanControlStateController:
         on_display_new_data_item(data_item)
         (thread) on_channel_state_changed(channel_index, channel_id, channel_name, enabled)
         (thread) on_data_item_states_changed(data_item_states)
-        (thread) on_probe_state_changed(probe_state, probe_position)  scanning, blanked, parked
-        (thread) on_blanked_check_box_changed(checked)
+        (thread) on_probe_state_changed(probe_state, probe_position)  parked, scanning
         (thread) on_positioned_check_box_changed(checked)
         (thread) on_ac_line_sync_check_box_changed(checked)
 
@@ -154,7 +151,6 @@ class ScanControlStateController:
         self.on_data_item_states_changed = None
         self.on_simulate_button_state_changed = None
         self.on_probe_state_changed = None
-        self.on_blanked_check_box_changed = None
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
         self.on_capture_button_state_changed = None
@@ -209,7 +205,6 @@ class ScanControlStateController:
         self.on_data_item_states_changed = None
         self.on_simulate_button_state_changed = None
         self.on_probe_state_changed = None
-        self.on_blanked_check_box_changed = None
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
         self.on_capture_button_state_changed = None
@@ -309,8 +304,7 @@ class ScanControlStateController:
             self.on_data_item_states_changed(list())
         probe_state = self.__scan_hardware_source.probe_state
         probe_position = self.__scan_hardware_source.probe_position
-        static_probe_state = self.__scan_hardware_source.static_probe_state
-        self.__probe_state_changed(probe_state, probe_position, static_probe_state)
+        self.__probe_state_changed(probe_state, probe_position)
         if self.__channel_id:
             self.__update_display_data_item()
 
@@ -382,9 +376,6 @@ class ScanControlStateController:
             self.__scan_hardware_source.shift_click(mouse_position, camera_shape)
             return True
         return False
-
-    def handle_blanked_check_box(self, checked):
-        self.__scan_hardware_source.static_probe_state = "blanked" if checked else "parked"
 
     def handle_positioned_check_box(self, checked):
         if checked:
@@ -539,11 +530,9 @@ class ScanControlStateController:
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(data_item_states)
 
-    def __probe_state_changed(self, probe_state, probe_position, static_probe_state):
+    def __probe_state_changed(self, probe_state, probe_position):
         if self.on_probe_state_changed:
             self.on_probe_state_changed(probe_state, probe_position)
-        if self.on_blanked_check_box_changed:
-            self.on_blanked_check_box_changed(static_probe_state == "blanked")
         if self.on_positioned_check_box_changed:
             self.on_positioned_check_box_changed(probe_position is not None)
 
@@ -948,7 +937,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         record_abort_button = ui.create_push_button_widget(_("Abort"))
         record_abort_button.on_clicked = self.__state_controller.handle_record_abort_clicked
         probe_state_label = ui.create_label_widget(_("Unknown"))
-        blanked_check_box = ui.create_check_box_widget(_("Blanked"))
         positioned_check_box = ui.create_check_box_widget(_("Positioned"))
         ac_line_sync_check_box = ui.create_check_box_widget(_("AC Line Sync"))
 
@@ -1191,10 +1179,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         row5.add(probe_state_label)
         row5.add_stretch()
 
-        row6 = ui.create_row_widget(properties={"spacing": 2})
-        row6.add(blanked_check_box)
-        row6.add_stretch()
-
         row7 = ui.create_row_widget(properties={"spacing": 2})
         row7.add(positioned_check_box)
         row7.add_stretch()
@@ -1210,12 +1194,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         column.add(simulatate_row)
         column.add(thumbnail_row)
         column.add(row5)
-        column.add(row6)
         column.add(row7)
         column.add_stretch()
-
-        def blanked_check_box_changed(check_state):
-            self.__state_controller.handle_blanked_check_box(check_state == "checked")
 
         def positioned_check_box_changed(check_state):
             self.__state_controller.handle_positioned_check_box(check_state == "checked")
@@ -1226,7 +1206,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         simulate_button.on_clicked = self.__state_controller.handle_simulate_clicked
         open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
-        blanked_check_box.on_check_state_changed = blanked_check_box_changed
         positioned_check_box.on_check_state_changed = positioned_check_box_changed
         ac_line_sync_check_box.on_check_state_changed = ac_line_sync_check_box_changed
 
@@ -1299,7 +1278,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 play_state_label.text = map_channel_state_to_text["stopped"]
 
         def probe_state_changed(probe_state, probe_position):
-            map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked"), "blanked": _("Blanked")}
+            map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
             if probe_state != "scanning":
                 if probe_position is not None:
                     probe_position_str = " " + str(int(probe_position.x * 100)) + "%" + ", " + str(int(probe_position.y * 100)) + "%"
@@ -1308,9 +1287,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             else:
                 probe_position_str = ""
             probe_state_label.text = map_probe_state_to_text.get(probe_state, "") + probe_position_str
-
-        def blanked_check_box_changed(checked):
-            blanked_check_box.check_state = "checked" if checked else "unchecked"
 
         def positioned_check_box_changed(checked):
             positioned_check_box.check_state = "checked" if checked else "unchecked"
@@ -1357,7 +1333,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_record_abort_button_state_changed = record_abort_button_state_changed
         self.__state_controller.on_simulate_button_state_changed = simulate_button_state_changed
         self.__state_controller.on_probe_state_changed = lambda a, b: self.document_controller.queue_task(lambda: probe_state_changed(a, b))
-        self.__state_controller.on_blanked_check_box_changed = lambda a: self.document_controller.queue_task(lambda: blanked_check_box_changed(a))
         self.__state_controller.on_positioned_check_box_changed = lambda a: self.document_controller.queue_task(lambda: positioned_check_box_changed(a))
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
         self.__state_controller.on_channel_count_changed = channel_count_changed

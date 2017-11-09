@@ -92,7 +92,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__scan_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
         self.__scan_adapter.on_profile_frame_parameters_changed = self.__profile_frame_parameters_changed
         self.__scan_adapter.on_channel_states_changed = self.__channel_states_changed
-        self.__scan_adapter.on_static_probe_state_changed = self.__static_probe_state_changed
         self.features.update(self.__scan_adapter.features)
         for channel_info in self.__scan_adapter.channel_info_list:
             self.add_data_channel(channel_info.channel_id, channel_info.name)
@@ -105,7 +104,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.profile_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
-        self.static_probe_state = scan_adapter.initial_state_probe_state
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue = queue.Queue()
@@ -129,7 +127,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         super().close()
 
         # keep the scan adapter around until super close is called, since super
-        # may do something that requires the scan adapter (blanker).
+        # may do something that requires the scan adapter.
         self.__scan_adapter.close()
         self.__scan_adapter = None
 
@@ -312,12 +310,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             if graphic.graphic_id == "probe":
                 display.remove_graphic(graphic)
 
-    def __probe_state_changed(self, probe_state, probe_position, static_probe_state):
+    def __probe_state_changed(self, probe_state, probe_position):
         # subclasses will override _set_probe_position
-        self._set_blanker(probe_state == "blanked")
+        # probe_state can be 'parked', or 'scanning'
         self._set_probe_position(probe_position)
         # update the probe position for listeners and also explicitly update for probe_graphic_connections.
-        self.probe_state_changed_event.fire(probe_state, probe_position, static_probe_state)
+        self.probe_state_changed_event.fire(probe_state, probe_position)
 
     def _enter_scanning_state(self):
         """Enter scanning state. Acquisition task will call this. Tell the STEM controller."""
@@ -327,17 +325,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         """Exit scanning state. Acquisition task will call this. Tell the STEM controller."""
         self.__get_stem_controller()._exit_scanning_state()
 
-    def _set_static_probe_state(self, value):
-        self.__get_stem_controller().set_static_probe_state(value)
-
-    @property
-    def static_probe_state(self):
-        return self.__get_stem_controller().static_probe_state
-
-    @static_probe_state.setter
-    def static_probe_state(self, value):
-        self._set_static_probe_state(value)
-
     @property
     def probe_state(self):
         return self.__get_stem_controller().probe_state
@@ -345,14 +332,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     # override from BaseScanHardwareSource
     def _set_probe_position(self, probe_position):
         self.__scan_adapter.set_probe_position(probe_position)
-
-    # override from BaseScanHardwareSource
-    def _set_blanker(self, blanker_on):
-        self.__scan_adapter.set_blanker(blanker_on)
-
-    @property
-    def _actual_blanker(self):
-        return self.__scan_adapter.actual_blanker
 
     @property
     def probe_position(self):
@@ -368,14 +347,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     # override from the HardwareSource parent class.
     def data_item_states_changed(self, data_item_states):
         self.__get_stem_controller()._data_item_states_changed(data_item_states)
-
-    def __static_probe_state_changed(self, static_probe_state):
-        # this method will be called when the device changes probe state (via dialog or script).
-        # it updates the channels internally but does not send out a message to set the probe state
-        # to the hardware, since it's already set, and doing so can cause strange change loops.
-        def static_probe_state_changed():
-            self._set_static_probe_state(static_probe_state)
-        self.__task_queue.put(static_probe_state_changed)
 
     @property
     def use_hardware_simulator(self):
@@ -626,12 +597,10 @@ class ScanAdapter:
         self.__device = device
         self.__device.on_device_state_changed = self.__device_state_changed
         self.channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
-        self.initial_state_probe_state = "blanked" if self.__device.blanker_enabled else "parked"
         self.features = dict()
         self.on_selected_profile_index_changed = None
         self.on_profile_frame_parameters_changed = None
         self.on_channel_states_changed = None
-        self.on_static_probe_state_changed = None
         self.__current_profile_index = 0
         self.__last_idle_position = None  # used for testing
 
@@ -709,13 +678,6 @@ class ScanAdapter:
     def _get_last_idle_position_for_test(self):
         return self.__last_idle_position
 
-    def set_blanker(self, blanker_on):
-        self.__device.blanker_enabled = blanker_on
-
-    @property
-    def actual_blanker(self):
-        return self.__device.blanker_enabled
-
     def shift_click(self, mouse_position, camera_shape):
         autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
         if autostem:
@@ -751,7 +713,7 @@ class ScanAdapter:
         ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
         return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
-    def __device_state_changed(self, profile_frame_parameters_list, device_channel_states, static_probe_state) -> None:
+    def __device_state_changed(self, profile_frame_parameters_list, device_channel_states) -> None:
         if callable(self.on_profile_frame_parameters_changed):
             for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
                 self.on_profile_frame_parameters_changed(profile_index, profile_frame_parameters)
@@ -760,8 +722,6 @@ class ScanAdapter:
             for channel_index, (channel_name, channel_enabled) in enumerate(device_channel_states):
                 channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))
             self.on_channel_states_changed(channel_states)
-        if callable(self.on_static_probe_state_changed):
-            self.on_static_probe_state_changed(static_probe_state)
 
 
 _component_registered_listener = None

@@ -340,36 +340,6 @@ class TestScanControlClass(unittest.TestCase):
                 self._close_hardware_source()
                 self._close_instrument(instrument)
 
-    def test_blanker_is_controlled_by_check_box(self):
-        with self._make_scan_context() as scan_context:
-            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            scan_state_controller.handle_blanked_check_box(True)
-            self.assertTrue(hardware_source._actual_blanker)
-            scan_state_controller.handle_blanked_check_box(False)
-            self.assertFalse(hardware_source._actual_blanker)
-
-    def test_blanker_is_off_during_scan_and_then_returns_to_desired_state(self):
-        with self._make_scan_context() as scan_context:
-            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            scan_state_controller.handle_blanked_check_box(True)
-            self.assertTrue(hardware_source._actual_blanker)
-            frame_time = hardware_source.get_current_frame_time()
-            hardware_source.start_playing()
-            start_time = time.time()
-            while hardware_source.probe_state != "scanning":  # special case, checking blanker, is_playing is too imprecise
-                time.sleep(frame_time)
-                self.assertTrue(time.time() - start_time < 3.0)
-            time.sleep(frame_time * 0.1)
-            self.assertFalse(hardware_source._actual_blanker)
-            hardware_source.stop_playing()
-            start_time = time.time()
-            while hardware_source.probe_state == "scanning":  # special case, checking blanker, is_playing is too imprecise
-                time.sleep(frame_time)
-                self.assertTrue(time.time() - start_time < 3.0)
-            time.sleep(frame_time * 0.1)
-            self.assertTrue(hardware_source._actual_blanker)
-            document_controller.periodic()
-
     def test_acquiring_multiple_channels_attaches_common_scan_id(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects

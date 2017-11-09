@@ -204,7 +204,6 @@ class ScanAcquisitionController:
                     data_item = library.create_data_item(_("Spectrum Scan"))
 
                     scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")  # type: HardwareSource.HardwareSource
-                    old_probe_state = scan_controller.get_property_as_str("static_probe_state")
                     old_probe_position = scan_controller.get_property_as_float_point("probe_position")
 
                     # force the data to be held in memory and write delayed by grabbing a data_ref.
@@ -212,7 +211,6 @@ class ScanAcquisitionController:
                         data = None
                         with contextlib.closing(eels_camera.create_view_task(frame_parameters=eels_camera_parameters)) as eels_view_task:
                             eels_view_task.grab_next_to_finish()
-                            scan_controller.set_property_as_str("static_probe_state", "parked")
                             try:
                                 for i in range(sample_count):
                                     if self.__aborted:
@@ -229,7 +227,6 @@ class ScanAcquisitionController:
                                     logging.debug("copying data %s %s %s", data_ref.data.shape, i, data_and_metadata.data.shape)
                                     data_ref[i] = data_and_metadata.data
                             finally:
-                                scan_controller.set_property_as_str("static_probe_state", old_probe_state)
                                 scan_controller.set_property_as_float_point("probe_position", old_probe_position)
                 finally:
                     self.acquisition_state_changed_event.fire({"message": "end"})

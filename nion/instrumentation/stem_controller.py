@@ -34,16 +34,14 @@ class STEMController:
     probe_position (fractional coordinates, optional)
     set_probe_position(probe_position)
     validate_probe_position()
-    static_probe_state (parked, blanked)
-    set_static_probe_state(static_probe_state)
 
-    probe_state_changed_event (probe_state, probe_position, static_probe_state)
+    probe_state_changed_event (probe_state, probe_position)
     """
 
     def __init__(self):
         self.__probe_position_value = Model.PropertyModel()
         self.__probe_position_value.on_value_changed = self.set_probe_position
-        self.__probe_state_stack = list()
+        self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.probe_state_changed_event = Event.Event()
         self.probe_data_items_changed_event = Event.Event()
@@ -53,11 +51,11 @@ class STEMController:
 
     def _enter_scanning_state(self):
         self.__probe_state_stack.append("scanning")
-        self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+        self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
     def _exit_scanning_state(self):
         self.__probe_state_stack.pop()
-        self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+        self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
     @property
     def _probe_position_value(self):
@@ -93,7 +91,7 @@ class STEMController:
             # value changing.
             self.__probe_position_value.value = new_probe_position
         # update the probe position for listeners and also explicitly update for probe_graphic_connections.
-        self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
+        self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
     def validate_probe_position(self):
         """Validate the probe position.
@@ -101,30 +99,9 @@ class STEMController:
         This is called when the user switches from not controlling to controlling the position."""
         self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
 
-    def set_static_probe_state(self, value: str) -> None:
-        """Set the static probe state.
-
-        Static probe state is the state of the probe when not scanning. Valid values are 'parked' or 'blanked'.
-        """
-        if self.probe_state != value:
-            if value != "parked" and value != "blanked":
-                logging.warning("static_probe_state must be 'parked' or 'blanked'")
-                value = "parked"
-            self.__probe_state_stack[0] = value
-            self.probe_state_changed_event.fire(self.probe_state, self.probe_position, self.static_probe_state)
-
-    @property
-    def static_probe_state(self) -> str:
-        """Static probe state is the default when not scanning and can be 'blanked' or 'parked'."""
-        return self.__probe_state_stack[0]
-
-    @static_probe_state.setter
-    def static_probe_state(self, value: str) -> None:
-        self.set_static_probe_state(value)
-
     @property
     def probe_state(self) -> str:
-        """Probe state is the current probe state and can be 'blanked', 'parked', or 'scanning'."""
+        """Probe state is the current probe state and can be 'parked', or 'scanning'."""
         return self.__probe_state_stack[-1]
 
     # instrument API
@@ -157,12 +134,12 @@ class STEMController:
         return "unknown" if value_exists else None
 
     def get_property(self, name):
-        if name in ("probe_position", "static_probe_state", "probe_state"):
+        if name in ("probe_position", "probe_state"):
             return getattr(self, name)
         return self.get_control_output(name)
 
     def set_property(self, name, value):
-        if name in ("probe_position", "static_probe_state"):
+        if name in ("probe_position"):
             return setattr(self, name, value)
         return self.set_control_output(name, value)
 
@@ -245,7 +222,7 @@ class ProbeGraphicConnection:
         if graphic:
             self.display.remove_graphic(graphic)
 
-    def update_probe_state(self, probe_position, static_probe_state):
+    def update_probe_state(self, probe_position):
         if probe_position is not None:
             self.probe_position_value.value = probe_position
             self.show_probe_graphic()
@@ -255,7 +232,7 @@ class ProbeGraphicConnection:
             if graphic:
                 self.display.remove_graphic(graphic)
         if self.graphic:
-            self.graphic.color = "#FF0" if static_probe_state == "blanked" else "#F80"
+            self.graphic.color = "#F80"
 
     def show_probe_graphic(self):
         if not self.graphic:
@@ -315,19 +292,19 @@ class ProbeView:
         with self.__last_data_items_lock:
             self.__last_data_items = copy.copy(data_items)
 
-    def __probe_state_changed(self, probe_state, probe_position, static_probe_state):
+    def __probe_state_changed(self, probe_state, probe_position):
         # thread safe. move actual call to main thread using the event loop.
-        self.__event_loop.create_task(self.__update_probe_state(probe_state, probe_position, static_probe_state))
+        self.__event_loop.create_task(self.__update_probe_state(probe_state, probe_position))
 
-    async def __update_probe_state(self, probe_state, probe_position, static_probe_state):
+    async def __update_probe_state(self, probe_state, probe_position):
         # thread unsafe. always called on main thread (via event loop).
         if probe_state != self.__probe_state:
             if probe_state == "scanning":
                 self.__hide_probe_graphics()
             else:
-                self.__show_probe_graphics(probe_position, static_probe_state)
+                self.__show_probe_graphics(probe_position)
             self.__probe_state = probe_state
-        self.__update_probe_graphics(probe_position, static_probe_state)
+        self.__update_probe_graphics(probe_position)
 
     def __hide_probe_graphics(self):
         # thread unsafe.
@@ -336,7 +313,7 @@ class ProbeView:
         for probe_graphic_connection in probe_graphic_connections:
             probe_graphic_connection.close()
 
-    def __show_probe_graphics(self, probe_position, static_probe_state):
+    def __show_probe_graphics(self, probe_position):
         # thread unsafe.
         with self.__last_data_items_lock:
             data_items = self.__last_data_items
@@ -350,13 +327,13 @@ class ProbeView:
                 # the probe position value object gives the ProbeGraphicConnection the ability to
                 # get, set, and watch for changes to the probe position.
                 probe_graphic_connection = ProbeGraphicConnection(display, self.__probe_position_value, self.__hide_probe_graphics)
-                probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
+                probe_graphic_connection.update_probe_state(probe_position)
                 self.__probe_graphic_connections.append(probe_graphic_connection)
 
-    def __update_probe_graphics(self, probe_position, static_probe_state):
+    def __update_probe_graphics(self, probe_position):
         # thread unsafe.
         for probe_graphic_connection in self.__probe_graphic_connections:
-            probe_graphic_connection.update_probe_state(probe_position, static_probe_state)
+            probe_graphic_connection.update_probe_state(probe_position)
 
 
 class ProbeViewController:
