@@ -126,16 +126,16 @@ class ScanAcquisitionController:
                     scan_frame_parameters["external_clock_mode"] = 1
                     scan_frame_parameters["ac_line_sync"] = False
                     scan_frame_parameters["ac_frame_sync"] = False
+                    flyback_pixels = scan_hardware_source._hardware_source.flyback_pixels  # using internal API
+                    scan_height = scan_frame_parameters["size"][0]
+                    scan_width = scan_frame_parameters["size"][1] + flyback_pixels
 
                     library = document_window.library
 
-                    camera_hardware_source.set_frame_parameters(camera_frame_parameters)
-                    camera_hardware_source._hardware_source.acquire_sequence_prepare()
+                    camera_hardware_source._hardware_source.set_current_frame_parameters(camera_hardware_source._hardware_source.get_frame_parameters_from_dict(camera_frame_parameters))
+                    camera_hardware_source._hardware_source.acquire_sequence_prepare(scan_width * scan_height)
 
-                    flyback_pixels = scan_hardware_source._hardware_source.flyback_pixels  # using internal API
                     with contextlib.closing(scan_hardware_source.create_record_task(scan_frame_parameters)) as scan_task:
-                        scan_height = scan_frame_parameters["size"][0]
-                        scan_width = scan_frame_parameters["size"][1] + flyback_pixels
                         data_elements = camera_hardware_source._hardware_source.acquire_sequence(scan_width * scan_height)
                         data_element = data_elements[0]
                         # the data_element['data'] ndarray may point to low level memory; we need to get it to disk

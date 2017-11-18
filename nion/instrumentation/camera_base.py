@@ -173,8 +173,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__camera_adapter.create_record_task(self.__record_parameters))
 
-    def acquire_sequence_prepare(self):
-        self.__camera_adapter.acquire_sequence_prepare()
+    def acquire_sequence_prepare(self, n: int) -> None:
+        self.__camera_adapter.acquire_sequence_prepare(n)
 
     def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
         return self.__camera_adapter.acquire_sequence(self.get_current_frame_parameters(), n)
@@ -541,7 +541,7 @@ class Camera(abc.ABC):
         """
         ...
 
-    def acquire_sequence_prepare(self) -> None:
+    def acquire_sequence_prepare(self, n: int) -> None:
         """Prepare for acquire_sequence."""
         pass
 
@@ -783,9 +783,9 @@ class CameraAdapter:
         record_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.camera, self.__camera_category, frame_parameters, self.display_name)
         return record_task
 
-    def acquire_sequence_prepare(self):
+    def acquire_sequence_prepare(self, n: int) -> None:
         if callable(getattr(self.camera, "acquire_sequence_prepare", None)):
-            self.camera.acquire_sequence_prepare()
+            self.camera.acquire_sequence_prepare(n)
 
     def __acquire_sequence(self, n: int, frame_parameters) -> dict:
         if callable(getattr(self.camera, "acquire_sequence", None)):
