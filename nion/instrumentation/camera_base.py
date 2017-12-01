@@ -15,6 +15,7 @@ import typing
 import numpy
 
 # local libraries
+from nion.data import Calibration
 from nion.data import Core
 from nion.data import DataAndMetadata
 from nion.swift.model import HardwareSource
@@ -504,16 +505,14 @@ class Camera(abc.ABC):
         """
         ...
 
-    @property
-    @abc.abstractmethod
-    def calibration(self) -> typing.List[dict]:
-        """Return list of calibration for each dimension.
+    # @property
+    # def calibration(self) -> typing.List[dict]:
+    # Optional method to return list of calibration for each dimension.
+    # Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
 
-        Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
-
-        This method is deprecated but must be implemented.
-        """
-        ...
+    # @property
+    # def calibration_controls(self) -> dict:
+    # Optional method to return list of calibration controls.
 
     @abc.abstractmethod
     def start_live(self) -> None:
@@ -568,6 +567,59 @@ class Camera(abc.ABC):
         """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
         pass
 
+
+def get_stem_control(stem_controller, calibration_controls, key):
+    if key + "_control" in calibration_controls:
+        valid, value = stem_controller.TryGetVal(calibration_controls[key + "_control"])
+        if valid:
+            return value
+    if key + "_value" in calibration_controls:
+        return calibration_controls.get(key + "_value")
+    return None
+
+
+def build_calibration_dict(stem_controller, calibration_controls, prefix):
+    scale = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "scale")
+    offset = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "offset")
+    units = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "units")
+    return Calibration.Calibration(offset, scale, units).rpc_dict
+
+
+def update_spatial_calibrations(data_element, stem_controller, camera):
+    if "spatial_calibrations" not in data_element:
+        if "spatial_calibrations" in data_element["properties"]:
+            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
+        elif hasattr(camera, "calibration"):  # used in nionccd1010
+            data_element["spatial_calibrations"] = camera.calibration
+        elif stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x")
+            y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y")
+            data_element["spatial_calibrations"] = [x_calibration_dict, y_calibration_dict]
+
+
+def update_intensity_calibration(data_element, stem_controller, camera):
+    if "intensity_calibration" not in data_element:
+        if "intensity_calibration" in data_element["properties"]:
+            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
+        elif stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            data_element["intensity_calibration"] = build_calibration_dict(stem_controller, calibration_controls, "intensity")
+    if "counts_per_electron" not in data_element:
+        if stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
+            if counts_per_electron:
+                data_element["counts_per_electron"] = counts_per_electron
+
+
+def update_autostem_properties(data_element, stem_controller):
+    if stem_controller:
+        try:
+            autostem_properties = stem_controller.get_autostem_properties()
+            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+        except Exception as e:
+            pass
 
 
 class CameraAdapterAcquisitionTask:
@@ -633,23 +685,11 @@ class CameraAdapterAcquisitionTask:
         data_element["version"] = 1
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
-        # add optional calibration properties. this section should be removed once NionCCD1010 is updated.
-        if "spatial_calibrations" not in data_element:
-            if "spatial_calibrations" in data_element["properties"]:
-                data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
-            else:  # handle backwards compatible case for nionccd1010
-                data_element["spatial_calibrations"] = self.__camera.calibration
-        if "intensity_calibration" not in data_element:
-            if "intensity_calibration" in data_element["properties"]:
-                data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
+        stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
+        update_spatial_calibrations(data_element, stem_controller, self.__camera)
+        update_intensity_calibration(data_element, stem_controller, self.__camera)
+        update_autostem_properties(data_element, stem_controller)
         # grab metadata from the autostem
-        autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        if autostem:
-            try:
-                autostem_properties = autostem.get_autostem_properties()
-                data_element["properties"].setdefault("autostem", dict()).update(copy.deepcopy(autostem_properties))
-            except Exception as e:
-                pass
         data_element["properties"]["hardware_source_name"] = self.__display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = exposure_ms / 1000.0
@@ -839,21 +879,10 @@ class CameraAdapter:
         data_element = self.__acquire_sequence(n, frame_parameters)
         data_element["version"] = 1
         data_element["state"] = "complete"
-        # add optional calibration properties
-        if "spatial_calibrations" in data_element["properties"]:
-            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
-        else:  # handle backwards compatible case for nionccd1010
-            data_element["spatial_calibrations"] = self.camera.calibration
-        if "intensity_calibration" in data_element["properties"]:
-            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
-        # grab metadata from the autostem
-        autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        if autostem:
-            try:
-                autostem_properties = autostem.get_autostem_properties()
-                data_element["properties"].setdefault("autostem", dict()).update(copy.deepcopy(autostem_properties))
-            except Exception as e:
-                pass
+        stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
+        update_spatial_calibrations(data_element, stem_controller, self.camera)
+        update_intensity_calibration(data_element, stem_controller, self.camera)
+        update_autostem_properties(data_element, stem_controller)
         data_element["properties"]["hardware_source_name"] = self.display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
