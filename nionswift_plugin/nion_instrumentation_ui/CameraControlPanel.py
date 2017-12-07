@@ -865,6 +865,14 @@ class CameraControlPanel(Panel.Panel):
 
 
 def create_camera_panel(document_controller, panel_id, properties):
+    """Create a custom camera panel.
+
+    The camera panel type is specified in the 'camera_panel_type' key in the properties dict.
+
+    The camera panel type must match a the `cmaera_panel_type` of a camera panel factory in the Registry.
+
+    The matching camera panel factory must return a ui_handler for the panel which is used to produce the UI.
+    """
     camera_panel_type = properties.get("camera_panel_type")
     for component in Registry.get_components_by_type("camera_panel"):
         if component.camera_panel_type == camera_panel_type:
@@ -895,7 +903,6 @@ class CameraDisplayPanelController:
     type = "camera-live"
 
     def __init__(self, display_panel_content, hardware_source_id, show_processed_data):
-        assert isinstance(display_panel_content, DisplayPanel.BaseDisplayPanelContent)
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         self.type = CameraDisplayPanelController.type
