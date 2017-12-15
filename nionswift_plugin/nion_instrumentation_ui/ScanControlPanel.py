@@ -916,7 +916,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 document_controller.document_model.append_data_item(data_item)
                 result_display_panel = document_controller.next_result_display_panel()
                 if result_display_panel:
-                    result_display_panel.set_displayed_data_item(data_item)
+                    result_display_panel.set_display_panel_data_item(data_item)
                     result_display_panel.request_focus()
             document_controller.queue_task(perform)
 
@@ -1419,7 +1419,7 @@ class ScanDisplayPanelController:
 
     type = "scan-live"
 
-    def __init__(self, display_panel_content, hardware_source_id, hardware_source_channel_id):
+    def __init__(self, display_panel, hardware_source_id, hardware_source_channel_id):
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         self.type = ScanDisplayPanelController.type
@@ -1437,8 +1437,8 @@ class ScanDisplayPanelController:
         self.__abort_button_visible = False
         self.__abort_button_enabled = False
         self.__data_item_states = list()
-        self.__display_panel_content = display_panel_content
-        self.__display_panel_content.header_canvas_item.end_header_color = "#98FB98"
+        self.__display_panel = display_panel
+        self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
         self.__playback_controls_composition.layout = CanvasItem.CanvasItemLayout()
         self.__playback_controls_composition.sizing.set_fixed_height(30)
@@ -1468,7 +1468,7 @@ class ScanDisplayPanelController:
         decrease_pmt_button.stroke_width = 1.5
         pmt_group.add_canvas_item(decrease_pmt_button)
         pmt_label = CanvasItem.StaticTextCanvasItem(_("PMT"))
-        pmt_label.size_to_content(display_panel_content.image_panel_get_font_metrics)
+        pmt_label.size_to_content(display_panel.image_panel_get_font_metrics)
         pmt_group.add_canvas_item(pmt_label)
         increase_pmt_button = IconCanvasItem("plus")
         increase_pmt_button.fill_style = "#FFF"
@@ -1484,16 +1484,16 @@ class ScanDisplayPanelController:
         playback_controls_row.add_canvas_item(hardware_source_display_name_canvas_item)
         self.__playback_controls_composition.add_canvas_item(CanvasItem.BackgroundCanvasItem("#98FB98"))
         self.__playback_controls_composition.add_canvas_item(playback_controls_row)
-        self.__display_panel_content.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
+        self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
 
         # configure the hardware source state controller
-        self.__state_controller = ScanControlStateController(hardware_source, display_panel_content.document_controller.queue_task, display_panel_content.document_controller.document_model, hardware_source_channel_id)
+        self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model, hardware_source_channel_id)
 
         def update_display_name():
             new_text = "%s (%s)" % (self.__display_name, self.__channel_name)
             if hardware_source_display_name_canvas_item.text != new_text:
                 hardware_source_display_name_canvas_item.text = new_text
-                hardware_source_display_name_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                hardware_source_display_name_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_play_button():
             map_play_button_state_to_text = {"scan": _("Scan"), "stop": _("Stop")}
@@ -1503,7 +1503,7 @@ class ScanDisplayPanelController:
             if scan_button_canvas_item.enabled != new_enabled or scan_button_canvas_item.text != new_text:
                 scan_button_canvas_item.enabled = new_enabled
                 scan_button_canvas_item.text = new_text
-                scan_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                scan_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_abort_button():
             abort_button_visible = self.__channel_enabled and self.__abort_button_visible
@@ -1512,12 +1512,12 @@ class ScanDisplayPanelController:
             if abort_button_canvas_item.enabled != abort_button_enabled or abort_button_canvas_item.text != new_text:
                 abort_button_canvas_item.text = new_text
                 abort_button_canvas_item.enabled = abort_button_enabled
-                abort_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_status_text():
             # first check whether we're closed or not; this particular method may be queued to the
             # front thread and may execute after closing.
-            if not self.__display_panel_content:
+            if not self.__display_panel:
                 return
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                 "partial": _("Acquiring"), "marked": _("Stopping")}
@@ -1533,12 +1533,12 @@ class ScanDisplayPanelController:
                     new_text = map_channel_state_to_text[channel_state] + partial_str
                     if status_text_canvas_item.text != new_text:
                         status_text_canvas_item.text = new_text
-                        status_text_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                        status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
                     return
             new_text = map_channel_state_to_text["stopped"]
             if status_text_canvas_item.text != new_text:
                 status_text_canvas_item.text = new_text
-                status_text_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_channel_enabled_check_box():
             channel_enabled_check_box.check_state = "checked" if self.__channel_enabled else "unchecked"
@@ -1560,7 +1560,7 @@ class ScanDisplayPanelController:
         def data_item_states_changed(data_item_states):
             # This will be called on a thread, but updating the status must occur on main thread.
             self.__data_item_states = data_item_states
-            display_panel_content.document_controller.queue_task(update_status_text)
+            display_panel.document_controller.queue_task(update_status_text)
 
         def channel_state_changed(channel_index, channel_id, channel_name, enabled):
             if channel_id == self.__hardware_source_channel_id:
@@ -1576,18 +1576,18 @@ class ScanDisplayPanelController:
             if visible:
                 capture_button.enabled = enabled
                 capture_button.text = _("Capture")
-                capture_button.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
             else:
                 capture_button.enabled = False
                 capture_button.text = str()
-                capture_button.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def display_new_data_item(data_item):
-            document_controller = display_panel_content.document_controller
+            document_controller = display_panel.document_controller
             document_controller.document_model.append_data_item(data_item)
             result_display_panel = document_controller.next_result_display_panel()
             if result_display_panel:
-                result_display_panel.set_displayed_data_item(data_item)
+                result_display_panel.set_display_panel_data_item(data_item)
                 result_display_panel.request_focus()
 
         self.__state_controller.on_display_name_changed = display_name_changed
@@ -1597,7 +1597,7 @@ class ScanDisplayPanelController:
         self.__state_controller.on_channel_state_changed = channel_state_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
         self.__state_controller.on_display_new_data_item = display_new_data_item
-        self.__state_controller.on_display_data_item_changed = display_panel_content.set_displayed_data_item
+        self.__state_controller.on_display_data_item_changed = display_panel.set_displayed_data_item
 
         def channel_enabled_check_box_check_state_changed(check_state):
             self.__state_controller.handle_enable_channel(self.__channel_index, check_state == "checked")
@@ -1614,8 +1614,8 @@ class ScanDisplayPanelController:
         increase_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_increase_pmt_clicked, self.__channel_index)
 
     def close(self):
-        self.__display_panel_content.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
-        self.__display_panel_content = None
+        self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
+        self.__display_panel = None
         self.__state_controller.close()
         self.__state_controller = None
 
@@ -1669,16 +1669,14 @@ def run():
                         actions.append(action)
                     return actions
 
-                def make_new(self, controller_type, display_panel_content, d):
+                def make_new(self, controller_type, display_panel, d):
                     # make a new display panel controller, typically called to restore contents of a display panel.
                     # controller_type will match the type property of the display panel controller when it was saved.
-                    # display_panel_content is a DataDisplayPanelContent object and essentially provides the gateway
-                    # to the document controller and ui objects.
                     # d is the dictionary that is saved when the display panel controller closes.
                     hardware_source_id = d.get("hardware_source_id")
                     channel_id = d.get("channel_id")
                     if controller_type == ScanDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
-                        return ScanDisplayPanelController(display_panel_content, hardware_source_id, channel_id)
+                        return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
                     return None
 
                 def match(self, data_item: DataItem.DataItem) -> dict:

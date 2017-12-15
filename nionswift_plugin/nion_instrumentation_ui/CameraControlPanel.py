@@ -902,7 +902,7 @@ class CameraDisplayPanelController:
 
     type = "camera-live"
 
-    def __init__(self, display_panel_content, hardware_source_id, show_processed_data):
+    def __init__(self, display_panel, hardware_source_id, show_processed_data):
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         self.type = CameraDisplayPanelController.type
@@ -910,7 +910,7 @@ class CameraDisplayPanelController:
         self.__hardware_source_id = hardware_source_id
 
         # configure the hardware source state controller
-        self.__state_controller = CameraControlStateController(hardware_source, display_panel_content.document_controller.queue_task, display_panel_content.document_controller.document_model)
+        self.__state_controller = CameraControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model)
 
         # configure the user interface
         self.__display_name = str()
@@ -919,8 +919,8 @@ class CameraDisplayPanelController:
         self.__abort_button_visible = False
         self.__abort_button_enabled = False
         self.__data_item_states = list()
-        self.__display_panel_content = display_panel_content
-        self.__display_panel_content.header_canvas_item.end_header_color = "#98FB98"
+        self.__display_panel = display_panel
+        self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
         self.__playback_controls_composition.layout = CanvasItem.CanvasItemLayout()
         self.__playback_controls_composition.sizing.set_fixed_height(30)
@@ -950,13 +950,13 @@ class CameraDisplayPanelController:
         playback_controls_row.add_canvas_item(hardware_source_display_name_canvas_item)
         self.__playback_controls_composition.add_canvas_item(CanvasItem.BackgroundCanvasItem("#98FB98"))
         self.__playback_controls_composition.add_canvas_item(playback_controls_row)
-        self.__display_panel_content.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
+        self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
 
         def update_display_name():
             new_text = "%s" % (self.__display_name)
             if hardware_source_display_name_canvas_item.text != new_text:
                 hardware_source_display_name_canvas_item.text = new_text
-                hardware_source_display_name_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                hardware_source_display_name_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_play_button():
             map_play_button_state_to_text = {"play": _("Play"), "pause": _("Pause")}
@@ -966,7 +966,7 @@ class CameraDisplayPanelController:
             if play_button_canvas_item.enabled != new_enabled or play_button_canvas_item.text != new_text:
                 play_button_canvas_item.enabled = new_enabled
                 play_button_canvas_item.text = new_text
-                play_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                play_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_abort_button():
             abort_button_visible = self.__abort_button_visible
@@ -975,7 +975,7 @@ class CameraDisplayPanelController:
             if abort_button_canvas_item.enabled != abort_button_enabled or abort_button_canvas_item.text != new_text:
                 abort_button_canvas_item.text = new_text
                 abort_button_canvas_item.enabled = abort_button_enabled
-                abort_button_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def update_status_text():
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
@@ -985,7 +985,7 @@ class CameraDisplayPanelController:
                 new_text = map_channel_state_to_text[channel_state]
                 if status_text_canvas_item.text != new_text:
                     status_text_canvas_item.text = new_text
-                    status_text_canvas_item.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                    status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
                 return
 
         def display_name_changed(display_name):
@@ -1010,26 +1010,22 @@ class CameraDisplayPanelController:
             if visible:
                 capture_button.enabled = enabled
                 capture_button.text = _("Capture")
-                capture_button.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
             else:
                 capture_button.enabled = False
                 capture_button.text = str()
-                capture_button.size_to_content(display_panel_content.image_panel_get_font_metrics)
+                capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def display_data_item_changed(data_item):
             if not self.__show_processed_checkbox or not self.__show_processed_checkbox.check_state == "checked":
                 self.__state_controller.use_processed_data = False  # for capture
-                display_panel_content.set_displayed_data_item(data_item)
-                # hack below to get inspector to update. cem.
-                display_panel_content.document_controller.notify_selected_data_item_changed(data_item)
+                display_panel.set_displayed_data_item(data_item)
             self.__last_data_item = data_item
 
         def processed_data_item_changed(data_item):
             if self.__show_processed_checkbox and self.__show_processed_checkbox.check_state == "checked":
                 self.__state_controller.use_processed_data = True  # for capture
-                display_panel_content.set_displayed_data_item(data_item)
-                # hack below to get inspector to update. cem.
-                display_panel_content.document_controller.notify_selected_data_item_changed(data_item)
+                display_panel.set_displayed_data_item(data_item)
             self.__last_processed_data_item = data_item
 
         def show_processed_checkbox_changed(check_state):
@@ -1039,9 +1035,9 @@ class CameraDisplayPanelController:
                 display_data_item_changed(self.__last_data_item)
 
         def display_new_data_item(data_item):
-            result_display_panel = display_panel_content.document_controller.next_result_display_panel()
+            result_display_panel = display_panel.document_controller.next_result_display_panel()
             if result_display_panel:
-                result_display_panel.set_displayed_data_item(data_item)
+                result_display_panel.set_display_panel_data_item(data_item)
                 result_display_panel.request_focus()
 
         if self.__show_processed_checkbox:
@@ -1064,8 +1060,8 @@ class CameraDisplayPanelController:
         self.__state_controller.initialize_state()
 
     def close(self):
-        self.__display_panel_content.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
-        self.__display_panel_content = None
+        self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
+        self.__display_panel = None
         self.__state_controller.close()
         self.__state_controller = None
 
@@ -1125,16 +1121,14 @@ def run():
                     action.checked = False
                     return [action]
 
-                def make_new(self, controller_type, display_panel_content, d):
+                def make_new(self, controller_type, display_panel, d):
                     # make a new display panel controller, typically called to restore contents of a display panel.
                     # controller_type will match the type property of the display panel controller when it was saved.
-                    # display_panel_content is a DataDisplayPanelContent object and essentially provides the gateway
-                    # to the document controller and ui objects.
                     # d is the dictionary that is saved when the display panel controller closes.
                     hardware_source_id = d.get("hardware_source_id")
                     show_processed_data = d.get("show_processed_data", False)
                     if controller_type == CameraDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
-                        return CameraDisplayPanelController(display_panel_content, hardware_source_id, show_processed_data)
+                        return CameraDisplayPanelController(display_panel, hardware_source_id, show_processed_data)
                     return None
 
                 def match(self, data_item: DataItem.DataItem) -> dict:

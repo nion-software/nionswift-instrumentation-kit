@@ -56,7 +56,7 @@ class TestScanControlClass(unittest.TestCase):
                 document_controller.document_model.append_data_item(data_item)
                 result_display_panel = document_controller.next_result_display_panel()
                 if result_display_panel:
-                    result_display_panel.set_displayed_data_item(data_item)
+                    result_display_panel.set_display_panel_data_item(data_item)
             document_controller.queue_task(perform)
             event_count_ref[0] += 1
             if event_count_ref[0] == enabled_channel_count:
