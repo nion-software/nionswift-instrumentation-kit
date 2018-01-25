@@ -121,13 +121,22 @@ class CameraControlStateController:
         self.__last_camera_current_time = 0
         self.__xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
 
+        # this function is threadsafe
+        # it queues the threadsafe call to the UI thread, checking to make sure the
+        # hardware source wasn't closed before being called (mainly to make tests run).
+        def handle_data_item_changed():
+            def update_display_data_item():
+                if self.__hardware_source:
+                    self.__update_display_data_item()
+            self.queue_task(update_display_data_item)
+
         self.__data_item = None
         data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        self.__data_item_changed_event_listener = data_item_reference.data_item_changed_event.listen(self.__update_display_data_item)
+        self.__data_item_changed_event_listener = data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
 
         self.__eels_data_item = None
         eels_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__hardware_source.hardware_source_id, "summed"))
-        self.__eels_data_item_changed_event_listener = eels_data_item_reference.data_item_changed_event.listen(self.__update_display_data_item)
+        self.__eels_data_item_changed_event_listener = eels_data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
 
     def close(self):
         if self.__captured_xdatas_available_event:
@@ -209,6 +218,7 @@ class CameraControlStateController:
     def has_processed_data(self):
         return self.__is_eels_camera
 
+    # not thread safe
     def __update_display_data_item(self):
         data_item_reference = self.__document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
         with data_item_reference.mutex:
