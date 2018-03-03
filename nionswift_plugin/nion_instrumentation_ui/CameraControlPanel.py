@@ -1141,8 +1141,8 @@ def run():
                         return CameraDisplayPanelController(display_panel, hardware_source_id, show_processed_data)
                     return None
 
-                def match(self, data_item: DataItem.DataItem) -> dict:
-                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, data_item):
+                def match(self, document_model, data_item: DataItem.DataItem) -> dict:
+                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, document_model, data_item):
                         return {"controller_type": CameraDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
                     return None
 

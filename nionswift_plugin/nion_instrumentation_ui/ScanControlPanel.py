@@ -1679,10 +1679,10 @@ def run():
                         return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
                     return None
 
-                def match(self, data_item: DataItem.DataItem) -> dict:
+                def match(self, document_model, data_item: DataItem.DataItem) -> dict:
                     for channel_index in range(hardware_source.channel_count):
                         channel_id, channel_name, __ = hardware_source.get_channel_state(channel_index)  # hack since there is no get_channel_info call
-                        if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, data_item):
+                        if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
                             return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                     return None
 
