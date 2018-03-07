@@ -164,7 +164,12 @@ class ScanControlStateController:
         self.__data_item_changed_event_listener = None
         if self.__channel_id:
             self.__data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
-            self.__data_item_changed_event_listener = self.__data_item_reference.data_item_changed_event.listen(self.__update_display_data_item)
+
+            def update_display_data_item():
+                # this message may be called from a thread; switch to UI thread
+                queue_task(self.__update_display_data_item)
+
+            self.__data_item_changed_event_listener = self.__data_item_reference.data_item_changed_event.listen(update_display_data_item)
 
     def close(self):
         if self.__captured_xdatas_available_event:

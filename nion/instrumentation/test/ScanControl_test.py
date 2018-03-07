@@ -839,6 +839,16 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
             self.assertEqual(scan_context.instrument.probe_position, hardware_source.scan_adapter._get_last_idle_position_for_test())
 
+    def test_acquire_into_empty_scan_controlled_display_panel(self):
+        ScanControlPanel.run()
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            display_panel = document_controller.selected_display_panel
+            display_panel.change_display_panel_content({"controller_type": "scan-live", "hardware_source_id": hardware_source.hardware_source_id, "channel_id": hardware_source.get_channel_state(0).channel_id})
+            scan_context.instrument.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
+            scan_state_controller.handle_positioned_check_box(True)
+            self._acquire_one(document_controller, hardware_source)
+
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
 
