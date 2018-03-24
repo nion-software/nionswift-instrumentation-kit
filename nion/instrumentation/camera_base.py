@@ -375,7 +375,7 @@ class Camera(abc.ABC):
 
         This is a global property, meaning it affects all profiles.
         """
-        return self._controller.SetFlip(do_flip)
+        ...
 
     @property
     @abc.abstractmethod
@@ -544,7 +544,7 @@ class Camera(abc.ABC):
         """Prepare for acquire_sequence."""
         pass
 
-    def acquire_sequence(self, n: int) -> dict:
+    def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
         """Acquire a sequence of n images. Return a single data element with two dimensions n x h, w.
 
         The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
@@ -595,7 +595,7 @@ def update_spatial_calibrations(data_element, stem_controller, camera):
             calibration_controls = camera.calibration_controls
             x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x")
             y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y")
-            data_element["spatial_calibrations"] = [x_calibration_dict, y_calibration_dict]
+            data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
 
 
 def update_intensity_calibration(data_element, stem_controller, camera):
