@@ -595,6 +595,12 @@ class TestCameraControlClass(unittest.TestCase):
             finally:
                 hardware_source.abort_playing(sync_timeout=3.0)
 
+    def test_acquiring_attaches_timezone(self):
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
+        with contextlib.closing(document_controller):
+            self._acquire_one(document_controller, hardware_source)
+            self.assertIsNotNone(document_model.data_items[0].metadata["description"]["time_zone"])
+
     def test_facade_frame_parameter_methods(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
