@@ -80,30 +80,33 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         super().__init__(scan_adapter.hardware_source_id, scan_adapter.display_name)
 
         self.features["is_scanning"] = True
+
+        # define events
         self.profile_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
         self.probe_state_changed_event = Event.Event()
+        self.channel_state_changed_event = Event.Event()
 
         self.__stem_controller_id = stem_controller_id
         self.__stem_controller = None
         self.probe_state_changed_event_listener = None
 
+        # configure the scan adapter, read features and data channel info from it
         self.__scan_adapter = scan_adapter
-        self.__scan_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
         self.__scan_adapter.on_profile_frame_parameters_changed = self.__profile_frame_parameters_changed
         self.__scan_adapter.on_channel_states_changed = self.__channel_states_changed
         self.features.update(self.__scan_adapter.features)
         for channel_info in self.__scan_adapter.channel_info_list:
             self.add_data_channel(channel_info.channel_id, channel_info.name)
+
+        # configure the initial profiles from the scan adapter
         self.__profiles = list()
         self.__profiles.extend(self.__scan_adapter.get_initial_profiles())
         self.__current_profile_index = self.__scan_adapter.get_initial_profile_index()
         self.__frame_parameters = self.__profiles[0]
         self.__record_parameters = self.__profiles[2]
+
         self.__acquisition_task = None
-        self.profile_changed_event = Event.Event()
-        self.frame_parameters_changed_event = Event.Event()
-        self.channel_state_changed_event = Event.Event()
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue = queue.Queue()
@@ -112,7 +115,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.record_index = 1  # use to give unique name to recorded images
 
     def close(self):
-        self.__scan_adapter.on_selected_profile_index_changed = None
         self.__scan_adapter.on_profile_frame_parameters_changed = None
 
         # thread needs to close before closing the stem controller. so use this method to
@@ -249,16 +251,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def set_selected_profile_index(self, profile_index):
         self.__current_profile_index = profile_index
-        self.__scan_adapter.set_selected_profile_index(profile_index)
         self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
         self.profile_changed_event.fire(profile_index)
 
     @property
     def selected_profile_index(self):
         return self.__current_profile_index
-
-    def __selected_profile_index_changed(self, profile_index):
-        self.__task_queue.put(lambda: self.set_selected_profile_index(profile_index))
 
     def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
         # this method will be called when the device changes parameters (via a dialog or something similar).
@@ -598,10 +596,8 @@ class ScanAdapter:
         self.__device.on_device_state_changed = self.__device_state_changed
         self.channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
         self.features = dict()
-        self.on_selected_profile_index_changed = None
         self.on_profile_frame_parameters_changed = None
         self.on_channel_states_changed = None
-        self.__current_profile_index = 0
         self.__last_idle_position = None  # used for testing
 
     def close(self):
@@ -625,9 +621,6 @@ class ScanAdapter:
 
     def get_initial_profile_index(self) -> int:
         return 0
-
-    def set_selected_profile_index(self, profile_index: int) -> None:
-        self.__current_profile_index = profile_index
 
     def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
