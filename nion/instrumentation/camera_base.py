@@ -64,7 +64,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__delegate.stop_acquisition()
 
     def _acquire_data_elements(self):
-        return self.__delegate.acquire_data_elements()
+        return [self.__delegate.acquire_data_element()]
 
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
@@ -658,7 +658,7 @@ class CameraAdapterAcquisitionTask:
     def stop_acquisition(self) -> None:
         self.__camera.stop_live()
 
-    def acquire_data_elements(self):
+    def acquire_data_element(self):
         if self.__pending_frame_parameters:
             self.__activate_frame_parameters()
         assert self.__frame_parameters is not None
@@ -699,7 +699,7 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["integration_count"] = cumulative_frame_count
         if self.__camera_category in ("eels", "ronchigram"):
             data_element["properties"]["signal_type"] = self.__camera_category
-        return [data_element]
+        return data_element
 
     def __activate_frame_parameters(self):
         self.__frame_parameters = self.frame_parameters
@@ -839,27 +839,18 @@ class CameraAdapter:
             properties = None
             data = None
             for index in range(n):
-                frame_data_elements = acquisition_task.acquire_data_elements()
-                if len(frame_data_elements) == 1 or processing != "sum_project":
-                    frame_data_element = frame_data_elements[0]
-                    frame_data = frame_data_element["data"]
-                    if data is None:
-                        if processing == "sum_project":
-                            data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
-                        else:
-                            data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
+                frame_data_element = acquisition_task.acquire_data_element()
+                frame_data = frame_data_element["data"]
+                if data is None:
                     if processing == "sum_project":
-                        data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
-                    else:
-                        data[index] = frame_data
-                    properties = copy.deepcopy(frame_data_element["properties"])
-                elif len(frame_data_elements) == 2:
-                    frame_data_element = frame_data_elements[1]
-                    frame_data = frame_data_element["data"]
-                    if data is None:
                         data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
+                    else:
+                        data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
+                if processing == "sum_project":
+                    data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
+                else:
                     data[index] = frame_data
-                    properties = copy.deepcopy(frame_data_element["properties"])
+                properties = copy.deepcopy(frame_data_element["properties"])
                 if processing == "sum_project":
                     properties["valid_rows"] = 1
                     spatial_properties = properties.get("spatial_calibrations")
