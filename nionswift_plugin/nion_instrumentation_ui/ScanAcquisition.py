@@ -561,6 +561,18 @@ class PanelDelegate:
         self.__scan_width_model = Model.PropertyModel()
         self.__scan_height_model = Model.PropertyModel()
 
+        scan_width_binding = Binding.PropertyBinding(self.__scan_width_model, "value", converter=Converter.IntegerToStringConverter())
+        scan_height_binding = Binding.PropertyBinding(self.__scan_height_model, "value", converter=Converter.IntegerToStringConverter())
+
+        def scan_profile_parameters_changed(profile_index, frame_parameters):
+            if profile_index == 2:
+                self.__scan_width_model.value = frame_parameters.size[1]
+                self.__scan_height_model.value = frame_parameters.size[0]
+
+        self.__scan_frame_parameters_changed_event_listener = scan_hardware_source.frame_parameters_changed_event.listen(scan_profile_parameters_changed)
+
+        scan_profile_parameters_changed(2, scan_hardware_source.get_frame_parameters(2))
+
         def update_scan_width(scan_width):
             if scan_width > 0:
                 frame_parameters = scan_hardware_source.get_frame_parameters(2)
@@ -575,20 +587,9 @@ class PanelDelegate:
                 scan_hardware_source.set_frame_parameters(2, frame_parameters)
             self.__update_estimate()
 
+        # only connect model to update hardware source after it has been initialized.
         self.__scan_width_model.on_value_changed = update_scan_width
         self.__scan_height_model.on_value_changed = update_scan_height
-
-        scan_width_binding = Binding.PropertyBinding(self.__scan_width_model, "value", converter=Converter.IntegerToStringConverter())
-        scan_height_binding = Binding.PropertyBinding(self.__scan_height_model, "value", converter=Converter.IntegerToStringConverter())
-
-        def scan_profile_parameters_changed(profile_index, frame_parameters):
-            if profile_index == 2:
-                self.__scan_width_model.value = frame_parameters.size[1]
-                self.__scan_height_model.value = frame_parameters.size[0]
-
-        self.__scan_frame_parameters_changed_event_listener = scan_hardware_source.frame_parameters_changed_event.listen(scan_profile_parameters_changed)
-
-        scan_profile_parameters_changed(2, scan_hardware_source.get_frame_parameters(2))
 
         self.__scan_width_widget._widget.bind_text(scan_width_binding)  # the widget will close the binding
         self.__scan_height_widget._widget.bind_text(scan_height_binding)  # the widget will close the binding
