@@ -1,8 +1,8 @@
 # standard libraries
 import asyncio
 import copy
+import enum
 import gettext
-import logging
 import threading
 
 # third party libraries
@@ -18,6 +18,11 @@ from nion.utils import Event
 
 
 _ = gettext.gettext
+
+
+class PMTType(enum.Enum):
+    DF = 0
+    BF = 1
 
 
 class STEMController:
@@ -169,6 +174,18 @@ class STEMController:
         return False
 
     # end required functions
+
+    # high level commands
+
+    def change_stage_position(self, *, dy: int=None, dx: int=None):
+        """Shift the stage by dx, dy (meters). Do not wait for confirmation."""
+        raise NotImplemented()
+
+    def change_pmt_gain(self, pmt_type: PMTType, *, factor: float) -> None:
+        """Change specified PMT by factor. Do not wait for confirmation."""
+        raise NotImplemented()
+
+    # end high level commands
 
 
 class PropertyToGraphicBinding(Binding.PropertyBinding):
