@@ -492,7 +492,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if not self.__stem_controller:
             self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
             if not self.__stem_controller:
-                print("STEM Controller (" + self.__stem_controller_id + ") not found. Using proxy.")
+                print("STEM Controller (" + self.__stem_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
                 from nion.instrumentation import stem_controller
                 self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
         return self.__stem_controller
