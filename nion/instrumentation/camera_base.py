@@ -67,249 +67,6 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         return [self.__delegate.acquire_data_element()]
 
 
-class CameraHardwareSource(HardwareSource.HardwareSource):
-
-    def __init__(self, camera_adapter, periodic_logger_fn=None):
-        super().__init__(camera_adapter.hardware_source_id, camera_adapter.display_name)
-        self.__camera_adapter = camera_adapter
-        self.__camera_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
-        self.__camera_adapter.on_profile_frame_parameter_changed = self.__profile_frame_parameter_changed
-        self.features["is_camera"] = True
-        self.features.update(self.__camera_adapter.features)
-        self.add_data_channel()
-        if self.__camera_adapter.processor:
-            self.add_channel_processor(0, self.__camera_adapter.processor)
-        self.log_timing = False
-        self.__profiles = list()
-        self.__profiles.extend(self.__camera_adapter.get_initial_profiles())
-        self.__current_profile_index = self.__camera_adapter.get_initial_profile_index()
-        self.__frame_parameters = self.__profiles[0]
-        self.__record_parameters = self.__profiles[2]
-        self.__acquisition_task = None
-        self.profile_changed_event = Event.Event()
-        self.frame_parameters_changed_event = Event.Event()
-        # the periodic logger function retrieves any log messages from the camera. it is called during
-        # __handle_log_messages_event. any messages are sent out on the log_messages_event.
-        self.__periodic_logger_fn = periodic_logger_fn
-        self.log_messages_event = Event.Event()
-        self.modes = ["Run", "Tune", "Snap"]
-        # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
-        # and executed at a later time in the __handle_executing_task_queue method.
-        self.__task_queue = queue.Queue()
-        self.__latest_values_lock = threading.RLock()
-        self.__latest_values = list()
-        self.__latest_profile_index = None
-
-    def close(self):
-        self.__camera_adapter.on_selected_profile_index_changed = None
-        self.__camera_adapter.on_profile_frame_parameter_changed = None
-        self.__periodic_logger_fn = None
-        super().close()
-        # keep the camera adapter around until super close is called, since super
-        # may do something that requires the camera adapter.
-        self.__camera_adapter.close()
-        self.__camera_adapter = None
-
-    def periodic(self):
-        self.__handle_executing_task_queue()
-        self.__handle_log_messages_event()
-
-    def __handle_executing_task_queue(self):
-        # gather the pending tasks, then execute them.
-        # doing it this way prevents tasks from triggering more tasks in an endless loop.
-        tasks = list()
-        while not self.__task_queue.empty():
-            task = self.__task_queue.get(False)
-            tasks.append(task)
-            self.__task_queue.task_done()
-        for task in tasks:
-            try:
-                task()
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                traceback.print_stack()
-
-    def __handle_log_messages_event(self):
-        if callable(self.__periodic_logger_fn):
-            messages, data_elements = self.__periodic_logger_fn()
-            if len(messages) > 0 or len(data_elements) > 0:
-                self.log_messages_event.fire(messages, data_elements)
-
-    @property
-    def camera_adapter(self) -> "CameraAdapter":
-        return self.__camera_adapter
-
-    @property
-    def camera(self) -> "Camera":
-        return self.__camera_adapter.camera
-
-    @property
-    def sensor_dimensions(self):
-        return self.__camera_adapter.sensor_dimensions
-
-    @property
-    def binning_values(self) -> typing.Sequence[int]:
-        return self.__camera_adapter.binning_values
-
-    @property
-    def readout_area(self):
-        return self.__camera_adapter.readout_area
-
-    @readout_area.setter
-    def readout_area(self, readout_area_TLBR):
-        self.__camera_adapter.readout_area = readout_area_TLBR
-
-    def get_expected_dimensions(self, binning):
-        return self.__camera_adapter.get_expected_dimensions(binning)
-
-    def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
-        assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__camera_adapter.create_acquisition_task(self.__frame_parameters))
-
-    def _view_task_updated(self, view_task):
-        self.__acquisition_task = view_task
-
-    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
-        assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__camera_adapter.create_record_task(self.__record_parameters))
-
-    def acquire_sequence_prepare(self, n: int) -> None:
-        self.__camera_adapter.acquire_sequence_prepare(n)
-
-    def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
-        return self.__camera_adapter.acquire_sequence(self.get_current_frame_parameters(), n)
-
-    def set_frame_parameters(self, profile_index, frame_parameters):
-        frame_parameters = copy.copy(frame_parameters)
-        self.__profiles[profile_index] = frame_parameters
-        self.__camera_adapter.set_profile_frame_parameters(profile_index, frame_parameters)
-        if profile_index == self.__current_profile_index:
-            self.set_current_frame_parameters(frame_parameters)
-        if profile_index == 2:
-            self.set_record_frame_parameters(frame_parameters)
-        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
-
-    def get_frame_parameters(self, profile_index):
-        return copy.copy(self.__profiles[profile_index])
-
-    def set_current_frame_parameters(self, frame_parameters):
-        if self.__acquisition_task:
-            self.__acquisition_task.set_frame_parameters(frame_parameters)
-        self.__frame_parameters = copy.copy(frame_parameters)
-
-    def get_current_frame_parameters(self):
-        return self.__frame_parameters
-
-    def set_record_frame_parameters(self, frame_parameters):
-        self.__record_parameters = copy.copy(frame_parameters)
-
-    def get_record_frame_parameters(self):
-        return self.__record_parameters
-
-    def set_selected_profile_index(self, profile_index):
-        if self.__current_profile_index != profile_index:
-            self.__current_profile_index = profile_index
-            self.__camera_adapter.set_selected_profile_index(profile_index)
-            self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
-            self.profile_changed_event.fire(profile_index)
-
-    @property
-    def selected_profile_index(self):
-        return self.__current_profile_index
-
-    def __do_update_parameters(self):
-        with self.__latest_values_lock:
-            if self.__latest_profile_index is not None:
-                self.set_selected_profile_index(self.__latest_profile_index)
-            self.__latest_profile_index = None
-            for profile_index, parameter, value in self.__latest_values:
-                frame_parameters = self.get_frame_parameters(profile_index)
-                if getattr(frame_parameters, parameter) != value:
-                    setattr(frame_parameters, parameter, value)
-                    self.set_frame_parameters(profile_index, frame_parameters)
-            self.__latest_values = list()
-
-    def __selected_profile_index_changed(self, profile_index):
-        with self.__latest_values_lock:
-            self.__latest_profile_index = profile_index
-        self.__task_queue.put(self.__do_update_parameters)
-
-    def __profile_frame_parameter_changed(self, profile_index, frame_parameter, value):
-        # this is the preferred technique for camera adapters to indicate changes
-        with self.__latest_values_lock:
-            # rebuild the list to remove anything matching our new profile_index/frame_parameter combo.
-            latest_values = list()
-            for profile_index_, parameter_, value_ in self.__latest_values:
-                if profile_index != profile_index_ or frame_parameter != parameter_:
-                    latest_values.append((profile_index_, parameter_, value_))
-            self.__latest_values = latest_values
-            self.__latest_values.append((profile_index, frame_parameter, value))
-        self.__task_queue.put(self.__do_update_parameters)
-
-    def get_frame_parameters_from_dict(self, d):
-        return self.__camera_adapter.get_frame_parameters_from_dict(d)
-
-    # mode property. thread safe.
-    def get_mode(self):
-        return self.modes[self.__current_profile_index]
-
-    # translate the mode identifier to the mode enum if necessary.
-    # set mode settings. thread safe.
-    def set_mode(self, mode):
-        self.set_selected_profile_index(self.modes.index(mode))
-
-    def open_configuration_interface(self, api_broker):
-        self.__camera_adapter.open_configuration_interface(api_broker)
-
-    def open_monitor(self):
-        self.__camera_adapter.open_monitor()
-
-    def shift_click(self, mouse_position, camera_shape):
-        if hasattr(self.__camera_adapter, "shift_click") and callable(self.__camera_adapter.shift_click):
-            self.__camera_adapter.shift_click(mouse_position, camera_shape)
-
-    def tilt_click(self, mouse_position, camera_shape):
-        if hasattr(self.__camera_adapter, "tilt_click") and callable(self.__camera_adapter.tilt_click):
-            self.__camera_adapter.tilt_click(mouse_position, camera_shape)
-
-    def get_property(self, name):
-        return self.__camera_adapter.get_property(name)
-
-    def set_property(self, name, value):
-        self.__camera_adapter.set_property(name, value)
-
-    def get_api(self, version):
-        actual_version = "1.0.0"
-        if Utility.compare_versions(version, actual_version) > 0:
-            raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
-
-        class CameraFacade(object):
-
-            def __init__(self):
-                pass
-
-        return CameraFacade()
-
-
-class CameraFrameParameters(object):
-
-    def __init__(self, d=None):
-        d = d or dict()
-        self.exposure_ms = d.get("exposure_ms", 125)
-        self.binning = d.get("binning", 1)
-        self.processing = d.get("processing")
-        self.integration_count = d.get("integration_count")
-
-    def as_dict(self):
-        return {
-            "exposure_ms": self.exposure_ms,
-            "binning": self.binning,
-            "processing": self.processing,
-            "integration_count": self.integration_count,
-        }
-
-
 class Camera(abc.ABC):
 
     # TODO: dimensional and intensity calibrations should be returned at top level of data element
@@ -568,60 +325,6 @@ class Camera(abc.ABC):
         pass
 
 
-def get_stem_control(stem_controller, calibration_controls, key):
-    if key + "_control" in calibration_controls:
-        valid, value = stem_controller.TryGetVal(calibration_controls[key + "_control"])
-        if valid:
-            return value
-    if key + "_value" in calibration_controls:
-        return calibration_controls.get(key + "_value")
-    return None
-
-
-def build_calibration_dict(stem_controller, calibration_controls, prefix):
-    scale = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "scale")
-    offset = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "offset")
-    units = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "units")
-    return Calibration.Calibration(offset, scale, units).rpc_dict
-
-
-def update_spatial_calibrations(data_element, stem_controller, camera):
-    if "spatial_calibrations" not in data_element:
-        if "spatial_calibrations" in data_element["properties"]:
-            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
-        elif hasattr(camera, "calibration"):  # used in nionccd1010
-            data_element["spatial_calibrations"] = camera.calibration
-        elif stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
-            x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x")
-            y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y")
-            data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
-
-
-def update_intensity_calibration(data_element, stem_controller, camera):
-    if "intensity_calibration" not in data_element:
-        if "intensity_calibration" in data_element["properties"]:
-            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
-        elif stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
-            data_element["intensity_calibration"] = build_calibration_dict(stem_controller, calibration_controls, "intensity")
-    if "counts_per_electron" not in data_element:
-        if stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
-            counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
-            if counts_per_electron:
-                data_element["counts_per_electron"] = counts_per_electron
-
-
-def update_autostem_properties(data_element, stem_controller):
-    if stem_controller:
-        try:
-            autostem_properties = stem_controller.get_autostem_properties()
-            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
-        except Exception as e:
-            pass
-
-
 class CameraAdapterAcquisitionTask:
 
     def __init__(self, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
@@ -711,25 +414,27 @@ class CameraAdapterAcquisitionTask:
             self.__camera.set_integration_count(self.__frame_parameters.integration_count, mode_id)
 
 
-class CameraAdapter:
+class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, hardware_source_id, camera_category, display_name, camera: Camera):
-        self.hardware_source_id = hardware_source_id
-        self.display_name = display_name
-        self.camera = camera
-        self.__camera_category = camera_category
+    def __init__(self, camera: Camera):
+        super().__init__(camera.camera_id, camera.camera_name)
+
+        self.__camera = camera
+        self.__camera_category = camera.camera_type
         self.modes = ["Run", "Tune", "Snap"]
-        self.binning_values = self.camera.binning_values
-        self.features = dict()
-        self.features["has_monitor"] = True
         self.processor = None
-        if camera_category.lower() == "ronchigram":
+
+        # configure the features
+        self.features = dict()
+        self.features["is_camera"] = True
+        self.features["has_monitor"] = True
+        if hasattr(camera, "camera_panel_type"):
+            self.features["camera_panel_type"] = camera.camera_panel_type
+        if self.__camera_category.lower() == "ronchigram":
             self.features["is_ronchigram_camera"] = True
-        if camera_category.lower() == "eels":
+        if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
-        self.on_selected_profile_index_changed = None
-        self.on_profile_frame_parameter_changed = None
 
         # on_low_level_parameter_changed is handled for backwards compatibility (old DLLs with new hardware source).
         # new DLLs should call on_mode_changed and on_mode_parameter_changed (handled below) and should NOT call
@@ -739,101 +444,165 @@ class CameraAdapter:
         def low_level_parameter_changed(parameter_name):
             # updates all profiles with new exposure/binning values (if changed)
             # parameter_name is ignored
-            profile_index = self.camera.mode_as_index
+            profile_index = self.__camera.mode_as_index
             if parameter_name == "exposureTimems" or parameter_name == "binning":
-                if callable(self.on_profile_frame_parameter_changed):
-                    for i, mode_id in enumerate(self.modes):
-                        exposure_ms = self.camera.get_exposure_ms(mode_id)
-                        binning = self.camera.get_binning(mode_id)
-                        self.on_profile_frame_parameter_changed(i, "exposure_ms", exposure_ms)
-                        self.on_profile_frame_parameter_changed(i, "binning", binning)
+                for i, mode_id in enumerate(self.modes):
+                    exposure_ms = self.__camera.get_exposure_ms(mode_id)
+                    binning = self.__camera.get_binning(mode_id)
+                    self.__profile_frame_parameter_changed(i, "exposure_ms", exposure_ms)
+                    self.__profile_frame_parameter_changed(i, "binning", binning)
             elif parameter_name == "mode":
-                if callable(self.on_selected_profile_index_changed):
-                    self.on_selected_profile_index_changed(profile_index)
+                self.__selected_profile_index_changed(profile_index)
 
-        self.camera.on_low_level_parameter_changed = low_level_parameter_changed
+        self.__camera.on_low_level_parameter_changed = low_level_parameter_changed
 
         def mode_changed(mode: str) -> None:
             for index, i_mode in enumerate(self.modes):
                 if mode == i_mode:
-                    if callable(self.on_selected_profile_index_changed):
-                        self.on_selected_profile_index_changed(index)
+                    self.__selected_profile_index_changed(index)
                     break
 
         def mode_parameter_changed(mode: str, parameter_name: str, value) -> None:
             for index, i_mode in enumerate(self.modes):
                 if mode == i_mode:
-                    if callable(self.on_profile_frame_parameter_changed):
-                        self.on_profile_frame_parameter_changed(index, parameter_name, value)
+                    self.__profile_frame_parameter_changed(index, parameter_name, value)
                     break
 
-        self.camera.on_mode_changed = mode_changed
-        self.camera.on_mode_parameter_changed = mode_parameter_changed
+        self.__camera.on_mode_changed = mode_changed
+        self.__camera.on_mode_parameter_changed = mode_parameter_changed
+
+        # self.__camera_adapter.on_selected_profile_index_changed = self.__selected_profile_index_changed
+        # self.__camera_adapter.on_profile_frame_parameter_changed = self.__profile_frame_parameter_changed
+
+        # add channels
+        self.add_data_channel()
+        if self.processor:
+            self.add_channel_processor(0, self.processor)
+
+        # define events
+        self.profile_changed_event = Event.Event()
+        self.frame_parameters_changed_event = Event.Event()
+        self.log_messages_event = Event.Event()
+
+        # configure profiles
+        self.__profiles = list()
+        self.__profiles.extend(self.__get_initial_profiles())
+        self.__current_profile_index = self.__get_initial_profile_index()
+        self.__frame_parameters = self.__profiles[0]
+        self.__record_parameters = self.__profiles[2]
+
+        self.__acquisition_task = None
+
+        # the periodic logger function retrieves any log messages from the camera. it is called during
+        # __handle_log_messages_event. any messages are sent out on the log_messages_event.
+        periodic_logger_fn = getattr(self.__camera, "periodic_logger_fn", None)
+        self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
+
+        # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
+        # and executed at a later time in the __handle_executing_task_queue method.
+        self.__task_queue = queue.Queue()
+        self.__latest_values_lock = threading.RLock()
+        self.__latest_values = list()
+        self.__latest_profile_index = None
 
     def close(self):
-        # unlisten for events from the image panel
-        self.camera.on_low_level_parameter_changed = None
-        self.camera.on_mode_changed = None
-        self.camera.on_mode_parameter_changed = None
-        close_method = getattr(self.camera, "close", None)
-        if callable(close_method):
-            close_method()
+        self.__periodic_logger_fn = None
+        super().close()
+        # keep the camera adapter around until super close is called, since super
+        # may do something that requires the camera adapter.
+        self.__camera.on_low_level_parameter_changed = None
+        self.__camera.on_mode_changed = None
+        self.__camera.on_mode_parameter_changed = None
+        camera_close_method = getattr(self.__camera, "close", None)
+        if callable(camera_close_method):
+            camera_close_method()
+        self.__camera = None
 
-    def get_initial_profiles(self) -> typing.List[typing.Any]:
+    def periodic(self):
+        self.__handle_executing_task_queue()
+        self.__handle_log_messages_event()
+
+    def __get_initial_profiles(self) -> typing.List[typing.Any]:
         # copy the frame parameters from the camera object to self.__profiles
         def get_frame_parameters(profile_index):
             mode_id = self.modes[profile_index]
-            exposure_ms = self.camera.get_exposure_ms(mode_id)
-            binning = self.camera.get_binning(mode_id)
+            exposure_ms = self.__camera.get_exposure_ms(mode_id)
+            binning = self.__camera.get_binning(mode_id)
             return CameraFrameParameters({"exposure_ms": exposure_ms, "binning": binning})
         return [get_frame_parameters(i) for i in range(3)]
 
-    def get_initial_profile_index(self) -> int:
-        return self.camera.mode_as_index
+    def __get_initial_profile_index(self) -> int:
+        return self.__camera.mode_as_index
 
-    def set_selected_profile_index(self, profile_index: int) -> None:
-        mode_id = self.modes[profile_index]
-        self.camera.mode = mode_id
+    def __handle_executing_task_queue(self):
+        # gather the pending tasks, then execute them.
+        # doing it this way prevents tasks from triggering more tasks in an endless loop.
+        tasks = list()
+        while not self.__task_queue.empty():
+            task = self.__task_queue.get(False)
+            tasks.append(task)
+            self.__task_queue.task_done()
+        for task in tasks:
+            try:
+                task()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                traceback.print_stack()
 
-    def set_profile_frame_parameters(self, profile_index: int, frame_parameters: CameraFrameParameters) -> None:
-        mode_id = self.modes[profile_index]
-        self.camera.set_exposure_ms(frame_parameters.exposure_ms, mode_id)
-        self.camera.set_binning(frame_parameters.binning, mode_id)
+    def __handle_log_messages_event(self):
+        if callable(self.__periodic_logger_fn):
+            messages, data_elements = self.__periodic_logger_fn()
+            if len(messages) > 0 or len(data_elements) > 0:
+                self.log_messages_event.fire(messages, data_elements)
+
+    @property
+    def camera(self) -> Camera:
+        return self.__camera
 
     @property
     def sensor_dimensions(self):
-        return self.camera.sensor_dimensions
+        return self.__camera.sensor_dimensions
+
+    @property
+    def binning_values(self) -> typing.Sequence[int]:
+        return self.__camera.binning_values
 
     @property
     def readout_area(self):
-        return self.camera.readout_area
+        return self.__camera.readout_area
 
     @readout_area.setter
     def readout_area(self, readout_area_TLBR):
-        self.camera.readout_area = readout_area_TLBR
+        self.__camera.readout_area = readout_area_TLBR
 
     def get_expected_dimensions(self, binning):
-        return self.camera.get_expected_dimensions(binning)
+        return self.__camera.get_expected_dimensions(binning)
 
-    def create_acquisition_task(self, frame_parameters):
-        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.camera, self.__camera_category, frame_parameters, self.display_name)
-        return acquisition_task
+    def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
+        assert self.__frame_parameters is not None
+        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(camera_adapter_acquisition_task)
 
-    def create_record_task(self, frame_parameters):
-        record_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.camera, self.__camera_category, frame_parameters, self.display_name)
-        return record_task
+    def _view_task_updated(self, view_task):
+        self.__acquisition_task = view_task
+
+    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
+        assert self.__record_parameters is not None
+        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
+        return CameraAcquisitionTask(camera_adapter_acquisition_task)
 
     def acquire_sequence_prepare(self, n: int) -> None:
-        if callable(getattr(self.camera, "acquire_sequence_prepare", None)):
-            self.camera.acquire_sequence_prepare(n)
+        if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
+            self.__camera.acquire_sequence_prepare(n)
 
     def __acquire_sequence(self, n: int, frame_parameters) -> dict:
-        if callable(getattr(self.camera, "acquire_sequence", None)):
-            data_element = self.camera.acquire_sequence(n)
+        if callable(getattr(self.__camera, "acquire_sequence", None)):
+            data_element = self.__camera.acquire_sequence(n)
             if data_element is not None:
                 return data_element
         processing = frame_parameters.processing
-        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.camera, self.__camera_category, frame_parameters, self.display_name)
+        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
         acquisition_task.start_acquisition()
         try:
             properties = None
@@ -863,39 +632,116 @@ class CameraAdapter:
         data_element["properties"] = properties
         return data_element
 
-    def acquire_sequence(self, frame_parameters, n: int):
-        self.camera.exposure_ms = frame_parameters.exposure_ms
-        self.camera.binning = frame_parameters.binning
-        self.camera.processing = frame_parameters.processing
+    def acquire_sequence(self, frame_parameters, n: int) -> typing.Sequence[typing.Dict]:
+        self.__camera.exposure_ms = frame_parameters.exposure_ms
+        self.__camera.binning = frame_parameters.binning
+        self.__camera.processing = frame_parameters.processing
         data_element = self.__acquire_sequence(n, frame_parameters)
         data_element["version"] = 1
         data_element["state"] = "complete"
         stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        update_spatial_calibrations(data_element, stem_controller, self.camera)
-        update_intensity_calibration(data_element, stem_controller, self.camera)
+        update_spatial_calibrations(data_element, stem_controller, self.__camera)
+        update_intensity_calibration(data_element, stem_controller, self.__camera)
         update_autostem_properties(data_element, stem_controller)
         data_element["properties"]["hardware_source_name"] = self.display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
         return [data_element]
 
-    def open_configuration_interface(self, api_broker):
-        if hasattr(self.camera, "show_config_window"):
-            self.camera.show_config_window()
-        if hasattr(self.camera, "show_configuration_dialog"):
-            self.camera.show_configuration_dialog(api_broker)
+    def set_frame_parameters(self, profile_index, frame_parameters):
+        frame_parameters = copy.copy(frame_parameters)
+        self.__profiles[profile_index] = frame_parameters
+        # update the frame parameters on the device
+        mode_id = self.modes[profile_index]
+        self.__camera.set_exposure_ms(frame_parameters.exposure_ms, mode_id)
+        self.__camera.set_binning(frame_parameters.binning, mode_id)
+        # update the local frame parameters
+        if profile_index == self.__current_profile_index:
+            self.set_current_frame_parameters(frame_parameters)
+        if profile_index == 2:
+            self.set_record_frame_parameters(frame_parameters)
+        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
-    def open_monitor(self):
-        self.camera.start_monitor()
+    def get_frame_parameters(self, profile_index):
+        return copy.copy(self.__profiles[profile_index])
+
+    def set_current_frame_parameters(self, frame_parameters):
+        if self.__acquisition_task:
+            self.__acquisition_task.set_frame_parameters(frame_parameters)
+        self.__frame_parameters = copy.copy(frame_parameters)
+
+    def get_current_frame_parameters(self):
+        return self.__frame_parameters
+
+    def set_record_frame_parameters(self, frame_parameters):
+        self.__record_parameters = copy.copy(frame_parameters)
+
+    def get_record_frame_parameters(self):
+        return self.__record_parameters
+
+    def set_selected_profile_index(self, profile_index):
+        if self.__current_profile_index != profile_index:
+            self.__current_profile_index = profile_index
+            # set the camera mode on the camera device
+            mode_id = self.modes[profile_index]
+            self.__camera.mode = mode_id
+            # set current frame parameters
+            self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
+            self.profile_changed_event.fire(profile_index)
+
+    @property
+    def selected_profile_index(self):
+        return self.__current_profile_index
+
+    def __do_update_parameters(self):
+        with self.__latest_values_lock:
+            if self.__latest_profile_index is not None:
+                self.set_selected_profile_index(self.__latest_profile_index)
+            self.__latest_profile_index = None
+            for profile_index, parameter, value in self.__latest_values:
+                frame_parameters = self.get_frame_parameters(profile_index)
+                if getattr(frame_parameters, parameter) != value:
+                    setattr(frame_parameters, parameter, value)
+                    self.set_frame_parameters(profile_index, frame_parameters)
+            self.__latest_values = list()
+
+    def __selected_profile_index_changed(self, profile_index):
+        with self.__latest_values_lock:
+            self.__latest_profile_index = profile_index
+        self.__task_queue.put(self.__do_update_parameters)
+
+    def __profile_frame_parameter_changed(self, profile_index, frame_parameter, value):
+        # this is the preferred technique for camera adapters to indicate changes
+        with self.__latest_values_lock:
+            # rebuild the list to remove anything matching our new profile_index/frame_parameter combo.
+            latest_values = list()
+            for profile_index_, parameter_, value_ in self.__latest_values:
+                if profile_index != profile_index_ or frame_parameter != parameter_:
+                    latest_values.append((profile_index_, parameter_, value_))
+            self.__latest_values = latest_values
+            self.__latest_values.append((profile_index, frame_parameter, value))
+        self.__task_queue.put(self.__do_update_parameters)
 
     def get_frame_parameters_from_dict(self, d):
         return CameraFrameParameters(d)
 
-    def get_property(self, name):
-        return getattr(self.camera, name)
+    # mode property. thread safe.
+    def get_mode(self):
+        return self.modes[self.__current_profile_index]
 
-    def set_property(self, name, value):
-        setattr(self.camera, name, value)
+    # translate the mode identifier to the mode enum if necessary.
+    # set mode settings. thread safe.
+    def set_mode(self, mode):
+        self.set_selected_profile_index(self.modes.index(mode))
+
+    def open_configuration_interface(self, api_broker):
+        if hasattr(self.__camera, "show_config_window"):
+            self.__camera.show_config_window()
+        if hasattr(self.__camera, "show_configuration_dialog"):
+            self.__camera.show_configuration_dialog(api_broker)
+
+    def open_monitor(self):
+        self.__camera.start_monitor()
 
     def shift_click(self, mouse_position, camera_shape):
         autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
@@ -918,6 +764,96 @@ class CameraAdapter:
             autostem.set_value("STilt.x", autostem.get_value("STilt.x") - da)
             autostem.set_value("STilt.y", autostem.get_value("STilt.y") - db)
 
+    def get_property(self, name):
+        return getattr(self.__camera, name)
+
+    def set_property(self, name, value):
+        setattr(self.__camera, name, value)
+
+    def get_api(self, version):
+        actual_version = "1.0.0"
+        if Utility.compare_versions(version, actual_version) > 0:
+            raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
+
+        class CameraFacade(object):
+
+            def __init__(self):
+                pass
+
+        return CameraFacade()
+
+
+class CameraFrameParameters(object):
+
+    def __init__(self, d=None):
+        d = d or dict()
+        self.exposure_ms = d.get("exposure_ms", 125)
+        self.binning = d.get("binning", 1)
+        self.processing = d.get("processing")
+        self.integration_count = d.get("integration_count")
+
+    def as_dict(self):
+        return {
+            "exposure_ms": self.exposure_ms,
+            "binning": self.binning,
+            "processing": self.processing,
+            "integration_count": self.integration_count,
+        }
+
+
+def get_stem_control(stem_controller, calibration_controls, key):
+    if key + "_control" in calibration_controls:
+        valid, value = stem_controller.TryGetVal(calibration_controls[key + "_control"])
+        if valid:
+            return value
+    if key + "_value" in calibration_controls:
+        return calibration_controls.get(key + "_value")
+    return None
+
+
+def build_calibration_dict(stem_controller, calibration_controls, prefix):
+    scale = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "scale")
+    offset = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "offset")
+    units = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "units")
+    return Calibration.Calibration(offset, scale, units).rpc_dict
+
+
+def update_spatial_calibrations(data_element, stem_controller, camera):
+    if "spatial_calibrations" not in data_element:
+        if "spatial_calibrations" in data_element["properties"]:
+            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
+        elif hasattr(camera, "calibration"):  # used in nionccd1010
+            data_element["spatial_calibrations"] = camera.calibration
+        elif stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x")
+            y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y")
+            data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+
+
+def update_intensity_calibration(data_element, stem_controller, camera):
+    if "intensity_calibration" not in data_element:
+        if "intensity_calibration" in data_element["properties"]:
+            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
+        elif stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            data_element["intensity_calibration"] = build_calibration_dict(stem_controller, calibration_controls, "intensity")
+    if "counts_per_electron" not in data_element:
+        if stem_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+            counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
+            if counts_per_electron:
+                data_element["counts_per_electron"] = counts_per_electron
+
+
+def update_autostem_properties(data_element, stem_controller):
+    if stem_controller:
+        try:
+            autostem_properties = stem_controller.get_autostem_properties()
+            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+        except Exception as e:
+            pass
+
 
 _component_registered_listener = None
 _component_unregistered_listener = None
@@ -925,10 +861,7 @@ _component_unregistered_listener = None
 def run():
     def component_registered(component, component_types):
         if "camera_device" in component_types:
-            camera_adapter = CameraAdapter(component.camera_id, component.camera_type, component.camera_name, component)
-            if hasattr(component, "camera_panel_type"):
-                camera_adapter.features["camera_panel_type"] = component.camera_panel_type
-            camera_hardware_source = CameraHardwareSource(camera_adapter)
+            camera_hardware_source = CameraHardwareSource(component)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
 
     def component_unregistered(component, component_types):
