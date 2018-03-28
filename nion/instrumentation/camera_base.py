@@ -26,43 +26,6 @@ from nion.utils import Registry
 
 _ = gettext.gettext
 
-class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
-
-    def __init__(self, delegate):
-        super().__init__(delegate.is_continuous)
-        self.__delegate = delegate
-
-    def set_frame_parameters(self, frame_parameters):
-        self.__delegate.set_frame_parameters(frame_parameters)
-
-    @property
-    def frame_parameters(self):
-        return self.__delegate.frame_parameters
-
-    def _start_acquisition(self) -> bool:
-        if not super()._start_acquisition():
-            return False
-        return self.__delegate.start_acquisition()
-
-    def _suspend_acquisition(self) -> None:
-        super()._suspend_acquisition()
-        return self.__delegate.suspend_acquisition()
-
-    def _resume_acquisition(self) -> None:
-        super()._resume_acquisition()
-        self.__delegate.resume_acquisition()
-
-    def _mark_acquisition(self) -> None:
-        super()._mark_acquisition()
-        self.__delegate.mark_acquisition()
-
-    def _stop_acquisition(self) -> None:
-        super()._stop_acquisition()
-        self.__delegate.stop_acquisition()
-
-    def _acquire_data_elements(self):
-        return [self.__delegate.acquire_data_element()]
-
 
 class Camera(abc.ABC):
 
@@ -322,9 +285,10 @@ class Camera(abc.ABC):
         pass
 
 
-class CameraAdapterAcquisitionTask:
+class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
+        super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
@@ -341,25 +305,27 @@ class CameraAdapterAcquisitionTask:
     def frame_parameters(self):
         return self.__pending_frame_parameters or self.__frame_parameters
 
-    def start_acquisition(self) -> bool:
-        self.resume_acquisition()
+    def _start_acquisition(self) -> bool:
+        if not super()._start_acquisition():
+            return False
+        self._resume_acquisition()
         return True
 
-    def suspend_acquisition(self) -> None:
-        pass
-
-    def resume_acquisition(self) -> None:
+    def _resume_acquisition(self) -> None:
+        super()._resume_acquisition()
         self.__activate_frame_parameters()
         self.__stop_after_acquire = False
         self.__camera.start_live()
 
-    def mark_acquisition(self) -> None:
+    def _mark_acquisition(self) -> None:
+        super()._mark_acquisition()
         self.__stop_after_acquire = True
 
-    def stop_acquisition(self) -> None:
+    def _stop_acquisition(self) -> None:
+        super()._stop_acquisition()
         self.__camera.stop_live()
 
-    def acquire_data_element(self):
+    def _acquire_data_elements(self):
         if self.__pending_frame_parameters:
             self.__activate_frame_parameters()
         assert self.__frame_parameters is not None
@@ -399,7 +365,7 @@ class CameraAdapterAcquisitionTask:
         data_element["properties"]["integration_count"] = cumulative_frame_count
         if self.__camera_category in ("eels", "ronchigram"):
             data_element["properties"]["signal_type"] = self.__camera_category
-        return data_element
+        return [data_element]
 
     def __activate_frame_parameters(self):
         self.__frame_parameters = self.frame_parameters
@@ -590,16 +556,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
-        return CameraAcquisitionTask(camera_adapter_acquisition_task)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
-        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
-        return CameraAcquisitionTask(camera_adapter_acquisition_task)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
 
     def acquire_sequence_prepare(self, n: int) -> None:
         if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
@@ -611,13 +575,13 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if data_element is not None:
                 return data_element
         processing = frame_parameters.processing
-        acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
-        acquisition_task.start_acquisition()
+        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
+        acquisition_task._start_acquisition()
         try:
             properties = None
             data = None
             for index in range(n):
-                frame_data_element = acquisition_task.acquire_data_element()
+                frame_data_element = acquisition_task._acquire_data_elements()[0]
                 frame_data = frame_data_element["data"]
                 if data is None:
                     if processing == "sum_project":
@@ -635,13 +599,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                     if spatial_properties is not None:
                         properties["spatial_properties"] = spatial_properties[1:]
         finally:
-            acquisition_task.stop_acquisition()
+            acquisition_task._stop_acquisition()
         data_element = dict()
         data_element["data"] = data
         data_element["properties"] = properties
         return data_element
 
-    def acquire_sequence(self, frame_parameters, n: int) -> typing.Sequence[typing.Dict]:
+    def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
+        frame_parameters = self.get_current_frame_parameters()
         self.__camera.exposure_ms = frame_parameters.exposure_ms
         self.__camera.binning = frame_parameters.binning
         self.__camera.processing = frame_parameters.processing
