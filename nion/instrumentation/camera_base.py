@@ -26,9 +26,6 @@ from nion.utils import Registry
 
 _ = gettext.gettext
 
-AUTOSTEM_CONTROLLER_ID = "autostem_controller"
-
-
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __init__(self, delegate):
@@ -327,7 +324,8 @@ class Camera(abc.ABC):
 
 class CameraAdapterAcquisitionTask:
 
-    def __init__(self, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
+    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
+        self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
@@ -388,10 +386,9 @@ class CameraAdapterAcquisitionTask:
         data_element["version"] = 1
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
-        stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        update_spatial_calibrations(data_element, stem_controller, self.__camera)
-        update_intensity_calibration(data_element, stem_controller, self.__camera)
-        update_autostem_properties(data_element, stem_controller)
+        update_spatial_calibrations(data_element, self.__stem_controller, self.__camera)
+        update_intensity_calibration(data_element, self.__stem_controller, self.__camera)
+        update_autostem_properties(data_element, self.__stem_controller)
         # grab metadata from the autostem
         data_element["properties"]["hardware_source_name"] = self.__display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
@@ -416,8 +413,11 @@ class CameraAdapterAcquisitionTask:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, camera: Camera):
+    def __init__(self, stem_controller_id: str, camera: Camera):
         super().__init__(camera.camera_id, camera.camera_name)
+
+        self.__stem_controller_id = stem_controller_id
+        self.__stem_controller = None
 
         self.__camera = camera
         self.__camera_category = camera.camera_type
@@ -522,6 +522,15 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__handle_executing_task_queue()
         self.__handle_log_messages_event()
 
+    def __get_stem_controller(self):
+        if not self.__stem_controller:
+            self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
+            if not self.__stem_controller:
+                print("STEM Controller (" + self.__stem_controller_id + ") not found. Using proxy.")
+                from nion.instrumentation import stem_controller
+                self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
+        return self.__stem_controller
+
     def __get_initial_profiles(self) -> typing.List[typing.Any]:
         # copy the frame parameters from the camera object to self.__profiles
         def get_frame_parameters(profile_index):
@@ -581,7 +590,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
+        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
         return CameraAcquisitionTask(camera_adapter_acquisition_task)
 
     def _view_task_updated(self, view_task):
@@ -589,7 +598,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
-        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
+        camera_adapter_acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
         return CameraAcquisitionTask(camera_adapter_acquisition_task)
 
     def acquire_sequence_prepare(self, n: int) -> None:
@@ -602,7 +611,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if data_element is not None:
                 return data_element
         processing = frame_parameters.processing
-        acquisition_task = CameraAdapterAcquisitionTask(self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
+        acquisition_task = CameraAdapterAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
         acquisition_task.start_acquisition()
         try:
             properties = None
@@ -639,7 +648,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         data_element = self.__acquire_sequence(n, frame_parameters)
         data_element["version"] = 1
         data_element["state"] = "complete"
-        stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
+        stem_controller = self.__get_stem_controller()
         update_spatial_calibrations(data_element, stem_controller, self.__camera)
         update_intensity_calibration(data_element, stem_controller, self.__camera)
         update_autostem_properties(data_element, stem_controller)
@@ -744,25 +753,24 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__camera.start_monitor()
 
     def shift_click(self, mouse_position, camera_shape):
-        autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        if autostem:
-            radians_per_pixel = autostem.get_value("TVPixelAngle")
-            defocus_value = autostem.get_value("C10")  # get the defocus
+        if self.__camera_category.lower() == "ronchigram":
+            stem_controller = self.__get_stem_controller()
+            radians_per_pixel = stem_controller.get_value("TVPixelAngle")
+            defocus_value = stem_controller.get_value("C10")  # get the defocus
             dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
             dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
             logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
-            autostem.set_value("SShft.x", autostem.get_value("SShft.x") - dx)
-            autostem.set_value("SShft.y", autostem.get_value("SShft.y") - dy)
+            stem_controller.change_stage_position(dy=dy, dx=dx)
 
     def tilt_click(self, mouse_position, camera_shape):
-        autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-        if autostem:
-            radians_per_pixel = autostem.get_value("TVPixelAngle")
+        if self.__camera_category.lower() == "ronchigram":
+            stem_controller = self.__get_stem_controller()
+            radians_per_pixel = stem_controller.get_value("TVPixelAngle")
             da = radians_per_pixel * (mouse_position[1] - (camera_shape[1] / 2))
             db = radians_per_pixel * (mouse_position[0] - (camera_shape[0] / 2))
             logging.info("Tilting (%s,%s) rad.\n", da, db)
-            autostem.set_value("STilt.x", autostem.get_value("STilt.x") - da)
-            autostem.set_value("STilt.y", autostem.get_value("STilt.y") - db)
+            stem_controller.set_value("STilt.x", stem_controller.get_value("STilt.x") - da)
+            stem_controller.set_value("STilt.y", stem_controller.get_value("STilt.y") - db)
 
     def get_property(self, name):
         return getattr(self.__camera, name)
@@ -861,7 +869,8 @@ _component_unregistered_listener = None
 def run():
     def component_registered(component, component_types):
         if "camera_device" in component_types:
-            camera_hardware_source = CameraHardwareSource(component)
+            stem_controller_id = getattr(component, "stem_controller_id", "autostem_controller")
+            camera_hardware_source = CameraHardwareSource(stem_controller_id, component)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
 
     def component_unregistered(component, component_types):

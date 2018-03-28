@@ -20,9 +20,6 @@ from nion.utils import Event
 from nion.utils import Registry
 
 
-AUTOSTEM_CONTROLLER_ID = "autostem_controller"
-
-
 class ScanFrameParameters:
 
     def __init__(self, d=None):
@@ -67,8 +64,9 @@ class ScanFrameParameters:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
         super().__init__(is_continuous)
+        self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
         self.__device = device
         self.__weak_scan_hardware_source = weakref.ref(scan_hardware_source)
@@ -185,12 +183,10 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
         def get_autostem_properties():
             autostem_properties = None
-            autostem = HardwareSource.HardwareSourceManager().get_instrument_by_id(AUTOSTEM_CONTROLLER_ID)
-            if autostem:
-                try:
-                    autostem_properties = autostem.get_autostem_properties()
-                except Exception as e:
-                    logging.info("autostem.get_autostem_properties has failed")
+            try:
+                autostem_properties = self.__stem_controller.get_autostem_properties()
+            except Exception as e:
+                logging.info("autostem.get_autostem_properties has failed")
             return autostem_properties
 
         _data_elements, complete, bad_frame, sub_area, self.__frame_number, self.__pixels_to_skip = self.__device.read_partial(self.__frame_number, self.__pixels_to_skip)
@@ -348,7 +344,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self, self.__device, self.hardware_source_id, True, self.__frame_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, True, self.__frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -357,7 +353,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self, self.__device, self.hardware_source_id, False, self.__record_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, False, self.__record_parameters, channel_states, self.display_name)
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level. no need to set them.
