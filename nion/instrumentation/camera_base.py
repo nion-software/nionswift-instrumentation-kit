@@ -354,7 +354,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
         update_spatial_calibrations(data_element, self.__stem_controller, self.__camera)
         update_intensity_calibration(data_element, self.__stem_controller, self.__camera)
-        update_autostem_properties(data_element, self.__stem_controller)
+        update_autostem_properties(data_element, self.__stem_controller, self.__camera)
         # grab metadata from the autostem
         data_element["properties"]["hardware_source_name"] = self.__display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
@@ -616,7 +616,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         stem_controller = self.__get_stem_controller()
         update_spatial_calibrations(data_element, stem_controller, self.__camera)
         update_intensity_calibration(data_element, stem_controller, self.__camera)
-        update_autostem_properties(data_element, stem_controller)
+        update_autostem_properties(data_element, stem_controller, self.__camera)
         data_element["properties"]["hardware_source_name"] = self.display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
@@ -819,13 +819,21 @@ def update_intensity_calibration(data_element, stem_controller, camera):
                 data_element["counts_per_electron"] = counts_per_electron
 
 
-def update_autostem_properties(data_element, stem_controller):
+def update_autostem_properties(data_element, stem_controller, camera):
     if stem_controller:
         try:
             autostem_properties = stem_controller.get_autostem_properties()
             data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
         except Exception as e:
             pass
+        # give camera a chance to add additional properties not already supplied. this also gives
+        # the camera a place to add properties outside of the 'autostem' dict.
+        camera_update_properties = getattr(camera, "update_acquisition_properties", None)
+        if callable(camera_update_properties):
+            camera.update_acquisition_properties(data_element["properties"])
+        if hasattr(camera, "acquisition_metatdata_groups"):
+            acquisition_metatdata_groups = camera.acquisition_metatdata_groups
+            stem_controller.apply_metadata_groups(data_element["properties"], acquisition_metatdata_groups)
 
 
 _component_registered_listener = None

@@ -4,6 +4,7 @@ import copy
 import enum
 import gettext
 import threading
+import typing
 
 # third party libraries
 # None
@@ -147,6 +148,15 @@ class STEMController:
         if name in ("probe_position"):
             return setattr(self, name, value)
         return self.set_control_output(name, value)
+
+    def apply_metadata_groups(self, properties: typing.Dict, metatdata_groups: typing.Tuple[typing.List[str], str]) -> None:
+        """Apply metadata groups to properties.
+
+        Metadata groups is a tuple with two elements. The first is a list of strings representing a dict-path in which
+        to add the controls. The second is a control group from which to read a list of controls to be added as name
+        value pairs to the dict-path.
+        """
+        pass
 
     # end instrument API
 
