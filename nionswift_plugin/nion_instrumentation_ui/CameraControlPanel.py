@@ -879,7 +879,7 @@ def create_camera_panel(document_controller, panel_id, properties):
 
     The camera panel type is specified in the 'camera_panel_type' key in the properties dict.
 
-    The camera panel type must match a the `cmaera_panel_type` of a camera panel factory in the Registry.
+    The camera panel type must match a the 'camera_panel_type' of a camera panel factory in the Registry.
 
     The matching camera panel factory must return a ui_handler for the panel which is used to produce the UI.
     """
@@ -889,18 +889,9 @@ def create_camera_panel(document_controller, panel_id, properties):
             hardware_source_id = properties["hardware_source_id"]
             hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
             camera_device = getattr(hardware_source, "camera", None)
-            ui_handler = component.get_ui_handler(PlugInManager.APIBroker(), document_controller.event_loop, hardware_source_id, camera_device)
+            ui_handler = component.get_ui_handler(api_broker=PlugInManager.APIBroker(), event_loop=document_controller.event_loop, hardware_source_id=hardware_source_id, camera_device=camera_device)
             panel = Panel.Panel(document_controller, panel_id, properties)
-            finishes = list()
-            panel.widget = Declarative.construct(document_controller.ui, None, ui_handler.ui_view, ui_handler, finishes)
-            for finish in finishes:
-                finish()
-            if ui_handler and hasattr(ui_handler, "init_handler"):
-                ui_handler.init_handler()
-            def close_handler():
-                if ui_handler and hasattr(ui_handler, "close"):
-                    ui_handler.close()
-            panel.on_close = close_handler
+            panel.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler)
             return panel
     return None
 
