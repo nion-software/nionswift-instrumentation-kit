@@ -54,6 +54,7 @@ class ScanControlStateController:
         (read/write property) probe_position may be None
         (read-only property) channel_count
         (read-only property) data_channel_count
+        (read-only property) subscan_enabled
         (method) set_selected_profile_index(profile_index): change the profile index
         (method) get_frame_parameters(profile_index)
         (method) set_frame_parameters(profile_index, frame_parameters)
@@ -76,6 +77,7 @@ class ScanControlStateController:
         handle_abort_clicked()
         handle_record_clicked()
         handle_simulate_clicked()
+        handle_subscan_enabled(enabled)
         handle_enable_channel(channel_index, enabled)
         handle_settings_button_clicked(api_broker)
         handle_shift_click(hardware_source_id, mouse_position, image_dimensions)
@@ -100,6 +102,7 @@ class ScanControlStateController:
 
     Clients can respond to:
         on_display_name_changed(display_name)
+        on_subscan_enabled_changed(enabled)
         on_profiles_changed(profile_label_list)
         on_profile_changed(profile_label)
         on_frame_parameters_changed(frame_parameters)
@@ -140,6 +143,7 @@ class ScanControlStateController:
         self.__probe_state_changed_event_listener = None
         self.__channel_state_changed_event_listener = None
         self.on_display_name_changed = None
+        self.on_subscan_enabled_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -200,6 +204,7 @@ class ScanControlStateController:
             self.__data_item_changed_event_listener.close()
             self.__data_item_changed_event_listener = None
         self.on_display_name_changed = None
+        self.on_subscan_enabled_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -289,6 +294,8 @@ class ScanControlStateController:
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
+        if self.on_subscan_enabled_changed:
+            self.on_subscan_enabled_changed(self.__scan_hardware_source.subscan_enabled)
         channel_count = self.__scan_hardware_source.channel_count
         if self.on_channel_count_changed:
             self.on_channel_count_changed(channel_count)
@@ -370,6 +377,12 @@ class ScanControlStateController:
     # must be called on ui thread
     def handle_simulate_clicked(self):
         self.__scan_hardware_source.start_simulator()
+
+    # must be called on ui thread
+    def handle_subscan_enabled(self, enabled):
+        self.__scan_hardware_source.subscan_enabled = enabled
+        if callable(self.on_subscan_enabled_changed):
+            self.on_subscan_enabled_changed(enabled)
 
     # must be called on ui thread
     def handle_enable_channel(self, channel_index, enabled):
@@ -916,6 +929,10 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.__shift_click_state = None
 
+        self.__subscan_enabled = False
+
+        self.__channel_states = dict()
+
         ui = document_controller.ui
 
         self.__key_pressed_event_listener = DisplayPanel.DisplayPanelManager().key_pressed_event.listen(self.image_panel_key_pressed)
@@ -1132,6 +1149,10 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         rotation_tracker.on_mouse_delta = rotation_tracker_mouse_delta
 
+        subscan_checkbox = ui.create_check_box_widget(_("Subscan Enabled"))
+
+        subscan_checkbox.on_checked_changed = self.__state_controller.handle_subscan_enabled
+
         time_column = ui.create_column_widget()
         time_column.add(time_row)
         time_column.add(fov_row)
@@ -1154,6 +1175,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         sizes_row_column = ui.create_column_widget()
         sizes_row_column.add(sizes_row)
+        sizes_row_column.add(subscan_checkbox)
         sizes_row_column.add_stretch()
 
         parameters_group1 = ui.create_row_widget()
@@ -1311,15 +1333,20 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_group.remove_all()
             for _ in range(count):
                 thumbnail_group.add(ui.create_column_widget())
+            self.__channel_states.clear()
 
         def channel_state_changed(channel_index, channel_id, name, enabled):
             thumbnail_column = thumbnail_group.children[channel_index]
             thumbnail_column.remove_all()
 
+            actual_channel_id = channel_id if not self.__subscan_enabled else channel_id + ".subscan"
+
             document_model = document_controller.document_model
-            data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, channel_id))
+            data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, actual_channel_id))
             data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, data_item_reference)
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
+
+            self.__channel_states[channel_index] = channel_id, name, enabled
 
             def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
                 column.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
@@ -1333,6 +1360,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 self.__state_controller.handle_enable_channel(channel_index, checked)
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
             thumbnail_column.add(channel_enabled_check_box_widget)
+
+        def subscan_enabled_changed(subscan_enabled):
+            self.__subscan_enabled = subscan_enabled
+            for channel_index, (channel_id, name, channel_enabled) in self.__channel_states.items():
+                channel_state_changed(channel_index, channel_id, name, channel_enabled)
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -1350,6 +1382,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
         self.__state_controller.on_channel_count_changed = channel_count_changed
         self.__state_controller.on_channel_state_changed = channel_state_changed
+        self.__state_controller.on_subscan_enabled_changed = subscan_enabled_changed
 
         self.__state_controller.initialize_state()
 

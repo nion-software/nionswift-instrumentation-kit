@@ -68,7 +68,7 @@ class ScanFrameParameters:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
@@ -84,6 +84,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__pixels_to_skip = 0
         self.__channel_states = channel_states
         self.__last_read_time = 0
+        self.__subscan_enabled = subscan_enabled
 
     def set_frame_parameters(self, frame_parameters):
         self.__frame_parameters = copy.deepcopy(frame_parameters)
@@ -92,6 +93,14 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
     @property
     def frame_parameters(self):
         return self.__frame_parameters
+
+    @property
+    def subscan_enabled(self):
+        return self.__subscan_enabled
+
+    @subscan_enabled.setter
+    def subscan_enabled(self, value):
+        self.__subscan_enabled = value
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
@@ -179,6 +188,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
+            if self.__subscan_enabled:
+                channel_id += ".subscan"
             update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
             data_element["data"] = npdata
             data_element["sub_area"] = sub_area
@@ -349,11 +360,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def flyback_pixels(self):
         return self.__device.flyback_pixels
 
+    @property
+    def subscan_enabled(self) -> bool:
+        return self.__subscan_enabled
+
+    @subscan_enabled.setter
+    def subscan_enabled(self, value: bool) -> None:
+        self.__subscan_enabled = value
+        if self.__acquisition_task:
+            self.__acquisition_task.subscan_enabled = value
+
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, True, self.__frame_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, True, self.__subscan_enabled, self.__frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -362,7 +383,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, False, self.__record_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, False, self.__subscan_enabled, self.__record_parameters, channel_states, self.display_name)
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level. no need to set them.
