@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import enum
+import functools
 import gettext
 import threading
 import typing
@@ -50,7 +51,8 @@ class STEMController:
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.probe_state_changed_event = Event.Event()
-        self.probe_data_items_changed_event = Event.Event()
+        self.__subscan_region_value = Model.PropertyModel()
+        self.scan_data_items_changed_event = Event.Event()
 
     def close(self):
         pass
@@ -68,12 +70,17 @@ class STEMController:
         """Internal use."""
         return self.__probe_position_value
 
+    @property
+    def _subscan_region_value(self):
+        """Internal use."""
+        return self.__subscan_region_value
+
     def disconnect_probe_connections(self):
-        self.probe_data_items_changed_event.fire(list())
+        self.scan_data_items_changed_event.fire(list())
 
     def _data_item_states_changed(self, data_item_states):
         if len(data_item_states) > 0:
-            self.probe_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
+            self.scan_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
 
     @property
     def probe_position(self):
@@ -235,6 +242,7 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
 
 class ProbeGraphicConnection:
     """Manage the connection between the hardware and the graphics representing the probe on a display."""
+
     def __init__(self, display, probe_position_value, hide_probe_graphics_fn):
         self.display = display
         self.probe_position_value = probe_position_value
@@ -304,7 +312,7 @@ class ProbeView:
         self.__probe_graphic_connections = list()
         self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
-        self.__probe_data_items_changed_listener = stem_controller.probe_data_items_changed_event.listen(self.__probe_data_items_changed)
+        self.__probe_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__probe_data_items_changed)
 
     def close(self):
         self.__probe_data_items_changed_listener.close()
@@ -363,6 +371,90 @@ class ProbeView:
             probe_graphic_connection.update_probe_state(probe_position)
 
 
+class SubscanView:
+    """Observes the STEM controller and updates data items and graphics."""
+
+    def __init__(self, stem_controller: STEMController, event_loop: asyncio.AbstractEventLoop):
+        assert event_loop is not None
+        self.__event_loop = event_loop
+        self.__last_data_items_lock = threading.RLock()
+        self.__scan_data_items = list()
+        self.__subscan_connections = list()
+        self.__subscan_region_value = stem_controller._subscan_region_value
+        self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
+        self.__scan_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__scan_data_items_changed)
+        self.__subscan_graphic_trackers = list()
+
+    def close(self):
+        self.__scan_data_items_changed_listener.close()
+        self.__scan_data_items_changed_listener = None
+        self.__scan_data_items = list()
+        self.__event_loop = None
+
+    def __scan_data_items_changed(self, data_items):
+        # thread safe.
+        with self.__last_data_items_lock:
+            self.__scan_data_items = copy.copy(data_items)
+
+    def __subscan_region_changed(self, name):
+        self.__event_loop.create_task(self.__update_subscan_region(self.__subscan_region_value.value))
+
+    async def __update_subscan_region(self, subscan_region):
+        with self.__last_data_items_lock:
+            scan_data_items = self.__scan_data_items
+        if subscan_region:
+            # create subscan graphics for each scan data item if it doesn't exist
+            if not self.__subscan_graphic_trackers:
+                for scan_data_item in scan_data_items:
+                    display = scan_data_item.primary_display_specifier.display
+                    if display:
+                        subscan_graphic = Graphics.RectangleGraphic()
+                        subscan_graphic.graphic_id = "subscan"
+                        subscan_graphic.label = _("Subscan")
+                        subscan_graphic.bounds = subscan_region
+                        subscan_graphic.is_bounds_constrained = True
+
+                        def subscan_graphic_property_changed(subscan_graphic, name):
+                            if name == "bounds":
+                                self.__subscan_region_value.value = subscan_graphic.bounds
+
+                        subscan_graphic_property_changed_listener = subscan_graphic.property_changed_event.listen(functools.partial(subscan_graphic_property_changed, subscan_graphic))
+
+                        def graphic_removed(subscan_graphic):
+                            self.__remove_one_subscan_graphic(subscan_graphic)
+                            self.__subscan_region_value.value = None
+
+                        def display_removed(subscan_graphic):
+                            self.__remove_one_subscan_graphic(subscan_graphic)
+
+                        remove_region_graphic_event_listener = subscan_graphic.about_to_be_removed_event.listen(functools.partial(graphic_removed, subscan_graphic))
+                        display_about_to_be_removed_listener = display.about_to_be_removed_event.listen(functools.partial(display_removed, subscan_graphic))
+                        self.__subscan_graphic_trackers.append((subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+                        display.add_graphic(subscan_graphic)
+            # apply new value to any existing subscan graphics
+            for subscan_graphic, l1, l2, l3 in self.__subscan_graphic_trackers:
+                subscan_graphic.bounds = subscan_region
+        else:
+            # remove any graphics
+            for subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
+                subscan_graphic_property_changed_listener.close()
+                remove_region_graphic_event_listener.close()
+                display_about_to_be_removed_listener.close()
+                subscan_graphic.container.remove_graphic(subscan_graphic)
+            self.__subscan_graphic_trackers = list()
+
+    def __remove_one_subscan_graphic(self, subscan_graphic_to_remove):
+        subscan_graphic_trackers = list()
+        for subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
+            if subscan_graphic_to_remove != subscan_graphic:
+                subscan_graphic_trackers.append((subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+            else:
+                subscan_graphic_property_changed_listener.close()
+                remove_region_graphic_event_listener.close()
+                display_about_to_be_removed_listener.close()
+        self.__subscan_graphic_trackers = subscan_graphic_trackers
+
+
 class ProbeViewController:
     """Manage a ProbeView for each instrument (STEMController) that gets registered."""
 
@@ -389,8 +481,19 @@ class ProbeViewController:
         # if this is a stem controller, add a probe view
         if hasattr(instrument, "_probe_position_value"):
             instrument._probe_view = ProbeView(instrument, self.__event_loop)
+        if hasattr(instrument, "_subscan_region_value"):
+            instrument._subscan_view = SubscanView(instrument, self.__event_loop)
 
     def unregister_instrument(self, instrument):
         if hasattr(instrument, "_probe_view"):
             instrument._probe_view.close()
             instrument._probe_view = None
+        if hasattr(instrument, "_subscan_view"):
+            instrument._subscan_view.close()
+            instrument._subscan_view = None
+
+"""
+from nion.swift.model import HardwareSource
+s = HardwareSource.HardwareSourceManager().get_instrument_by_id('usim_stem_controller')
+s._subscan_region_value.value = ((0.1, 0.1), (0.2, 0.3))
+"""
