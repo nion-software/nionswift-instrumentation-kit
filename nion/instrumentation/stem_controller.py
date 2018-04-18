@@ -27,6 +27,12 @@ class PMTType(enum.Enum):
     BF = 1
 
 
+class SubscanState(enum.Enum):
+    INVALID = -1
+    DISABLED = 0
+    ENABLED = 1
+
+
 class STEMController:
     """An interface to a STEM microscope.
 
@@ -51,7 +57,8 @@ class STEMController:
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.probe_state_changed_event = Event.Event()
-        self.__subscan_region_value = Model.PropertyModel()
+        self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
+        self.__subscan_region_value = Model.PropertyModel(None)
         self.scan_data_items_changed_event = Event.Event()
 
     def close(self):
@@ -60,6 +67,8 @@ class STEMController:
     def _enter_scanning_state(self):
         self.__probe_state_stack.append("scanning")
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
+        if self._subscan_state_value.value == SubscanState.INVALID:
+            self._subscan_state_value.value = SubscanState.DISABLED
 
     def _exit_scanning_state(self):
         self.__probe_state_stack.pop()
@@ -69,6 +78,11 @@ class STEMController:
     def _probe_position_value(self):
         """Internal use."""
         return self.__probe_position_value
+
+    @property
+    def _subscan_state_value(self):
+        """Internal use."""
+        return self.__subscan_state_value
 
     @property
     def _subscan_region_value(self):
@@ -380,6 +394,7 @@ class SubscanView:
         self.__last_data_items_lock = threading.RLock()
         self.__scan_data_items = list()
         self.__subscan_connections = list()
+        self.__subscan_state_model = stem_controller._subscan_state_value
         self.__subscan_region_value = stem_controller._subscan_region_value
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
         self.__scan_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__scan_data_items_changed)
@@ -393,8 +408,9 @@ class SubscanView:
 
     def __scan_data_items_changed(self, data_items):
         # thread safe.
-        with self.__last_data_items_lock:
-            self.__scan_data_items = copy.copy(data_items)
+        if self.__subscan_state_model.value == SubscanState.DISABLED:
+            with self.__last_data_items_lock:
+                self.__scan_data_items = copy.copy(data_items)
 
     def __subscan_region_changed(self, name):
         # pass the value to update subscan region via the field; that way less worry about overruns
@@ -425,6 +441,7 @@ class SubscanView:
 
                         def graphic_removed(subscan_graphic):
                             self.__remove_one_subscan_graphic(subscan_graphic)
+                            self.__subscan_state_model.value = SubscanState.DISABLED
                             self.__subscan_region_value.value = None
 
                         def display_removed(subscan_graphic):

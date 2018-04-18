@@ -11,7 +11,7 @@ import uuid
 import weakref
 
 # third party libraries
-# None
+from nion.instrumentation import stem_controller
 
 # local libraries
 from nion.swift.model import DataItem
@@ -19,6 +19,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Model
 from nion.utils import Registry
 
 
@@ -293,6 +294,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller = stem_controller
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+        self.__subscan_state_changed_event_listener = self.__stem_controller._subscan_state_value.property_changed_event.listen(self.__subscan_state_changed)
         self.__subscan_region_changed_event_listener = self.__stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
@@ -324,7 +326,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = dict()
         self.record_index = 1  # use to give unique name to recorded images
-        self.__subscan_enabled = False
 
     def close(self):
         # thread needs to close before closing the stem controller. so use this method to
@@ -388,17 +389,20 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__device.flyback_pixels
 
     @property
+    def subscan_state(self) -> stem_controller.SubscanState:
+        return self.__stem_controller._subscan_state_value.value
+
+    @property
+    def subscan_state_model(self) -> Model.PropertyModel:
+        return self.__stem_controller._subscan_state_value
+
+    @property
     def subscan_enabled(self) -> bool:
-        return self.__subscan_enabled
+        return self.__stem_controller._subscan_state_value.value == stem_controller.SubscanState.ENABLED
 
     @subscan_enabled.setter
     def subscan_enabled(self, value: bool) -> None:
-        self.__subscan_enabled = value
-        _subscan_region_value = self.__stem_controller._subscan_region_value
-        if value and not _subscan_region_value.value:
-            _subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
-        if self.__acquisition_task:
-            self.__acquisition_task.subscan_enabled = value
+        self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.ENABLED if value else stem_controller.SubscanState.DISABLED
 
     @property
     def subscan_region(self):
@@ -407,6 +411,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     @subscan_region.setter
     def subscan_region(self, value):
         self.__stem_controller._subscan_region_value.value = value
+
+    def __subscan_state_changed(self, name):
+        subscan_state = self.__stem_controller._subscan_state_value.value
+        subscan_enabled = subscan_state == stem_controller.SubscanState.ENABLED
+        subscan_region_value = self.__stem_controller._subscan_region_value
+        if subscan_enabled and not subscan_region_value.value:
+            subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
+        if self.__acquisition_task:
+            self.__acquisition_task.subscan_enabled = subscan_enabled
 
     def __subscan_region_changed(self, name):
         if self.__acquisition_task:

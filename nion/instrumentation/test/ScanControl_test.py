@@ -849,6 +849,64 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
 
+    def test_subscan_state_goes_from_invalid_to_disabled_upon_first_acquisition(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self.assertEqual(stem_controller.SubscanState.INVALID, hardware_source.subscan_state)
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(stem_controller.SubscanState.DISABLED, hardware_source.subscan_state)
+
+    def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+                hardware_source.start_playing()
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                display = document_model.data_items[0].primary_display_specifier.display
+                self.assertEqual(len(display.graphics), 0)
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                hardware_source.stop_playing()
+                self.assertEqual(2, len(document_model.data_items))
+                self.assertEqual(1, len(display.graphics))
+                self.assertEqual(0, len(document_model.data_items[1].primary_display_specifier.display.graphics))
+
+    def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+                hardware_source.start_playing()
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                display = document_model.data_items[0].primary_display_specifier.display
+                self.assertEqual(len(display.graphics), 0)
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                display.remove_graphic(display.graphics[0])
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                hardware_source.stop_playing()
+                self.assertFalse(hardware_source.subscan_enabled)
+
+    def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+                hardware_source.start_playing()
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                display = document_model.data_items[0].primary_display_specifier.display
+                self.assertEqual(len(display.graphics), 0)
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                hardware_source.stop_playing()
+                display.remove_graphic(display.graphics[0])
+                self.assertFalse(hardware_source.subscan_enabled)
+
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
 

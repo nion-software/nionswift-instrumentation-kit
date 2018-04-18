@@ -8,6 +8,7 @@ import sys
 import math
 
 # local libraries
+from nion.instrumentation import stem_controller
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import Decorators
 from nion.swift import DisplayPanel
@@ -54,7 +55,7 @@ class ScanControlStateController:
         (read/write property) probe_position may be None
         (read-only property) channel_count
         (read-only property) data_channel_count
-        (read-only property) subscan_enabled
+        (read-only property) subscan_state
         (method) set_selected_profile_index(profile_index): change the profile index
         (method) get_frame_parameters(profile_index)
         (method) set_frame_parameters(profile_index, frame_parameters)
@@ -102,7 +103,7 @@ class ScanControlStateController:
 
     Clients can respond to:
         on_display_name_changed(display_name)
-        on_subscan_enabled_changed(enabled)
+        on_subscan_state_changed(subscan_state)
         on_profiles_changed(profile_label_list)
         on_profile_changed(profile_label)
         on_frame_parameters_changed(frame_parameters)
@@ -142,8 +143,9 @@ class ScanControlStateController:
         self.__acquisition_state_changed_event_listener = None
         self.__probe_state_changed_event_listener = None
         self.__channel_state_changed_event_listener = None
+        self.__subscan_state_changed_listener = None
         self.on_display_name_changed = None
-        self.on_subscan_enabled_changed = None
+        self.on_subscan_state_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -203,8 +205,11 @@ class ScanControlStateController:
         if self.__data_item_changed_event_listener:
             self.__data_item_changed_event_listener.close()
             self.__data_item_changed_event_listener = None
+        if self.__subscan_state_changed_listener:
+            self.__subscan_state_changed_listener.close()
+            self.__subscan_state_changed_listener = None
         self.on_display_name_changed = None
-        self.on_subscan_enabled_changed = None
+        self.on_subscan_state_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -292,10 +297,18 @@ class ScanControlStateController:
             self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__probe_state_changed_event_listener = self.__scan_hardware_source.probe_state_changed_event.listen(self.__probe_state_changed)
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
+            subscan_state_model = self.__scan_hardware_source.subscan_state_model
+
+            def subscan_state_changed(name):
+                if callable(self.on_subscan_state_changed):
+                    self.on_subscan_state_changed(subscan_state_model.value)
+
+            self.__subscan_state_changed_listener = subscan_state_model.property_changed_event.listen(subscan_state_changed)
+            subscan_state_changed("value")
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
-        if self.on_subscan_enabled_changed:
-            self.on_subscan_enabled_changed(self.__scan_hardware_source.subscan_enabled)
+        if self.on_subscan_state_changed:
+            self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
         channel_count = self.__scan_hardware_source.channel_count
         if self.on_channel_count_changed:
             self.on_channel_count_changed(channel_count)
@@ -381,8 +394,6 @@ class ScanControlStateController:
     # must be called on ui thread
     def handle_subscan_enabled(self, enabled):
         self.__scan_hardware_source.subscan_enabled = enabled
-        if callable(self.on_subscan_enabled_changed):
-            self.on_subscan_enabled_changed(enabled)
 
     # must be called on ui thread
     def handle_enable_channel(self, channel_index, enabled):
@@ -929,6 +940,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.__shift_click_state = None
 
+        self.__subscan_state = None
         self.__subscan_enabled = False
 
         self.__channel_states = dict()
@@ -1361,10 +1373,16 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
             thumbnail_column.add(channel_enabled_check_box_widget)
 
-        def subscan_enabled_changed(subscan_enabled):
-            self.__subscan_enabled = subscan_enabled
+        async def update_subscan_state():
             for channel_index, (channel_id, name, channel_enabled) in self.__channel_states.items():
                 channel_state_changed(channel_index, channel_id, name, channel_enabled)
+            subscan_checkbox.enabled = self.__subscan_state != stem_controller.SubscanState.INVALID
+            subscan_checkbox.checked = self.__subscan_enabled
+
+        def subscan_state_changed(subscan_state):
+            self.__subscan_state = subscan_state
+            self.__subscan_enabled = subscan_state == stem_controller.SubscanState.ENABLED
+            self.document_controller.event_loop.create_task(update_subscan_state())
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -1382,7 +1400,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
         self.__state_controller.on_channel_count_changed = channel_count_changed
         self.__state_controller.on_channel_state_changed = channel_state_changed
-        self.__state_controller.on_subscan_enabled_changed = subscan_enabled_changed
+        self.__state_controller.on_subscan_state_changed = subscan_state_changed
 
         self.__state_controller.initialize_state()
 
