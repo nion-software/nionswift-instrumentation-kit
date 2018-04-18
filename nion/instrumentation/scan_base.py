@@ -18,6 +18,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import Utility
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import Registry
 
 
@@ -30,6 +31,7 @@ class ScanFrameParameters:
         d = d or dict()
         self.size = d.get("size", (512, 512))
         self.center_nm = d.get("center_nm", (0, 0))
+        self.fov_size_nm = d.get("fov_size_nm", (8, 8))
         self.pixel_time_us = d.get("pixel_time_us", 10)
         self.fov_nm = d.get("fov_nm", 8)
         self.rotation_rad = d.get("rotation_rad", 0)
@@ -43,6 +45,7 @@ class ScanFrameParameters:
         return {
             "size": self.size,
             "center_nm": self.center_nm,
+            "fov_size_nm": self.fov_size_nm,
             "pixel_time_us": self.pixel_time_us,
             "fov_nm": self.fov_nm,
             "rotation_rad": self.rotation_rad,
@@ -56,6 +59,7 @@ class ScanFrameParameters:
     def __repr__(self):
         return "size pixels: " + str(self.size) +\
                "\ncenter nm: " + str(self.center_nm) +\
+               "\nfov size nm: " + str(self.fov_size_nm) +\
                "\npixel time: " + str(self.pixel_time_us) +\
                "\nfield of view: " + str(self.fov_nm) +\
                "\nrotation: " + str(self.rotation_rad) +\
@@ -68,7 +72,7 @@ class ScanFrameParameters:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
@@ -85,6 +89,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__channel_states = channel_states
         self.__last_read_time = 0
         self.__subscan_enabled = subscan_enabled
+        self.__subscan_region = subscan_region
 
     def set_frame_parameters(self, frame_parameters):
         self.__frame_parameters = copy.deepcopy(frame_parameters)
@@ -101,6 +106,16 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
     @subscan_enabled.setter
     def subscan_enabled(self, value):
         self.__subscan_enabled = value
+        self.__activate_frame_parameters()
+
+    @property
+    def subscan_region(self):
+        return self.__subscan_region
+
+    @subscan_region.setter
+    def subscan_region(self, value):
+        self.__subscan_region = value
+        self.__activate_frame_parameters()
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
@@ -241,12 +256,30 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         return data_elements
 
     def __activate_frame_parameters(self):
-        self.__device.set_frame_parameters(self.__frame_parameters)
+        device_frame_parameters = copy.copy(self.__frame_parameters)
+        if device_frame_parameters.size[0] > device_frame_parameters.size[1]:
+            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm, device_frame_parameters.fov_nm * device_frame_parameters.size[1] / device_frame_parameters.size[0]
+        elif device_frame_parameters.size[0] < device_frame_parameters.size[1]:
+            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * device_frame_parameters.size[0] / device_frame_parameters.size[1], device_frame_parameters.fov_nm
+        else:
+            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm, device_frame_parameters.fov_nm
+        if self.subscan_enabled and self.subscan_region:
+            subscan_region = Geometry.FloatRect.make(self.subscan_region)
+            size_y = int(device_frame_parameters.size[0] * subscan_region.height)
+            size_x = int(device_frame_parameters.size[1] * subscan_region.width)
+            fov_size_nm_y = device_frame_parameters.fov_size_nm[0] * subscan_region.height
+            fov_size_nm_x = device_frame_parameters.fov_size_nm[1] * subscan_region.width
+            center_nm_y = device_frame_parameters.fov_size_nm[0] * (subscan_region.center.y - 0.5)
+            center_nm_x = device_frame_parameters.fov_size_nm[1] * (subscan_region.center.x - 0.5)
+            device_frame_parameters.size = size_y, size_x
+            device_frame_parameters.fov_size_nm = fov_size_nm_y, fov_size_nm_x
+            device_frame_parameters.center_nm = center_nm_y, center_nm_x
+        self.__device.set_frame_parameters(device_frame_parameters)
 
 
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, device, hardware_source_id: str, display_name: str):
+    def __init__(self, stem_controller, device, hardware_source_id: str, display_name: str):
         super().__init__(hardware_source_id, display_name)
 
         self.features["is_scanning"] = True
@@ -257,9 +290,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
 
-        self.__stem_controller_id = stem_controller_id
-        self.__stem_controller = None
-        self.probe_state_changed_event_listener = None
+        self.__stem_controller = stem_controller
+
+        self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+        self.__subscan_region_changed_event_listener = self.__stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
@@ -298,10 +332,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.close_thread()
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
-        self.__get_stem_controller().disconnect_probe_connections()
-        if self.probe_state_changed_event_listener:
-            self.probe_state_changed_event_listener.close()
-            self.probe_state_changed_event_listener = None
+        self.__stem_controller.disconnect_probe_connections()
+        if self.__probe_state_changed_event_listener:
+            self.__probe_state_changed_event_listener.close()
+            self.__probe_state_changed_event_listener = None
+        if self.__subscan_region_changed_event_listener:
+            self.__subscan_region_changed_event_listener.close()
+            self.__subscan_region_changed_event_listener = None
         super().close()
 
         # keep the device around until super close is called, since super
@@ -333,16 +370,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def scan_device(self):
         return self.__device
 
-    def __get_stem_controller(self):
-        if not self.__stem_controller:
-            self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
-            if not self.__stem_controller:
-                print("STEM Controller (" + self.__stem_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
-                from nion.instrumentation import stem_controller
-                self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
-            self.probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
-        return self.__stem_controller
-
     def __get_initial_profiles(self) -> typing.List[typing.Any]:
         profiles = list()
         profiles.append(self.__get_frame_parameters(0))
@@ -367,14 +394,32 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     @subscan_enabled.setter
     def subscan_enabled(self, value: bool) -> None:
         self.__subscan_enabled = value
+        _subscan_region_value = self.__stem_controller._subscan_region_value
+        if value and not _subscan_region_value.value:
+            _subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
         if self.__acquisition_task:
             self.__acquisition_task.subscan_enabled = value
+
+    @property
+    def subscan_region(self):
+        return self.__stem_controller._subscan_region_value.value
+
+    @subscan_region.setter
+    def subscan_region(self, value):
+        self.__stem_controller._subscan_region_value.value = value
+
+    def __subscan_region_changed(self, name):
+        if self.__acquisition_task:
+            subscan_region = self.subscan_region
+            if not subscan_region:
+                self.subscan_enabled = False
+            self.__acquisition_task.subscan_region = subscan_region
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, True, self.__subscan_enabled, self.__frame_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.__frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -383,7 +428,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__get_stem_controller(), self, self.__device, self.hardware_source_id, False, self.__subscan_enabled, self.__record_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, self.subscan_enabled, self.subscan_region, self.__record_parameters, channel_states, self.display_name)
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level. no need to set them.
@@ -444,11 +489,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # channel indexes larger than then the channel count will be subscan channels
         if channel_index < self.channel_count:
             channel_id, name, enabled = self.get_channel_state(channel_index)
-            return channel_id, name, enabled if not self.__subscan_enabled else False
+            return channel_id, name, enabled if not self.subscan_enabled else False
         else:
             channel_id, name, enabled = self.get_channel_state(channel_index - self.channel_count)
             subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_id, name)
-            return subscan_channel_id, subscan_channel_name, enabled if self.__subscan_enabled else False
+            return subscan_channel_id, subscan_channel_name, enabled if self.subscan_enabled else False
 
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
@@ -551,6 +596,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         for graphic in copy.copy(display.graphics):
             if graphic.graphic_id == "probe":
                 display.remove_graphic(graphic)
+            if graphic.graphic_id == "subscan":
+                display.remove_graphic(graphic)
 
     def __probe_state_changed(self, probe_state, probe_position):
         # subclasses will override _set_probe_position
@@ -561,15 +608,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def _enter_scanning_state(self):
         """Enter scanning state. Acquisition task will call this. Tell the STEM controller."""
-        self.__get_stem_controller()._enter_scanning_state()
+        self.__stem_controller._enter_scanning_state()
 
     def _exit_scanning_state(self):
         """Exit scanning state. Acquisition task will call this. Tell the STEM controller."""
-        self.__get_stem_controller()._exit_scanning_state()
+        self.__stem_controller._exit_scanning_state()
 
     @property
     def probe_state(self):
-        return self.__get_stem_controller().probe_state
+        return self.__stem_controller.probe_state
 
     # override from BaseScanHardwareSource
     def _set_probe_position(self, probe_position):
@@ -586,18 +633,18 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     @property
     def probe_position(self):
-        return self.__get_stem_controller().probe_position
+        return self.__stem_controller.probe_position
 
     @probe_position.setter
     def probe_position(self, probe_position):
-        self.__get_stem_controller().set_probe_position(probe_position)
+        self.__stem_controller.set_probe_position(probe_position)
 
     def validate_probe_position(self):
-        self.__get_stem_controller().validate_probe_position()
+        self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
     def data_item_states_changed(self, data_item_states):
-        self.__get_stem_controller()._data_item_states_changed(data_item_states)
+        self.__stem_controller._data_item_states_changed(data_item_states)
 
     @property
     def use_hardware_simulator(self):
@@ -624,15 +671,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         dx = 1e-9 * pixel_size_nm * (mouse_position[1] - (camera_shape[1] / 2))
         dy = 1e-9 * pixel_size_nm * (mouse_position[0] - (camera_shape[0] / 2))
         logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
-        self.__get_stem_controller().change_stage_position(dy=dy, dx=dx)
+        self.__stem_controller.change_stage_position(dy=dy, dx=dx)
 
     def increase_pmt(self, channel_index):
         if channel_index in (0, 1):  # df, bf
-            self.__get_stem_controller().change_pmt_gain(channel_index, factor=2.0)
+            self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
 
     def decrease_pmt(self, channel_index):
         if channel_index in (0, 1):  # df, bf
-            self.__get_stem_controller().change_pmt_gain(channel_index, factor=0.5)
+            self.__stem_controller.change_pmt_gain(channel_index, factor=0.5)
 
     def get_api(self, version):
         actual_version = "1.0.0"
@@ -653,7 +700,12 @@ _component_unregistered_listener = None
 def run():
     def component_registered(component, component_types):
         if "scan_device" in component_types:
-            scan_hardware_source = ScanHardwareSource(component.stem_controller_id, component, component.scan_device_id, component.scan_device_name)
+            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id)
+            if not stem_controller:
+                print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
+                from nion.instrumentation import stem_controller
+                stem_controller = stem_controller.STEMController()
+            scan_hardware_source = ScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
 
     def component_unregistered(component, component_types):

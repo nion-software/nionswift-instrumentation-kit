@@ -397,9 +397,12 @@ class SubscanView:
             self.__scan_data_items = copy.copy(data_items)
 
     def __subscan_region_changed(self, name):
-        self.__event_loop.create_task(self.__update_subscan_region(self.__subscan_region_value.value))
+        # pass the value to update subscan region via the field; that way less worry about overruns
+        self.__update_subscan_region_value = self.__subscan_region_value.value
+        self.__event_loop.create_task(self.__update_subscan_region())
 
-    async def __update_subscan_region(self, subscan_region):
+    async def __update_subscan_region(self):
+        subscan_region = self.__update_subscan_region_value
         with self.__last_data_items_lock:
             scan_data_items = self.__scan_data_items
         if subscan_region:
