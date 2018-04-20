@@ -36,6 +36,9 @@ class ScanFrameParameters:
         self.pixel_time_us = d.get("pixel_time_us", 10)
         self.fov_nm = d.get("fov_nm", 8)
         self.rotation_rad = d.get("rotation_rad", 0)
+        self.subscan_pixel_size = None
+        self.subscan_fractional_size = None
+        self.subscan_fractional_center = None
         self.external_clock_wait_time_ms = d.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = d.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
         self.ac_line_sync = d.get("ac_line_sync", False)
@@ -43,7 +46,7 @@ class ScanFrameParameters:
         self.flyback_time_us = d.get("flyback_time_us", 30.0)
 
     def as_dict(self):
-        return {
+        d = {
             "size": self.size,
             "center_nm": self.center_nm,
             "fov_size_nm": self.fov_size_nm,
@@ -56,6 +59,13 @@ class ScanFrameParameters:
             "ac_frame_sync": self.ac_frame_sync,
             "flyback_time_us": self.flyback_time_us,
         }
+        if self.subscan_pixel_size is not None:
+            d["subscan_pixel_size"] = self.subscan_pixel_size
+        if self.subscan_fractional_size is not None:
+            d["subscan_fractional_size"] = self.subscan_fractional_size
+        if self.subscan_fractional_center is not None:
+            d["subscan_fractional_center"] = self.subscan_fractional_center
+        return d
 
     def __repr__(self):
         return "size pixels: " + str(self.size) +\
@@ -258,23 +268,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __activate_frame_parameters(self):
         device_frame_parameters = copy.copy(self.__frame_parameters)
-        if device_frame_parameters.size[0] > device_frame_parameters.size[1]:
-            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm, device_frame_parameters.fov_nm * device_frame_parameters.size[1] / device_frame_parameters.size[0]
-        elif device_frame_parameters.size[0] < device_frame_parameters.size[1]:
-            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * device_frame_parameters.size[0] / device_frame_parameters.size[1], device_frame_parameters.fov_nm
-        else:
-            device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm, device_frame_parameters.fov_nm
+        context_size = Geometry.FloatSize.make(device_frame_parameters.size)
+        device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
         if self.subscan_enabled and self.subscan_region:
             subscan_region = Geometry.FloatRect.make(self.subscan_region)
-            size_y = int(device_frame_parameters.size[0] * subscan_region.height)
-            size_x = int(device_frame_parameters.size[1] * subscan_region.width)
-            fov_size_nm_y = device_frame_parameters.fov_size_nm[0] * subscan_region.height
-            fov_size_nm_x = device_frame_parameters.fov_size_nm[1] * subscan_region.width
-            center_nm_y = device_frame_parameters.fov_size_nm[0] * (subscan_region.center.y - 0.5)
-            center_nm_x = device_frame_parameters.fov_size_nm[1] * (subscan_region.center.x - 0.5)
-            device_frame_parameters.size = size_y, size_x
-            device_frame_parameters.fov_size_nm = fov_size_nm_y, fov_size_nm_x
-            device_frame_parameters.center_nm = center_nm_y, center_nm_x
+            device_frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
+            device_frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
+            device_frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
