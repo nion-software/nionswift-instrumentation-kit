@@ -38,6 +38,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def tearDown(self):
         HardwareSource.HardwareSourceManager()._close_hardware_sources()
+        HardwareSource.HardwareSourceManager()._close_instruments()
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing()
