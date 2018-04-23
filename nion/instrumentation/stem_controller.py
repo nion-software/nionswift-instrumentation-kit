@@ -343,10 +343,16 @@ class ProbeView:
 
     def __probe_state_changed(self, probe_state, probe_position):
         # thread safe. move actual call to main thread using the event loop.
-        self.__event_loop.create_task(self.__update_probe_state(probe_state, probe_position))
+        self.__latest_probe_state = probe_state
+        self.__latest_probe_position = probe_position
+        self.__event_loop.create_task(self.__update_probe_state())
 
-    async def __update_probe_state(self, probe_state, probe_position):
+    async def __update_probe_state(self):
         # thread unsafe. always called on main thread (via event loop).
+        # don't pass arguments to this function; instead use 'latest' values.
+        # this helps avoid strange cyclic updates.
+        probe_state = self.__latest_probe_state
+        probe_position = self.__latest_probe_position
         if probe_state != self.__probe_state:
             if probe_state == "scanning":
                 self.__hide_probe_graphics()
