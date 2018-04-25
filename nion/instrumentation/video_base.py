@@ -1,5 +1,7 @@
 # standard libraries
 import abc
+import json
+import pathlib
 
 # typing
 # None
@@ -9,6 +11,7 @@ import numpy
 
 # local libraries
 from nion.swift.model import HardwareSource
+from nion.utils import ListModel
 from nion.utils import Registry
 
 
@@ -97,6 +100,72 @@ class VideoHardwareSource(HardwareSource.HardwareSource):
     def _create_acquisition_view_task(self) -> AcquisitionTask:
         return AcquisitionTask(self.hardware_source_id, self.__camera, self.display_name)
 
+
+class VideoDeviceInstance:
+    def __init__(self, video_device, settings):
+        self.video_device = video_device
+        self.settings = settings
+
+
+class VideoConfiguration:
+
+    def __init__(self):
+        # the active video sources (hardware sources). this list is updated when a video camera device is registered or
+        # unregistered with the hardware source manager.
+        self.video_sources = ListModel.ListModel()
+
+        # the list of instances of video cameras. this is similar to the video sources but is the devices plus settings
+        # for the device. some devices might not have instances if the factory to create the instance hasn't been
+        # registered yet.
+        self.__instances = list()
+
+        # the list of video device factories. this is populated by responding to the registry messages.
+        self.__video_device_factories = list()
+
+        def component_registered(component, component_types):
+            if "video_device_factory" in component_types:
+                if not component in self.__video_device_factories:
+                    self.__video_device_factories.append(component)
+                self.__make_video_devices()
+
+        def component_unregistered(component, component_types):
+            if "video_device_factory" in component_types:
+                if component in self.__video_device_factories:
+                    self.__video_device_factories.remove(component)
+                    # TODO: handle unregistering
+
+        self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
+        self.__component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
+
+        for component in Registry.get_components_by_type("video_device_factory"):
+            component_registered(component, {"video_device_factory"})
+
+    def close(self):
+        self.__component_registered_listener.close()
+        self.__component_registered_listener = None
+        self.__component_unregistered_listener.close()
+        self.__component_unregistered_listener = None
+
+    def __make_video_devices(self):
+        for video_device_factory in self.__video_device_factories:
+            for instance in self.__instances:
+                if not instance.video_device:
+                    instance.video_device = video_device_factory.make_video_device(instance.settings)
+                    if instance.video_device:
+                        Registry.register_component(instance.video_device, {"video_device"})
+
+    def load(self, config_file: pathlib.Path):
+        # read the configured video cameras from the config file and populate the instances list.
+        if config_file.is_file():
+            with open(config_file) as f:
+                settings_list = json.load(f)
+            if isinstance(settings_list, list):
+                for settings in settings_list:
+                    self.__instances.append(VideoDeviceInstance(None, settings))
+        self.__make_video_devices()
+
+
+video_configuration = VideoConfiguration()
 
 _component_registered_listener = None
 _component_unregistered_listener = None

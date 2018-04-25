@@ -1,3 +1,6 @@
+import logging
+import pathlib
+
 from . import CameraControlPanel
 from . import ScanControlPanel
 from . import ScanAcquisition
@@ -19,6 +22,9 @@ class STEMControllerExtension:
         # grab the api object.
         api = api_broker.get_api(version="1", ui_version="1")
         self.__probe_view_controller = stem_controller.ProbeViewController(api.application._application.event_loop)
+        config_file = api.application.configuration_location / pathlib.Path("video_device_config.json")
+        logging.info("Video device configuration: " + str(config_file))
+        video_base.video_configuration.load(config_file)
 
     def close(self):
         self.__probe_view_controller.close()

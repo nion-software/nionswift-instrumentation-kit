@@ -13,6 +13,9 @@ from nion.ui import CanvasItem
 from nion.ui import Widgets
 from nion.utils import Geometry
 
+from nion.instrumentation import video_base
+
+
 _ = gettext.gettext
 
 
@@ -422,9 +425,13 @@ def run():
 
             DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id, HardwareDisplayPanelControllerFactory())
 
+            video_base.video_configuration.video_sources.append_item(hardware_source)
+
     def unregister_hardware_panel(hardware_source):
         if hardware_source.features.get("is_video", False):
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id)
+            video_sources = video_base.video_configuration.video_sources
+            video_sources.remove_item(video_sources.items.index(hardware_source))
 
     hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_hardware_panel)
     hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_hardware_panel)
