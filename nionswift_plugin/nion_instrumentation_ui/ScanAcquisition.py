@@ -297,7 +297,7 @@ class PanelDelegate:
         self.__scan_hardware_source_choice = HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
         self.__camera_hardware_source_choice = HardwareSourceChoice(ui._ui, "scan_acquisition_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_camera"))
         self.__scan_acquisition_preference_panel = ScanAcquisitionPreferencePanel(self.__scan_hardware_source_choice, self.__camera_hardware_source_choice)
-        PreferencesDialog.PreferencesManager().register_preference_pane(self.__scan_acquisition_preference_panel)
+        # PreferencesDialog.PreferencesManager().register_preference_pane(self.__scan_acquisition_preference_panel)
 
         column = ui.create_column_widget()
 
@@ -627,7 +627,7 @@ class PanelDelegate:
             self.__camera_hardware_source_choice.close()
             self.__camera_hardware_source_choice = None
         if self.__scan_acquisition_preference_panel:
-            PreferencesDialog.PreferencesManager().unregister_preference_pane(self.__scan_acquisition_preference_panel)
+            # PreferencesDialog.PreferencesManager().unregister_preference_pane(self.__scan_acquisition_preference_panel)
             self.__scan_acquisition_preference_panel = None
 
 
@@ -715,7 +715,7 @@ class ScanAcquisitionPreferencePanel:
         self.__scan_hardware_source_choice = scan_hardware_source_choice
         self.__camera_hardware_source_choice = other_hardware_source_choice
 
-    def build(self, ui):
+    def build(self, ui, **kwargs):
         scan_hardware_source_combo_box = self.__scan_hardware_source_choice.create_combo_box(ui)
         other_hardware_source_combo_box = self.__camera_hardware_source_choice.create_combo_box(ui)
         row = ui.create_row_widget()
