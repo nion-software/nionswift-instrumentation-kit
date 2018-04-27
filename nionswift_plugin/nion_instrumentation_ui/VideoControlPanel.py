@@ -1,6 +1,7 @@
 # would like to create a panel with a combobox containing
 # all registered HWSources, and a play/stop button.
 
+import copy
 import functools
 import gettext
 
@@ -10,8 +11,14 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import HardwareSource
 from nion.ui import CanvasItem
+from nion.ui import Declarative
+from nion.ui import PreferencesDialog
 from nion.ui import Widgets
+from nion.utils import Converter
+from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Model
+from nion.utils import Registry
 
 from nion.instrumentation import video_base
 
@@ -76,6 +83,21 @@ class VideoSourceStateController:
         data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
         self.__data_item_changed_event_listener = data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
 
+        def hardware_source_removed(hardware_source):
+            if self.__hardware_source == hardware_source:
+                self.__property_changed_event_listener.close()
+                self.__property_changed_event_listener = None
+                self.__hardware_source = None
+
+        self.__hardware_source_removed_event = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(hardware_source_removed)
+
+        def hardware_source_property_changed(property_name):
+            if property_name == "display_name":
+                if callable(self.on_display_name_changed):
+                    self.on_display_name_changed(self.__hardware_source.display_name)
+
+        self.__property_changed_event_listener = self.__hardware_source.property_changed_event.listen(hardware_source_property_changed)
+
     def close(self):
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
@@ -91,6 +113,11 @@ class VideoSourceStateController:
         self.on_data_item_states_changed = None
         self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
+        if self.__property_changed_event_listener:
+            self.__property_changed_event_listener.close()
+            self.__property_changed_event_listener = None
+        self.__hardware_source_removed_event.close()
+        self.__hardware_source_removed_event = None
         self.__hardware_source = None
 
     def __update_play_button_state(self):
@@ -310,8 +337,9 @@ class VideoSourceWidget(Widgets.CompositeWidgetBase):
         ui = document_controller.ui
 
         # top row, source selection, play button
+        hardware_source_display_name_label = ui.create_label_widget(hardware_source.display_name)
         top_row = ui.create_row_widget(properties={"spacing": 8, "margin-left": 8, "margin-top": 4})
-        top_row.add(ui.create_label_widget(hardware_source.display_name))
+        top_row.add(hardware_source_display_name_label)
         top_row.add_stretch()
         # next row, prev and next buttons and status text
         next_row = ui.create_row_widget(properties={"spacing": 8, "margin-left": 8, "margin-top": 0})
@@ -337,11 +365,15 @@ class VideoSourceWidget(Widgets.CompositeWidgetBase):
         def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
             self.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
 
+        def display_name_changed(display_name):
+            hardware_source_display_name_label.text = display_name
+
         thumbnail_widget.on_drag = thumbnail_widget_drag
 
         # connections
         play_pause_button.on_clicked = self.__state_controller.handle_play_clicked
 
+        self.__state_controller.on_display_name_changed = display_name_changed
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
 
         self.__state_controller.initialize_state()
@@ -366,22 +398,193 @@ class VideoSourcePanel(Panel.Panel):
 
         hardware_column = ui.create_column_widget()
 
-        self.hardware_source_widgets = []
+        self.__hardware_source_widgets = dict()
 
         hardware_sources = HardwareSource.HardwareSourceManager().hardware_sources
         hardware_sources.sort(key=lambda hardware_source: hardware_source.display_name)
 
+        def hardware_source_added(hardware_source):
+            if hasattr(hardware_source, "video_device"):
+                hardware_source_widget = VideoSourceWidget(document_controller, hardware_source)
+                hardware_column.add(hardware_source_widget)
+                self.__hardware_source_widgets[hardware_source.hardware_source_id] = hardware_source_widget
+
+        def hardware_source_removed(hardware_source):
+            hardware_source_widget = self.__hardware_source_widgets.get(hardware_source.hardware_source_id)
+            if hardware_source_widget:
+                hardware_column.remove(hardware_source_widget)
+
         for hardware_source in hardware_sources:
-            hardware_source_widget = VideoSourceWidget(document_controller, hardware_source)
-            hardware_column.add(hardware_source_widget)
+            hardware_source_added(hardware_source)
 
         hardware_column.add_stretch()
 
+        self.__hardware_source_added_event = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(hardware_source_added)
+
+        self.__hardware_source_removed_event = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(hardware_source_removed)
+
         self.widget = hardware_column
+
+    def close(self):
+        self.__hardware_source_added_event.close()
+        self.__hardware_source_added_event = None
+        self.__hardware_source_removed_event.close()
+        self.__hardware_source_removed_event = None
+        super().close()
+
+
+class VideoPreferencePanel:
+
+    def __init__(self, video_configuration: video_base.VideoConfiguration):
+        self.identifier = "video_sources"
+        self.label = _("Video Sources")
+        self.__video_configuration = video_configuration
+
+    def build(self, ui, event_loop=None, **kwargs):
+        u = Declarative.DeclarativeUI()
+
+        video_device_factories = list(Registry.get_components_by_type("video_device_factory"))
+
+        class Handler:
+            def __init__(self, ui_view, video_sources):
+                self.ui_view = ui_view
+                self.video_sources = video_sources
+                self.video_source_type_index = Model.PropertyModel(0)
+
+            def create_new_video_device(self, widget):
+                video_base.video_configuration.create_hardware_source(video_device_factories[self.video_source_type_index.value])
+
+            def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+
+                class SectionHandler:
+
+                    def __init__(self, container, hardware_source):
+                        self.container = container
+                        self.hardware_source = hardware_source
+                        self.settings = video_base.video_configuration.get_settings_model(hardware_source)
+                        self.settings_original = copy.deepcopy(self.settings)
+                        self.needs_saving_model = Model.PropertyModel(False)
+                        self.property_changed_event = Event.Event()
+                        self.apply_button = None
+                        self.revert_button = None
+
+                        def settings_changed(property_name):
+                            self.needs_saving_model.value = True
+
+                        self.__settings_changed_event_listener = self.settings.property_changed_event.listen(settings_changed)
+
+                        def needs_saving_model_changed(property_name):
+                            if self.apply_button:
+                                self.apply_button.enabled = self.needs_saving_model.value
+                            if self.revert_button:
+                                self.revert_button.enabled = self.needs_saving_model.value
+
+                        self.__needs_saving_changed_event_listener = self.needs_saving_model.property_changed_event.listen(needs_saving_model_changed)
+
+                    def close(self):
+                        self.__settings_changed_event_listener.close()
+                        self.__settings_changed_event_listener = None
+
+                    def init_handler(self):
+                        self.apply_button.enabled = self.needs_saving_model.value
+                        self.revert_button.enabled = self.needs_saving_model.value
+
+                    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+                        if component_id == "edit_group":
+                            if self.__video_device_factory:
+                                return self.__video_device_factory.create_editor_handler(self.settings)
+                            else:
+                                return self
+
+                    @property
+                    def resources(self):
+                        if self.__video_device_factory:
+                            content = self.__video_device_factory.get_editor_description()
+                        else:
+                            content = u.create_label(text=_("Not Available"))
+
+                        component = u.define_component(content=content, component_id="edit_group")
+
+                        return {"edit_group": component}
+
+                    @property
+                    def __video_device_factory(self):
+                        for video_device_factory in video_device_factories:
+                            if video_device_factory.factory_id == self.settings.driver:
+                                return video_device_factory
+                        return None
+
+                    @property
+                    def driver_display_name(self) -> str:
+                        video_device_factory = self.__video_device_factory
+                        return video_device_factory.display_name if video_device_factory else _("Unknown")
+
+                    def apply(self, widget):
+                        video_base.video_configuration.set_settings_model(self.hardware_source, self.settings)
+                        self.needs_saving_model.value = False
+
+                    def revert(self, widget):
+                        self.settings.copy_from(self.settings_original)
+                        self.needs_saving_model.value = False
+
+                    def remove(self, widget):
+                        video_base.video_configuration.remove_hardware_source(self.hardware_source)
+
+                if component_id == "section":
+                    return SectionHandler(container, item)
+
+            @property
+            def resources(self):
+                u = Declarative.DeclarativeUI()
+
+                driver_display_name_label = u.create_label(text="@binding(driver_display_name)")
+
+                device_id_field = u.create_line_edit(text="@binding(settings.device_id)", width=180)
+
+                display_name_field = u.create_line_edit(text="@binding(settings.name)", width=240)
+
+                edit_group_content = u.create_component_instance("edit_group")
+
+                edit_group = u.create_group(edit_group_content, margin=8)
+
+                edit_row = u.create_row(edit_group, u.create_stretch())
+
+                apply_button = u.create_push_button(name="apply_button", text=_("Apply"), on_clicked="apply")
+                revert_button = u.create_push_button(name="revert_button", text=_("Revert"), on_clicked="revert")
+                remove_button = u.create_push_button(text=_("Remove"), on_clicked="remove")
+                remove_row = u.create_row(apply_button, revert_button, remove_button, u.create_stretch())
+
+                label_column = u.create_column(u.create_label(text=_("Driver:")), u.create_label(text=_("Device ID:")), u.create_label(text=_("Display Name:")), spacing=4)
+                field_column = u.create_column(driver_display_name_label, device_id_field, display_name_field, spacing=4)
+
+                content_row = u.create_row(label_column, field_column, u.create_stretch(), spacing=12)
+
+                content = u.create_column(content_row, edit_row, remove_row, spacing=8)
+
+                component = u.define_component(content=content, component_id="section")
+
+                return {"section": component}
+
+        sources_column = u.create_column(items="video_sources.items", item_component_id="section", spacing=8)
+
+        sources_content = u.create_scroll_area(u.create_column(sources_column, u.create_stretch()))
+
+        video_source_types = [video_device_factory.display_name for video_device_factory in video_device_factories]
+
+        video_source_type_combo = u.create_combo_box(items=video_source_types, current_index="@binding(video_source_type_index.value)")
+
+        button_row = u.create_row(u.create_stretch(), video_source_type_combo, u.create_push_button(text=_("New"), on_clicked="create_new_video_device"), spacing=8)
+
+        content = u.create_column(sources_content, button_row)
+
+        return Declarative.DeclarativeWidget(ui, event_loop, Handler(content, self.__video_configuration.video_sources))
 
 
 workspace_manager = Workspace.WorkspaceManager()
 workspace_manager.register_panel(VideoSourcePanel, "video-source-control-panel", _("Video Source"), ["left", "right"], "left")
+
+video_preference_panel = VideoPreferencePanel(video_base.video_configuration)
+PreferencesDialog.PreferencesManager().register_preference_pane(video_preference_panel)
 
 hardware_source_added_event_listener = None
 hardware_source_removed_event_listener = None
@@ -425,13 +628,9 @@ def run():
 
             DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id, HardwareDisplayPanelControllerFactory())
 
-            video_base.video_configuration.video_sources.append_item(hardware_source)
-
     def unregister_hardware_panel(hardware_source):
         if hardware_source.features.get("is_video", False):
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id)
-            video_sources = video_base.video_configuration.video_sources
-            video_sources.remove_item(video_sources.items.index(hardware_source))
 
     hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_hardware_panel)
     hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_hardware_panel)
