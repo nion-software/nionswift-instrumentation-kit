@@ -172,8 +172,8 @@ class VideoConfiguration:
 
     def load(self, config_file: pathlib.Path):
         # read the configured video cameras from the config file and populate the instances list.
+        self.__config_file = config_file
         if config_file.is_file():
-            self.__config_file = config_file
             with open(config_file) as f:
                 settings_list = json.load(f)
             if isinstance(settings_list, list):
