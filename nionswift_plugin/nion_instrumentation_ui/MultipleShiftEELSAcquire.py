@@ -19,7 +19,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 
-from . import ScanAcquisition
+from . import HardwareSourceChoice
 
 _ = gettext.gettext
 
@@ -217,7 +217,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
         ui = document_controller.ui
 
-        self.__eels_camera_choice = ScanAcquisition.HardwareSourceChoice(ui, "eels_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_eels_camera"))
+        self.__eels_camera_choice = HardwareSourceChoice.HardwareSourceChoice(ui, "eels_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_eels_camera"))
 
         # TODO: how to get text to align right?
         self.number_frames = self.ui.create_line_edit_widget(properties={"width": 30})
