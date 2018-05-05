@@ -612,7 +612,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             if graphic.graphic_id == "subscan":
                 display.remove_graphic(graphic)
 
-    def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.Dict]]:
+    def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[typing.Dict]]]:
         """Get recently acquired (buffered) data.
 
         The start parameter can be negative to index backwards from the end.
