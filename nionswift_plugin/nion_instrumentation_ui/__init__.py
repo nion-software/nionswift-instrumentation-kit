@@ -4,6 +4,7 @@ import pathlib
 from . import CameraControlPanel
 from . import ScanControlPanel
 from . import ScanAcquisition
+from . import AcquisitionRecorder
 from . import MultipleShiftEELSAcquire
 from . import VideoControlPanel
 

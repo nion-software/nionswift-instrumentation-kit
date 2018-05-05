@@ -612,6 +612,20 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             if graphic.graphic_id == "subscan":
                 display.remove_graphic(graphic)
 
+    def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.Dict]]:
+        """Get recently acquired (buffered) data.
+
+        The start parameter can be negative to index backwards from the end.
+
+        If start refers to a buffer item that doesn't exist or if count requests too many buffer items given
+        the start value, the returned list may have fewer elements than count.
+
+        Returns None if buffering is not enabled.
+        """
+        if hasattr(self.__device, "get_buffer_data"):
+            return self.__device.get_buffer_data(start, count)
+        return None
+
     def __probe_state_changed(self, probe_state, probe_position):
         # subclasses will override _set_probe_position
         # probe_state can be 'parked', or 'scanning'
