@@ -725,7 +725,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
             dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
             logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
-            stem_controller.change_stage_position(dy=dy, dx=dx)
+            stem_controller.set_value("SShft.x", stem_controller.get_value("SShft.x") - dx)
+            stem_controller.set_value("SShft.y", stem_controller.get_value("SShft.y") - dy)
 
     def tilt_click(self, mouse_position, camera_shape):
         if self.__camera_category.lower() == "ronchigram":
