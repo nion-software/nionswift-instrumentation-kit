@@ -80,54 +80,71 @@ class Controller:
 
         def exec_acquire():
             # this will execute in a thread; the enclosing async routine will continue when it finishes
-            start_time = time.time()
-            max_wait_time = max(start_time > hardware_source.get_current_frame_time() * 1.5, 3)
-            while not hardware_source.is_playing:
-                if time.time() - start_time > max_wait_time:
-                    success_ref[0] = False
-                    return
-                time.sleep(0.01)
-            hardware_source.get_next_xdatas_to_start(max_wait_time)
-            for i in range(frame_count):
-                self.progress_model.value = int(100 * i / frame_count)
-                if self.cancel_event.is_set():
-                    success_ref[0] = False
-                    break
-                hardware_source.get_next_xdatas_to_finish(max_wait_time)
+            try:
+                start_time = time.time()
+                max_wait_time = max(hardware_source.get_current_frame_time() * 1.5, 3)
+                while not hardware_source.is_playing:
+                    if time.time() - start_time > max_wait_time:
+                        success_ref[0] = False
+                        return
+                    time.sleep(0.01)
+                hardware_source.get_next_xdatas_to_start(max_wait_time * 2)  # wait for frame + next frame
+                for i in range(frame_count):
+                    self.progress_model.value = int(100 * i / frame_count)
+                    if self.cancel_event.is_set():
+                        success_ref[0] = False
+                        break
+                    hardware_source.get_next_xdatas_to_finish(max_wait_time * 2)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                success_ref[0] = False
 
         if do_acquire:
+            print("AR: start playing")
             hardware_source.start_playing()
+            print("AR: wait for acquire")
             await event_loop.run_in_executor(None, exec_acquire)
+            print("AR: acquire finished")
 
         def exec_grab():
             # this will execute in a thread; the enclosing async routine will continue when it finishes
-            start_time = time.time()
-            max_wait_time = max(start_time > hardware_source.get_current_frame_time() * 1.5, 3)
-            while hardware_source.is_playing:
-                if time.time() - start_time > max_wait_time:
-                    success_ref[0] = False
-                    return
-                time.sleep(0.01)
-            data_element_groups = hardware_source.get_buffer_data(-frame_count, frame_count)
-            for data_element_group in data_element_groups:
-                if self.cancel_event.is_set():
-                    success_ref[0] = False
-                    break
-                xdata_group = list()
-                for data_element in data_element_group:
-                    xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                    xdata_group.append(xdata)
-                xdata_group_list.append(xdata_group)
-            self.progress_model.value = 100
+            try:
+                start_time = time.time()
+                max_wait_time = max(hardware_source.get_current_frame_time() * 1.5, 3)
+                while hardware_source.is_playing:
+                    if time.time() - start_time > max_wait_time:
+                        success_ref[0] = False
+                        return
+                    time.sleep(0.01)
+                data_element_groups = hardware_source.get_buffer_data(-frame_count, frame_count)
+                for data_element_group in data_element_groups:
+                    if self.cancel_event.is_set():
+                        success_ref[0] = False
+                        break
+                    xdata_group = list()
+                    for data_element in data_element_group:
+                        xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                        xdata_group.append(xdata)
+                    xdata_group_list.append(xdata_group)
+                self.progress_model.value = 100
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                success_ref[0] = False
 
         if success_ref[0]:
+            print("AR: stop playing")
             hardware_source.stop_playing()
+            print("AR: grabbing data")
             await event_loop.run_in_executor(None, exec_grab)
+            print("AR: grab finished")
 
         xdata_group = None
 
         if success_ref[0]:
             if len(xdata_group_list) > 1:
+                print("AR: making xdata")
                 valid_count = 0
                 examplar_xdata_group = xdata_group_list[-1]
                 shapes = [xdata.data.shape for xdata in examplar_xdata_group]
@@ -154,6 +171,7 @@ class Controller:
                 xdata_group = xdata_group_list[0]
 
         if xdata_group:
+            print("AR: making data item")
             for xdata in xdata_group:
                 data_item = DataItem.DataItem(large_format=True)
                 data_item.ensure_data_source()
@@ -163,9 +181,11 @@ class Controller:
                 document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(data_item))
 
         if was_playing:
+            print("AR: restarting")
             hardware_source.start_playing()
         self.state.value = "idle"
         self.progress_model.value = 0
+        print("AR: done")
 
     def cancel(self):
         self.cancel_event.set()
