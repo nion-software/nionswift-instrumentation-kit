@@ -1,0 +1,36 @@
+package:
+  name: 'nionswift-instrumentation'
+  version: '0.13.0'
+
+source:
+  git_rev: 0.13.0
+  git_url: https://github.com/nion-software/nionswift-instrumentation-kit.git
+
+build:
+  noarch: python
+  number: 0
+  script: python -m pip install --no-deps --ignore-installed .
+  include_recipe: False
+
+requirements:
+  host:
+    - python
+    - setuptools
+  run:
+    - python >=3.5
+
+test:
+  imports:
+    - nion.instrumentation
+    - nion.instrumentation.test
+    - nionswift_plugin.nion_instrumentation_ui
+
+about:
+  home: https://github.com/nion-software/nionswift-instrumentation-kit
+  license: GPL-3.0
+  summary: "A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope)."
+  description: "A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope)."
+
+extra:
+  recipe-maintainers:
+    cmeyer
