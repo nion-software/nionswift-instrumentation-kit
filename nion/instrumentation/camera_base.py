@@ -352,7 +352,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["version"] = 1
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
-        update_spatial_calibrations(data_element, self.__stem_controller, self.__camera)
+        update_spatial_calibrations(data_element, self.__stem_controller, self.__camera, self.__camera_category, cumulative_data.shape)
         update_intensity_calibration(data_element, self.__stem_controller, self.__camera)
         update_autostem_properties(data_element, self.__stem_controller, self.__camera)
         # grab metadata from the autostem
@@ -616,7 +616,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         data_element["state"] = "complete"
         stem_controller = self.__get_stem_controller()
         if "spatial_calibrations" not in data_element:
-            update_spatial_calibrations(data_element, stem_controller, self.__camera)
+            update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category, data_element["data"].shape[1:])
             if "spatial_calibrations" in data_element:
                 if frame_parameters.processing == "sum_project":
                     data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
@@ -798,7 +798,7 @@ def build_calibration_dict(stem_controller, calibration_controls, prefix):
     return Calibration.Calibration(offset, scale, units).rpc_dict
 
 
-def update_spatial_calibrations(data_element, stem_controller, camera):
+def update_spatial_calibrations(data_element, stem_controller, camera, camera_category, data_shape):
     if "spatial_calibrations" not in data_element:
         if "spatial_calibrations" in data_element["properties"]:
             data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
@@ -808,6 +808,9 @@ def update_spatial_calibrations(data_element, stem_controller, camera):
             calibration_controls = camera.calibration_controls
             x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x")
             y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y")
+            if camera_category.lower() != "eels":
+                y_calibration_dict["offset"] = -y_calibration_dict["scale"] * data_shape[0] * 0.5
+                x_calibration_dict["offset"] = -x_calibration_dict["scale"] * data_shape[1] * 0.5
             data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
 
 
