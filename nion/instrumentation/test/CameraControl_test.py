@@ -602,6 +602,31 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             self.assertIsNotNone(document_model.data_items[0].metadata["description"]["time_zone"])
 
+    def test_acquire_sequence_2d_calibrations(self):
+        document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.acquire_sequence_prepare(4)
+            data_elements = hardware_source.acquire_sequence(4)
+            self.assertEqual(1, len(data_elements))
+            data_element = data_elements[0]
+            self.assertEqual(3, len(data_element["data"].shape))
+            self.assertEqual(3, len(data_element["spatial_calibrations"]))
+
+    def test_acquire_sequence_1d_calibrations(self):
+        document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.processing = "sum_project"
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.acquire_sequence_prepare(4)
+            data_elements = hardware_source.acquire_sequence(4)
+            self.assertEqual(1, len(data_elements))
+            data_element = data_elements[0]
+            self.assertEqual(2, len(data_element["data"].shape))
+            self.assertEqual(2, len(data_element["spatial_calibrations"]))
+
     def test_facade_frame_parameter_methods(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller), contextlib.closing(state_controller):

@@ -574,6 +574,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             data_element = self.__camera.acquire_sequence(n)
             if data_element is not None:
                 return data_element
+        # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
         acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
         acquisition_task._start_acquisition()
@@ -597,7 +598,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                     properties["valid_rows"] = 1
                     spatial_properties = properties.get("spatial_calibrations")
                     if spatial_properties is not None:
-                        properties["spatial_properties"] = spatial_properties[1:]
+                        properties["spatial_calibrations"] = spatial_properties[1:]
         finally:
             acquisition_task._stop_acquisition()
         data_element = dict()
@@ -614,7 +615,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         data_element["version"] = 1
         data_element["state"] = "complete"
         stem_controller = self.__get_stem_controller()
-        update_spatial_calibrations(data_element, stem_controller, self.__camera)
+        if "spatial_calibrations" not in data_element:
+            update_spatial_calibrations(data_element, stem_controller, self.__camera)
+            if "spatial_calibrations" in data_element:
+                if frame_parameters.processing == "sum_project":
+                    data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
+                data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         update_intensity_calibration(data_element, stem_controller, self.__camera)
         update_autostem_properties(data_element, stem_controller, self.__camera)
         data_element["properties"]["hardware_source_name"] = self.display_name
