@@ -14,6 +14,7 @@ setuptools.setup(
     author="Nion Software",
     author_email="swift@nion.com",
     description="A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope).",
+    long_description="A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope).",
     url="https://github.com/nion-software/nionswift-instrumentation-kit",
     packages=["nion.instrumentation", "nion.instrumentation.test", "nionswift_plugin.nion_instrumentation_ui"],
     package_data={"nionswift_plugin.nion_instrumentation_ui": ["resources/*", "manifest.json"]},
