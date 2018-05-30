@@ -207,7 +207,7 @@ class Camera(abc.ABC):
     @property
     @abc.abstractmethod
     def processing(self) -> str:
-        """Return processing actions for the current mode.
+        """Return processing actions for the current mode. Only applies to sequence acquisition.
 
         Processing may be 'sum_project' or None.
         """
@@ -216,7 +216,7 @@ class Camera(abc.ABC):
     @processing.setter
     @abc.abstractmethod
     def processing(self, value: str) -> None:
-        """Set processing actions for the current mode.
+        """Set processing actions for the current mode. Only applies to sequence acquisition.
 
         Processing may be 'sum_project' or None.
         """
@@ -373,6 +373,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         mode_id = self.__camera.mode
         self.__camera.set_exposure_ms(self.__frame_parameters.exposure_ms, mode_id)
         self.__camera.set_binning(self.__frame_parameters.binning, mode_id)
+        self.__camera.processing = self.__frame_parameters.processing
         if hasattr(self.__camera, "set_integration_count"):
             self.__camera.set_integration_count(self.__frame_parameters.integration_count, mode_id)
 
@@ -566,6 +567,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
 
     def acquire_sequence_prepare(self, n: int) -> None:
+        frame_parameters = self.get_current_frame_parameters()
+        self.__camera.exposure_ms = frame_parameters.exposure_ms
+        self.__camera.binning = frame_parameters.binning
+        self.__camera.processing = frame_parameters.processing
         if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
             self.__camera.acquire_sequence_prepare(n)
 
@@ -585,11 +590,11 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 frame_data_element = acquisition_task._acquire_data_elements()[0]
                 frame_data = frame_data_element["data"]
                 if data is None:
-                    if processing == "sum_project":
+                    if processing == "sum_project" and len(frame_data.shape) > 1:
                         data = numpy.empty((n,) + frame_data.shape[1:], frame_data.dtype)
                     else:
                         data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
-                if processing == "sum_project":
+                if processing == "sum_project" and len(frame_data.shape) > 1:
                     data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
                 else:
                     data[index] = frame_data
@@ -608,9 +613,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
         frame_parameters = self.get_current_frame_parameters()
-        self.__camera.exposure_ms = frame_parameters.exposure_ms
-        self.__camera.binning = frame_parameters.binning
-        self.__camera.processing = frame_parameters.processing
         data_element = self.__acquire_sequence(n, frame_parameters)
         data_element["version"] = 1
         data_element["state"] = "complete"

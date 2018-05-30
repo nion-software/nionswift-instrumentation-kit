@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 
+- Improve handling of sum/project processing in acquire sequence.
+
 - Improve handling of calibration via calibration controls.
 
 - Fix default handling of dimensional calibrations in acquire sequence.
