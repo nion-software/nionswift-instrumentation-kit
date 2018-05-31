@@ -833,7 +833,13 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             if camera_category.lower() != "eels":
                 y_calibration_dict["offset"] = -y_calibration_dict["scale"] * data_shape[0] * 0.5
                 x_calibration_dict["offset"] = -x_calibration_dict["scale"] * data_shape[1] * 0.5
-            data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+                data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+            else:
+                # cover the possibility that EELS data is returned as 1D
+                if len(data_shape) == 2:
+                    data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+                else:
+                    data_element["spatial_calibrations"] = [x_calibration_dict]
 
 
 def update_intensity_calibration(data_element, stem_controller, camera):
