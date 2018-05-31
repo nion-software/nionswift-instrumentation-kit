@@ -249,21 +249,31 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f%s%s" % (num, 'Y', suffix)
 
 
-def calculate_time_size(scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time):
-    pixels = (scan_width + 2) * scan_height
-    time_s = exposure_time * pixels
-    if time_s > 3600:
-        time_str = "{0:.1f} hours".format((int(time_s) + 3599) / 3600)
-    elif time_s > 90:
-        time_str = "{0:.1f} minutes".format((int(time_s) + 59) / 60)
-    else:
-        time_str = "{} seconds".format(int(time_s))
-    memory_acquire = pixels * camera_width * camera_height * 4
+def calculate_time_size(camera_hardware_source, scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time):
+    acquire_pixel_count = (scan_width + 2) * scan_height
+    storage_pixel_count = scan_width * scan_height
+    camera_frame_parameters = camera_hardware_source.get_frame_parameters(0).as_dict()
+    camera_frame_parameters["acquisition_frame_count"] = acquire_pixel_count
+    camera_frame_parameters["storage_frame_count"] = storage_pixel_count
     if is_summed:
-        memory_storage = pixels * camera_width * 4
-        size_str = "{} ({})".format(sizeof_fmt(memory_acquire), sizeof_fmt(memory_storage))
+        camera_frame_parameters["processing"] = "sum_project"
+        storage_memory = storage_pixel_count * camera_width * 4
     else:
-        size_str = sizeof_fmt(memory_acquire)
+        storage_memory = storage_pixel_count * camera_height * camera_width * 4
+    acquire_sequence_metrics = camera_hardware_source.get_acquire_sequence_metrics(camera_frame_parameters)
+    acquisition_time = acquire_sequence_metrics.get("acquisition_time", exposure_time * acquire_pixel_count)  # in seconds
+    acquisition_memory = acquire_sequence_metrics.get("acquisition_memory", acquire_pixel_count * camera_width * camera_height * 4)  # in bytes
+    storage_memory = acquire_sequence_metrics.get("storage_memory", storage_memory)  # in bytes
+    if acquisition_time > 3600:
+        time_str = "{0:.1f} hours".format((int(acquisition_time) + 3599) / 3600)
+    elif acquisition_time > 90:
+        time_str = "{0:.1f} minutes".format((int(acquisition_time) + 59) / 60)
+    else:
+        time_str = "{} seconds".format(int(acquisition_time))
+    if acquisition_memory != 0 and abs(storage_memory / acquisition_memory - 1) > 0.1:
+        size_str = "{} ({})".format(sizeof_fmt(acquisition_memory), sizeof_fmt(storage_memory))
+    else:
+        size_str = sizeof_fmt(storage_memory)
     return time_str, size_str
 
 
@@ -505,13 +515,14 @@ class PanelDelegate:
 
     def __update_estimate(self):
         if self.__exposure_time_ms_value_model and self.__scan_width_model and self.__scan_height_model:
+            camera_hardware_source = self.__camera_hardware_source_choice.hardware_source
             camera_width = self.__camera_width_ref[0]
             camera_height = self.__camera_height_ref[0]
             scan_width = self.__scan_width_model.value
             scan_height = self.__scan_height_model.value
             is_summed = self.__style_combo_box.current_index == 0
             exposure_time = self.__exposure_time_ms_value_model.value / 1000
-            time_str, size_str = calculate_time_size(scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time)
+            time_str, size_str = calculate_time_size(camera_hardware_source, scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time)
             self.__estimate_label_widget.text = "{0} / {1}".format(time_str, size_str)
         else:
             self.__estimate_label_widget.text = None

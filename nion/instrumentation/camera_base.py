@@ -257,6 +257,21 @@ class Camera(abc.ABC):
         """
         ...
 
+    def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
+        """Return the acquire sequence metrics for the frame parameters dict.
+
+        The frame parameters will contain extra keys 'acquisition_frame_count' and 'storage_frame_count' to indicate
+        the number of frames in the sequence.
+
+        The frame parameters will contain a key 'processing' set to 'sum_project' if 1D summing or binning
+        is requested.
+
+        The dictionary returned should include keys for 'acquisition_time' (in seconds), 'storage_memory' (in bytes) and
+         'acquisition_memory' (in bytes). The default values will be the exposure time times the acquisition frame
+         count and the camera readout size times the number of frames.
+        """
+        return dict()
+
     def acquire_sequence_prepare(self, n: int) -> None:
         """Prepare for acquire_sequence."""
         pass
@@ -629,6 +644,11 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
         return [data_element]
+
+    def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
+        if hasattr(self.__camera, "get_acquire_sequence_metrics"):
+            return self.__camera.get_acquire_sequence_metrics(frame_parameters)
+        return dict()
 
     def set_frame_parameters(self, profile_index, frame_parameters):
         frame_parameters = copy.copy(frame_parameters)
