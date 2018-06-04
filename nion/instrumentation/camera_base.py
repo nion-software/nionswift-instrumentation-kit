@@ -636,8 +636,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if "spatial_calibrations" not in data_element:
             update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category, data_element["data"].shape[1:], binning, binning)
             if "spatial_calibrations" in data_element:
-                if frame_parameters.processing == "sum_project":
-                    data_element["spatial_calibrations"] = data_element["spatial_calibrations"][1:]
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         update_intensity_calibration(data_element, stem_controller, self.__camera)
         update_autostem_properties(data_element, stem_controller, self.__camera)
@@ -832,7 +830,7 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             calibration_controls = camera.calibration_controls
             x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x)
             y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y)
-            if camera_category.lower() != "eels":
+            if camera_category.lower() != "eels" and len(data_shape) == 2:
                 y_calibration_dict["offset"] = -y_calibration_dict["scale"] * data_shape[0] * 0.5
                 x_calibration_dict["offset"] = -x_calibration_dict["scale"] * data_shape[1] * 0.5
                 data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
