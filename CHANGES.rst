@@ -1,8 +1,8 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+0.13.2 (2018-06-04)
+-------------------
 
 - Improve handling of sum/project processing in acquire sequence.
 
