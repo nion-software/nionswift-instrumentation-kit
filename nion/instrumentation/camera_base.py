@@ -856,7 +856,7 @@ def update_intensity_calibration(data_element, stem_controller, camera):
             calibration_controls = camera.calibration_controls
             counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
             if counts_per_electron:
-                data_element["counts_per_electron"] = counts_per_electron
+                data_element["properties"]["counts_per_electron"] = counts_per_electron
 
 
 def update_autostem_properties(data_element, stem_controller, camera):
