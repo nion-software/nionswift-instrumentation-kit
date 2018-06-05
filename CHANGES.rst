@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+
+- Fix handling of Ronchigram when scale calibration missing.
+
 0.13.2 (2018-06-04)
 -------------------
 
