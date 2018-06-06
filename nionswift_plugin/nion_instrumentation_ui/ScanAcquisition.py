@@ -113,8 +113,8 @@ class ScanAcquisitionController:
 
                     scan_frame_parameters = scan_hardware_source.get_frame_parameters_for_profile_by_index(2)
                     scan_max_area = 2048 * 2048
-                    scan_param_height = scan_frame_parameters["size"][0]
-                    scan_param_width = scan_frame_parameters["size"][1]
+                    scan_param_height = int(scan_frame_parameters["size"][0])
+                    scan_param_width = int(scan_frame_parameters["size"][1])
                     if scan_param_height * scan_param_width > scan_max_area:
                         scan_param_height = scan_max_area // scan_param_width
                     scan_frame_parameters["size"] = scan_param_height, scan_param_width
@@ -125,8 +125,8 @@ class ScanAcquisitionController:
                     scan_frame_parameters["ac_line_sync"] = False
                     scan_frame_parameters["ac_frame_sync"] = False
                     flyback_pixels = scan_hardware_source._hardware_source.flyback_pixels  # using internal API
-                    scan_height = scan_frame_parameters["size"][0]
-                    scan_width = scan_frame_parameters["size"][1] + flyback_pixels
+                    scan_height = scan_param_height
+                    scan_width = scan_param_width + flyback_pixels
 
                     library = document_window.library
 
