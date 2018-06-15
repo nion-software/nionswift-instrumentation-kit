@@ -643,8 +643,7 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         return True
 
     def _repaint(self, drawing_context):
-        drawing_context.save()
-        try:
+        with drawing_context.saver():
             import math
             canvas_size = self.canvas_size
             center_x = canvas_size.width * 0.5
@@ -691,8 +690,6 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
             # drawing_context.stroke_style = "#F00"
             # drawing_context.line_width = 1.0
             # drawing_context.stroke()
-        finally:
-            drawing_context.restore()
 
 
 class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
