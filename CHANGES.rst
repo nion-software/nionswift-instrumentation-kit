@@ -1,8 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+0.13.3 (2018-06-18)
+-------------------
+
+- Minor changes to scan acquisition (ensure size is int).
 
 - Fix handling of Ronchigram when scale calibration missing.
 
