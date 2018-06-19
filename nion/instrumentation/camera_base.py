@@ -1,10 +1,11 @@
 # standard libraries
 import abc
+import asyncio
+import concurrent.futures
 import copy
 import datetime
 import gettext
 import logging
-import queue
 import threading
 import typing
 
@@ -342,12 +343,11 @@ class CameraSettings:
         self.__frame_parameters = self.__profiles[0]
         self.__record_parameters = self.__profiles[2]
 
-        # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
-        # and executed at a later time in the __handle_executing_task_queue method.
-        self.__task_queue = queue.Queue()
+        # track the latest values from the low level. update in the event loop to avoid threading issues.
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = list()
         self.__latest_profile_index = None
+        self.__event_loop = None
 
     def close(self):
         # keep the camera adapter around until super close is called, since super
@@ -356,6 +356,9 @@ class CameraSettings:
         self.__camera.on_mode_changed = None
         self.__camera.on_mode_parameter_changed = None
         self.__camera = None
+
+    def initialize(self, event_loop=None, **kwargs):
+        self.__event_loop = event_loop
 
     def get_frame_parameters_from_dict(self, d):
         return CameraFrameParameters(d)
@@ -442,9 +445,9 @@ class CameraSettings:
                     latest_values.append((profile_index_, parameter_, value_))
             self.__latest_values = latest_values
             self.__latest_values.append((profile_index, frame_parameter, value))
-        self.__task_queue.put(self.__do_update_parameters)
+        self.__event_loop.create_task(self.__do_update_parameters())
 
-    def __do_update_parameters(self):
+    async def __do_update_parameters(self):
         with self.__latest_values_lock:
             if self.__latest_profile_index is not None:
                 self.set_selected_profile_index(self.__latest_profile_index)
@@ -459,23 +462,7 @@ class CameraSettings:
     def __selected_profile_index_changed(self, profile_index):
         with self.__latest_values_lock:
             self.__latest_profile_index = profile_index
-        self.__task_queue.put(self.__do_update_parameters)
-
-    def _handle_executing_task_queue(self):
-        # gather the pending tasks, then execute them.
-        # doing it this way prevents tasks from triggering more tasks in an endless loop.
-        tasks = list()
-        while not self.__task_queue.empty():
-            task = self.__task_queue.get(False)
-            tasks.append(task)
-            self.__task_queue.task_done()
-        for task in tasks:
-            try:
-                task()
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                traceback.print_stack()
+        self.__event_loop.create_task(self.__do_update_parameters())
 
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
@@ -483,7 +470,15 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def __init__(self, stem_controller_id: str, camera: Camera, camera_settings: CameraSettings):
         super().__init__(camera.camera_id, camera.camera_name)
 
+        # configure the event loop object
+        logger = logging.getLogger()
+        old_level = logger.level
+        logger.setLevel(logging.INFO)
+        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
+        logger.setLevel(old_level)
+
         self.__camera_settings = camera_settings
+        self.__camera_settings.initialize(event_loop=self.__event_loop)
 
         self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
@@ -533,6 +528,22 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
 
     def close(self):
+        # give cancelled tasks a chance to finish
+        self.__event_loop.stop()
+        self.__event_loop.run_forever()
+        try:
+            # this assumes that all outstanding tasks finish in a reasonable time (i.e. no infinite loops).
+            self.__event_loop.run_until_complete(asyncio.gather(*asyncio.Task.all_tasks(loop=self.__event_loop), loop=self.__event_loop))
+        except concurrent.futures.CancelledError:
+            pass
+        # now close
+        # due to a bug in Python libraries, the default executor needs to be shutdown explicitly before the event loop
+        # see http://bugs.python.org/issue28464
+        if self.__event_loop._default_executor:
+            self.__event_loop._default_executor.shutdown()
+        self.__event_loop.close()
+        self.__event_loop = None
+
         self.__periodic_logger_fn = None
         super().close()
         self.__profile_changed_event_listener.close()
@@ -551,7 +562,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__camera = None
 
     def periodic(self):
-        self.__camera_settings._handle_executing_task_queue()
+        self.__event_loop.stop()
+        self.__event_loop.run_forever()
         self.__handle_log_messages_event()
 
     def __get_stem_controller(self):
