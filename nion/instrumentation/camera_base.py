@@ -113,57 +113,13 @@ class Camera(abc.ABC):
         """
         ...
 
-    def set_integration_count(self, integration_count: int) -> None:
-        """Set the integration code for the mode.
+    @abc.abstractmethod
+    def set_frame_parameters(self, frame_parameters: typing.Any) -> None:
+        """Set the pending frame parameters (exposure_ms, binning, processing, integration_count).
 
-        Integration count can be ignored, in which case integration is performed by higher level code.
-
-        Setting the integration count for the currently live mode (if there is one) should update acquisition as soon
-        as possible, which may be immediately or may be the next frame.
+        processing and integration_count are optional, in which case they are handled at a higher level.
         """
         pass
-
-    @property
-    @abc.abstractmethod
-    def exposure_ms(self) -> float:
-        """Return the exposure (in milliseconds) for the current mode."""
-        ...
-
-    @exposure_ms.setter
-    @abc.abstractmethod
-    def exposure_ms(self, value: float) -> None:
-        """Set the exposure (in milliseconds) for the current mode."""
-        ...
-
-    @property
-    @abc.abstractmethod
-    def binning(self) -> int:
-        """Return the binning for the current mode."""
-        ...
-
-    @binning.setter
-    @abc.abstractmethod
-    def binning(self, value: int) -> None:
-        """Set the binning for the current mode."""
-        ...
-
-    @property
-    @abc.abstractmethod
-    def processing(self) -> str:
-        """Return processing actions for the current mode. Only applies to sequence acquisition.
-
-        Processing may be 'sum_project' or None.
-        """
-        ...
-
-    @processing.setter
-    @abc.abstractmethod
-    def processing(self, value: str) -> None:
-        """Set processing actions for the current mode. Only applies to sequence acquisition.
-
-        Processing may be 'sum_project' or None.
-        """
-        ...
 
     # @property
     # def calibration(self) -> typing.List[dict]:
@@ -329,11 +285,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
     def __activate_frame_parameters(self):
         self.__frame_parameters = self.frame_parameters
         self.__pending_frame_parameters = None
-        self.__camera.exposure_ms = self.__frame_parameters.exposure_ms
-        self.__camera.binning = self.__frame_parameters.binning
-        self.__camera.processing = self.__frame_parameters.processing
-        if hasattr(self.__camera, "set_integration_count"):
-            self.__camera.set_integration_count(self.__frame_parameters.integration_count, None)
+        self.__camera.set_frame_parameters(self.__frame_parameters)
 
 
 class CameraSettings:
@@ -404,6 +356,9 @@ class CameraSettings:
         self.__camera.on_mode_changed = None
         self.__camera.on_mode_parameter_changed = None
         self.__camera = None
+
+    def get_frame_parameters_from_dict(self, d):
+        return CameraFrameParameters(d)
 
     def set_current_frame_parameters(self, frame_parameters):
         self.__frame_parameters = copy.copy(frame_parameters)
@@ -650,9 +605,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def acquire_sequence_prepare(self, n: int) -> None:
         frame_parameters = self.get_current_frame_parameters()
-        self.__camera.exposure_ms = frame_parameters.exposure_ms
-        self.__camera.binning = frame_parameters.binning
-        self.__camera.processing = frame_parameters.processing
+        self.__camera.set_frame_parameters(frame_parameters)
         if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
             self.__camera.acquire_sequence_prepare(n)
 
@@ -739,7 +692,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.__record_parameters
 
     def get_frame_parameters_from_dict(self, d):
-        return CameraFrameParameters(d)
+        return self.__camera_settings.get_frame_parameters_from_dict(d)
 
     def shift_click(self, mouse_position, camera_shape):
         if self.__camera_category.lower() == "ronchigram":
@@ -821,7 +774,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__camera_settings.open_monitor()
 
 
-class CameraFrameParameters(object):
+class CameraFrameParameters:
 
     def __init__(self, d=None):
         d = d or dict()
