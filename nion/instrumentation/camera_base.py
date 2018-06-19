@@ -113,63 +113,6 @@ class Camera(abc.ABC):
         """
         ...
 
-    @property
-    @abc.abstractmethod
-    def mode(self) -> str:
-        """Return the current mode of the camera, as a case-insensitive string identifier.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @mode.setter
-    @abc.abstractmethod
-    def mode(self, mode: str) -> None:
-        """Set the current mode of the camera, using a case-insensitive string identifier.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def mode_as_index(self) -> int:
-        """Return the index of the current mode of the camera.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @abc.abstractmethod
-    def get_exposure_ms(self, mode_id: str) -> float:
-        """Return the exposure (in milliseconds) for the mode."""
-        ...
-
-    @abc.abstractmethod
-    def set_exposure_ms(self, exposure_ms: float, mode_id: str) -> None:
-        """Set the exposure (in milliseconds) for the mode.
-
-        Setting the exposure for the currently live mode (if there is one) should change the exposure as soon
-        as possible, which may be immediately or may be the next exposed frame.
-        """
-        ...
-
-    @abc.abstractmethod
-    def get_binning(self, mode_id: str) -> int:
-        """Return the binning for the mode."""
-        ...
-
-    @abc.abstractmethod
-    def set_binning(self, binning: int, mode_id: str) -> None:
-        """Set the binning for the mode.
-
-        Binning should be one of the values returned from `binning_values`.
-
-        Setting the binning for the currently live mode (if there is one) should change the binning as soon
-        as possible, which may be immediately or may be the next frame.
-        """
-        ...
-
     def set_integration_count(self, integration_count: int) -> None:
         """Set the integration code for the mode.
 
@@ -315,6 +258,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def set_frame_parameters(self, frame_parameters):
         self.__pending_frame_parameters = copy.copy(frame_parameters)
+        self.__activate_frame_parameters()
 
     @property
     def frame_parameters(self):
@@ -389,7 +333,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera.binning = self.__frame_parameters.binning
         self.__camera.processing = self.__frame_parameters.processing
         if hasattr(self.__camera, "set_integration_count"):
-            self.__camera.set_integration_count(self.__frame_parameters.integration_count)
+            self.__camera.set_integration_count(self.__frame_parameters.integration_count, None)
 
 
 class CameraSettings:
@@ -495,9 +439,6 @@ class CameraSettings:
     def set_selected_profile_index(self, profile_index):
         if self.__current_profile_index != profile_index:
             self.__current_profile_index = profile_index
-            # set the camera mode on the camera device
-            mode_id = self.modes[profile_index]
-            self.__camera.mode = mode_id
             # set current frame parameters
             self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
             self.profile_changed_event.fire(profile_index)
@@ -981,10 +922,21 @@ def run():
             camera_settings = CameraSettings(camera)
             camera_hardware_source = CameraHardwareSource(stem_controller_id, camera, camera_settings)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+        if "camera_module" in component_types:
+            camera_module = component
+            stem_controller_id = getattr(camera_module, "stem_controller_id", "autostem_controller")
+            camera_settings = camera_module.camera_settings
+            camera_device = camera_module.camera_device
+            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings)
+            HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+            camera_module.hardware_source = camera_hardware_source
 
     def component_unregistered(component, component_types):
         if "camera_device" in component_types:
             HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
+        if "camera_module" in component_types:
+            camera_hardware_source = component.hardware_source
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
 
     global _component_registered_listener
     global _component_unregistered_listener
@@ -994,3 +946,6 @@ def run():
 
     for component in Registry.get_components_by_type("camera_device"):
         component_registered(component, {"camera_device"})
+
+    for component in Registry.get_components_by_type("camera_module"):
+        component_registered(component, {"camera_module"})
