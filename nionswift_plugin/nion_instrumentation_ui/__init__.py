@@ -14,6 +14,9 @@ from nion.instrumentation import stem_controller
 from nion.instrumentation import video_base
 
 
+configuration_location = None
+
+
 class STEMControllerExtension:
 
     # required for Swift to recognize this as an extension class.
@@ -26,6 +29,8 @@ class STEMControllerExtension:
         config_file = api.application.configuration_location / pathlib.Path("video_device_config.json")
         logging.info("Video device configuration: " + str(config_file))
         video_base.video_configuration.load(config_file)
+        global configuration_location
+        configuration_location = pathlib.Path(api.application.configuration_location)
 
     def close(self):
         self.__probe_view_controller.close()
@@ -33,7 +38,8 @@ class STEMControllerExtension:
 
 
 def run():
-    camera_base.run()
+    global configuration_location
+    camera_base.run(configuration_location)
     scan_base.run()
     video_base.run()
     CameraControlPanel.run()

@@ -5,7 +5,10 @@ import concurrent.futures
 import copy
 import datetime
 import gettext
+import json
 import logging
+import os
+import pathlib
 import threading
 import typing
 
@@ -467,7 +470,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, camera: Camera, camera_settings: CameraSettings):
+    def __init__(self, stem_controller_id: str, camera: Camera, camera_settings: CameraSettings, configuration_location: pathlib.Path):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -478,10 +481,32 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         logger.setLevel(old_level)
 
         self.__camera_settings = camera_settings
-        self.__camera_settings.initialize(event_loop=self.__event_loop)
+        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
 
         self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
+
+        # add optional support for settings. to enable auto settings handling, the camera settings object must define
+        # a settings_id property (which can just be the camera id), an apply_settings method which takes a settings
+        # dict read from the config file and applies it as the settings, and a settings_changed_event which must be
+        # fired when the settings changed (at which point they will be written to the config file).
+        self.__settings_changed_event_listener = None
+        if configuration_location and hasattr(self.__camera_settings, "settings_id"):
+            config_file = configuration_location / pathlib.Path(self.__camera_settings.settings_id + "_config.json")
+            logging.info("Camera device configuration: " + str(config_file))
+            if config_file.is_file():
+                with open(config_file) as f:
+                    settings_dict = json.load(f)
+                self.__camera_settings.apply_settings(settings_dict)
+
+            def settings_changed(settings_dict: typing.Dict) -> None:
+                # atomically overwrite
+                temp_filepath = config_file.with_suffix(".temp")
+                with open(temp_filepath, "w") as fp:
+                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
+                os.replace(temp_filepath, config_file)
+
+            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
 
         self.__stem_controller_id = stem_controller_id
         self.__stem_controller = None
@@ -546,6 +571,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
         self.__periodic_logger_fn = None
         super().close()
+        if self.__settings_changed_event_listener:
+            self.__settings_changed_event_listener.close()
+            self.__settings_changed_event_listener = None
         self.__profile_changed_event_listener.close()
         self.__profile_changed_event_listener = None
         self.__frame_parameters_changed_event_listener.close()
@@ -879,20 +907,20 @@ def update_autostem_properties(data_element, stem_controller, camera):
 _component_registered_listener = None
 _component_unregistered_listener = None
 
-def run():
+def run(configuration_location: pathlib.Path):
     def component_registered(component, component_types):
         if "camera_device" in component_types:
             camera = component
             stem_controller_id = getattr(camera, "stem_controller_id", "autostem_controller")
             camera_settings = CameraSettings(camera)
-            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera, camera_settings)
+            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera, camera_settings, configuration_location)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
         if "camera_module" in component_types:
             camera_module = component
             stem_controller_id = getattr(camera_module, "stem_controller_id", "autostem_controller")
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
-            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings)
+            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
             camera_module.hardware_source = camera_hardware_source
 
