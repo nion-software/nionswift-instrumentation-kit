@@ -32,6 +32,277 @@ _ = gettext.gettext
 
 
 class Camera(abc.ABC):
+    """Backwards compatibility."""
+
+    @abc.abstractmethod
+    def close(self) -> None:
+        """Close the camera."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def sensor_dimensions(self) -> (int, int):
+        """Read-only property for the native sensor size (no binning).
+
+        Returns (height, width) in pixels.
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def readout_area(self) -> (int, int, int, int):
+        """Return the detector readout area.
+
+        Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
+
+        There are restrictions on the valid values, depending on camera. This property should use the closest
+        appropriate values, rounding up when necessary.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @readout_area.setter
+    @abc.abstractmethod
+    def readout_area(self, readout_area_TLBR: (int, int, int, int)) -> None:
+        """Set the detector readout area.
+
+        The coordinates, top, left, bottom, right, are specified in sensor coordinates.
+
+        There are restrictions on the valid values, depending on camera. This property should always return
+        valid values.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def flip(self):
+        """Return whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @flip.setter
+    @abc.abstractmethod
+    def flip(self, do_flip):
+        """Set whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def binning_values(self) -> typing.List[int]:
+        """Return a list of valid binning values (int's).
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_expected_dimensions(self, binning: int) -> (int, int):
+        """Read-only property for the expected image size (binning and readout area included).
+
+        Returns (height, width).
+
+        Cameras are allowed to bin in one dimension and not the other.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def mode(self) -> str:
+        """Return the current mode of the camera, as a case-insensitive string identifier.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
+        ...
+
+    @mode.setter
+    @abc.abstractmethod
+    def mode(self, mode: str) -> None:
+        """Set the current mode of the camera, using a case-insensitive string identifier.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def mode_as_index(self) -> int:
+        """Return the index of the current mode of the camera.
+
+        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_exposure_ms(self, mode_id: str) -> float:
+        """Return the exposure (in milliseconds) for the mode."""
+        ...
+
+    @abc.abstractmethod
+    def set_exposure_ms(self, exposure_ms: float, mode_id: str) -> None:
+        """Set the exposure (in milliseconds) for the mode.
+
+        Setting the exposure for the currently live mode (if there is one) should change the exposure as soon
+        as possible, which may be immediately or may be the next exposed frame.
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_binning(self, mode_id: str) -> int:
+        """Return the binning for the mode."""
+        ...
+
+    @abc.abstractmethod
+    def set_binning(self, binning: int, mode_id: str) -> None:
+        """Set the binning for the mode.
+
+        Binning should be one of the values returned from `binning_values`.
+
+        Setting the binning for the currently live mode (if there is one) should change the binning as soon
+        as possible, which may be immediately or may be the next frame.
+        """
+        ...
+
+    def set_integration_count(self, integration_count: int, mode_id: str) -> None:
+        """Set the integration code for the mode.
+
+        Integration count can be ignored, in which case integration is performed by higher level code.
+
+        Setting the integration count for the currently live mode (if there is one) should update acquisition as soon
+        as possible, which may be immediately or may be the next frame.
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def exposure_ms(self) -> float:
+        """Return the exposure (in milliseconds) for the current mode."""
+        ...
+
+    @exposure_ms.setter
+    @abc.abstractmethod
+    def exposure_ms(self, value: float) -> None:
+        """Set the exposure (in milliseconds) for the current mode."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def binning(self) -> int:
+        """Return the binning for the current mode."""
+        ...
+
+    @binning.setter
+    @abc.abstractmethod
+    def binning(self, value: int) -> None:
+        """Set the binning for the current mode."""
+        ...
+
+    @property
+    @abc.abstractmethod
+    def processing(self) -> str:
+        """Return processing actions for the current mode. Only applies to sequence acquisition.
+
+        Processing may be 'sum_project' or None.
+        """
+        ...
+
+    @processing.setter
+    @abc.abstractmethod
+    def processing(self, value: str) -> None:
+        """Set processing actions for the current mode. Only applies to sequence acquisition.
+
+        Processing may be 'sum_project' or None.
+        """
+        ...
+
+    # @property
+    # def calibration(self) -> typing.List[dict]:
+    # Optional method to return list of calibration for each dimension.
+    # Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
+
+    # @property
+    # def calibration_controls(self) -> dict:
+    # Optional method to return list of calibration controls.
+
+    @abc.abstractmethod
+    def start_live(self) -> None:
+        """Start live acquisition. Required before using acquire_image."""
+        ...
+
+    @abc.abstractmethod
+    def stop_live(self) -> None:
+        """Stop live acquisition."""
+        ...
+
+    @abc.abstractmethod
+    def acquire_image(self) -> dict:
+        """Acquire the most recent image and return a data element dict.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict. Inside the 'properties' dict you must include 'frame_number' as an int.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+
+        If integration_count is non-zero and is handled directly in this method, the 'properties' should also contain
+        a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
+        value of 1 is assumed.
+        """
+        ...
+
+    def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
+        """Return the acquire sequence metrics for the frame parameters dict.
+
+        The frame parameters will contain extra keys 'acquisition_frame_count' and 'storage_frame_count' to indicate
+        the number of frames in the sequence.
+
+        The frame parameters will contain a key 'processing' set to 'sum_project' if 1D summing or binning
+        is requested.
+
+        The dictionary returned should include keys for 'acquisition_time' (in seconds), 'storage_memory' (in bytes) and
+         'acquisition_memory' (in bytes). The default values will be the exposure time times the acquisition frame
+         count and the camera readout size times the number of frames.
+        """
+        return dict()
+
+    def acquire_sequence_prepare(self, n: int) -> None:
+        """Prepare for acquire_sequence."""
+        pass
+
+    def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
+        """Acquire a sequence of n images. Return a single data element with two dimensions n x h, w.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+        """
+        return None
+
+    def show_config_window(self) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+    def show_configuration_dialog(self, api_broker) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+    def start_monitor(self) -> None:
+        """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+
+class Camera2(abc.ABC):
 
     # TODO: dimensional and intensity calibrations should be returned at top level of data element
     # TODO: camera hardware source should query the camera for list of possible modes
@@ -205,7 +476,7 @@ class Camera(abc.ABC):
 
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: Camera, camera_category: str, frame_parameters, display_name):
+    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: Camera2, camera_category: str, frame_parameters, display_name):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
@@ -294,7 +565,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
 class CameraSettings:
 
-    def __init__(self, camera: Camera):
+    def __init__(self, camera: Camera2):
         self.__camera = camera
 
         self.current_frame_parameters_changed_event = Event.Event()
@@ -470,7 +741,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, camera: Camera, camera_settings: CameraSettings, configuration_location: pathlib.Path):
+    def __init__(self, stem_controller_id: str, camera: Camera2, camera_settings: CameraSettings, configuration_location: pathlib.Path):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -610,7 +881,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 self.log_messages_event.fire(messages, data_elements)
 
     @property
-    def camera(self) -> Camera:
+    def camera(self) -> Camera2:
         return self.__camera
 
     @property
@@ -909,12 +1180,6 @@ _component_unregistered_listener = None
 
 def run(configuration_location: pathlib.Path):
     def component_registered(component, component_types):
-        if "camera_device" in component_types:
-            camera = component
-            stem_controller_id = getattr(camera, "stem_controller_id", "autostem_controller")
-            camera_settings = CameraSettings(camera)
-            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera, camera_settings, configuration_location)
-            HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
         if "camera_module" in component_types:
             camera_module = component
             stem_controller_id = getattr(camera_module, "stem_controller_id", "autostem_controller")
@@ -925,8 +1190,6 @@ def run(configuration_location: pathlib.Path):
             camera_module.hardware_source = camera_hardware_source
 
     def component_unregistered(component, component_types):
-        if "camera_device" in component_types:
-            HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
         if "camera_module" in component_types:
             camera_hardware_source = component.hardware_source
             HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
@@ -936,9 +1199,6 @@ def run(configuration_location: pathlib.Path):
 
     _component_registered_listener = Registry.listen_component_registered_event(component_registered)
     _component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
-
-    for component in Registry.get_components_by_type("camera_device"):
-        component_registered(component, {"camera_device"})
 
     for component in Registry.get_components_by_type("camera_module"):
         component_registered(component, {"camera_module"})
