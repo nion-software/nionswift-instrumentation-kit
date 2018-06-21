@@ -886,7 +886,8 @@ def create_camera_panel(document_controller, panel_id, properties):
             hardware_source_id = properties["hardware_source_id"]
             hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
             camera_device = getattr(hardware_source, "camera", None)
-            ui_handler = component.get_ui_handler(api_broker=PlugInManager.APIBroker(), event_loop=document_controller.event_loop, hardware_source_id=hardware_source_id, camera_device=camera_device)
+            camera_settings = getattr(hardware_source, "camera_settings", None)
+            ui_handler = component.get_ui_handler(api_broker=PlugInManager.APIBroker(), event_loop=document_controller.event_loop, hardware_source_id=hardware_source_id, camera_device=camera_device, camera_settings=camera_settings)
             panel = Panel.Panel(document_controller, panel_id, properties)
             panel.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler)
             return panel

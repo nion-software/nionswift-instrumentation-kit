@@ -741,7 +741,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, camera: Camera2, camera_settings: CameraSettings, configuration_location: pathlib.Path):
+    def __init__(self, stem_controller_id: str, camera: Camera2, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -790,8 +790,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.features = dict()
         self.features["is_camera"] = True
         self.features["has_monitor"] = True
-        if hasattr(camera, "camera_panel_type"):
-            self.features["camera_panel_type"] = camera.camera_panel_type
+        if camera_panel_type:
+            self.features["camera_panel_type"] = camera_panel_type
         if self.__camera_category.lower() == "ronchigram":
             self.features["is_ronchigram_camera"] = True
         if self.__camera_category.lower() == "eels":
@@ -879,6 +879,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             messages, data_elements = self.__periodic_logger_fn()
             if len(messages) > 0 or len(data_elements) > 0:
                 self.log_messages_event.fire(messages, data_elements)
+
+    @property
+    def camera_settings(self) -> CameraSettings:
+        return self.__camera_settings
 
     @property
     def camera(self) -> Camera2:
@@ -1185,7 +1189,8 @@ def run(configuration_location: pathlib.Path):
             stem_controller_id = getattr(camera_module, "stem_controller_id", "autostem_controller")
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
-            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location)
+            camera_panel_type = getattr(camera_module, "camera_panel_type", None)
+            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
             camera_module.hardware_source = camera_hardware_source
 
