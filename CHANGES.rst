@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.14.0 (2018-06-21)
+-------------------
+
+- Introduce camera modules to replace camera devices. Allows more control of camera settings.
+
 0.13.3 (2018-06-18)
 -------------------
 
