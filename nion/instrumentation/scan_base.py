@@ -81,6 +81,39 @@ class ScanFrameParameters:
                "\nflyback time: " + str(self.flyback_time_us)
 
 
+# set the calibrations for this image
+def update_calibration_metadata(data_element, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata):
+    pixel_time_us = float(image_metadata["pixel_time_us"])
+    center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
+    center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
+    fov_nm = float(image_metadata["fov_nm"])
+    pixel_size_nm = fov_nm / max(data_shape)
+    data_element["title"] = channel_name
+    data_element["version"] = 1
+    data_element["channel_id"] = channel_id  # needed to match to the channel
+    data_element["channel_name"] = channel_name  # needed to match to the channel
+    data_element["spatial_calibrations"] = (
+        {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+        {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+    )
+    properties = dict()
+    if image_metadata is not None:
+        properties["autostem"] = copy.deepcopy(image_metadata)
+    exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
+    properties["exposure"] = exposure_s
+    properties["frame_index"] = frame_number
+    properties["channel_id"] = channel_id  # needed for info after acquisition
+    properties["channel_name"] = channel_name  # needed for info after acquisition
+    properties["scan_id"] = str(scan_id)
+    properties["center_x_nm"] = center_x_nm
+    properties["center_y_nm"] = center_y_nm
+    properties["pixel_time_us"] = pixel_time_us
+    properties["fov_nm"] = fov_nm
+    properties["rotation_deg"] = float(image_metadata["rotation_deg"])
+    properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
+    data_element["properties"] = properties
+
+
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
@@ -176,47 +209,14 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _acquire_data_elements(self):
 
-        # and now we set the calibrations for this image
-        def update_calibration_metadata(data_element, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata):
-            if "properties" not in data_element:
-                pixel_time_us = float(image_metadata["pixel_time_us"])
-                center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
-                center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
-                fov_nm = float(image_metadata["fov_nm"])
-                pixel_size_nm = fov_nm / max(data_shape)
-                data_element["title"] = channel_name
-                data_element["version"] = 1
-                data_element["channel_id"] = channel_id  # needed to match to the channel
-                data_element["channel_name"] = channel_name  # needed to match to the channel
-                data_element["spatial_calibrations"] = (
-                    {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-                )
-                properties = dict()
-                if image_metadata is not None:
-                    properties["autostem"] = copy.deepcopy(image_metadata)
-                exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
-                properties["hardware_source_name"] = self.__display_name
-                properties["hardware_source_id"] = self.__hardware_source_id
-                properties["exposure"] = exposure_s
-                properties["frame_index"] = frame_number
-                properties["channel_id"] = channel_id  # needed for info after acquisition
-                properties["channel_name"] = channel_name  # needed for info after acquisition
-                properties["scan_id"] = str(scan_id)
-                properties["center_x_nm"] = center_x_nm
-                properties["center_y_nm"] = center_y_nm
-                properties["pixel_time_us"] = pixel_time_us
-                properties["fov_nm"] = fov_nm
-                properties["rotation_deg"] = float(image_metadata["rotation_deg"])
-                properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
-                data_element["properties"] = properties
-
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
             if self.__subscan_enabled:
                 channel_id += ".subscan"
             update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
+            data_element["properties"]["hardware_source_name"] = self.__display_name
+            data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
             data_element["data"] = npdata
             data_element["sub_area"] = sub_area
             data_element["state"] = "complete" if complete else "partial"
@@ -623,7 +623,38 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         Returns None if buffering is not enabled.
         """
         if hasattr(self.__device, "get_buffer_data"):
-            return self.__device.get_buffer_data(start, count)
+            buffer_data = self.__device.get_buffer_data(start, count)
+
+            autostem_properties = None
+            try:
+                autostem_properties = self.__stem_controller.get_autostem_properties()
+            except Exception as e:
+                logging.info("autostem.get_autostem_properties has failed")
+
+            enabled_channel_states = list()
+            for channel_index in range(self.channel_count):
+                channel_state = self.get_channel_state(channel_index)
+                if channel_state.enabled:
+                    enabled_channel_states.append(channel_state)
+
+            scan_id = uuid.uuid4()
+
+            for data_element_group in buffer_data:
+                for channel_index, (data_element, channel_state) in enumerate(zip(data_element_group, enabled_channel_states)):
+                    channel_name = channel_state.name
+                    channel_id = channel_state.channel_id
+                    if self.subscan_enabled:
+                        channel_id += ".subscan"
+                    properties = data_element["properties"]
+                    if autostem_properties:
+                        properties.update(autostem_properties)
+                    update_calibration_metadata(data_element, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties)
+                    data_element["properties"]["channel_index"] = channel_index
+                    data_element["properties"]["hardware_source_name"] = self.display_name
+                    data_element["properties"]["hardware_source_id"] = self.hardware_source_id
+
+            return buffer_data
+
         return None
 
     def __probe_state_changed(self, probe_state, probe_position):

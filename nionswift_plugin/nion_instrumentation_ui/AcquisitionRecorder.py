@@ -165,7 +165,8 @@ class Controller:
                     xdata = DataAndMetadata.new_data_and_metadata(data,
                                                                   intensity_calibration=intensity_calibration,
                                                                   dimensional_calibrations=dimensional_calibrations,
-                                                                  data_descriptor=data_descriptor)
+                                                                  data_descriptor=data_descriptor,
+                                                                  metadata=xdata.metadata)
                     xdata_group.append(xdata)
             elif len(xdata_group_list) == 1:
                 xdata_group = xdata_group_list[0]
