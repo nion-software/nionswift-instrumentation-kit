@@ -177,7 +177,9 @@ class Controller:
                 data_item = DataItem.DataItem(large_format=True)
                 data_item.ensure_data_source()
                 data_item.set_xdata(xdata)
-                data_item.title = _("Recording of ") + hardware_source.display_name
+                channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
+                channel_ext = (" (" + channel_name + ")") if channel_name else ""
+                data_item.title = _("Recording of ") + hardware_source.display_name + channel_ext
                 document_controller.document_model.append_data_item(data_item)
                 document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(data_item))
 
