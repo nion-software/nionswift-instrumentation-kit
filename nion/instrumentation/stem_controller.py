@@ -14,9 +14,10 @@ import typing
 from nion.swift.model import Graphics
 from nion.swift.model import HardwareSource
 from nion.utils import Binding
+from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
-from nion.utils import Event
+from nion.utils import Registry
 
 
 _ = gettext.gettext
@@ -517,6 +518,25 @@ class ProbeViewController:
         if hasattr(instrument, "_subscan_view"):
             instrument._subscan_view.close()
             instrument._subscan_view = None
+
+
+# the plan is to migrate away from the hardware manager as a registration system.
+# but keep this here until that migration is complete.
+
+def component_registered(component, component_types):
+    if "stem_controller" in component_types:
+        HardwareSource.HardwareSourceManager().register_instrument(component.instrument_id, component)
+
+def component_unregistered(component, component_types):
+    if "stem_controller" in component_types:
+        HardwareSource.HardwareSourceManager().unregister_instrument(component.instrument_id)
+
+component_registered_listener = Registry.listen_component_registered_event(component_registered)
+component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
+
+for component in Registry.get_components_by_type("stem_controller"):
+    component_registered(component, {"stem_controller"})
+
 
 """
 from nion.swift.model import HardwareSource
