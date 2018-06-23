@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import pathlib
-import threading
 import typing
 
 # typing
@@ -32,280 +31,36 @@ _ = gettext.gettext
 
 
 class Camera(abc.ABC):
-    """Backwards compatibility."""
+    """DEPRECATED. Here for backwards compatibility.
 
-    @abc.abstractmethod
-    def close(self) -> None:
-        """Close the camera."""
-        ...
-
-    @property
-    @abc.abstractmethod
-    def sensor_dimensions(self) -> (int, int):
-        """Read-only property for the native sensor size (no binning).
-
-        Returns (height, width) in pixels.
-
-        This is a global property, meaning it affects all profiles, and is assumed to be constant.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def readout_area(self) -> (int, int, int, int):
-        """Return the detector readout area.
-
-        Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
-
-        There are restrictions on the valid values, depending on camera. This property should use the closest
-        appropriate values, rounding up when necessary.
-
-        This is a global property, meaning it affects all profiles.
-        """
-        ...
-
-    @readout_area.setter
-    @abc.abstractmethod
-    def readout_area(self, readout_area_TLBR: (int, int, int, int)) -> None:
-        """Set the detector readout area.
-
-        The coordinates, top, left, bottom, right, are specified in sensor coordinates.
-
-        There are restrictions on the valid values, depending on camera. This property should always return
-        valid values.
-
-        This is a global property, meaning it affects all profiles.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def flip(self):
-        """Return whether data is flipped left-right (last dimension).
-
-        This is a global property, meaning it affects all profiles.
-        """
-        ...
-
-    @flip.setter
-    @abc.abstractmethod
-    def flip(self, do_flip):
-        """Set whether data is flipped left-right (last dimension).
-
-        This is a global property, meaning it affects all profiles.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def binning_values(self) -> typing.List[int]:
-        """Return a list of valid binning values (int's).
-
-        This is a global property, meaning it affects all profiles, and is assumed to be constant.
-        """
-        ...
-
-    @abc.abstractmethod
-    def get_expected_dimensions(self, binning: int) -> (int, int):
-        """Read-only property for the expected image size (binning and readout area included).
-
-        Returns (height, width).
-
-        Cameras are allowed to bin in one dimension and not the other.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def mode(self) -> str:
-        """Return the current mode of the camera, as a case-insensitive string identifier.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @mode.setter
-    @abc.abstractmethod
-    def mode(self, mode: str) -> None:
-        """Set the current mode of the camera, using a case-insensitive string identifier.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @property
-    @abc.abstractmethod
-    def mode_as_index(self) -> int:
-        """Return the index of the current mode of the camera.
-
-        Cameras must currently handle the 'Run', 'Tune', and 'Snap' modes.
-        """
-        ...
-
-    @abc.abstractmethod
-    def get_exposure_ms(self, mode_id: str) -> float:
-        """Return the exposure (in milliseconds) for the mode."""
-        ...
-
-    @abc.abstractmethod
-    def set_exposure_ms(self, exposure_ms: float, mode_id: str) -> None:
-        """Set the exposure (in milliseconds) for the mode.
-
-        Setting the exposure for the currently live mode (if there is one) should change the exposure as soon
-        as possible, which may be immediately or may be the next exposed frame.
-        """
-        ...
-
-    @abc.abstractmethod
-    def get_binning(self, mode_id: str) -> int:
-        """Return the binning for the mode."""
-        ...
-
-    @abc.abstractmethod
-    def set_binning(self, binning: int, mode_id: str) -> None:
-        """Set the binning for the mode.
-
-        Binning should be one of the values returned from `binning_values`.
-
-        Setting the binning for the currently live mode (if there is one) should change the binning as soon
-        as possible, which may be immediately or may be the next frame.
-        """
-        ...
+    The method implementations only exist since classes derived from this base class may have assumed these methods
+    would be implemented. Methods marked as abstract have been removed since they must have already been implemented in
+    any class derived from this one.
+    """
 
     def set_integration_count(self, integration_count: int, mode_id: str) -> None:
-        """Set the integration code for the mode.
-
-        Integration count can be ignored, in which case integration is performed by higher level code.
-
-        Setting the integration count for the currently live mode (if there is one) should update acquisition as soon
-        as possible, which may be immediately or may be the next frame.
-        """
         pass
 
-    @property
-    @abc.abstractmethod
-    def exposure_ms(self) -> float:
-        """Return the exposure (in milliseconds) for the current mode."""
-        ...
-
-    @exposure_ms.setter
-    @abc.abstractmethod
-    def exposure_ms(self, value: float) -> None:
-        """Set the exposure (in milliseconds) for the current mode."""
-        ...
-
-    @property
-    @abc.abstractmethod
-    def binning(self) -> int:
-        """Return the binning for the current mode."""
-        ...
-
-    @binning.setter
-    @abc.abstractmethod
-    def binning(self, value: int) -> None:
-        """Set the binning for the current mode."""
-        ...
-
-    @property
-    @abc.abstractmethod
-    def processing(self) -> str:
-        """Return processing actions for the current mode. Only applies to sequence acquisition.
-
-        Processing may be 'sum_project' or None.
-        """
-        ...
-
-    @processing.setter
-    @abc.abstractmethod
-    def processing(self, value: str) -> None:
-        """Set processing actions for the current mode. Only applies to sequence acquisition.
-
-        Processing may be 'sum_project' or None.
-        """
-        ...
-
-    # @property
-    # def calibration(self) -> typing.List[dict]:
-    # Optional method to return list of calibration for each dimension.
-    # Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
-
-    # @property
-    # def calibration_controls(self) -> dict:
-    # Optional method to return list of calibration controls.
-
-    @abc.abstractmethod
-    def start_live(self) -> None:
-        """Start live acquisition. Required before using acquire_image."""
-        ...
-
-    @abc.abstractmethod
-    def stop_live(self) -> None:
-        """Stop live acquisition."""
-        ...
-
-    @abc.abstractmethod
-    def acquire_image(self) -> dict:
-        """Acquire the most recent image and return a data element dict.
-
-        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
-        with a dict. Inside the 'properties' dict you must include 'frame_number' as an int.
-
-        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
-        released (Python reference count goes to zero).
-
-        If integration_count is non-zero and is handled directly in this method, the 'properties' should also contain
-        a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
-        value of 1 is assumed.
-        """
-        ...
-
     def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
-        """Return the acquire sequence metrics for the frame parameters dict.
-
-        The frame parameters will contain extra keys 'acquisition_frame_count' and 'storage_frame_count' to indicate
-        the number of frames in the sequence.
-
-        The frame parameters will contain a key 'processing' set to 'sum_project' if 1D summing or binning
-        is requested.
-
-        The dictionary returned should include keys for 'acquisition_time' (in seconds), 'storage_memory' (in bytes) and
-         'acquisition_memory' (in bytes). The default values will be the exposure time times the acquisition frame
-         count and the camera readout size times the number of frames.
-        """
         return dict()
 
     def acquire_sequence_prepare(self, n: int) -> None:
-        """Prepare for acquire_sequence."""
         pass
 
     def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
-        """Acquire a sequence of n images. Return a single data element with two dimensions n x h, w.
-
-        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
-        with a dict.
-
-        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
-        released (Python reference count goes to zero).
-        """
         return None
 
     def show_config_window(self) -> None:
-        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         pass
 
     def show_configuration_dialog(self, api_broker) -> None:
-        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         pass
 
     def start_monitor(self) -> None:
-        """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
         pass
 
 
-class Camera2(abc.ABC):
-
-    # TODO: dimensional and intensity calibrations should be returned at top level of data element
-    # TODO: camera hardware source should query the camera for list of possible modes
+class CameraDevice(abc.ABC):
 
     @abc.abstractmethod
     def close(self) -> None:
@@ -394,16 +149,13 @@ class Camera2(abc.ABC):
 
         processing and integration_count are optional, in which case they are handled at a higher level.
         """
-        pass
+        ...
 
-    # @property
-    # def calibration(self) -> typing.List[dict]:
-    # Optional method to return list of calibration for each dimension.
-    # Each calibration is a dict and can include 'scale', 'offset', and 'units' keys.
-
-    # @property
-    # def calibration_controls(self) -> dict:
-    # Optional method to return list of calibration controls.
+    @property
+    @abc.abstractmethod
+    def calibration_controls(self) -> dict:
+        """Return list of calibration controls to be read from STEM controller for this device."""
+        ...
 
     @abc.abstractmethod
     def start_live(self) -> None:
@@ -476,7 +228,7 @@ class Camera2(abc.ABC):
 
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: Camera2, camera_category: str, frame_parameters, display_name):
+    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_category: str, frame_parameters, display_name):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
@@ -564,184 +316,70 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
 
 class CameraSettings:
+    """Used for typing. Not intended to serve as a base class."""
 
-    def __init__(self, camera: Camera2):
-        self.__camera = camera
-
+    def __init__(self):
         self.current_frame_parameters_changed_event = Event.Event()
         self.record_frame_parameters_changed_event = Event.Event()
         self.profile_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
-
-        self.modes = ["Run", "Tune", "Snap"]
-
-        # on_low_level_parameter_changed is handled for backwards compatibility (old DLLs with new hardware source).
-        # new DLLs should call on_mode_changed and on_mode_parameter_changed (handled below) and should NOT call
-        # on_low_level_parameter_changed.
-        # handling of on_low_level_parameter_changed can be removed once all users have updated to new DLLs (2017-06-23)
-
-        def low_level_parameter_changed(parameter_name):
-            # updates all profiles with new exposure/binning values (if changed)
-            # parameter_name is ignored
-            profile_index = self.__camera.mode_as_index
-            if parameter_name == "exposureTimems" or parameter_name == "binning":
-                for i, mode_id in enumerate(self.modes):
-                    exposure_ms = self.__camera.get_exposure_ms(mode_id)
-                    binning = self.__camera.get_binning(mode_id)
-                    self.__profile_frame_parameter_changed(i, "exposure_ms", exposure_ms)
-                    self.__profile_frame_parameter_changed(i, "binning", binning)
-            elif parameter_name == "mode":
-                self.__selected_profile_index_changed(profile_index)
-
-        self.__camera.on_low_level_parameter_changed = low_level_parameter_changed
-
-        def mode_changed(mode: str) -> None:
-            for index, i_mode in enumerate(self.modes):
-                if mode == i_mode:
-                    self.__selected_profile_index_changed(index)
-                    break
-
-        def mode_parameter_changed(mode: str, parameter_name: str, value) -> None:
-            for index, i_mode in enumerate(self.modes):
-                if mode == i_mode:
-                    self.__profile_frame_parameter_changed(index, parameter_name, value)
-                    break
-
-        self.__camera.on_mode_changed = mode_changed
-        self.__camera.on_mode_parameter_changed = mode_parameter_changed
-
-        # configure profiles
-        self.__profiles = list()
-        self.__profiles.extend(self.__get_initial_profiles())
-        self.__current_profile_index = self.__get_initial_profile_index()
-        self.__frame_parameters = self.__profiles[0]
-        self.__record_parameters = self.__profiles[2]
-
-        # track the latest values from the low level. update in the event loop to avoid threading issues.
-        self.__latest_values_lock = threading.RLock()
-        self.__latest_values = list()
-        self.__latest_profile_index = None
-        self.__event_loop = None
+        self.settings_changed_event = Event.Event()
+        self.settings_id = str()
+        self.modes = [str()]
 
     def close(self):
-        # keep the camera adapter around until super close is called, since super
-        # may do something that requires the camera adapter.
-        self.__camera.on_low_level_parameter_changed = None
-        self.__camera.on_mode_changed = None
-        self.__camera.on_mode_parameter_changed = None
-        self.__camera = None
+        pass
 
-    def initialize(self, event_loop=None, **kwargs):
-        self.__event_loop = event_loop
+    def initialize(self, configuration_location: pathlib.Path = None, event_loop: asyncio.AbstractEventLoop = None, **kwargs):
+        pass
 
-    def get_frame_parameters_from_dict(self, d):
-        return CameraFrameParameters(d)
+    def apply_settings(self, settings_dict: typing.Dict) -> None:
+        pass
 
-    def set_current_frame_parameters(self, frame_parameters):
-        self.__frame_parameters = copy.copy(frame_parameters)
+    def get_frame_parameters_from_dict(self, d: typing.Mapping):
+        pass
+
+    def set_current_frame_parameters(self, frame_parameters) -> None:
         self.current_frame_parameters_changed_event.fire(frame_parameters)
 
     def get_current_frame_parameters(self):
-        return self.__frame_parameters
+        return None
 
-    def set_record_frame_parameters(self, frame_parameters):
-        self.__record_parameters = copy.copy(frame_parameters)
+    def set_record_frame_parameters(self, frame_parameters) -> None:
         self.record_frame_parameters_changed_event.fire(frame_parameters)
 
     def get_record_frame_parameters(self):
-        return self.__record_parameters
+        return None
 
-    def set_frame_parameters(self, profile_index, frame_parameters):
-        frame_parameters = copy.copy(frame_parameters)
-        self.__profiles[profile_index] = frame_parameters
-        # update the frame parameters on the device
-        mode_id = self.modes[profile_index]
-        self.__camera.set_exposure_ms(frame_parameters.exposure_ms, mode_id)
-        self.__camera.set_binning(frame_parameters.binning, mode_id)
-        # update the local frame parameters
-        if profile_index == self.__current_profile_index:
-            self.set_current_frame_parameters(frame_parameters)
-        if profile_index == 2:
-            self.set_record_frame_parameters(frame_parameters)
+    def set_frame_parameters(self, profile_index: int, frame_parameters) -> None:
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
-    def get_frame_parameters(self, profile_index):
-        return copy.copy(self.__profiles[profile_index])
+    def get_frame_parameters(self, profile_index: int):
+        return None
 
-    def set_selected_profile_index(self, profile_index):
-        if self.__current_profile_index != profile_index:
-            self.__current_profile_index = profile_index
-            # set current frame parameters
-            self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
-            self.profile_changed_event.fire(profile_index)
+    def set_selected_profile_index(self, profile_index: int) -> None:
+        pass
 
     @property
-    def selected_profile_index(self):
-        return self.__current_profile_index
+    def selected_profile_index(self) -> int:
+        return 0
 
-    # mode property. thread safe.
-    def get_mode(self):
-        return self.modes[self.__current_profile_index]
+    def get_mode(self) -> str:
+        return str()
 
-    # translate the mode identifier to the mode enum if necessary.
-    # set mode settings. thread safe.
-    def set_mode(self, mode):
-        self.set_selected_profile_index(self.modes.index(mode))
+    def set_mode(self, mode: str) -> None:
+        pass
 
-    def open_configuration_interface(self, api_broker):
-        if hasattr(self.__camera, "show_config_window"):
-            self.__camera.show_config_window()
-        if hasattr(self.__camera, "show_configuration_dialog"):
-            self.__camera.show_configuration_dialog(api_broker)
+    def open_configuration_interface(self, api_broker) -> None:
+        pass
 
-    def open_monitor(self):
-        self.__camera.start_monitor()
-
-    def __get_initial_profiles(self) -> typing.List[typing.Any]:
-        # copy the frame parameters from the camera object to self.__profiles
-        def get_frame_parameters(profile_index):
-            mode_id = self.modes[profile_index]
-            exposure_ms = self.__camera.get_exposure_ms(mode_id)
-            binning = self.__camera.get_binning(mode_id)
-            return CameraFrameParameters({"exposure_ms": exposure_ms, "binning": binning})
-        return [get_frame_parameters(i) for i in range(3)]
-
-    def __get_initial_profile_index(self) -> int:
-        return self.__camera.mode_as_index
-
-    def __profile_frame_parameter_changed(self, profile_index, frame_parameter, value):
-        # this is the preferred technique for camera adapters to indicate changes
-        with self.__latest_values_lock:
-            # rebuild the list to remove anything matching our new profile_index/frame_parameter combo.
-            latest_values = list()
-            for profile_index_, parameter_, value_ in self.__latest_values:
-                if profile_index != profile_index_ or frame_parameter != parameter_:
-                    latest_values.append((profile_index_, parameter_, value_))
-            self.__latest_values = latest_values
-            self.__latest_values.append((profile_index, frame_parameter, value))
-        self.__event_loop.create_task(self.__do_update_parameters())
-
-    async def __do_update_parameters(self):
-        with self.__latest_values_lock:
-            if self.__latest_profile_index is not None:
-                self.set_selected_profile_index(self.__latest_profile_index)
-            self.__latest_profile_index = None
-            for profile_index, parameter, value in self.__latest_values:
-                frame_parameters = self.get_frame_parameters(profile_index)
-                if getattr(frame_parameters, parameter) != value:
-                    setattr(frame_parameters, parameter, value)
-                    self.set_frame_parameters(profile_index, frame_parameters)
-            self.__latest_values = list()
-
-    def __selected_profile_index_changed(self, profile_index):
-        with self.__latest_values_lock:
-            self.__latest_profile_index = profile_index
-        self.__event_loop.create_task(self.__do_update_parameters())
+    def open_monitor(self) -> None:
+        pass
 
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, camera: Camera2, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
+    def __init__(self, stem_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -885,7 +523,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.__camera_settings
 
     @property
-    def camera(self) -> Camera2:
+    def camera(self) -> CameraDevice:
         return self.__camera
 
     @property

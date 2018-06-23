@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+
+- Improve metadata, calibration, and naming during acquisition recording.
+
 0.14.0 (2018-06-21)
 -------------------
 
