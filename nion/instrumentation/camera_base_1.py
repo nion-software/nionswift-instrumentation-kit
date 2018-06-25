@@ -609,11 +609,16 @@ def run():
         if "camera_device" in component_types:
             stem_controller_id = getattr(component, "stem_controller_id", "autostem_controller")
             camera_hardware_source = CameraHardwareSource(stem_controller_id, component)
+            component_types = {"hardware_source", "camera_hardware_source"}.union({component.camera_type + "_camera_hardware_source"})
+            Registry.register_component(camera_hardware_source, component_types)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+            component.hardware_source = camera_hardware_source
 
     def component_unregistered(component, component_types):
         if "camera_device" in component_types:
-            HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
+            camera_hardware_source = component.hardware_source
+            Registry.unregister_component(camera_hardware_source)
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
 
     global _component_registered_listener
     global _component_unregistered_listener

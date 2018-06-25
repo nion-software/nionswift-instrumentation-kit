@@ -257,6 +257,7 @@ def run():
     def component_registered(component, component_types):
         if "video_device" in component_types:
             hardware_source = VideoHardwareSource(component)
+            Registry.register_component(hardware_source, {"hardware_source", "video_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
             video_configuration.video_sources.append_item(hardware_source)
 
@@ -266,6 +267,7 @@ def run():
                 if getattr(hardware_source, "video_device", None) and hardware_source.video_device == component:
                     video_configuration.video_sources.remove_item(video_configuration.video_sources.items.index(hardware_source))
                     video_configuration._remove_video_device(component)
+                    Registry.unregister_component(hardware_source)
                     HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
 
     global _component_registered_listener

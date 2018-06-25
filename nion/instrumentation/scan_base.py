@@ -764,11 +764,15 @@ def run():
                 from nion.instrumentation import stem_controller
                 stem_controller = stem_controller.STEMController()
             scan_hardware_source = ScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
+            Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
+            component.hardware_source = scan_hardware_source
 
     def component_unregistered(component, component_types):
         if "scan_device" in component_types:
-            HardwareSource.HardwareSourceManager().unregister_hardware_source(component)
+            scan_hardware_source = component.hardware_source
+            Registry.unregister_component(scan_hardware_source)
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
 
     global _component_registered_listener
     global _component_unregistered_listener

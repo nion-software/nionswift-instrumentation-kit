@@ -829,12 +829,15 @@ def run(configuration_location: pathlib.Path):
             camera_device = camera_module.camera_device
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)
             camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
+            component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
+            Registry.register_component(camera_hardware_source, component_types)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
             camera_module.hardware_source = camera_hardware_source
 
     def component_unregistered(component, component_types):
         if "camera_module" in component_types:
             camera_hardware_source = component.hardware_source
+            Registry.unregister_component(camera_hardware_source)
             HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
 
     global _component_registered_listener
