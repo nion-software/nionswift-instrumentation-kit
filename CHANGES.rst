@@ -1,10 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+0.14.1 (2019-06-25)
+-------------------
 
 - Add STEM controller methods to access ronchigram camera, eels camera, and scan controller.
+
+- Register all cameras via Registry rather than directly in HardwareSourceManager.
 
 - Improve metadata, calibration, and naming during acquisition recording.
 
