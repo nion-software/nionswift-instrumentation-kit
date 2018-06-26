@@ -61,9 +61,45 @@ class STEMController:
         self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value = Model.PropertyModel(None)
         self.scan_data_items_changed_event = Event.Event()
+        self.__ronchigram_camera = None
+        self.__eels_camera = None
+        self.__scan_controller = None
 
     def close(self):
         pass
+
+    # configuration methods
+
+    @property
+    def ronchigram_camera(self) -> HardwareSource.HardwareSource:
+        if self.__ronchigram_camera:
+            return self.__ronchigram_camera
+        return tuple(Registry.get_components_by_type("ronchigram_camera_hardware_source"))[0]
+
+    def set_ronchigram_camera(self, camera: HardwareSource.HardwareSource) -> None:
+        assert camera.features.get("is_ronchigram_camera", False)
+        self.__ronchigram_camera = camera
+
+    @property
+    def eels_camera(self) -> HardwareSource.HardwareSource:
+        if self.__eels_camera:
+            return self.__eels_camera
+        return tuple(Registry.get_components_by_type("eels_camera_hardware_source"))[0]
+
+    def set_eels_camera(self, camera: HardwareSource.HardwareSource) -> None:
+        assert camera.features.get("is_eels_camera", False)
+        self.__eels_camera = camera
+
+    @property
+    def scan_controller(self) -> HardwareSource.HardwareSource:
+        if self.__scan_controller:
+            return self.__scan_controller
+        return tuple(Registry.get_components_by_type("scan_controller"))[0]
+
+    def set_scan_controller(self, scan_controller: HardwareSource.HardwareSource) -> None:
+        self.__scan_controller = scan_controller
+
+    # end configuration methods
 
     def _enter_scanning_state(self):
         self.__probe_state_stack.append("scanning")

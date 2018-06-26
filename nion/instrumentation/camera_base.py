@@ -829,6 +829,8 @@ def run(configuration_location: pathlib.Path):
             camera_device = camera_module.camera_device
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)
             camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
+            if hasattr(camera_module, "priority"):
+                camera_hardware_source.priority = camera_module.priority
             component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
             Registry.register_component(camera_hardware_source, component_types)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)

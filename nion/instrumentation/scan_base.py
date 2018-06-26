@@ -764,6 +764,8 @@ def run():
                 from nion.instrumentation import stem_controller
                 stem_controller = stem_controller.STEMController()
             scan_hardware_source = ScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
+            if hasattr(component, "priority"):
+                scan_hardware_source.priority = component.priority
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
             component.hardware_source = scan_hardware_source

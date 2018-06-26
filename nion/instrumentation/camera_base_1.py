@@ -609,6 +609,8 @@ def run():
         if "camera_device" in component_types:
             stem_controller_id = getattr(component, "stem_controller_id", "autostem_controller")
             camera_hardware_source = CameraHardwareSource(stem_controller_id, component)
+            if hasattr(component, "priority"):
+                camera_hardware_source.priority = component.priority
             component_types = {"hardware_source", "camera_hardware_source"}.union({component.camera_type + "_camera_hardware_source"})
             Registry.register_component(camera_hardware_source, component_types)
             HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)

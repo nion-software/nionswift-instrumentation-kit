@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 
+- Add STEM controller methods to access ronchigram camera, eels camera, and scan controller.
+
 - Improve metadata, calibration, and naming during acquisition recording.
 
 0.14.0 (2018-06-21)
