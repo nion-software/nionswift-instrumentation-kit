@@ -316,15 +316,57 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
 
 class CameraSettings:
-    """Used for typing. Not intended to serve as a base class."""
+    """Document and define types for camera settings.
+
+    IMPORTANT NOTE: Used for typing. Not intended to serve as a base class.
+
+    The camera settings object facilitates persistence and tracking of configuration and frame parameters for the
+    camera. When used with the standard UI, it is only accessed through the CameraHardwareSource and not used directly.
+    However, when used with a custom UI, it may be accessed directly.
+
+    Configuration parameters are settings that apply to the camera as a whole, as opposed to settings for a specific
+    acquisition sequence.
+
+    Frame parameters are settings that apply to a specific frame acquisition sequence.
+
+    The current frame parameters refer to the frame parameters being used for the current acquisition (if running) or
+    pending acquisition (if stopped).
+
+    For backwards compatibility, the record frame parameters are a special set of parameters used for
+    higher quality data acquisition (recording).
+
+    To facilitate the user being able to switch between frame parameter settings quickly, sets of frame parameters
+    called profiles and the current selected profile can be tracked. The standard UI supports this capability but custom
+    UIs may choose not to support this.
+
+    The manner in which a change to the current frame parameters is propagated to the frame parameters associated with
+    the current profile is implementation dependent. The suggested behavior is to apply user initiated changes in the
+    current frame parameters to the frame parameters associated with the current profile.
+
+    For backwards compatibility, the profiles may also be referred to by named modes. Up to now, exactly three modes
+    have been supported: Run (0), Tune (1), and Snap (2), with the mode name and profile index listed in parenthesis.
+
+    When `set_current_frame_parameters` is called, it should fire the `current_frame_parameters_changed_event` with
+    the frame parameters as the only parameter; this will result in a `set_frame_parameters` call to the camera device.
+
+    TODO: write about threading (events must be triggered on main thread)
+    """
 
     def __init__(self):
+        # these events must be defined
         self.current_frame_parameters_changed_event = Event.Event()
         self.record_frame_parameters_changed_event = Event.Event()
         self.profile_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
+
+        # optional event and identifier for settings. defining settings_id signals that
+        # the settings should be managed as a dict by the container of this class. the container
+        # will call apply_settings to initialize settings and then expect settings_changed_event
+        # to be fired when settings change.
         self.settings_changed_event = Event.Event()
         self.settings_id = str()
+
+        # the list of possible modes should be defined here
         self.modes = [str()]
 
     def close(self):
@@ -334,40 +376,67 @@ class CameraSettings:
         pass
 
     def apply_settings(self, settings_dict: typing.Dict) -> None:
+        """Initialize the settings with the settings_dict."""
         pass
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping):
         pass
 
     def set_current_frame_parameters(self, frame_parameters) -> None:
+        """Set the current frame parameters.
+
+        Fire the current frame parameters changed event and optionally the settings changed event.
+        """
         self.current_frame_parameters_changed_event.fire(frame_parameters)
 
     def get_current_frame_parameters(self):
+        """Get the current frame parameters."""
         return None
 
     def set_record_frame_parameters(self, frame_parameters) -> None:
+        """Set the record frame parameters.
+
+        Fire the record frame parameters changed event and optionally the settings changed event.
+        """
         self.record_frame_parameters_changed_event.fire(frame_parameters)
 
     def get_record_frame_parameters(self):
+        """Get the record frame parameters."""
         return None
 
     def set_frame_parameters(self, profile_index: int, frame_parameters) -> None:
+        """Set the frame parameters with the settings index and fire the frame parameters changed event.
+
+        If the settings index matches the current settings index, call set current frame parameters.
+
+        If the settings index matches the record settings index, call set record frame parameters.
+        """
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
     def get_frame_parameters(self, profile_index: int):
+        """Get the frame parameters for the settings index."""
         return None
 
     def set_selected_profile_index(self, profile_index: int) -> None:
+        """Set the current settings index.
+
+        Call set current frame parameters if it changed.
+
+        Fire profile changed event if it changed.
+        """
         pass
 
     @property
     def selected_profile_index(self) -> int:
+        """Return the current settings index."""
         return 0
 
     def get_mode(self) -> str:
+        """Return the current mode (named version of current settings index)."""
         return str()
 
     def set_mode(self, mode: str) -> None:
+        """Set the current mode (named version of current settings index)."""
         pass
 
     def open_configuration_interface(self, api_broker) -> None:
