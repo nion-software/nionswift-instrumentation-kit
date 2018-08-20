@@ -193,6 +193,10 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         super()._abort_acquisition()
         self._suspend_acquisition()
 
+    def _request_abort_acquisition(self) -> None:
+        super()._request_abort_acquisition()
+        self.__device.cancel()
+
     def _mark_acquisition(self) -> None:
         super()._mark_acquisition()
         self.__device.stop()

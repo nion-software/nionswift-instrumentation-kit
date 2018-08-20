@@ -1,6 +1,8 @@
 # system imports
 import contextlib
 import copy
+import enum
+import functools
 import gettext
 import logging
 import threading
@@ -11,7 +13,6 @@ import numpy
 
 # local libraries
 from nion.typeshed import API_1_0 as API
-from nion.typeshed import HardwareSource_1_0 as HardwareSource
 from nion.typeshed import UI_1_0 as UserInterface
 from nion.swift.model import ImportExportManager
 from nion.utils import Binding
@@ -23,90 +24,49 @@ from . import HardwareSourceChoice
 _ = gettext.gettext
 
 
+class SequenceState(enum.Enum):
+    idle = 0
+    scanning = 1
+
+
 class ScanAcquisitionController:
 
-    def __init__(self, api):
+    def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source):
         self.__api = api
-        self.__aborted = False
+        self.__document_controller = document_controller
+        self.__scan_hardware_source = scan_hardware_source
+        self.__camera_hardware_source = camera_hardware_source
+        self.__state = SequenceState.idle
         self.acquisition_state_changed_event = Event.Event()
 
-    def start_spectrum_image(self, document_window: API.DocumentWindow) -> None:
+    def start(self, sum_frames: bool) -> None:
 
-        def acquire_spectrum_image(api: API.API, document_window: API.DocumentWindow) -> None:
-            try:
-                logging.debug("start")
-                self.acquisition_state_changed_event.fire({"message": "start"})
-                try:
-                    eels_camera = api.get_hardware_source_by_id("orca_camera", version="1.0")
-                    eels_camera_parameters = eels_camera.get_frame_parameters_for_profile_by_index(0)
-
-                    scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")
-                    scan_parameters = scan_controller.get_frame_parameters_for_profile_by_index(2)
-                    scan_max_size = 2048
-                    scan_parameters["size"] = min(scan_max_size, scan_parameters["size"][0]), min(scan_max_size, scan_parameters["size"][1])
-                    scan_parameters["pixel_time_us"] = int(1000 * eels_camera_parameters["exposure_ms"] * 0.75)
-                    scan_parameters["external_clock_wait_time_ms"] = int(eels_camera_parameters["exposure_ms"] * 1.5)
-                    scan_parameters["external_clock_mode"] = 1
-
-                    library = document_window.library
-                    data_item = library.create_data_item(_("Spectrum Image"))
-                    document_window.display_data_item(data_item)
-
-                    # force the data to be held in memory and write delayed by grabbing a data_ref.
-                    with library.data_ref_for_data_item(data_item) as data_ref:
-                        flyback_pixels = 2
-                        with contextlib.closing(eels_camera.create_view_task(frame_parameters=eels_camera_parameters, buffer_size=16)) as eels_view_task:
-                            # wait for a frame, then create the record task during the next frame, then wait for that
-                            # frame to finish. that will position the scan at the first position. proceed with acquisition.
-                            eels_view_task.grab_next_to_finish()
-                            eels_view_task.grab_earliest()  # wait for current frame to finish
-                            with contextlib.closing(scan_controller.create_record_task(scan_parameters)) as scan_task:
-                                try:
-                                    scan_height = scan_parameters["size"][0]
-                                    scan_width = scan_parameters["size"][1] + flyback_pixels
-                                    data_and_metadata_list = eels_view_task.grab_earliest()
-                                    eels_data_and_metadata = data_and_metadata_list[1]
-                                    eels_data = eels_data_and_metadata.data
-                                    frame_index_base = eels_data_and_metadata.metadata["hardware_source"]["frame_index"]
-                                    frame_index = eels_data_and_metadata.metadata["hardware_source"]["frame_index"] - frame_index_base
-                                    while True:
-                                        if self.__aborted:
-                                            scan_task.cancel()
-                                            break
-                                        column = frame_index % scan_width
-                                        row = frame_index // scan_width
-                                        if data_ref.data is None:
-                                            data_ref.data = numpy.zeros(scan_parameters["size"] + (eels_data.shape[0],), numpy.float)
-                                        if row >= scan_height:
-                                            break
-                                        if column < data_ref.data.shape[1]:
-                                            data_ref[row, column, :] = eels_data
-                                            self.acquisition_state_changed_event.fire({"message": "update", "position": (row, column + flyback_pixels)})
-                                        data_and_metadata_list = eels_view_task.grab_earliest()
-                                        eels_data_and_metadata = data_and_metadata_list[1]
-                                        eels_data = eels_data_and_metadata.data
-                                        frame_index = eels_data_and_metadata.metadata["hardware_source"]["frame_index"] - frame_index_base
-                                except:
-                                    scan_task.cancel()
-                                    raise
-                finally:
-                    self.acquisition_state_changed_event.fire({"message": "end"})
-                    logging.debug("end")
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-
-        self.__thread = threading.Thread(target=acquire_spectrum_image, args=(self.__api, document_window))
-        self.__thread.start()
-
-    def start_sequence(self, document_window: API.DocumentWindow, scan_device, eels_camera, sum_frames: bool) -> None:
+        def create_and_display_data_item(library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source):
+            camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
+            data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
+            data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
+            # the data item should not have any other 'clients' at this point; so setting the
+            # data and metadata will immediately unload the data (and write to disk). this is important,
+            # because the data (up to this point) can be shared data from the DLL.
+            data_item.set_data_and_metadata(data_and_metadata)
+            # assert not data_item._data_item.is_data_loaded
+            # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
+            document_window.display_data_item(data_item)
+            for scan_data_and_metadata in scan_data_list:
+                scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
+                scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
+                channel_id = camera_hardware_source_id + "_" + scan_channel_id
+                data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
+                data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
+                data_item.set_data_and_metadata(scan_data_and_metadata)
+                document_window.display_data_item(data_item)
 
         def acquire_sequence(api: API.API, document_window: API.DocumentWindow, scan_hardware_source, camera_hardware_source) -> None:
             try:
-                logging.debug("start")
-                self.acquisition_state_changed_event.fire({"message": "start"})
+                logging.debug("start sequence acquisition")
+                self.__state = SequenceState.scanning
+                self.acquisition_state_changed_event.fire(self.__state)
                 try:
-                    camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
                     camera_frame_parameters = camera_hardware_source.get_frame_parameters_for_profile_by_index(0)
                     if sum_frames:
                         camera_frame_parameters["processing"] = "sum_project"
@@ -135,109 +95,52 @@ class ScanAcquisitionController:
 
                     with contextlib.closing(scan_hardware_source.create_record_task(scan_frame_parameters)) as scan_task:
                         data_elements = camera_hardware_source._hardware_source.acquire_sequence(scan_width * scan_height)
-                        data_element = data_elements[0]
-                        # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
-                        # quickly. see note below.
-                        scan_data_list = scan_task.grab()
-                        data_shape = data_element["data"].shape
-                        if flyback_pixels > 0:
-                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
+                        if data_elements and len(data_elements) >= 1:
+                            # not aborted
+                            data_element = data_elements[0]
+                            # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
+                            # quickly. see note below.
+                            scan_data_list = scan_task.grab()
+                            data_shape = data_element["data"].shape
+                            if flyback_pixels > 0:
+                                data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
+                            else:
+                                data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])
+                            if len(scan_data_list) > 0:
+                                collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
+                                scan_properties = scan_data_list[0].metadata
+                            else:
+                                collection_calibrations = [{}, {}]
+                                scan_properties = {}
+                            if "spatial_calibrations" in data_element:
+                                datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
+                            else:
+                                datum_calibrations = [{} for i in range(len(data_element["data"].shape) - 2)]
+                            # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
+                            data_element["collection_dimension_count"] = 2
+                            data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
+                            data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
+                            data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                            document_window.queue_task(functools.partial(create_and_display_data_item, library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source))  # must occur on UI thread
                         else:
-                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])
-                        if len(scan_data_list) > 0:
-                            collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
-                            scan_properties = scan_data_list[0].metadata
-                        else:
-                            collection_calibrations = [{}, {}]
-                            scan_properties = {}
-                        if "spatial_calibrations" in data_element:
-                            datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
-                        else:
-                            datum_calibrations = [{} for i in range(len(data_element["data"].shape) - 2)]
-                        # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
-                        data_element["collection_dimension_count"] = 2
-                        data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
-                        data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
-                        data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                        def create_and_display_data_item():
-                            data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
-                            data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
-                            # the data item should not have any other 'clients' at this point; so setting the
-                            # data and metadata will immediately unload the data (and write to disk). this is important,
-                            # because the data (up to this point) can be shared data from the DLL.
-                            data_item.set_data_and_metadata(data_and_metadata)
-                            # assert not data_item._data_item.is_data_loaded
-                            # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
-                            document_window.display_data_item(data_item)
-                            for scan_data_and_metadata in scan_data_list:
-                                scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
-                                scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
-                                channel_id = camera_hardware_source_id + "_" + scan_channel_id
-                                data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
-                                data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
-                                data_item.set_data_and_metadata(scan_data_and_metadata)
-                                document_window.display_data_item(data_item)
-                        document_window.queue_task(create_and_display_data_item)  # must occur on UI thread
+                            # aborted
+                            scan_task.cancel()
                 finally:
-                    self.acquisition_state_changed_event.fire({"message": "end"})
-                    logging.debug("end")
+                    self.__state = SequenceState.idle
+                    self.acquisition_state_changed_event.fire(self.__state)
+                    logging.debug("end sequence acquisition")
             except Exception as e:
                 import traceback
                 traceback.print_exc()
 
-        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_window, scan_device, eels_camera))
+        document_window = self.__document_controller
+
+        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_window, self.__scan_hardware_source, self.__camera_hardware_source))
         self.__thread.start()
 
-    def start_line_scan(self, document_controller, start, end, sample_count):
-
-        def acquire_line_scan(api, document_controller):
-            try:
-                logging.debug("start line scan")
-                self.acquisition_state_changed_event.fire({"message": "start"})
-                try:
-                    eels_camera = api.get_hardware_source_by_id("eels_camera", version="1.0")
-                    eels_camera_parameters = eels_camera.get_frame_parameters_for_profile_by_index(0)
-
-                    library = document_controller.library
-                    data_item = library.create_data_item(_("Spectrum Scan"))
-
-                    scan_controller = api.get_hardware_source_by_id("scan_controller", version="1.0")  # type: HardwareSource.HardwareSource
-                    old_probe_position = scan_controller.get_property_as_float_point("probe_position")
-
-                    # force the data to be held in memory and write delayed by grabbing a data_ref.
-                    with library.data_ref_for_data_item(data_item) as data_ref:
-                        data = None
-                        with contextlib.closing(eels_camera.create_view_task(frame_parameters=eels_camera_parameters)) as eels_view_task:
-                            eels_view_task.grab_next_to_finish()
-                            try:
-                                for i in range(sample_count):
-                                    if self.__aborted:
-                                        break
-                                    param = float(i) / sample_count
-                                    y = start[0] + param * (end[0] - start[0])
-                                    x = start[1] + param * (end[1] - start[1])
-                                    logging.debug("position %s", (y, x))
-                                    scan_controller.set_property_as_float_point("probe_position", (y, x))
-                                    data_and_metadata = eels_view_task.grab_next_to_start()[0]
-                                    if data is None:
-                                        data = numpy.zeros((sample_count,) + data_and_metadata.data_shape, numpy.float)
-                                        data_ref.data = data
-                                    logging.debug("copying data %s %s %s", data_ref.data.shape, i, data_and_metadata.data.shape)
-                                    data_ref[i] = data_and_metadata.data
-                            finally:
-                                scan_controller.set_property_as_float_point("probe_position", old_probe_position)
-                finally:
-                    self.acquisition_state_changed_event.fire({"message": "end"})
-                    logging.debug("end line scan")
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-
-        self.__thread = threading.Thread(target=acquire_line_scan, args=(self.__api, document_controller))
-        self.__thread.start()
-
-    def abort(self):
-        self.__aborted = True
+    def cancel(self) -> None:
+        if self.__state == SequenceState.scanning:
+            self.__camera_hardware_source._hardware_source.acquire_sequence_cancel()
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
@@ -285,7 +188,8 @@ class PanelDelegate:
         self.panel_name = _("Spectrum Imaging / 4d Scan Acquisition")
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
-        self.__scan_acquisition_controller = None  # type: typing.Optional[ScanAcquisitionController]
+        self.__scan_acquisition_controller = None
+        self.__acquisition_state_changed_event_listener = None
         self.__line_scan_acquisition_controller = None
         self.__eels_frame_parameters_changed_event_listener = None
         self.__scan_frame_parameters_changed_event_listener = None
@@ -309,109 +213,10 @@ class PanelDelegate:
 
         column = ui.create_column_widget()
 
-        old_start_button_widget = ui.create_push_button_widget(_("Start Spectrum Image"))
-        old_status_label = ui.create_label_widget()
-        def old_button_clicked():
-            if self.__scan_acquisition_controller:
-                self.__scan_acquisition_controller.abort()
-            else:
-                def update_button(state):
-                    def update_ui():
-                        if state["message"] == "start":
-                            old_start_button_widget.text = _("Abort Spectrum Image")
-                        elif state["message"] == "end":
-                            old_start_button_widget.text = _("Start Spectrum Image")
-                            old_status_label.text = _("Using parameters from Record mode.")
-                        elif state["message"] == "update":
-                            old_status_label.text = "{}: {}".format(_("Position"), state["position"])
-                    document_controller.queue_task(update_ui)
-                    if state["message"] == "end":
-                        self.__acquisition_state_changed_event.close()
-                        self.__acquisition_state_changed_event = None
-                        self.__scan_acquisition_controller = None
-                self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
-                self.__acquisition_state_changed_event = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(update_button)
-                self.__scan_acquisition_controller.start_spectrum_image(document_controller)
-        old_start_button_widget.on_clicked = old_button_clicked
-
-        old_button_row = ui.create_row_widget()
-        old_button_row.add(old_start_button_widget)
-        old_button_row.add_stretch()
-
-        old_status_row = ui.create_row_widget()
-        old_status_row.add(old_status_label)
-        old_status_row.add_stretch()
-
-        old_status_label.text = _("Using parameters from Record mode.")
-
-        line_samples = [16]
-
-        line_button_widget = ui.create_push_button_widget(_("Start Line Scan"))
-        line_samples_label = ui.create_label_widget(_("Samples"))
-        line_samples_edit_widget = ui.create_line_edit_widget(str(line_samples[0]))
-        line_samples_edit_widget.request_refocus()
-
-        def change_line_samples(text):
-            line_samples[0] = max(min(int(text), 1024), 1)
-            line_samples_edit_widget.text = str(line_samples[0])
-            line_samples_edit_widget.request_refocus()
-        line_samples_edit_widget.on_editing_finished = change_line_samples
-
-        def scan_button_clicked():
-            if self.__line_scan_acquisition_controller:
-                self.__line_scan_acquisition_controller.abort()
-            else:
-                def update_button(state):
-                    def update_ui():
-                        if state["message"] == "start":
-                            line_button_widget.text = _("Abort Line Scan")
-                        elif state["message"] == "end":
-                            line_button_widget.text = _("Start Line Scan")
-                    document_controller.queue_task(update_ui)
-                    if state["message"] == "end":
-                        self.__line_acquisition_state_changed_event.close()
-                        self.__line_acquisition_state_changed_event = None
-                        self.__line_scan_acquisition_controller = None
-                display = document_controller.target_display
-                graphics = display.selected_graphics if display else list()
-                if len(graphics) == 1:
-                    region = graphics[0].region
-                    if region and region.type == "line-region":
-                        start = region.get_property("start")
-                        end = region.get_property("end")
-                        # data_shape = data_item.data_and_metadata.data_shape
-                        self.__line_scan_acquisition_controller = ScanAcquisitionController(self.__api)
-                        self.__line_acquisition_state_changed_event = self.__line_scan_acquisition_controller.acquisition_state_changed_event.listen(update_button)
-                        self.__line_scan_acquisition_controller.start_line_scan(document_controller, start, end, line_samples[0])
-        line_button_widget.on_clicked = scan_button_clicked
-
-        line_button_row = ui.create_row_widget()
-        line_button_row.add(line_button_widget)
-        line_button_row.add_stretch()
-
-        line_samples_row = ui.create_row_widget()
-        line_samples_row.add(line_samples_label)
-        line_samples_row.add(line_samples_edit_widget)
-        line_samples_row.add_stretch()
-
         self.__style_combo_box = ui.create_combo_box_widget([_("2d x 1d (SI)"), _("2d x 2d (4d)")])
         self.__style_combo_box.current_index = 0
 
-        def acquire_sequence():
-            if self.__scan_hardware_source_choice.hardware_source:
-                scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
-            else:
-                scan_hardware_source = None
-            if self.__camera_hardware_source_choice.hardware_source:
-                camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
-            else:
-                camera_hardware_source = None
-            if scan_hardware_source and camera_hardware_source:
-                self.__scan_acquisition_controller = ScanAcquisitionController(self.__api)
-                self.__scan_acquisition_controller.start_sequence(document_controller, scan_hardware_source, camera_hardware_source, self.__style_combo_box.current_index == 0)
-
         acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
-        acquire_sequence_button_widget.on_clicked = acquire_sequence
 
         self.__scan_width_widget = ui.create_line_edit_widget()
         self.__scan_height_widget = ui.create_line_edit_widget()
@@ -468,12 +273,6 @@ class PanelDelegate:
         acquire_sequence_button_row.add(acquire_sequence_button_widget)
         acquire_sequence_button_row.add_stretch()
 
-        # column.add_spacing(8)
-        # column.add(old_button_row)
-        # column.add(old_status_row)
-        # column.add_spacing(8)
-        # column.add(line_button_row)
-        # column.add(line_samples_row)
         if self.__scan_hardware_source_choice.hardware_source_count > 1:
             column.add_spacing(8)
             column.add(scan_row)
@@ -510,6 +309,41 @@ class PanelDelegate:
             self.__update_estimate()
 
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
+
+        def acquisition_state_changed(acquisition_state: SequenceState) -> None:
+
+            async def update_button_text(text: str) -> None:
+                acquire_sequence_button_widget.text = text
+
+            if acquisition_state == SequenceState.idle:
+                self.__scan_acquisition_controller = None
+                self.__acquisition_state_changed_event_listener.close()
+                self.__acquisition_state_changed_event_listener = None
+                document_controller._document_window.event_loop.create_task(update_button_text(_("Acquire")))
+            else:
+                document_controller._document_window.event_loop.create_task(update_button_text(_("Cancel")))
+
+        def acquire_sequence() -> None:
+            if self.__scan_acquisition_controller:
+                if self.__scan_acquisition_controller:
+                    self.__scan_acquisition_controller.cancel()
+            else:
+                if self.__scan_hardware_source_choice.hardware_source:
+                    scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+                else:
+                    scan_hardware_source = None
+
+                if self.__camera_hardware_source_choice.hardware_source:
+                    camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+                else:
+                    camera_hardware_source = None
+
+                if scan_hardware_source and camera_hardware_source:
+                    self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source)
+                    self.__acquisition_state_changed_event_listener = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(acquisition_state_changed)
+                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_index == 0)
+
+        acquire_sequence_button_widget.on_clicked = acquire_sequence
 
         return column
 

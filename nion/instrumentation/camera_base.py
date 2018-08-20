@@ -210,8 +210,19 @@ class CameraDevice(abc.ABC):
 
         The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
         released (Python reference count goes to zero).
+
+        Return None for cancellation.
+
+        Raise exception for error.
         """
         return None
+
+    def acquire_sequence_cancel(self) -> None:
+        """Request to cancel a sequence acquisition.
+
+        Pending acquire_sequence calls should return None to indicate cancellation.
+        """
+        pass
 
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
@@ -633,9 +644,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def __acquire_sequence(self, n: int, frame_parameters) -> dict:
         if callable(getattr(self.__camera, "acquire_sequence", None)):
-            data_element = self.__camera.acquire_sequence(n)
-            if data_element is not None:
-                return data_element
+            return self.__camera.acquire_sequence(n)
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
         acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
@@ -672,19 +681,25 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         frame_parameters = self.get_current_frame_parameters()
         binning = frame_parameters.binning
         data_element = self.__acquire_sequence(n, frame_parameters)
-        data_element["version"] = 1
-        data_element["state"] = "complete"
-        stem_controller = self.__get_stem_controller()
-        if "spatial_calibrations" not in data_element:
-            update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category, data_element["data"].shape[1:], binning, binning)
-            if "spatial_calibrations" in data_element:
-                data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
-        update_intensity_calibration(data_element, stem_controller, self.__camera)
-        update_autostem_properties(data_element, stem_controller, self.__camera)
-        data_element["properties"]["hardware_source_name"] = self.display_name
-        data_element["properties"]["hardware_source_id"] = self.hardware_source_id
-        data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
-        return [data_element]
+        if data_element:
+            data_element["version"] = 1
+            data_element["state"] = "complete"
+            stem_controller = self.__get_stem_controller()
+            if "spatial_calibrations" not in data_element:
+                update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category, data_element["data"].shape[1:], binning, binning)
+                if "spatial_calibrations" in data_element:
+                    data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
+            update_intensity_calibration(data_element, stem_controller, self.__camera)
+            update_autostem_properties(data_element, stem_controller, self.__camera)
+            data_element["properties"]["hardware_source_name"] = self.display_name
+            data_element["properties"]["hardware_source_id"] = self.hardware_source_id
+            data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
+            return [data_element]
+        return []
+
+    def acquire_sequence_cancel(self) -> None:
+        if callable(getattr(self.__camera, "acquire_sequence_cancel", None)):
+            self.__camera.acquire_sequence_cancel()
 
     def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
         if hasattr(self.__camera, "get_acquire_sequence_metrics"):
