@@ -736,12 +736,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller.change_stage_position(dy=dy, dx=dx)
 
     def increase_pmt(self, channel_index):
-        if channel_index in (0, 1):  # df, bf
-            self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
+        self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
 
     def decrease_pmt(self, channel_index):
-        if channel_index in (0, 1):  # df, bf
-            self.__stem_controller.change_pmt_gain(channel_index, factor=0.5)
+        self.__stem_controller.change_pmt_gain(channel_index, factor=0.5)
 
     def get_api(self, version):
         actual_version = "1.0.0"
