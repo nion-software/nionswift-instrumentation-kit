@@ -37,6 +37,7 @@ class ScanAcquisitionController:
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
         self.__state = SequenceState.idle
+        self.__aborted = False  # set this flag when abort requested in case low level doesn't follow rules
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, sum_frames: bool) -> None:
@@ -90,12 +91,17 @@ class ScanAcquisitionController:
 
                     library = document_window.library
 
+                    # abort the scan to not interfere with setup; and clear the aborted flag
+                    scan_hardware_source.abort_playing()
+                    self.__aborted = False
+
                     camera_hardware_source._hardware_source.set_current_frame_parameters(camera_hardware_source._hardware_source.get_frame_parameters_from_dict(camera_frame_parameters))
                     camera_hardware_source._hardware_source.acquire_sequence_prepare(scan_width * scan_height)
 
                     with contextlib.closing(scan_hardware_source.create_record_task(scan_frame_parameters)) as scan_task:
                         data_elements = camera_hardware_source._hardware_source.acquire_sequence(scan_width * scan_height)
-                        if data_elements and len(data_elements) >= 1:
+                        # acquire_sequence should return None or no elements if aborted or error; but use flag anyway just in case
+                        if data_elements and len(data_elements) >= 1 and not self.__aborted:
                             # not aborted
                             data_element = data_elements[0]
                             # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
@@ -139,8 +145,14 @@ class ScanAcquisitionController:
         self.__thread.start()
 
     def cancel(self) -> None:
+        logging.debug("abort sequence acquisition")
         if self.__state == SequenceState.scanning:
+            # if the state is scanning, the thread could be stuck on acquire sequence or
+            # stuck on scan.grab. cancel both here.
             self.__camera_hardware_source._hardware_source.acquire_sequence_cancel()
+            self.__scan_hardware_source._hardware_source.abort_recording()
+        # and set the flag for misbehaving acquire_sequence return values.
+        self.__aborted = True
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
