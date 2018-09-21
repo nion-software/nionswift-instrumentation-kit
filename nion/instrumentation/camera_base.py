@@ -289,14 +289,23 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         cumulative_frame_count = 0  # used for integration_count
         cumulative_data = None
         data_element = None  # avoid use-before-set warning
+        had_grace_frame = False  # whether grace frame has been used up (allows for extra frame during accumulation startup)
         while cumulative_frame_count < integration_count:
             data_element = self.__camera.acquire_image()
             frames_acquired = data_element["properties"].get("integration_count", 1)
             if cumulative_data is None:
                 cumulative_data = data_element["data"]
+                cumulative_frame_count += frames_acquired
             else:
-                cumulative_data += data_element["data"]
-            cumulative_frame_count += frames_acquired
+                # if the cumulative shape does not match in size, assume it is an acquisition steady state problem
+                # and start again with the newer frame. only allow this to occur once.
+                if cumulative_data.shape != data_element["data"].shape:
+                    assert not had_grace_frame
+                    cumulative_data = data_element["data"]
+                    had_grace_frame = True
+                else:
+                    cumulative_data += data_element["data"]
+                    cumulative_frame_count += frames_acquired
             assert cumulative_frame_count <= integration_count
         if self.__stop_after_acquire:
             self.__camera.stop_live()
