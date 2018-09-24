@@ -107,7 +107,7 @@ How do I access the STEM Controller and scan device?
 You can access the STEM controller and scan device using the following code::
 
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
 
 How do I configure the scan and start view mode?
@@ -115,7 +115,7 @@ How do I configure the scan and start view mode?
 You can configure an individual scan and start viewing using the following code::
 
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
@@ -129,7 +129,7 @@ How do I configure the scan and acquire one channel?
 You can configure an individual scan, start viewing, and grab data from the acquisition using the following code::
 
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
@@ -148,7 +148,7 @@ You can configure an individual scan with multiple channels, start viewing, and 
 following code::
 
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
@@ -168,7 +168,7 @@ You can monitor progress during an individual scan. ::
 
     import time
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     frame_time = scan.calculate_frame_time(frame_parameters)
@@ -188,7 +188,7 @@ stopped. ::
 
     import time
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     frame_time = scan.calculate_frame_time(frame_parameters)
@@ -204,7 +204,7 @@ A subscan can be specified within the context of an individual scan by specifyin
 
     import time
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     frame_parameters["subscan_pixel_size"] = (100, 100)
@@ -233,7 +233,7 @@ A combined scan produces data from the scan and data from the camera.
 
 ..
     from nion.utils import Registry
-    stem_controller = Registry.get_compoonent("stem_controller")
+    stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
     scan_frame_parameters = scan.get_current_frame_parameters()
     # adjust scan_frame_parameters here if desired
@@ -243,6 +243,7 @@ A combined scan produces data from the scan and data from the camera.
     frame = frames[0]
     camera_data = camera_data[0]
 
+.. the API needs to handle processing -- EELS (SI) vs Ronchigram (DI)
 .. the API needs to handle multiple cameras (eventually)
 .. the API needs to handle error conditions or abort
 .. the API will generally connect acquisition to channels, which the user can view and cancel
