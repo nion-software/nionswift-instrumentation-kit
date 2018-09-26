@@ -503,7 +503,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if Utility.compare_versions(version, actual_version) > 0:
             raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
 
-        class CameraFacade(object):
+        class CameraFacade:
 
             def __init__(self):
                 pass
@@ -511,7 +511,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return CameraFacade()
 
 
-class CameraFrameParameters(object):
+class CameraFrameParameters:
 
     def __init__(self, d=None):
         d = d or dict()

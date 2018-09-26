@@ -2,203 +2,244 @@
 
 Cameras
 =======
+There can be several cameras on a STEM microscope, but the Ronchigram and optional EELS camera are the primary ones.
 
-About Data Acquisition
-----------------------
-Acquisition can be started in **View** or **Record** mode. **View** mode is an ongoing acquisition whereas **Record**
-mode is a single acquisition.
+.. contents::
 
-Acquisition is started with frame parameters that specify the readout configuration to be used. You can configure
-specific frame parameters or use one of the user defined profiles available in the user interface.
+General Info
+++++++++++++
 
-In **View** mode, you can specify the initial frame parameters, but other scripts may be able to change the frame
-parameters during acquisition. The acquisition API doesn't attempt to prevent this.
+How does camera acquisition work?
+---------------------------------
+The cameras for the STEM microscope typically operate in a continuous acquisition mode (also known as view mode). To
+get high quality data normally means that the camera will need to already be running in the desired mode by the time
+you expose and read data in order to minimize startup or mode change artifacts.
 
-In **Record** mode, since you are acquiring a single frame, your frame parameters are guaranteed to be used.  **Record**
-mode can be used while **View** mode is already in progress. When the **Record** is finished, the **View** will
-continue.
+Although the details for a given camera may vary, a camera will typically have a these phases to acquire data: exposure,
+readout, corrections, and processing.
 
-Acquisition code in extensions should be run on threads to prevent locking the user interface. Acquisition code in
-scripts will always run on threads due to the nature of scripts.
+Cameras start with an exposure phase. After the exposure phase, and typically overlapping with the next exposure phase,
+the data is read from the camera into a frame buffer. Once in the frame buffer, corrections such as blemish removal,
+dark subtraction, and gain normalization are performed. Next, processing such as binning to height one or averaging
+with the previous frame is applied. Finally, the finished data can be displayed, stored, or further processed.
 
-Accessing a Hardware Source Object
-----------------------------------
-To do acquisition, you will need to get a versioned ``hardware_source`` from the :samp:`api` object using a
-:samp:`hardware_source_id` (see :ref:`hardware-source-identifiers`). ::
+It is important to understand these phases in order to understand how internal changes to camera settings or external
+changes are reflected in the acquired data. Specifically, if you make an external change, such as changing defocus on
+the microscope, you will need to ensure that you grab a frame whose _exposure_ has started after the external change has
+been applied to guarantee that the grabbed data reflects the external change. This process varies between cameras so it
+is recommended to follow the advice on this page to accomplish this.
 
-    camera = api.get_hardware_source_by_id("ronchigram", version="1.0")
+What parameters can be controlled on the camera?
+------------------------------------------------
+A camera is configured with frame parameters, which is just a Python `dict` structure.
 
-Frame Parameters Overview
--------------------------
-You will first configure the :samp:`frame_parameters` for the hardware source. There are several ways to do this.
+The following parameters are supported:
 
-Frame parameters are specific to the hardware source. The easiest way to get valid frame parameters is to ask the
-:samp:`camera` for the default frame parameters. ::
+============================    ===========
+Name                            Description
+============================    ===========
+exposure_ms                     the exposure time, in milliseconds
+binning                         the binning factor, may apply only to one dimension
+============================    ===========
 
-    frame_parameters = camera.get_default_frame_parameters()
+The camera tracks its current frame parameters during acquisition.
 
-Next you can modify the :samp:`frame_parameters` (this is hardware source specific). ::
+Frame parameters applied while the camera is playing are marked as pending and take effect on the next frame.
 
+How does camera acquisition interact with Nion Swift and plug-ins?
+------------------------------------------------------------------
+Acquisition threads send their data into Nion Swift via a data channel. Unless otherwise configured, a data channel will
+feed into a reusable data item which can be displayed in the user interface.
+
+There is currently no mechanism whereby a plug-in or script using a camera can exclude actions from other plug-ins or
+scripts. Access is managed by convention and the user not running conflicting applications simultaneously.
+
+How does camera acquisition interact with Python threads?
+---------------------------------------------------------
+In Nion Swift, the user interface is run on the main UI thread. It is important that function calls made from the main
+UI thread return within a short period of time (< 50ms). This ensures that the UI is responsive.
+
+During acquisition, function calls to the camera can easily take more than 50ms. For this reason, most of the examples
+on this page should be run from a thread other than the main UI thread.
+
+In addition, some function calls may _require_ the UI thread to be running separately in order to complete. These
+functions must be called from a thread and are noted separately.
+
+Python code run in the Console is run on the main UI thread. It is useful for experimentation and most examples on this
+page will run in the Console, although if something goes wrong, there is no way to recover other than restarting Nion
+Swift.
+
+Python code run using Run Script is run on a separate thread and the examples on this page can all be run using that
+mechanism unless otherwise noted.
+
+Python code run in plug-ins will need to create its own threads and run these examples from those threads.
+
+It is also possible to define a function in the Console and then launch that function using threading. Here is a short
+example::
+
+    import threading
+
+    def fn():
+        print("Put code to run on thread here.")
+
+    threading.Thread(target=fn).start()
+
+Using the API
++++++++++++++
+
+How do I access the STEM Controller and cameras?
+------------------------------------------------
+You can access the STEM controller and cameras using the following code::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    ronchigram = stem_controller.ronchigram_camera
+
+    eels = stem_controller.eels_camera
+
+How do I configure the camera and start view mode?
+--------------------------------------------------
+You can configure a camera and start viewing using the following code::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    ronchigram = stem_controller.ronchigram_camera
+
+    frame_parameters = ronchigram.get_current_frame_parameters()
     frame_parameters["binning"] = 4
     frame_parameters["exposure_ms"] = 200
 
-You can also get the frame parameters for one of the acquisition profiles configured by the user. ::
+    ronchigram.start_playing(frame_parameters)
 
-    frame_parameters = camera.get_frame_parameters_for_profile_by_index(1)
+How do I determine if the camera is running?
+--------------------------------------------
+You can make a rough determination if a camera acquisition is running using the following::
 
-You can get and set the currently selected acquisition profile in the user interface using the ``profile_index``
-property. Setting the selected acquisition profile is discouraged since it can be confusing to the user if their
-selected profile suddenly changes. ::
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-    old_profile_index = camera.profile_index
-    camera.profile_index = new_profile_index
+    ronchigram = stem_controller.ronchigram_camera
 
-You can also update the frame parameters associated with a profile. Again, use this ability with caution since it can be
-confusing to the user  to lose their settings. ::
+    is_playing = ronchigram.is_playing
 
-    camera.set_frame_parameters_for_profile_by_index(1, frame_parameters)
+You shouldn't use this technique to synchronize acquisition as it does not handle threads and race conditions in a
+predictable manner. For instance, it may not be accurate if called immediately following a call that initiates
+acquisition; likewise it may not be accurate if called immediately before acquisition ends.
 
-Querying Acquisition State
---------------------------
-Hardware sources can be in one of several state: idle, viewing/playing, or recording. ::
+How do I stop or cancel view mode?
+----------------------------------
+There are two ways to cancel a camera acquisition: stop and abort. Stop waits until the end of the current frame, while
+abort stops as soon as possible. Aborting a camera acquisition may result in partially acquired data. You can abort a
+camera acquisition that has already been stopped. ::
 
-    is_playing = camera.is_playing
-    is_recording = camera.is_recording
+    import time
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-.. note:: Recording can occur *during* viewing, in which case the camera can be viewing/playing and recording simultaneously.
+    ronchigram = stem_controller.ronchigram_camera
 
-Acquisition Frame Parameters
-----------------------------
-Hardware sources have frame parameters associated with both view/play and record modes. You can query and set those
-frame parameters using several methods. Setting the frame parameters will apply the frame parameters to soonest possible
-frame.
+    frame_parameters = ronchigram.get_current_frame_parameters()
+    frame_parameters["exposure_ms"] = 200
+    # adjust frame_parameters here if desired
 
-To query and set the frame parameters for view/play mode::
+    ronchigram.start_playing(frame_parameters)
 
-    frame_parameters = camera.get_frame_parameters()
-    camera.set_frame_parameters(frame_parameters)
+    time.sleep(0.15)
 
-To query and set the frame parameters for record mode::
+    ronchigram.stop_playing()
+    ronchigram.abort_playing()
 
-    frame_parameters = camera.get_record_frame_parameters()
-    camera.set_record_frame_parameters(frame_parameters)
+How do I configure the camera and acquire data?
+-----------------------------------------------
+You can configure a camera, start viewing, and grab data from the acquisition using the following code::
 
-Controlling Acquisition State
------------------------------
-You can control the acquisition view/play state using these methods::
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-    camera.start_playing(frame_parameters, channels_enabled)
-    camera.stop_playing()
-    camera.abort_playing()
+    ronchigram = stem_controller.ronchigram_camera
 
-Passing ``frame_parameters`` and ``channels_enabled`` are optional. Passing ``None`` will use the existing frame
-parameters and enabled channels. Not all hardware sources support channels.
+    frame_parameters = ronchigram.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
 
-Stopping will finish the current frame. Aborting will immediately stop acquisition, potentially mid-frame.
+    ronchigram.start_playing(frame_parameters)
 
-You can control acquisition record state using these methods::
+    # grab two consecutive frames, with a guaranteed start time after the first call
+    frame1 = ronchigram.grab_next_to_start()[0]
+    frame2 = ronchigram.grab_next_to_finish()[0]
 
-    camera.start_recording(frame_parameters, channels_enabled)
-    camera.abort_recording()
+The ``grab_next_to_start`` call waits until the next frame starts and then grabs it. The ``grab_next_to_finish`` call
+waits until the current frame ends and then grabs it. Both calls return a list of ``xdata`` objects with an entry for
+each enabled channel. In this case the first element is selected since only a single channel is enabled.
 
-Again, ``frame_parameters`` and ``channels_enabled`` are optional.
+The ``grab_next_to_start`` will grab the next frame that begins the readout phase after the function call. However, it
+will not ensure that the _exposure_ started after the function call. To ensure your code grabs a frame that is exposued
+_after_ the call, you should first make a call to ``grab_next_to_start`` followed by a call ``grab_next_to_finish``.
 
-Recording occurs on a frame by frame basis, so there is no need to stop recording as it will always finish at the end of
-a frame. Calling ``abort_recording`` will immediately stop recording, if desired.
+How do I acquire a sequence of frames from a camera?
+----------------------------------------------------
+You can grab a sequence of frames from a camera acquisition as long as they each have the same pixel size. If buffering
+is available, you can also grab recently acquired data by using negative frame indexes. ::
 
-Recording in this way will generate a new data item.
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-.. note:: Recording can occur *during* view/play. How the view is stopped (stop or abort) to begin recording is
-    specific to the camera implementation. After recording, the view will resume with current frame parameters.
+    eels = stem_controller.eels_camera
 
-Acquiring Data
---------------
-You can acquire data during a view. Acquired data is returned as a list of ``DataAndMetadata`` objects.
+    frame_parameters = eels.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
 
-There are a few techniques to grab data:
+    eels.start_playing(frame_parameters)
 
-    - ``grab_next_to_finish`` is used to grab data from view/play mode when frame parameters and other state related
-      to the hardware source is already known.
+    # grab consecutive frames, with a guaranteed start time after the first call
+    frame_index_start = 0  # must be zero, no buffering is currently available
+    frame_index_count = 10
+    frames_list = eels.grab_sequence(frame_index_start, frame_index_count)
+    if frames_list:
+        for frames in frames_list:
+            # each frames will have data for each channel
+            # eels may have two channels: 2d and 1d data; grab the last one (1d)
+            frame = frames[-1]
 
-    - ``grab_next_to_start`` is used to grab data from view/play mode when you need to ensure that the next frame
-      represents data with new frame parameters or other state related to the hardware source.
+How do I find data items associated with viewing and sequence acquisition?
+--------------------------------------------------------------------------
+The camera pushes its data through data channels which are connected to data items in Nion Swift. To find the associated
+data item, you must find the associated data channel name and then ask Nion Swift for the associated data item. ::
 
-    - ``record`` is used to grab data in record mode.
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-You can pass frame parameters and enabled channels to ``grab_next_to_start`` and ``record`` methods. There is no need
-to pass them to ``grab_next_to_finish`` since that method will be grabbing data from acquisition that is already in
-progress.
+    ronchigram = stem_controller.ronchigram_camera
 
-Only a single record can occur at once but there is no defined coordination technique to avoid multiple records from
-occuring simultaneously. If two records are requested simultaneously, the latest one will override.
+    frame_parameters = ronchigram.get_current_frame_parameters()
 
-All three methods will start either view/play mode or record mode if not already started.
+    data_channel_id = ronchigram.get_data_channel_id(frame_parameters)
 
-Some example code to demonstate calling these methods. ::
+    data_item = api.library.get_data_item_for_data_channel_id(data_channel_id)
 
-    data_and_metadata_list = camera.grab_next_to_finish(timeout)
-    data_and_metadata = data_and_metadata_list[0]
+How do I determine camera frame parameters from acquired data's metadata?
+-------------------------------------------------------------------------
+The camera frame parameters are saved in the metadata of acquired xdata or data items. You can create new frame
+parameters from metadata using the following technique::
 
-    data_and_metadata_list = camera.grab_next_to_start(frame_parameters, channels_enabled, timeout)
-    data_and_metadata = data_and_metadata_list[0]
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-    data_and_metadata_list = hardware_source_api.record(frame_parameters, channels_enabled, timeout)
-    data_and_metadata = data_and_metadata_list[0]
+    ronchigram = stem_controller.ronchigram_camera
 
-The ``frame_parameters``, ``channels_enabled``, and ``timeout`` parameters are all optional.
+    frame_parameters = ronchigram.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
 
-For more information about these methods, see :py:class:`nion.swift.Facade.HardwareSource`.
+    ronchigram.start_playing(frame_parameters)
 
-Record Tasks
-------------
-For a *Record* data acquisition, you can also use an acquisition task. ::
+    # grab a frame as an example
+    frame = ronchigram.grab_next_to_finish()[0]
 
-    with contextlib.closing(hardware_source_api.create_record_task(frame_parameters)) as record_task:
-        do_concurrent_task()
-        data_and_metadata_list = record_task.grab()
+    new_frame_parameters = ronchigram.create_frame_parameters(frame.metadata["hardware_source"])
 
-The acquisition is started as soon as the **Record** task is created. The :samp:`grab` method will wait until the
-recording is done and then return.
+How do I configure a rectangular scan synchronized with a camera?
+-----------------------------------------------------------------
+See :ref:`combined-acquisition`
 
-Record tasks are useful to do concurrent work while the recording is taking place.
-
-For more information about these methods, see :py:class:`nion.swift.Facade.HardwareSource`.
-
-.. _hardware-source-identifiers:
-
-Hardware Configuration
-----------------------
-With a ``hardware_source`` object, you can set and get properties on the instrument. ::
-
-    if camera.get_property_as_bool("use_gain"):
-        do_gain_image_processing()
-
-Properties are typed and the following types are supported:
-
-    - float
-    - int
-    - str
-    - bool
-    - float_point
-
-You can also set properties on a hardware source. ::
-
-    superscan.set_property_as_float_point("probe_position", (0.5, 0.5))
-
-For more information about these methods, see :py:class:`nion.swift.Facade.Instrument`.
-
-Hardware Source Identifiers
----------------------------
-Instruments and hardware sources are identified by id's. Id's are divided into direct id's and aliases. Aliases are
-configurable in .ini files. For instance, the direct hardware might have a ``hardware_source_id`` of ``nionccd1010`` but
-there might be an alias ``ronchigram`` which points to the ``nionccd1010``. It is recommended to make an alias for each
-application that you write, making it easy for users to configure what camera to use for your application.
-
-..
-    Camera Hardware Source
-    ----------------------
-    N/A
-
-    Scan Hardware Source
-    --------------------
-    N/A
+.. TODO: monitoring changes to current values

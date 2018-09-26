@@ -10,7 +10,6 @@ Getting Started
    * Next, read about performing :ref:`scan_control`.
    * Read about using the :ref:`using-cameras`.
    * Read about using :ref:`using-video`.
-   * Finally, read about doing :ref:`advanced-acquisition`.
 
 Table of Contents
 -----------------
@@ -19,6 +18,5 @@ Table of Contents
     scanning
     cameras
     video
-    synchronized_acquisition
     :maxdepth: 1
     :caption: Contents:

@@ -40,7 +40,7 @@ Subscans can also be specified within a full scan context. Subscans take the rot
 
 What parameters can be controlled on the scan?
 ----------------------------------------------
-An individual scan is configured with frame parameters, which is just a Python dict structure.
+An individual scan is configured with frame parameters, which is just a Python ``dict`` structure.
 
 The following parameters are supported:
 
@@ -58,7 +58,7 @@ ac_line_sync                    no          whether to sync each line to power l
 ac_frame_sync                   no          whether to sync each frame to power line frequency
 ============================    =========   ===========
 
-The scan device tracks its current frame parameters during acquisition.
+The scan controller tracks its current frame parameters during acquisition.
 
 Some parameters (fov_size_nm, rotation_rad, pixel_time_us, and flyback_time_us) take effect immediately, while others
 are marked as pending and take effect on the next frame.
@@ -69,11 +69,11 @@ the complex scan is restarted.
 
 How does scanning interact with Nion Swift and plug-ins?
 --------------------------------------------------------
-Most scans, whether continuous or not, send their resulting data into Nion Swift via a data channel. Unless otherwise
-configured, a data channel will feed into a reusable data item which can be displayed in the user interface.
+Acquisition threads send their data into Nion Swift via a data channel. Unless otherwise configured, a data channel will
+feed into a reusable data item which can be displayed in the user interface.
 
-There is currently no mechanism whereby a plug-in or script using the scan device can exclude actions from another
-plug-in or script. Access is managed by convention and the user not running conflicting applications simultaneously.
+There is currently no mechanism whereby a plug-in or script using the scan device can exclude actions from other
+plug-ins or scripts. Access is managed by convention and the user not running conflicting applications simultaneously.
 
 How does scanning interact with Python threads?
 -----------------------------------------------
@@ -83,15 +83,15 @@ UI thread return within a short period of time (< 50ms). This ensures that the U
 During acquisition, function calls to the scan device can easily take more than 50ms. For this reason, most of the
 examples on this page should be run from a thread other than the main UI thread.
 
-In addition, some function calls may require the UI thread to be running separately in order to complete. These
+In addition, some function calls may _require_ the UI thread to be running separately in order to complete. These
 functions must be called from a thread and are noted separately.
 
-Python code run in the Console are run on the main UI thread. It is useful for experimentation and most examples on this
+Python code run in the Console is run on the main UI thread. It is useful for experimentation and most examples on this
 page will run in the Console, although if something goes wrong, there is no way to recover other than restarting Nion
 Swift.
 
 Python code run using Run Script is run on a separate thread and the examples on this page can all be run using that
-mechanism unless otherwise noteed.
+mechanism unless otherwise noted.
 
 Python code run in plug-ins will need to create its own threads and run these examples from those threads.
 
@@ -105,8 +105,8 @@ example::
 
     threading.Thread(target=fn).start()
 
-Basic Scanning
-++++++++++++++
+Using the API
++++++++++++++
 
 How do I access the STEM Controller and scan device?
 ----------------------------------------------------
@@ -114,6 +114,7 @@ You can access the STEM controller and scan device using the following code::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
 
 How do I configure the scan and start view mode?
@@ -122,9 +123,12 @@ You can configure an individual scan and start viewing using the following code:
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
+
     scan.start_playing(frame_parameters)
 
 As the scan starts, output data will be associated with data items in Nion Swift which will be updated in near real
@@ -136,18 +140,22 @@ You can configure an individual scan, start viewing, and grab data from the acqu
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
+
     scan.set_enabled_channels([0])
     scan.start_playing(frame_parameters)
+
     # grab two consecutive frames, with a guaranteed start time after the first call
     frame1 = scan.grab_next_to_start()[0]
     frame2 = scan.grab_next_to_finish()[0]
 
-The `grab_next_to_start` call waits until the next frame starts and then grabs it. The `grab_next_to_finish` call waits
-until the current frame ends and then grabs it. Both calls return a list of `xdata` objects with an entry for each
-enabled channel. In this case the first element is selected since only a single channel is enabled.
+The ``grab_next_to_start`` call waits until the next frame starts and then grabs it. The ``grab_next_to_finish`` call
+waits until the current frame ends and then grabs it. Both calls return a list of ``xdata`` objects with an entry for
+each enabled channel. In this case the first element is selected since only a single channel is enabled.
 
 How do I configure the scan and acquire multiple channels?
 ----------------------------------------------------------
@@ -156,19 +164,38 @@ following code::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
+
     scan.set_enabled_channels([1, 2])
     scan.start_playing(frame_parameters)
+
     # grab two consecutive frames, with a guaranteed start time after the first call
     frames1 = scan.grab_next_to_start()
     frames2 = scan.grab_next_to_finish()
     frame1c1, frame1c2 = frames1
     frame2c1, frame2c2 = frames2
 
-The `grab_next_to_start` and `grab_next_to_finish` calls return a list of `xdata` objects with an entry for each enabled
-channel. These values are unpacked in the last two lines.
+The ``grab_next_to_start`` and ``grab_next_to_finish`` calls return a list of ``xdata`` objects with an entry for each
+enabled channel. These values are unpacked in the last two lines.
+
+How do I determine if the scan is running?
+------------------------------------------
+You can make a rough determination if a scan is running using the following::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    scan = stem_controller.scan_controller
+
+    is_scanning = scan.is_playing
+
+You shouldn't use this technique to synchronize acquisition as it does not handle threads and race conditions in a
+predictable manner. For instance, it may not be accurate if called immediately following a call that initiates
+acquisition; likewise it may not be accurate if called immediately before acquisition ends.
 
 How do I monitor progress (partial scans) during a scan?
 --------------------------------------------------------
@@ -176,12 +203,17 @@ You can monitor progress during an individual scan. ::
 
     import time
     from nion.utils import Registry
+
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     frame_time = scan.calculate_frame_time(frame_parameters)
     # adjust frame_parameters here if desired
+
     scan.start_playing(frame_parameters)
+
     # monitor progress
     frame_id = scan.get_current_frame_id()
     for i in range(10):
@@ -197,27 +229,19 @@ stopped. ::
     import time
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     frame_time = scan.calculate_frame_time(frame_parameters)
     # adjust frame_parameters here if desired
+
     scan.start_playing(frame_parameters)
+
     time.sleep(frame_time * 0.75)
+
     scan.stop_playing()
     scan.abort_playing()
-
-How do I determine if the scan is running?
-------------------------------------------
-You can make a rough determination if a scan is running using the following::
-
-    from nion.utils import Registry
-    stem_controller = Registry.get_component("stem_controller")
-    scan = stem_controller.scan_controller
-    is_scanning = stem_controller.is_playing
-
-You shouldn't use this technique to synchronize acquisition as it does not handle threads and race conditions in a
-predictable manner. For instance, it may not be accurate if called immediately following a call that initiates
-acquisition; likewise it may not be accurate if called immediately before acquisition ends.
 
 How do I configure the scan for acquire a subscan of an existing scan?
 -----------------------------------------------------------------------
@@ -226,12 +250,15 @@ A subscan can be specified within the context of an individual scan by specifyin
     import time
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     frame_parameters["subscan_pixel_size"] = (100, 100)
     frame_parameters["subscan_fractional_size"] = (0.4, 0.3)
     frame_parameters["subscan_fractional_center"] = (0.5, 0.5)
     # adjust frame_parameters further here if desired
+
     scan.start_playing(frame_parameters)
 
 ============================    =========   ===========
@@ -248,6 +275,8 @@ top left and the (1, 1) tuple is at the bottom right. Coordinates are specified 
 Changing the rotation will rotate the scan around the microscope axis and the subscan will generally be off axis; so a
 rotation will effectively shift a subscan in addition to rotating it.
 
+.. _combined-acquisition:
+
 How do I configure a rectangular scan synchronized with a camera?
 -----------------------------------------------------------------
 A combined acquisition puts a camera producing a trigger signal together with a scan configured to advance on an
@@ -261,14 +290,20 @@ The following code will perform a scan record combined with a camera sequence::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     eels = stem_controller.eels_camera
+
     scan_frame_parameters = scan.get_current_frame_parameters()
+
     eels_frame_parameters = eels.get_current_frame_parameters()
     eels_frame_parameters["processing"] = "sum_project"  # produce 1D spectrum at each scan location
     # further adjust scan_frame_parameters and eels_frame_parameters here if desired
+
     frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
         camera=camera, camera_frame_parameters=camera_frame_parameters)
+
     combined_data = scan.grab_combined_data(frame_id)
     frames, camera_data_list = combined_data
     frame = frames[0]
@@ -293,14 +328,21 @@ arbitrary line. The calculations are tedious so a help routine is provided. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     ronchigram = stem_controller.ronchigram_camera
+
     scan_frame_parameters = scan.get_current_frame_parameters()
+
     ronchigram_frame_parameters = ronchigram.get_current_frame_parameters()
     # further adjust scan_frame_parameters and ronchigram_frame_parameters here if desired
+
     line_scan_frame_parameters = scan.calculate_line_scan_frame_parameters(scan_frame_parameters, start, end, length)
+
     frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
         camera=camera, camera_frame_parameters=camera_frame_parameters)
+
     combined_data = scan.grab_combined_data(frame_id)
     frames, camera_data_list = combined_data
     frame = frames[0]
@@ -321,41 +363,50 @@ of the extra dimension with size of one.
 
 How do I acquire a sequence of scans?
 -------------------------------------
-You can grab a sequence of scans as long as they have the same pixel size. If buffered is enabled, you can also
+You can grab a sequence of scans as long as they have the same pixel size. If buffering is available, you can also
 grab recently acquired data by using negative frame indexes. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
+    scan.set_enabled_channels([0, 1])
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
+
     scan.start_playing(frame_parameters)
+
     # grab consecutive frames, with a guaranteed start time after the first call
     frame_index_start = -10
     frame_index_count = 10
     frames_list = scan.grab_sequence(frame_index_start, frame_index_count)
     if frames_list:
         for frames in frames_list:
+            # each frames will have data for each channel
             frame1, frame2 = frames
 
 How do I grab recently scanned data?
 ------------------------------------
-You can grab recently acquired scans (as long as they have the same pixel size) by using a negative starting frame index
-and using the technique above to acquire a sequence of scans.
+You can grab recently acquired scans (as long as they each have the same pixel size) by using a negative starting frame
+index and using the technique above to acquire a sequence of scans.
 
 How do I find data items associated with viewing and recording?
 ---------------------------------------------------------------
 The scan device pushes its data through data channels which are connected to data items in Nion Swift. To find the
-associated data item, you must find the associated channel names (there will be one for each individual scan detector)
-and then ask Nion Swift for the associated data item. ::
+associated data item, you must find the associated data channel names (there will be one for each individual scan
+detector) and then ask Nion Swift for the associated data item. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
-    scan = stem_controller.scan_controller
-    frame_parameters = scan.get_current_frame_parameters()
-    scan_channel_ids = scan.get_scan_channel_ids(frame_parameters)
-    data_item = api.library.get_data_item_for_data_channel_id(scan_channel_ids[0])
 
+    scan = stem_controller.scan_controller
+
+    frame_parameters = scan.get_current_frame_parameters()
+
+    scan_channel_ids = scan.get_scan_channel_ids(frame_parameters)
+
+    data_item = api.library.get_data_item_for_data_channel_id(scan_channel_ids[0])
 
 How do I determine scan parameters from acquired data's metadata?
 -----------------------------------------------------------------
@@ -364,12 +415,17 @@ metadata using the following technique::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     scan = stem_controller.scan_controller
+
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
+
     scan.start_playing(frame_parameters)
+
     # grab a frame as an example
     frame = scan.grab_next_to_finish()[0]
+
     new_frame_parameters = scan.create_frame_parameters(frame.metadata["hardware_source"])
 
 .. _probe-position:
@@ -381,9 +437,15 @@ the position will be either None or a fractional position relative to the most r
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
+
     print(stem_controller.probe_state)
     print(stem_controller.probe_position)
+
     stem_controller.probe_position = (0.6, 0.4)
     stem_controller.probe_position = None  # move to default parked position
 
 .. TODO: observing probe_position, probe_state changes
+.. TODO: partial data acquisitions
+.. TODO: monitoring changes to current values
+.. TODO: get/set named/saved settings
+
