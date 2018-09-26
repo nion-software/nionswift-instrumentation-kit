@@ -24,6 +24,9 @@ points.
 
 TODO: explain flyback time
 
+Scans typically fit into two categories: continuous or non-continuous. Continuous scans repeat when they reach the end
+of a frame. Non-continuous scans stop and wait for further function calls or UI initiation to continue.
+
 How do the scan coordinate systems and rotations work?
 ------------------------------------------------------
 The scan device is typically centered on the axis of the microscope and the magnification and position are specified
@@ -64,10 +67,13 @@ More complex scans can also be comprised of more than one individual scan. If pa
 scan, it applies to the next individual scan. If the parameters to the complex scan are changed during a complex scan,
 the complex scan is restarted.
 
-How do scanning applications interact?
---------------------------------------
-There is currently no mechanism whereby an application using the scan device can exclude actions from another
-application. Access is managed by the user not running conflicting applications simultaneously.
+How does scanning interact with Nion Swift and plug-ins?
+--------------------------------------------------------
+Most scans, whether continuous or not, send their resulting data into Nion Swift via a data channel. Unless otherwise
+configured, a data channel will feed into a reusable data item which can be displayed in the user interface.
+
+There is currently no mechanism whereby a plug-in or script using the scan device can exclude actions from another
+plug-in or script. Access is managed by convention and the user not running conflicting applications simultaneously.
 
 How does scanning interact with Python threads?
 -----------------------------------------------
@@ -133,7 +139,8 @@ You can configure an individual scan, start viewing, and grab data from the acqu
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
-    scan.start_playing(frame_parameters, channels=[0])
+    scan.set_enabled_channels([0])
+    scan.start_playing(frame_parameters)
     # grab two consecutive frames, with a guaranteed start time after the first call
     frame1 = scan.grab_next_to_start()[0]
     frame2 = scan.grab_next_to_finish()[0]
@@ -152,7 +159,8 @@ following code::
     scan = stem_controller.scan_controller
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
-    scan.start_playing(frame_parameters, channels=[1, 2])
+    scan.set_enabled_channels([1, 2])
+    scan.start_playing(frame_parameters)
     # grab two consecutive frames, with a guaranteed start time after the first call
     frames1 = scan.grab_next_to_start()
     frames2 = scan.grab_next_to_finish()
@@ -194,9 +202,22 @@ stopped. ::
     frame_time = scan.calculate_frame_time(frame_parameters)
     # adjust frame_parameters here if desired
     scan.start_playing(frame_parameters)
-    time.sleep(1.0)
-    scan.stop_playing(frame_parameters)
-    scan.abort_playing(frame_parameters)
+    time.sleep(frame_time * 0.75)
+    scan.stop_playing()
+    scan.abort_playing()
+
+How do I determine if the scan is running?
+------------------------------------------
+You can make a rough determination if a scan is running using the following::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    scan = stem_controller.scan_controller
+    is_scanning = stem_controller.is_playing
+
+You shouldn't use this technique to synchronize acquisition as it does not handle threads and race conditions in a
+predictable manner. For instance, it may not be accurate if called immediately following a call that initiates
+acquisition; likewise it may not be accurate if called immediately before acquisition ends.
 
 How do I configure the scan for acquire a subscan of an existing scan?
 -----------------------------------------------------------------------
@@ -229,54 +250,136 @@ rotation will effectively shift a subscan in addition to rotating it.
 
 How do I configure a rectangular scan synchronized with a camera?
 -----------------------------------------------------------------
-A combined scan produces data from the scan and data from the camera.
+A combined acquisition puts a camera producing a trigger signal together with a scan configured to advance on an
+external trigger. The camera is asked to acquire a sequence of frames corresponding to the size of the scan plus
+overhead required by the scan (flyback). The operation results in scan data and data from the camera.
 
-..
+Although not possible at the moment, we expect future capabilities to include the ability to combine acquisition from
+multiple cameras/devices.
+
+The following code will perform a scan record combined with a camera sequence::
+
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
     scan = stem_controller.scan_controller
+    eels = stem_controller.eels_camera
     scan_frame_parameters = scan.get_current_frame_parameters()
-    # adjust scan_frame_parameters here if desired
-    frame_id = stem_controller.start_combined_record(scan, scan_frame_parameters, camera, camera_frame_parameters)
+    eels_frame_parameters = eels.get_current_frame_parameters()
+    eels_frame_parameters["processing"] = "sum_project"  # produce 1D spectrum at each scan location
+    # further adjust scan_frame_parameters and eels_frame_parameters here if desired
+    frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
+        camera=camera, camera_frame_parameters=camera_frame_parameters)
     combined_data = scan.grab_combined_data(frame_id)
     frames, camera_data_list = combined_data
     frame = frames[0]
     camera_data = camera_data[0]
 
-.. the API needs to handle processing -- EELS (SI) vs Ronchigram (DI)
-.. the API needs to handle multiple cameras (eventually)
+You can use a camera frame parameter to control processing from 2d to 1d data.
+
+============================    =========   ===========
+Name                            Immediate   Description
+============================    =========   ===========
+processing                      no          use "sum_project" to sum and project the data from 2d to 1d
+============================    =========   ===========
+
+.. the API will handle multiple cameras (eventually) by passing 'cameras' instead of 'camera', etc.
 .. the API needs to handle error conditions or abort
 .. the API will generally connect acquisition to channels, which the user can view and cancel
 
 How do I configure a line scan synchronized with a camera?
 ----------------------------------------------------------
+You can configure a scan with a height of one and an appropriate rotation to perform a combined acquisition along an
+arbitrary line. The calculations are tedious so a help routine is provided. ::
 
-How do I configure complex multi-region scans synchronized with a camera?
--------------------------------------------------------------------------
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    scan = stem_controller.scan_controller
+    ronchigram = stem_controller.ronchigram_camera
+    scan_frame_parameters = scan.get_current_frame_parameters()
+    ronchigram_frame_parameters = ronchigram.get_current_frame_parameters()
+    # further adjust scan_frame_parameters and ronchigram_frame_parameters here if desired
+    line_scan_frame_parameters = scan.calculate_line_scan_frame_parameters(scan_frame_parameters, start, end, length)
+    frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
+        camera=camera, camera_frame_parameters=camera_frame_parameters)
+    combined_data = scan.grab_combined_data(frame_id)
+    frames, camera_data_list = combined_data
+    frame = frames[0]
+    camera_data = camera_data[0]
 
-How do I do multiple acquisitions at each point in a synchronized scan?
------------------------------------------------------------------------
+The scan and camera data will be returned with one fewer collection dimension since the data will be squeezed to get rid
+of the extra dimension with size of one.
 
-How do I perform an action between regions in a multi-region synchronized scan?
--------------------------------------------------------------------------------
+..
+    How do I configure complex multi-region scans synchronized with a camera?
+    -------------------------------------------------------------------------
 
-How do I acquire a sequence of rectangular scans?
--------------------------------------------------
+    How do I do multiple acquisitions at each point in a synchronized scan?
+    -----------------------------------------------------------------------
 
-How do I grab recently captured data?
+    How do I perform an action between regions in a multi-region synchronized scan?
+    -------------------------------------------------------------------------------
+
+How do I acquire a sequence of scans?
 -------------------------------------
+You can grab a sequence of scans as long as they have the same pixel size. If buffered is enabled, you can also
+grab recently acquired data by using negative frame indexes. ::
 
-How do I find data items associated with view mode?
----------------------------------------------------
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    scan = stem_controller.scan_controller
+    frame_parameters = scan.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
+    scan.start_playing(frame_parameters)
+    # grab consecutive frames, with a guaranteed start time after the first call
+    frame_index_start = -10
+    frame_index_count = 10
+    frames_list = scan.grab_sequence(frame_index_start, frame_index_count)
+    if frames_list:
+        for frames in frames_list:
+            frame1, frame2 = frames
+
+How do I grab recently scanned data?
+------------------------------------
+You can grab recently acquired scans (as long as they have the same pixel size) by using a negative starting frame index
+and using the technique above to acquire a sequence of scans.
+
+How do I find data items associated with viewing and recording?
+---------------------------------------------------------------
+The scan device pushes its data through data channels which are connected to data items in Nion Swift. To find the
+associated data item, you must find the associated channel names (there will be one for each individual scan detector)
+and then ask Nion Swift for the associated data item. ::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    scan = stem_controller.scan_controller
+    frame_parameters = scan.get_current_frame_parameters()
+    scan_channel_ids = scan.get_scan_channel_ids(frame_parameters)
+    data_item = api.library.get_data_item_for_data_channel_id(scan_channel_ids[0])
+
 
 How do I determine scan parameters from acquired data's metadata?
 -----------------------------------------------------------------
+The scan parameters are saved in the metadata of acquired xdata or data items. You can create new frame parameters from
+metadata using the following technique::
 
-How do I control the probe manually?
-------------------------------------
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    scan = stem_controller.scan_controller
+    frame_parameters = scan.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
+    scan.start_playing(frame_parameters)
+    # grab a frame as an example
+    frame = scan.grab_next_to_finish()[0]
+    new_frame_parameters = scan.create_frame_parameters(frame.metadata["hardware_source"])
 
-How do I control the state of the probe (scanning, positioned, not-positioned)?
--------------------------------------------------------------------------------
+How do I control the probe when not scanning?
+---------------------------------------------
+You can determine the probe state and probe position. The probe state will be either "scanning" or "parked". If "parked"
+the position will be either None or a fractional position relative to the most recently acquired data. ::
 
-How do I control blanking?
---------------------------
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    print(stem_controller.probe_state)
+    print(stem_controller.probe_position)
+    stem_controller.probe_position = (0.6, 0.4)
+    stem_controller.probe_position = None  # move to default parked position
