@@ -372,6 +372,8 @@ metadata using the following technique::
     frame = scan.grab_next_to_finish()[0]
     new_frame_parameters = scan.create_frame_parameters(frame.metadata["hardware_source"])
 
+.. _probe-position:
+
 How do I control the probe when not scanning?
 ---------------------------------------------
 You can determine the probe state and probe position. The probe state will be either "scanning" or "parked". If "parked"
@@ -383,3 +385,5 @@ the position will be either None or a fractional position relative to the most r
     print(stem_controller.probe_position)
     stem_controller.probe_position = (0.6, 0.4)
     stem_controller.probe_position = None  # move to default parked position
+
+.. TODO: observing probe_position, probe_state changes

@@ -2,106 +2,107 @@
 
 STEM Instrument
 ===============
+The STEM controller represents the STEM instrument. The scan device is tightly integrated into the STEM controller and
+some functions related to scanning are available in this object too. The scan controller, Ronchigram camera, and EELS
+camera are also accessible from this controller.
 
-Accessing the STEM Instrument
------------------------------
-To do instrument control, you will need to get a versioned ``instrument`` object from the ``api`` object using an
-``instrument_id`` (see :ref:`hardware-source-identifiers`). ::
+.. contents::
 
-    autostem = api.get_instrument_by_id("autostem", version="1.0")
+How do I access the STEM controller?
+------------------------------------
+You can access the STEM controller with the following code::
 
-Instrument Properties
----------------------
-Once you have an ``instrument`` object, you can set and get properties on the instrument. ::
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-    if autostem.get_property_as_bool("ShowTuningImages"):
-        show_data()
+Older plug-ins may also access the STEM controller directly via the Nion Swift API with this code::
 
-Properties are typed and the following types are supported:
+    stem_controller = api.get_instrument_by_id("autostem", version="1.0")
 
-    - float
-    - int
-    - str
-    - bool
-    - float_point
-
-You can also set properties on an instrument. ::
-
-    superscan.set_property_as_float_point("probe_position", (0.5, 0.5))
-
-For more information about these methods, see :py:class:`nion.swift.Facade.Instrument`.
-
-Instrument Controls
--------------------
-A set of methods to access a special subset of properties called *controls* is also available.
+How do STEM controller controls work?
+-------------------------------------
+The STEM controller manages a special set of properties called *controls*.
 
 Controls are special properties that are always represented as float values and may represent combinations of other
 controls. Their methods have special features which allow more precise setting within the network of controls.
 
-Autostem controls are characterized as having a internal "local" value added to weighted sum of values from zero or more
-input controls. Changing the value of an input control can change the output value of other controls.
+Controls are characterized as having an internal "local" value added to weighted sum of values from zero or more input
+controls. Changing the value of an input control can change the output value of other controls.
 
-Setting Output Values
----------------------
-You can set values on controls in such a way as to allow changes to propogate to dependent controls or not.
+How do I access STEM controller controls?
+-----------------------------------------
+Once you have a STEM controller, you can access properties of the instrument using code like this::
 
-To set the output value of a control, use the ``set_control`` method with no options. ::
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-    autostem.set_control_output("d3x", d3x_value)
+    success, defocus_value = stem_controller.TryGetVal("C10")
 
-Confirmation
-------------
-When setting the absolute output value of a control, you can confirm the value gets set by passing an options dict with
-a ``value_type`` key of ``confirm``. ::
+    if stem_controller.SetVal("C10", defocus_value - 2000E-9):
+        print("Defocus successfully changed.")
 
-    autostem.set_control_output("d3x", 0.0, options={'confirm': True})
+    blanked = bool(stem_controller.GetVal("C_Blank"))  # will throw exception if not available
 
-You can also add options for tolerance factor when confirming. The tolerance factor default is 1.0 and should be thought
-of as the nominal tolerance for that control. Passing a higher tolerance factor (for example 1.5) will increase the
-permitted error margin and passing lower tolerance factor (for example 0.5) will decrease the permitted error margin
-and consequently make a timeout more likely. The tolerance factor value 0.0 is a special value which removes all
-checking and only waits for any change at all and then returns.
+The code above shows the :code:`TryGetVal`, :code:`GetVal` and :code:`SetVal` functions. The :code:`SetVal` function
+tries to immediately set the value and returns without delay.
 
-To set d3x to within 2% of its nominal target value ::
+You can also use the :code:`SetValDelta` function which adds. The :code:`SetVal` above can be replaced with this line::
 
-    autostem.set_control_output("d3x", 0.0, options={'confirm': True, 'confirm_tolerance_factor': 1.02})
+    stem_controller.SetValDelta("C10", -2000E-9)  # decreases C10 by 2000nm
 
-You can also add timeout options when confirming. The default timeout is 16 seconds. ::
+You can also use :code:`SetValWait` and :code:`SetValAndConfirm`. The former waits a specified number of milliseconds
+before returning a failure; while the latter waits for the value to be set and confirmed, up to a specified number of
+milliseconds. ::
 
-    autostem.set_control_output("d3x", 0.0, options={'confirm': True, 'confirm_timeout': 16.0})
+    stem_controller.SetValWait("C10", 1000)  # wait 1 second
+    stem_controller.SetValAndConfirm("C10", 500E-9, 1.0, 3000)  # wait 3 seconds for C10 to be set to 500nm
 
-If the timeout occurs before the value is confirmed, a ``TimeoutException`` will be raised.
-
-Local Values
-------------
-You can set the *local* value of a control by passing an options dict with a ``value_type`` key of ``local``. ::
-
-    autostem.set_control_output("d3x", 0.0, options={'value_type': 'local'})
-
-Delta Values
-------------
-
-You can change a control by a delta value by passing an options dict with a ``value_type`` key of ``delta``. ::
-
-    autostem.set_control_output("d3x", d3x_delta, options={'value_type': 'delta'})
-
-Inform, or Keeping Dependent Outputs Constant
----------------------------------------------
+The :code:`SetValAndConfirm` function is useful to be assured that the value has been set before proceeding with
+acquisition. The `1.0` parameter is the tolerance factor and `1.0` signifies its nominal value.
 
 Finally, you can adjust a control in such a way that the output values of dependent controls stay constant. This is
-useful during setup when you want to change the displayed value without actually changing the dependent outputs. You do
-this by passing an options dict with a ``inform`` key of True. This parameter is named ``inform`` for historical
-reasons but can also be thought of as *keep dependent outputs constant*. ::
+useful during setup when you want to change the displayed value without actually changing the dependent outputs,
+somewhat like tare function. This function is named :code:`InformControl` for historical reasons but can also be thought
+of as keep dependent outputs constant*. ::
 
-    autostem.set_control_output("d3x", d3x_value, options={'inform': True})
+    stem_controller.InformControl("C10", 0)  # defocus will now be displayed as 0, but output values won't change
 
-Control State
--------------
+How do I determine if a control exists?
+---------------------------------------
+When a control doesn't exist, it will return `False` from :code:`TryGetVal`::
 
-Finally, you can query the state of a control to see if it exists or to see its current state. The only defined
-return values at the moment are None and 'undefined' state. ::
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+    exists, _ = stem_controller.TryGetVal("C93")
+    assert not exists
 
-    if autostem.get_control_state("dqt") is not None:
-        run_dqt_adjustment()
+How do I access the scan and camera controllers?
+------------------------------------------------
+The scan controller, Ronchigram camera, and optional EELS camera are integral parts of the STEM instrument. They are
+accessible using the following code::
 
-For more information about these methods, see :py:class:`nion.swift.Facade.Instrument`.
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    scan = stem_controller.scan_controller
+
+    ronchigram = stem_controller.ronchigram_camera
+
+    eels = stem_controller.eels_camera
+
+On systems without an EELS detector, the :code:`eels_camera` property will be :code:`None`.
+
+How do I control the probe position?
+------------------------------------
+You can determine the probe state and control the probe position using the STEM controller. The probe position is
+specified in terms of the last scan.
+
+See :ref:`probe-position` for more information.
+
+.. TODO: how to set the local value of a control
+.. TODO: how to get the state of a control (i.e. does it exist)
+.. TODO: older functions
+.. TODO: change stage position
+.. TODO: has_monochromator (add to stem controllers)
+.. TODO: defocus (add to stem controllers)
+.. TODO: observing control changes
