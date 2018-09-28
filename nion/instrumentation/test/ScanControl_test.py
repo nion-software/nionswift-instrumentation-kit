@@ -41,8 +41,8 @@ class TestScanControlClass(unittest.TestCase):
         HardwareSource.HardwareSourceManager()._close_instruments()
 
     def _acquire_one(self, document_controller, hardware_source):
-        hardware_source.start_playing(3.0)
-        hardware_source.stop_playing(3.0)
+        hardware_source.start_playing(sync_timeout=3.0)
+        hardware_source.stop_playing(sync_timeout=3.0)
         document_controller.periodic()
 
     def _record_one(self, document_controller, hardware_source, scan_state_controller):
@@ -234,7 +234,7 @@ class TestScanControlClass(unittest.TestCase):
             time.sleep(frame_time * 0.25)
             self._record_one(document_controller, hardware_source, scan_state_controller)
             self.assertEqual(len(document_model.data_items), 2)  # check assumptions
-            hardware_source.stop_playing(3.0)
+            hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(document_model.data_items[1].dimensional_shape, hardware_source.get_frame_parameters(2).size)
             self.assertNotEqual(document_model.data_items[0].dimensional_shape, document_model.data_items[1].dimensional_shape)

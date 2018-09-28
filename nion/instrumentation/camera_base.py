@@ -248,10 +248,10 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera_category = camera_category
         self.__display_name = display_name
         self.__frame_parameters = None
-        self.__pending_frame_parameters = copy.copy(frame_parameters)
+        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
 
     def set_frame_parameters(self, frame_parameters):
-        self.__pending_frame_parameters = copy.copy(frame_parameters)
+        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
         self.__activate_frame_parameters()
 
     @property
@@ -540,8 +540,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # define events
         self.log_messages_event = Event.Event()
 
-        self.__frame_parameters = self.__camera_settings.get_current_frame_parameters()
-        self.__record_parameters = self.__camera_settings.get_record_frame_parameters()
+        self.__frame_parameters = CameraFrameParameters(self.__camera_settings.get_current_frame_parameters())
+        self.__record_parameters = CameraFrameParameters(self.__camera_settings.get_record_frame_parameters())
 
         self.__acquisition_task = None
 
@@ -606,6 +606,13 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             messages, data_elements = self.__periodic_logger_fn()
             if len(messages) > 0 or len(data_elements) > 0:
                 self.log_messages_event.fire(messages, data_elements)
+
+    def start_playing(self, *args, **kwargs):
+        if "frame_parameters" in kwargs:
+            self.set_current_frame_parameters(kwargs["frame_parameters"])
+        elif len(args) == 1 and isinstance(args[0], dict):
+            self.set_current_frame_parameters(args[0])
+        super().start_playing(*args, **kwargs)
 
     @property
     def camera_settings(self) -> CameraSettings:
@@ -718,17 +725,17 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def __current_frame_parameters_changed(self, frame_parameters):
         if self.__acquisition_task:
             self.__acquisition_task.set_frame_parameters(frame_parameters)
-        self.__frame_parameters = copy.copy(frame_parameters)
+        self.__frame_parameters = CameraFrameParameters(frame_parameters)
 
     def set_current_frame_parameters(self, frame_parameters):
         self.__camera_settings.set_current_frame_parameters(frame_parameters)
         # __current_frame_parameters_changed will be called by the controller
 
     def get_current_frame_parameters(self):
-        return self.__frame_parameters
+        return CameraFrameParameters(self.__frame_parameters)
 
     def __record_frame_parameters_changed(self, frame_parameters):
-        self.__record_parameters = copy.copy(frame_parameters)
+        self.__record_parameters = CameraFrameParameters(frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
         self.__camera_settings.set_record_frame_parameters(frame_parameters)
@@ -820,14 +827,23 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__camera_settings.open_monitor()
 
 
-class CameraFrameParameters:
+class CameraFrameParameters(dict):
 
-    def __init__(self, d=None):
-        d = d or dict()
-        self.exposure_ms = d.get("exposure_ms", 125)
-        self.binning = d.get("binning", 1)
-        self.processing = d.get("processing")
-        self.integration_count = d.get("integration_count")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+        self.exposure_ms = self.get("exposure_ms", 125)
+        self.binning = self.get("binning", 1)
+        self.processing = self.get("processing")
+        self.integration_count = self.get("integration_count")
+
+    def __copy__(self):
+        return self.__class__(copy.copy(dict(self)))
+
+    def __deepcopy__(self, memo):
+        deepcopy = self.__class__(copy.deepcopy(dict(self)))
+        memo[id(self)] = deepcopy
+        return deepcopy
 
     def as_dict(self):
         return {
@@ -943,3 +959,17 @@ def run(configuration_location: pathlib.Path):
 
     for component in Registry.get_components_by_type("camera_module"):
         component_registered(component, {"camera_module"})
+
+
+class CameraInterface:
+    # preliminary interface (v1.0.0) for camera hardware source
+    def get_current_frame_parameters(self) -> dict: ...
+    def create_frame_parameters(self, d: dict) -> dict: ...
+    def start_playing(self, frame_parameters: dict) -> None: ...
+    def stop_playing(self) -> None: ...
+    def abort_playing(self) -> None: ...
+    def is_playing(self) -> bool: ...
+    def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+    def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+    def grab_sequence(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def get_data_channel_id(self, frame_parameters: dict) -> str: ...

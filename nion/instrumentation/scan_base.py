@@ -27,24 +27,32 @@ from nion.utils import Registry
 _ = gettext.gettext
 
 
-class ScanFrameParameters:
-
-    def __init__(self, d=None):
-        d = d or dict()
-        self.size = d.get("size", (512, 512))
-        self.center_nm = d.get("center_nm", (0, 0))
-        self.fov_size_nm = d.get("fov_size_nm", (8, 8))
-        self.pixel_time_us = d.get("pixel_time_us", 10)
-        self.fov_nm = d.get("fov_nm", 8)
-        self.rotation_rad = d.get("rotation_rad", 0)
+class ScanFrameParameters(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+        self.size = self.get("size", (512, 512))
+        self.center_nm = self.get("center_nm", (0, 0))
+        self.fov_size_nm = self.get("fov_size_nm", (8, 8))
+        self.pixel_time_us = self.get("pixel_time_us", 10)
+        self.fov_nm = self.get("fov_nm", 8)
+        self.rotation_rad = self.get("rotation_rad", 0)
         self.subscan_pixel_size = None
         self.subscan_fractional_size = None
         self.subscan_fractional_center = None
-        self.external_clock_wait_time_ms = d.get("external_clock_wait_time_ms", 0)
-        self.external_clock_mode = d.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
-        self.ac_line_sync = d.get("ac_line_sync", False)
-        self.ac_frame_sync = d.get("ac_frame_sync", True)
-        self.flyback_time_us = d.get("flyback_time_us", 30.0)
+        self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
+        self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.ac_line_sync = self.get("ac_line_sync", False)
+        self.ac_frame_sync = self.get("ac_frame_sync", True)
+        self.flyback_time_us = self.get("flyback_time_us", 30.0)
+
+    def __copy__(self):
+        return self.__class__(copy.copy(dict(self)))
+
+    def __deepcopy__(self, memo):
+        deepcopy = self.__class__(copy.deepcopy(dict(self)))
+        memo[id(self)] = deepcopy
+        return deepcopy
 
     def as_dict(self):
         d = {
@@ -126,7 +134,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__is_continuous = is_continuous
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
-        self.__frame_parameters = copy.deepcopy(frame_parameters)
+        self.__frame_parameters = ScanFrameParameters(frame_parameters)
         self.__frame_number = None
         self.__scan_id = None
         self.__last_scan_id = None
@@ -137,7 +145,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__subscan_region = subscan_region
 
     def set_frame_parameters(self, frame_parameters):
-        self.__frame_parameters = copy.deepcopy(frame_parameters)
+        self.__frame_parameters = ScanFrameParameters(frame_parameters)
         self.__activate_frame_parameters()
 
     @property
@@ -272,7 +280,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         return data_elements
 
     def __activate_frame_parameters(self):
-        device_frame_parameters = copy.copy(self.__frame_parameters)
+        device_frame_parameters = ScanFrameParameters(self.__frame_parameters)
         context_size = Geometry.FloatSize.make(device_frame_parameters.size)
         device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
         if self.subscan_enabled and self.subscan_region:
@@ -389,6 +397,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __get_initial_profile_index(self) -> int:
         return 0
 
+    def start_playing(self, *args, **kwargs):
+        if "frame_parameters" in kwargs:
+            self.set_current_frame_parameters(kwargs["frame_parameters"])
+        elif len(args) == 1 and isinstance(args[0], dict):
+            self.set_current_frame_parameters(args[0])
+        super().start_playing(*args, **kwargs)
+
     @property
     def flyback_pixels(self):
         return self.__device.flyback_pixels
@@ -450,16 +465,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level. no need to set them.
-        frame_parameters = copy.copy(frame_parameters)
+        frame_parameters = ScanFrameParameters(frame_parameters)
         self.__profiles[profile_index] = frame_parameters
         if profile_index == self.__current_profile_index:
-            self.__frame_parameters = copy.copy(frame_parameters)
+            self.__frame_parameters = ScanFrameParameters(frame_parameters)
         if profile_index == 2:
-            self.__record_parameters = copy.copy(frame_parameters)
+            self.__record_parameters = ScanFrameParameters(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
     def set_frame_parameters(self, profile_index, frame_parameters):
-        frame_parameters = copy.copy(frame_parameters)
+        frame_parameters = ScanFrameParameters(frame_parameters)
         self.__profiles[profile_index] = frame_parameters
         self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
         if profile_index == self.__current_profile_index:
@@ -474,13 +489,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def set_current_frame_parameters(self, frame_parameters):
         if self.__acquisition_task:
             self.__acquisition_task.set_frame_parameters(frame_parameters)
-        self.__frame_parameters = copy.copy(frame_parameters)
+        self.__frame_parameters = ScanFrameParameters(frame_parameters)
 
     def get_current_frame_parameters(self):
-        return self.__frame_parameters
+        return ScanFrameParameters(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
-        self.__record_parameters = copy.copy(frame_parameters)
+        self.__record_parameters = ScanFrameParameters(frame_parameters)
 
     def get_record_frame_parameters(self):
         return self.__record_parameters
@@ -557,7 +572,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # current values is different semantics than the scan control panel, which _does_ set current values if
         # the current profile is selected. Hrrmmm.
         with self.__latest_values_lock:
-            self.__latest_values[profile_index] = frame_parameters
+            self.__latest_values[profile_index] = ScanFrameParameters(frame_parameters)
         def do_update_parameters():
             with self.__latest_values_lock:
                 for profile_index in self.__latest_values.keys():
@@ -801,10 +816,11 @@ class ScanInterface:
     def is_playing(self) -> bool: ...
     def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
     def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+    def grab_sequence(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
     def calculate_frame_time(self, frame_parameters: dict) -> float: ...
+    def get_data_channel_id(self, frame_parameters: dict) -> str: ...
     def get_current_frame_id(self) -> int: ...
     def get_frame_progress(self, frame_id: int) -> float: ...
     def start_combined_record(self, frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> int: ...
     def grab_combined_data(self, frame_id: int) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]: ...
     def calculate_line_scan_frame_parameters(self, frame_parameters: dict, start: typing.Tuple[float, float], end: typing.Tuple[float, float], length: int) -> dict: ...
-    def grab_sequence(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...

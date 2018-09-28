@@ -38,10 +38,10 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera_category = camera_category
         self.__display_name = display_name
         self.__frame_parameters = None
-        self.__pending_frame_parameters = copy.copy(frame_parameters)
+        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
 
     def set_frame_parameters(self, frame_parameters):
-        self.__pending_frame_parameters = copy.copy(frame_parameters)
+        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
 
     @property
     def frame_parameters(self):
@@ -197,8 +197,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__profiles = list()
         self.__profiles.extend(self.__get_initial_profiles())
         self.__current_profile_index = self.__get_initial_profile_index()
-        self.__frame_parameters = self.__profiles[0]
-        self.__record_parameters = self.__profiles[2]
+        self.__frame_parameters = CameraFrameParameters(self.__profiles[0])
+        self.__record_parameters = CameraFrameParameters(self.__profiles[2])
 
         self.__acquisition_task = None
 
@@ -377,7 +377,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return dict()
 
     def set_frame_parameters(self, profile_index, frame_parameters):
-        frame_parameters = copy.copy(frame_parameters)
+        frame_parameters = CameraFrameParameters(frame_parameters)
         self.__profiles[profile_index] = frame_parameters
         # update the frame parameters on the device
         mode_id = self.modes[profile_index]
@@ -391,18 +391,18 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
     def get_frame_parameters(self, profile_index):
-        return copy.copy(self.__profiles[profile_index])
+        return CameraFrameParameters(self.__profiles[profile_index])
 
     def set_current_frame_parameters(self, frame_parameters):
         if self.__acquisition_task:
             self.__acquisition_task.set_frame_parameters(frame_parameters)
-        self.__frame_parameters = copy.copy(frame_parameters)
+        self.__frame_parameters = CameraFrameParameters(frame_parameters)
 
     def get_current_frame_parameters(self):
-        return self.__frame_parameters
+        return CameraFrameParameters(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
-        self.__record_parameters = copy.copy(frame_parameters)
+        self.__record_parameters = CameraFrameParameters(frame_parameters)
 
     def get_record_frame_parameters(self):
         return self.__record_parameters
@@ -511,14 +511,23 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return CameraFacade()
 
 
-class CameraFrameParameters:
+class CameraFrameParameters(dict):
 
-    def __init__(self, d=None):
-        d = d or dict()
-        self.exposure_ms = d.get("exposure_ms", 125)
-        self.binning = d.get("binning", 1)
-        self.processing = d.get("processing")
-        self.integration_count = d.get("integration_count")
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
+        self.exposure_ms = self.get("exposure_ms", 125)
+        self.binning = self.get("binning", 1)
+        self.processing = self.get("processing")
+        self.integration_count = self.get("integration_count")
+
+    def __copy__(self):
+        return self.__class__(copy.copy(dict(self)))
+
+    def __deepcopy__(self, memo):
+        deepcopy = self.__class__(copy.deepcopy(dict(self)))
+        memo[id(self)] = deepcopy
+        return deepcopy
 
     def as_dict(self):
         return {
