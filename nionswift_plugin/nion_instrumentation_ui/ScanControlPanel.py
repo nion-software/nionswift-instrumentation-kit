@@ -1348,7 +1348,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_column = thumbnail_group.children[channel_index]
             thumbnail_column.remove_all()
 
-            actual_channel_id = channel_id if not self.__subscan_enabled else channel_id + ".subscan"
+            actual_channel_id = channel_id if not self.__subscan_enabled else channel_id + "_subscan"
 
             document_model = document_controller.document_model
             data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, actual_channel_id))

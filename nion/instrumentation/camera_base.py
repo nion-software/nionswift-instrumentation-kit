@@ -614,6 +614,26 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.set_current_frame_parameters(args[0])
         super().start_playing(*args, **kwargs)
 
+    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_start(timeout)
+
+    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_finish(timeout)
+
+    def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
+        return False
+
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return None
+
+    def grab_sequence_abort(self) -> None:
+        return None
+
+    def grab_sequence_get_progress(self) -> typing.Optional[float]:
+        return None
+
     @property
     def camera_settings(self) -> CameraSettings:
         return self.__camera_settings
@@ -971,5 +991,9 @@ class CameraInterface:
     def is_playing(self) -> bool: ...
     def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
     def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def grab_sequence(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def grab_sequence_prepare(self, count: int) -> bool: ...
+    def grab_sequence(self, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def grab_sequence_abort(self) -> None: ...
+    def grab_sequence_get_progress(self) -> typing.Optional[float]: ...
+    def grab_buffer(self, count: int, *, start: int = None) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
     def get_data_channel_id(self, frame_parameters: dict) -> str: ...

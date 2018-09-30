@@ -275,18 +275,18 @@ top left and the (1, 1) tuple is at the bottom right. Coordinates are specified 
 Changing the rotation will rotate the scan around the microscope axis and the subscan will generally be off axis; so a
 rotation will effectively shift a subscan in addition to rotating it.
 
-.. _combined-acquisition:
+.. synced-acquisition:
 
 How do I configure a rectangular scan synchronized with a camera?
 -----------------------------------------------------------------
-A combined acquisition puts a camera producing a trigger signal together with a scan configured to advance on an
+A synchronized acquisition puts a camera producing a trigger signal together with a scan configured to advance on an
 external trigger. The camera is asked to acquire a sequence of frames corresponding to the size of the scan plus
 overhead required by the scan (flyback). The operation results in scan data and data from the camera.
 
 Although not possible at the moment, we expect future capabilities to include the ability to combine acquisition from
 multiple cameras/devices.
 
-The following code will perform a scan record combined with a camera sequence::
+The following code will perform a scan synchronized with a camera::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
@@ -301,10 +301,11 @@ The following code will perform a scan record combined with a camera sequence::
     eels_frame_parameters["processing"] = "sum_project"  # produce 1D spectrum at each scan location
     # further adjust scan_frame_parameters and eels_frame_parameters here if desired
 
-    frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
-        camera=camera, camera_frame_parameters=camera_frame_parameters)
+    combined_data = scan.grab_synchronized(
+        scan_frame_parameter=scan_frame_parameters,
+        camera=camera,
+        camera_frame_parameters=camera_frame_parameters)
 
-    combined_data = scan.grab_combined_data(frame_id)
     frames, camera_data_list = combined_data
     frame = frames[0]
     camera_data = camera_data[0]
@@ -340,10 +341,11 @@ arbitrary line. The calculations are tedious so a help routine is provided. ::
 
     line_scan_frame_parameters = scan.calculate_line_scan_frame_parameters(scan_frame_parameters, start, end, length)
 
-    frame_id = scan.start_combined_record(scan_frame_parameter=scan_frame_parameters,
-        camera=camera, camera_frame_parameters=camera_frame_parameters)
+    combined_data = scan.grab_synchronized(
+        scan_frame_parameter=line_scan_frame_parameters,
+        camera=camera,
+        camera_frame_parameters=camera_frame_parameters)
 
-    combined_data = scan.grab_combined_data(frame_id)
     frames, camera_data_list = combined_data
     frame = frames[0]
     camera_data = camera_data[0]
@@ -363,8 +365,7 @@ of the extra dimension with size of one.
 
 How do I acquire a sequence of scans?
 -------------------------------------
-You can grab a sequence of scans as long as they have the same pixel size. If buffering is available, you can also
-grab recently acquired data by using negative frame indexes. ::
+You can grab a sequence of scans as long as they have the same pixel size. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
@@ -378,35 +379,54 @@ grab recently acquired data by using negative frame indexes. ::
     scan.start_playing(frame_parameters)
 
     # grab consecutive frames, with a guaranteed start time after the first call
-    frame_index_start = -10
-    frame_index_count = 10
-    frames_list = scan.grab_sequence(frame_index_start, frame_index_count)
-    if frames_list:
-        for frames in frames_list:
-            # each frames will have data for each channel
-            frame1, frame2 = frames
+    if scan.grab_sequence_prepare(10):
+        frames_list = scan.grab_sequence(10)
+        if frames_list:
+            for frames in frames_list:
+                # each frames will have data for each channel
+                frame1, frame2 = frames
 
 How do I grab recently scanned data?
 ------------------------------------
-You can grab recently acquired scans (as long as they each have the same pixel size) by using a negative starting frame
-index and using the technique above to acquire a sequence of scans.
-
-How do I find data items associated with viewing and recording?
----------------------------------------------------------------
-The scan device pushes its data through data channels which are connected to data items in Nion Swift. To find the
-associated data item, you must find the associated data channel names (there will be one for each individual scan
-detector) and then ask Nion Swift for the associated data item. ::
+You can grab recently acquired scans (as long as they each have the same pixel size) by using this code::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
 
     scan = stem_controller.scan_controller
 
+    scan.set_enabled_channels([0, 1])
     frame_parameters = scan.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
 
-    scan_channel_ids = scan.get_scan_channel_ids(frame_parameters)
+    scan.start_playing(frame_parameters)
 
-    data_item = api.library.get_data_item_for_data_channel_id(scan_channel_ids[0])
+    # grab buffered frames
+    frames_list = scan.grab_buffer(10)
+    if frames_list:
+        for frames in frames_list:
+            # each frames will have data for each channel
+            frame1, frame2 = frames
+
+How do I find data items associated with viewing and recording?
+---------------------------------------------------------------
+The scan device pushes its data through data channels which are connected to data items via data item references in Nion
+Swift. To find the associated data item, you must find the associated data item reference key (there will be one for
+each individual scan detector and application) and then ask Nion Swift for the associated data item. ::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    scan = stem_controller.scan_controller
+
+    reference_key = scan.make_reference_key(channel_index=0, subscan=True)
+
+    data_item = api.library.get_data_item_for_reference_key(reference_key)
+
+You can also create or get a data item which will be the target of an acquisition. This is useful if you need to set up
+the data item in a particular display panel in a workspace in Nion Swift. ::
+
+    data_item = api.library.get_data_item_for_reference_key(reference_key, create_if_needed=True, large_format=False)
 
 How do I determine scan parameters from acquired data's metadata?
 -----------------------------------------------------------------

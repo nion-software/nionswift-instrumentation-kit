@@ -274,6 +274,33 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if len(messages) > 0 or len(data_elements) > 0:
                 self.log_messages_event.fire(messages, data_elements)
 
+    def start_playing(self, *args, **kwargs):
+        if "frame_parameters" in kwargs:
+            self.set_current_frame_parameters(kwargs["frame_parameters"])
+        elif len(args) == 1 and isinstance(args[0], dict):
+            self.set_current_frame_parameters(args[0])
+        super().start_playing(*args, **kwargs)
+
+    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_start(timeout)
+
+    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_finish(timeout)
+
+    def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
+        return False
+
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return None
+
+    def grab_sequence_abort(self) -> None:
+        return None
+
+    def grab_sequence_get_progress(self) -> typing.Optional[float]:
+        return None
+
     @property
     def camera(self):
         return self.__camera

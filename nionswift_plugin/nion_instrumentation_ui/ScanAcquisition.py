@@ -89,8 +89,6 @@ class ScanAcquisitionController:
                     scan_height = scan_param_height
                     scan_width = scan_param_width + flyback_pixels
 
-                    library = document_window.library
-
                     # abort the scan to not interfere with setup; and clear the aborted flag
                     scan_hardware_source.abort_playing()
                     self.__aborted = False
@@ -127,7 +125,7 @@ class ScanAcquisitionController:
                             data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
                             data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
                             data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                            document_window.queue_task(functools.partial(create_and_display_data_item, library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source))  # must occur on UI thread
+                            document_window.queue_task(functools.partial(create_and_display_data_item, document_window.library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source))  # must occur on UI thread
                         else:
                             # aborted
                             scan_task.cancel()

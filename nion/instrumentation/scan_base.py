@@ -17,6 +17,7 @@ from nion.instrumentation import stem_controller
 from nion.data import DataAndMetadata
 from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
+from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
@@ -37,9 +38,9 @@ class ScanFrameParameters(dict):
         self.pixel_time_us = self.get("pixel_time_us", 10)
         self.fov_nm = self.get("fov_nm", 8)
         self.rotation_rad = self.get("rotation_rad", 0)
-        self.subscan_pixel_size = None
-        self.subscan_fractional_size = None
-        self.subscan_fractional_center = None
+        self.subscan_pixel_size = self.get("subscan_pixel_size", None)
+        self.subscan_fractional_size = self.get("subscan_fractional_size", None)
+        self.subscan_fractional_center = self.get("subscan_fractional_center", None)
         self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
         self.ac_line_sync = self.get("ac_line_sync", False)
@@ -226,7 +227,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
             if self.__subscan_enabled:
-                channel_id += ".subscan"
+                channel_id += "_subscan"
             update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
             data_element["properties"]["hardware_source_name"] = self.__display_name
             data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
@@ -404,6 +405,65 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.set_current_frame_parameters(args[0])
         super().start_playing(*args, **kwargs)
 
+    def get_enabled_channels(self) -> typing.Sequence[int]:
+        indexes = list()
+        for index, enabled in enumerate(self.__device.channels_enabled):
+            if enabled:
+                indexes.append(index)
+        return indexes
+
+    def set_enabled_channels(self, channel_indexes: typing.Sequence[int]) -> None:
+        for index in range(self.channel_count):
+            self.set_channel_enabled(index, index in channel_indexes)
+
+    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_start(timeout)
+
+    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.start_playing()
+        return self.get_next_xdatas_to_finish(timeout)
+
+    def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
+        return False
+
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return None
+
+    def grab_sequence_abort(self) -> None:
+        pass
+
+    def grab_sequence_get_progress(self) -> typing.Optional[float]:
+        return None
+
+    def grab_synchronized(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
+        pass
+
+    def grab_synchronized_abort(self) -> None:
+        pass
+
+    def grab_synchronized_get_progress(self) -> typing.Optional[float]:
+        return None
+
+    def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        if start is None and count is not None:
+            assert count > 0
+            start = -count
+        if start is not None and count is None:
+            assert start < 0
+            count = -start
+        data_element_groups = self.get_buffer_data(start, count)
+        if data_element_groups is None:
+            return None
+        xdata_group_list = list()
+        for data_element_group in data_element_groups:
+            xdata_group = list()
+            for data_element in data_element_group:
+                xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                xdata_group.append(xdata)
+            xdata_group_list.append(xdata_group)
+        return xdata_group_list
+
     @property
     def flyback_pixels(self):
         return self.__device.flyback_pixels
@@ -516,7 +576,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__channel_states_changed([self.get_channel_state(i_channel_index) for i_channel_index in range(self.channel_count)])
 
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
-        return channel_index + self.channel_count, channel_id + ".subscan", " ".join((channel_name, _("SubScan")))
+        return channel_index + self.channel_count, channel_id + "_subscan", " ".join((channel_name, _("SubScan")))
 
     def get_data_channel_state(self, channel_index):
         # channel indexes larger than then the channel count will be subscan channels
@@ -616,13 +676,30 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_frame_parameters_from_dict(self, d):
         return ScanFrameParameters(d)
 
+    def calculate_frame_time(self, frame_parameters: dict) -> float:
+        size = frame_parameters["size"]
+        pixel_time_us = frame_parameters["pixel_time_us"]
+        return size[0] * size[1] * pixel_time_us / 1000000.0
+
     def get_current_frame_time(self):
-        frame_parameters = self.get_current_frame_parameters()
-        return frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1000000.0
+        return self.calculate_frame_time(self.get_current_frame_parameters())
 
     def get_record_frame_time(self):
-        frame_parameters = self.get_record_frame_parameters()
-        return frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1000000.0
+        return self.calculate_frame_time(self.get_record_frame_parameters())
+
+    def make_reference_key(self, **kwargs) -> str:
+        # TODO: specifying the channel key in an acquisition? and sub channels?
+        is_subscan = kwargs.get("subscan", False)
+        channel_index = kwargs.get("channel_index")
+        reference_key = kwargs.get("reference_key")
+        if reference_key:
+            return "_".join([self.hardware_source_id, str(reference_key)])
+        if channel_index is not None:
+            if is_subscan:
+                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index), "subscan"])
+            else:
+                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
+        return self.hardware_source_id
 
     def clean_data_item(self, data_item: DataItem.DataItem, data_channel: HardwareSource.DataChannel) -> None:
         display = data_item.displays[0]
@@ -664,7 +741,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     channel_name = channel_state.name
                     channel_id = channel_state.channel_id
                     if self.subscan_enabled:
-                        channel_id += ".subscan"
+                        channel_id += "_subscan"
                     properties = data_element["properties"]
                     if autostem_properties:
                         properties.update(autostem_properties)
@@ -808,7 +885,7 @@ class ScanInterface:
     # preliminary interface (v1.0.0) for scan hardware source
     def get_current_frame_parameters(self) -> dict: ...
     def create_frame_parameters(self, d: dict) -> dict: ...
-    def get_scan_channel_ids(self, frame_parameters: dict) -> typing.List[str]: ...
+    def get_enabled_channels(self) -> typing.Sequence[int]: ...
     def set_enabled_channels(self, channel_indexes: typing.Sequence[int]) -> None: ...
     def start_playing(self, frame_parameters: dict) -> None: ...
     def stop_playing(self) -> None: ...
@@ -816,11 +893,18 @@ class ScanInterface:
     def is_playing(self) -> bool: ...
     def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
     def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def grab_sequence(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def grab_sequence_prepare(self, count: int) -> bool: ...
+    def grab_sequence(self, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def grab_sequence_abort(self) -> None: ...
+    def grab_sequence_get_progress(self) -> typing.Optional[float]: ...
+    def grab_synchronized(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]: ...
+    def grab_synchronized_abort(self) -> None: ...
+    def grab_synchronized_get_progress(self) -> typing.Optional[float]: ...
+    def grab_buffer(self, count: int, *, start: int = None) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
     def calculate_frame_time(self, frame_parameters: dict) -> float: ...
-    def get_data_channel_id(self, frame_parameters: dict) -> str: ...
+    def calculate_line_scan_frame_parameters(self, frame_parameters: dict, start: typing.Tuple[float, float], end: typing.Tuple[float, float], length: int) -> dict: ...
+    def make_reference_key(self, **kwargs) -> str: ...
+
     def get_current_frame_id(self) -> int: ...
     def get_frame_progress(self, frame_id: int) -> float: ...
-    def start_combined_record(self, frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> int: ...
-    def grab_combined_data(self, frame_id: int) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]: ...
-    def calculate_line_scan_frame_parameters(self, frame_parameters: dict, start: typing.Tuple[float, float], end: typing.Tuple[float, float], length: int) -> dict: ...
+

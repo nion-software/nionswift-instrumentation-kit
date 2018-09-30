@@ -179,8 +179,7 @@ _after_ the call, you should first make a call to ``grab_next_to_start`` followe
 
 How do I acquire a sequence of frames from a camera?
 ----------------------------------------------------
-You can grab a sequence of frames from a camera acquisition as long as they each have the same pixel size. If buffering
-is available, you can also grab recently acquired data by using negative frame indexes. ::
+You can grab a sequence of frames from a camera acquisition as long as they each have the same pixel size. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
@@ -193,14 +192,38 @@ is available, you can also grab recently acquired data by using negative frame i
     eels.start_playing(frame_parameters)
 
     # grab consecutive frames, with a guaranteed start time after the first call
-    frame_index_start = 0  # must be zero, no buffering is currently available
-    frame_index_count = 10
-    frames_list = eels.grab_sequence(frame_index_start, frame_index_count)
+    if eels.grab_sequence_prepare(10):
+        frames_list = eels.grab_sequence(10)
+        if frames_list:
+            for frames in frames_list:
+                # each frames will have data for each channel
+                # eels may have two channels: 2d and 1d data; grab the last one (1d)
+                frame = frames[-1]
+
+This capability may not be available on all cameras.
+
+How do I grab recently acquired data?
+-------------------------------------
+You can grab recently acquired data (as long as they each have the same pixel size) by using this code::
+
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    eels = stem_controller.eels_camera
+
+    frame_parameters = eels.get_current_frame_parameters()
+    # adjust frame_parameters here if desired
+
+    eels.start_playing(frame_parameters)
+
+    # grab buffered frames
+    frames_list = eels.grab_buffer(10)
     if frames_list:
         for frames in frames_list:
             # each frames will have data for each channel
-            # eels may have two channels: 2d and 1d data; grab the last one (1d)
-            frame = frames[-1]
+            frame1, frame2 = frames
+
+This capability may not be available on all cameras.
 
 How do I find data items associated with viewing and sequence acquisition?
 --------------------------------------------------------------------------
@@ -240,6 +263,6 @@ parameters from metadata using the following technique::
 
 How do I configure a rectangular scan synchronized with a camera?
 -----------------------------------------------------------------
-See :ref:`combined-acquisition`
+See :ref:`synced-acquisition`
 
 .. TODO: monitoring changes to current values
