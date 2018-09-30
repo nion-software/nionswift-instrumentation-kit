@@ -235,11 +235,14 @@ data item, you must find the associated data channel name and then ask Nion Swif
 
     ronchigram = stem_controller.ronchigram_camera
 
-    frame_parameters = ronchigram.get_current_frame_parameters()
+    reference_key = scan.make_reference_key()
 
-    data_channel_id = ronchigram.get_data_channel_id(frame_parameters)
+    data_item = api.library.get_data_item_for_reference_key(reference_key)
 
-    data_item = api.library.get_data_item_for_data_channel_id(data_channel_id)
+You can also create or get a data item which will be the target of an acquisition. This is useful if you need to set up
+the data item in a particular display panel in a workspace in Nion Swift. ::
+
+    data_item = api.library.get_data_item_for_reference_key(reference_key, create_if_needed=True, large_format=False)
 
 How do I determine camera frame parameters from acquired data's metadata?
 -------------------------------------------------------------------------

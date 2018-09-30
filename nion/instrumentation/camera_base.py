@@ -22,6 +22,7 @@ from nion.data import Calibration
 from nion.data import Core
 from nion.data import DataAndMetadata
 from nion.swift.model import HardwareSource
+from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Registry
@@ -623,16 +624,37 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.get_next_xdatas_to_finish(timeout)
 
     def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
-        return False
+        self.acquire_sequence_prepare(count)
+        return True
 
-    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]:
+        self.start_playing()
+        frames = self.acquire_sequence(count)
+        if frames is not None:
+            xdatas = list()
+            for data_element in frames:
+                data_element["is_sequence"] = True
+                data_element["collection_dimension_count"] = 0
+                data_element["datum_dimension_count"] = len(data_element["data"].shape) - 1
+                xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                xdatas.append(xdata)
+            return xdatas
         return None
 
     def grab_sequence_abort(self) -> None:
-        return None
+        self.acquire_sequence_cancel()
 
     def grab_sequence_get_progress(self) -> typing.Optional[float]:
         return None
+
+    def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return None
+
+    def make_reference_key(self, **kwargs) -> str:
+        reference_key = kwargs.get("reference_key")
+        if reference_key:
+            return "_".join([self.hardware_source_id, str(reference_key)])
+        return self.hardware_source_id
 
     @property
     def camera_settings(self) -> CameraSettings:
@@ -992,8 +1014,8 @@ class CameraInterface:
     def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
     def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
     def grab_sequence_prepare(self, count: int) -> bool: ...
-    def grab_sequence(self, count: int) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
+    def grab_sequence(self, count: int) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]: ...
     def grab_sequence_abort(self) -> None: ...
     def grab_sequence_get_progress(self) -> typing.Optional[float]: ...
     def grab_buffer(self, count: int, *, start: int = None) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
-    def get_data_channel_id(self, frame_parameters: dict) -> str: ...
+    def make_reference_key(self, **kwargs) -> str: ...

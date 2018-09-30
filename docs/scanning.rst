@@ -412,26 +412,25 @@ You can grab recently acquired scans (as long as they each have the same pixel s
             # each frames will have data for each channel
             frame1, frame2 = frames
 
-..
-    How do I find data items associated with viewing and recording?
-    ---------------------------------------------------------------
-    The scan device pushes its data through data channels which are connected to data items via data item references in Nion
-    Swift. To find the associated data item, you must find the associated data item reference key (there will be one for
-    each individual scan detector and application) and then ask Nion Swift for the associated data item. ::
+How do I find data items associated with viewing and recording?
+---------------------------------------------------------------
+The scan device pushes its data through data channels which are connected to data items via data item references in Nion
+Swift. To find the associated data item, you must find the associated data item reference key (there will be one for
+each individual scan detector and application) and then ask Nion Swift for the associated data item. ::
 
-        from nion.utils import Registry
-        stem_controller = Registry.get_component("stem_controller")
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
 
-        scan = stem_controller.scan_controller
+    scan = stem_controller.scan_controller
 
-        reference_key = scan.make_reference_key(channel_index=0, subscan=True)
+    reference_key = scan.make_reference_key(channel_index=0, subscan=True)
 
-        data_item = api.library.get_data_item_for_reference_key(reference_key)
+    data_item = api.library.get_data_item_for_reference_key(reference_key)
 
-    You can also create or get a data item which will be the target of an acquisition. This is useful if you need to set up
-    the data item in a particular display panel in a workspace in Nion Swift. ::
+You can also create or get a data item which will be the target of an acquisition. This is useful if you need to set up
+the data item in a particular display panel in a workspace in Nion Swift. ::
 
-        data_item = api.library.get_data_item_for_reference_key(reference_key, create_if_needed=True, large_format=False)
+    data_item = api.library.get_data_item_for_reference_key(reference_key, create_if_needed=True, large_format=False)
 
 How do I determine scan parameters from acquired data's metadata?
 -----------------------------------------------------------------

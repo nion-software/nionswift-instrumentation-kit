@@ -292,7 +292,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
         return False
 
-    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]:
         return None
 
     def grab_sequence_abort(self) -> None:
