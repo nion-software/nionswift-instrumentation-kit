@@ -1,20 +1,13 @@
 # system imports
-import contextlib
-import copy
 import enum
 import functools
 import gettext
 import logging
 import threading
-import typing
-
-# third part imports
-import numpy
 
 # local libraries
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
-from nion.swift.model import ImportExportManager
 from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Event
@@ -36,8 +29,6 @@ class ScanAcquisitionController:
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
-        self.__state = SequenceState.idle
-        self.__aborted = False  # set this flag when abort requested in case low level doesn't follow rules
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, sum_frames: bool) -> None:
@@ -62,95 +53,39 @@ class ScanAcquisitionController:
                 data_item.set_data_and_metadata(scan_data_and_metadata)
                 document_window.display_data_item(data_item)
 
-        def acquire_sequence(api: API.API, document_window: API.DocumentWindow, scan_hardware_source, camera_hardware_source) -> None:
-            try:
-                logging.debug("start sequence acquisition")
-                self.__state = SequenceState.scanning
-                self.acquisition_state_changed_event.fire(self.__state)
-                try:
-                    camera_frame_parameters = camera_hardware_source.get_frame_parameters_for_profile_by_index(0)
-                    if sum_frames:
-                        camera_frame_parameters["processing"] = "sum_project"
-
-                    scan_frame_parameters = scan_hardware_source.get_frame_parameters_for_profile_by_index(2)
-                    scan_max_area = 2048 * 2048
-                    scan_param_height = int(scan_frame_parameters["size"][0])
-                    scan_param_width = int(scan_frame_parameters["size"][1])
-                    if scan_param_height * scan_param_width > scan_max_area:
-                        scan_param_height = scan_max_area // scan_param_width
-                    scan_frame_parameters["size"] = scan_param_height, scan_param_width
-                    scan_frame_parameters["pixel_time_us"] = int(1000 * camera_frame_parameters["exposure_ms"] * 0.75)
-                    # long timeout is needed until memory allocation is outside of the acquire_sequence call.
-                    scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
-                    scan_frame_parameters["external_clock_mode"] = 1
-                    scan_frame_parameters["ac_line_sync"] = False
-                    scan_frame_parameters["ac_frame_sync"] = False
-                    flyback_pixels = scan_hardware_source._hardware_source.flyback_pixels  # using internal API
-                    scan_height = scan_param_height
-                    scan_width = scan_param_width + flyback_pixels
-
-                    # abort the scan to not interfere with setup; and clear the aborted flag
-                    scan_hardware_source.abort_playing()
-                    self.__aborted = False
-
-                    camera_hardware_source._hardware_source.set_current_frame_parameters(camera_hardware_source._hardware_source.get_frame_parameters_from_dict(camera_frame_parameters))
-                    camera_hardware_source._hardware_source.acquire_sequence_prepare(scan_width * scan_height)
-
-                    with contextlib.closing(scan_hardware_source.create_record_task(scan_frame_parameters)) as scan_task:
-                        data_elements = camera_hardware_source._hardware_source.acquire_sequence(scan_width * scan_height)
-                        # acquire_sequence should return None or no elements if aborted or error; but use flag anyway just in case
-                        if data_elements and len(data_elements) >= 1 and not self.__aborted:
-                            # not aborted
-                            data_element = data_elements[0]
-                            # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
-                            # quickly. see note below.
-                            scan_data_list = scan_task.grab()
-                            data_shape = data_element["data"].shape
-                            if flyback_pixels > 0:
-                                data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
-                            else:
-                                data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])
-                            if len(scan_data_list) > 0:
-                                collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
-                                scan_properties = scan_data_list[0].metadata
-                            else:
-                                collection_calibrations = [{}, {}]
-                                scan_properties = {}
-                            if "spatial_calibrations" in data_element:
-                                datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
-                            else:
-                                datum_calibrations = [{} for i in range(len(data_element["data"].shape) - 2)]
-                            # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
-                            data_element["collection_dimension_count"] = 2
-                            data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
-                            data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
-                            data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                            document_window.queue_task(functools.partial(create_and_display_data_item, document_window.library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source))  # must occur on UI thread
-                        else:
-                            # aborted
-                            scan_task.cancel()
-                finally:
-                    self.__state = SequenceState.idle
-                    self.acquisition_state_changed_event.fire(self.__state)
-                    logging.debug("end sequence acquisition")
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-
         document_window = self.__document_controller
 
-        self.__thread = threading.Thread(target=acquire_sequence, args=(self.__api, document_window, self.__scan_hardware_source, self.__camera_hardware_source))
+        scan_hardware_source = self.__scan_hardware_source._hardware_source
+
+        scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
+
+        camera_hardware_source = self.__camera_hardware_source._hardware_source
+
+        camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
+
+        if sum_frames:
+            camera_frame_parameters["processing"] = "sum_project"
+
+        def grab_synchronized():
+            self.acquisition_state_changed_event.fire(SequenceState.scanning)
+            try:
+                combined_data = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+                                                                       camera=camera_hardware_source,
+                                                                       camera_frame_parameters=camera_frame_parameters)
+                if combined_data is not None:
+                    scan_data_list, camera_data_list = combined_data
+                    document_window.queue_task(
+                        functools.partial(create_and_display_data_item, document_window.library, camera_data_list[0],
+                                          scan_data_list, self.__scan_hardware_source, self.__camera_hardware_source))
+            finally:
+                self.acquisition_state_changed_event.fire(SequenceState.idle)
+
+        self.__thread = threading.Thread(target=grab_synchronized)
         self.__thread.start()
 
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
-        if self.__state == SequenceState.scanning:
-            # if the state is scanning, the thread could be stuck on acquire sequence or
-            # stuck on scan.grab. cancel both here.
-            self.__camera_hardware_source._hardware_source.acquire_sequence_cancel()
-            self.__scan_hardware_source._hardware_source.abort_recording()
-        # and set the flag for misbehaving acquire_sequence return values.
-        self.__aborted = True
+        self.__scan_hardware_source._hardware_source.grab_synchronized_abort()
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size

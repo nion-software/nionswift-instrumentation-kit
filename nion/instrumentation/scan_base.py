@@ -1,5 +1,6 @@
 # standard libraries
 import collections
+import contextlib
 import copy
 import gettext
 import logging
@@ -292,6 +293,45 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
+class RecordTask:
+
+    def __init__(self, hardware_source, frame_parameters):
+        self.__hardware_source = hardware_source
+        if frame_parameters:
+            self.__hardware_source.set_record_frame_parameters(frame_parameters)
+        self.__data_and_metadata_list = None
+        # synchronize start of thread; if this sync doesn't occur, the task can be closed before the acquisition
+        # is started. in that case a deadlock occurs because the abort doesn't apply and the thread is waiting
+        # for the acquisition.
+        self.__recording_started = threading.Event()
+
+        def record_thread():
+            self.__hardware_source.start_recording()
+            self.__recording_started.set()
+            self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
+
+        self.__thread = threading.Thread(target=record_thread)
+        self.__thread.start()
+        self.__recording_started.wait()
+
+    def close(self) -> None:
+        if self.__thread.is_alive():
+            self.__hardware_source.abort_recording()
+            self.__thread.join()
+        self.__data_and_metadata_list = None
+
+    @property
+    def is_finished(self) -> bool:
+        return not self.__thread.is_alive()
+
+    def grab(self) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        self.__thread.join()
+        return self.__data_and_metadata_list
+
+    def cancel(self) -> None:
+        self.__hardware_source.abort_recording()
+
+
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, stem_controller, device, hardware_source_id: str, display_name: str):
@@ -340,6 +380,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__latest_values_lock = threading.RLock()
         self.__latest_values = dict()
         self.record_index = 1  # use to give unique name to recorded images
+
+        # synchronized acquisition
+        self.__camera_hardware_source = None
+        self.__grab_synchronized_is_scanning = False
+        self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
+        self.acquisition_state_changed_event = Event.Event()
 
     def close(self):
         # thread needs to close before closing the stem controller. so use this method to
@@ -437,10 +483,83 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return None
 
     def grab_synchronized(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
-        pass
+        self.__camera_hardware_source = camera
+        try:
+            self.__grab_synchronized_is_scanning = True
+            self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+            try:
+                scan_max_area = 2048 * 2048
+                scan_param_height = int(scan_frame_parameters["size"][0])
+                scan_param_width = int(scan_frame_parameters["size"][1])
+                if scan_param_height * scan_param_width > scan_max_area:
+                    scan_param_height = scan_max_area // scan_param_width
+                scan_frame_parameters["size"] = scan_param_height, scan_param_width
+                scan_frame_parameters["pixel_time_us"] = int(1000 * camera_frame_parameters["exposure_ms"] * 0.75)
+                # long timeout is needed until memory allocation is outside of the acquire_sequence call.
+                scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
+                scan_frame_parameters["external_clock_mode"] = 1
+                scan_frame_parameters["ac_line_sync"] = False
+                scan_frame_parameters["ac_frame_sync"] = False
+                flyback_pixels = self.flyback_pixels  # using internal API
+                scan_height = scan_param_height
+                scan_width = scan_param_width + flyback_pixels
+
+                # abort the scan to not interfere with setup; and clear the aborted flag
+                self.abort_playing()
+                self.__grab_synchronized_aborted = False
+
+                self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+                self.__camera_hardware_source.acquire_sequence_prepare(scan_width * scan_height)
+
+                with contextlib.closing(RecordTask(self, scan_frame_parameters)) as scan_task:
+                    data_elements = self.__camera_hardware_source.acquire_sequence(scan_width * scan_height)
+                    # acquire_sequence should return None or no elements if aborted or error; but use flag anyway just in case
+                    if data_elements and len(data_elements) >= 1 and not self.__grab_synchronized_aborted:
+                        # not aborted
+                        data_element = data_elements[0]
+                        # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
+                        # quickly. see note below.
+                        scan_data_list = scan_task.grab()
+                        data_shape = data_element["data"].shape
+                        if flyback_pixels > 0:
+                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])[:, flyback_pixels:scan_width, :]
+                        else:
+                            data_element["data"] = data_element["data"].reshape(scan_height, scan_width, *data_shape[1:])
+                        if len(scan_data_list) > 0:
+                            collection_calibrations = [calibration.write_dict() for calibration in scan_data_list[0].dimensional_calibrations]
+                            scan_properties = scan_data_list[0].metadata
+                        else:
+                            collection_calibrations = [{}, {}]
+                            scan_properties = {}
+                        if "spatial_calibrations" in data_element:
+                            datum_calibrations = [copy.deepcopy(spatial_calibration) for spatial_calibration in data_element["spatial_calibrations"][1:]]
+                        else:
+                            datum_calibrations = [{} for i in range(len(data_element["data"].shape) - 2)]
+                        # combine the dimensional calibrations from the scan data with the datum dimensions calibration from the sequence
+                        data_element["collection_dimension_count"] = 2
+                        data_element["spatial_calibrations"] = collection_calibrations + datum_calibrations
+                        data_element.setdefault("metadata", dict())["scan_detector"] = scan_properties.get("hardware_source", dict())
+                        data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                        return scan_data_list, [data_and_metadata]
+                    else:
+                        # aborted
+                        scan_task.cancel()
+            finally:
+                self.__grab_synchronized_is_scanning = False
+                self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+                logging.debug("end sequence acquisition")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
     def grab_synchronized_abort(self) -> None:
-        pass
+        if self.__grab_synchronized_is_scanning:
+            # if the state is scanning, the thread could be stuck on acquire sequence or
+            # stuck on scan.grab. cancel both here.
+            self.__camera_hardware_source.acquire_sequence_cancel()
+            self.abort_recording()
+        # and set the flag for misbehaving acquire_sequence return values.
+        self.__grab_synchronized_aborted = True
 
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
         return None
