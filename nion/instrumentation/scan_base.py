@@ -227,7 +227,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
-            if self.__subscan_enabled:
+            if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
+                channel_id += "_subscan"
+            elif self.subscan_enabled:
                 channel_id += "_subscan"
             update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
             data_element["properties"]["hardware_source_name"] = self.__display_name
@@ -285,7 +287,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         device_frame_parameters = ScanFrameParameters(self.__frame_parameters)
         context_size = Geometry.FloatSize.make(device_frame_parameters.size)
         device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
-        if self.subscan_enabled and self.subscan_region:
+        if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
+            pass  # let the parameters speak for themselves
+        elif self.subscan_enabled and self.subscan_region:
             subscan_region = Geometry.FloatRect.make(self.subscan_region)
             device_frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
             device_frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
