@@ -541,8 +541,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # define events
         self.log_messages_event = Event.Event()
 
-        self.__frame_parameters = CameraFrameParameters(self.__camera_settings.get_current_frame_parameters())
-        self.__record_parameters = CameraFrameParameters(self.__camera_settings.get_record_frame_parameters())
+        self.__frame_parameters = CameraFrameParameters(self.__camera_settings.get_current_frame_parameters().as_dict())
+        self.__record_parameters = CameraFrameParameters(self.__camera_settings.get_record_frame_parameters().as_dict())
 
         self.__acquisition_task = None
 
