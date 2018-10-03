@@ -25,6 +25,8 @@ result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
 """
 
+TIMEOUT = 20
+
 class TestCameraControlClass(unittest.TestCase):
 
     def setUp(self):
@@ -46,13 +48,13 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while not hardware_source.is_playing:
                 time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
         finally:
             hardware_source.stop_playing()
         start_time = time.time()
         while hardware_source.is_playing:
             time.sleep(self.exposure)
-            self.assertTrue(time.time() - start_time < 3.0)
+            self.assertTrue(time.time() - start_time < TIMEOUT)
         document_controller.periodic()
 
     def _setup_hardware_source(self, initialize: bool=True, is_eels: bool=False) -> (DocumentController.DocumentController, DocumentModel.DocumentModel, HardwareSource.HardwareSource, CameraControlPanel.CameraControlStateController):
@@ -171,7 +173,7 @@ class TestCameraControlClass(unittest.TestCase):
                 start_time = time.time()
                 while not hardware_source.is_playing:
                     time.sleep(self.exposure)
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 # now it is playing, so synchronize to the end of a frame
                 hardware_source.get_next_xdatas_to_finish(10.0)
                 # now wait long enough for the next frame to start, 50ms should be enough
@@ -199,7 +201,7 @@ class TestCameraControlClass(unittest.TestCase):
                 state_controller.handle_capture_clicked()
                 hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing(sync_timeout=3.0)
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
 
@@ -215,7 +217,7 @@ class TestCameraControlClass(unittest.TestCase):
                 state_controller.handle_capture_clicked()
                 hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing(sync_timeout=3.0)
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
             self.assertEqual(len(document_model.data_items[2].dimensional_shape), 2)
@@ -232,7 +234,7 @@ class TestCameraControlClass(unittest.TestCase):
                 state_controller.handle_capture_clicked()
                 hardware_source.get_next_xdatas_to_finish(5)
             finally:
-                hardware_source.stop_playing(sync_timeout=3.0)
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
             self.assertEqual(len(document_model.data_items[2].dimensional_shape), 1)
@@ -251,7 +253,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 1)
             self.assertEqual(document_model.data_items[0].dimensional_shape, hardware_source.get_expected_dimensions(4))
@@ -349,7 +351,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             state_controller.handle_change_profile("Snap")
             hardware_source.start_playing()
             try:
@@ -389,7 +391,7 @@ class TestCameraControlClass(unittest.TestCase):
                 start_time = time.time()
                 while hardware_source.is_playing:
                     time.sleep(0.01)
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 document_controller.periodic()
                 self.assertEqual(play_enabled[0], True)
                 self.assertEqual(play_state[0], "play")
@@ -455,7 +457,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             self.assertEqual(len(document_model.data_items), 2)
             # second acquisition
             first_data_items = copy.copy(data_items)
@@ -493,24 +495,24 @@ class TestCameraControlClass(unittest.TestCase):
                 start_time = time.time()
                 while not hardware_source.is_playing:
                     time.sleep(0.01)
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 start_time = time.time()
                 while len(document_model.data_items) < 2:
                     time.sleep(0.01)
                     document_controller.periodic()
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 document_model.remove_data_item(document_model.data_items[1])
                 start_time = time.time()
                 while len(document_model.data_items) < 2:
                     time.sleep(0.01)
                     document_controller.periodic()
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
             finally:
                 hardware_source.abort_playing()
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(0.01)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             document_controller.periodic()
 
     def test_starting_processed_view_initializes_source_region(self):
@@ -594,7 +596,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(frame0_integration_count, 4)
                 self.assertEqual(frame1_integration_count, 4)
             finally:
-                hardware_source.abort_playing(sync_timeout=3.0)
+                hardware_source.abort_playing(sync_timeout=TIMEOUT)
 
     def test_acquiring_attaches_timezone(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
@@ -657,7 +659,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure * 0.1)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             self.assertFalse(hardware_source.is_playing)  # we know this works
             self.assertFalse(hardware_source_facade.is_playing)
 
@@ -678,7 +680,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure * 0.1)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             self.assertFalse(hardware_source.is_playing)  # we know this works
             self.assertFalse(hardware_source_facade.is_playing)
 
@@ -696,7 +698,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_recording:
                 time.sleep(self.exposure * 0.1)
-                self.assertTrue(time.time() - start_time < 4.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             self.assertFalse(hardware_source.is_recording)  # we know this works
             self.assertFalse(hardware_source_facade.is_recording)
 
@@ -716,7 +718,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_recording:
                 time.sleep(self.exposure * 0.01)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
             # TODO: figure out a way to test whether abort actually aborts or just stops
             self.assertFalse(hardware_source.is_recording)  # we know this works
             self.assertFalse(hardware_source_facade.is_recording)
@@ -759,7 +761,7 @@ class TestCameraControlClass(unittest.TestCase):
                 start_time = time.time()
                 while hardware_source.is_recording:
                     time.sleep(self.exposure * 0.01)
-                    self.assertTrue(time.time() - start_time < 3.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 self.assertFalse(hardware_source_facade.is_recording)
 
     def test_facade_record_task_cancel(self):
@@ -774,7 +776,7 @@ class TestCameraControlClass(unittest.TestCase):
                 start_time = time.time()
                 while hardware_source.is_recording:
                     time.sleep(self.exposure * 0.01)
-                    self.assertTrue(time.time() - start_time < 4.0)
+                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 self.assertFalse(hardware_source_facade.is_recording)
 
     def test_facade_grab_data(self):
@@ -794,7 +796,7 @@ class TestCameraControlClass(unittest.TestCase):
             start_time = time.time()
             while hardware_source.is_playing:
                 time.sleep(self.exposure * 0.1)
-                self.assertTrue(time.time() - start_time < 3.0)
+                self.assertTrue(time.time() - start_time < TIMEOUT)
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
