@@ -11,7 +11,7 @@ import os
 
 setuptools.setup(
     name="nionswift-instrumentation",
-    version="0.14.1",
+    version="0.15.0",
     author="Nion Software",
     author_email="swift@nion.com",
     description="A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope).",

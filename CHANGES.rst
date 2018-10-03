@@ -1,6 +1,19 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.15.0 (2018-10-03)
+-------------------
+
+- Improve support for sub-scan.
+
+- Expand API and documentation.
+
+- Improve cancel and error handling in synchronized acquisition.
+
+- Remove limitation of PMT to channels 0, 1.
+
+- Add support for acquisition sequence cancellation.
+
 0.14.1 (2018-06-25)
 -------------------
 
