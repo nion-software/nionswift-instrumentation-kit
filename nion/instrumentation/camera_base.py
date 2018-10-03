@@ -199,11 +199,11 @@ class CameraDevice(abc.ABC):
         """
         return dict()
 
-    def acquire_sequence_prepare(self, n: int) -> None:
+    # def acquire_sequence_prepare(self, n: int) -> None:
         """Prepare for acquire_sequence."""
-        pass
+        # pass
 
-    def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
+    # def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
         """Acquire a sequence of n images. Return a single data element with two dimensions n x h, w.
 
         The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
@@ -216,7 +216,7 @@ class CameraDevice(abc.ABC):
 
         Raise exception for error.
         """
-        return None
+        # return None
 
     def acquire_sequence_cancel(self) -> None:
         """Request to cancel a sequence acquisition.
@@ -771,6 +771,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__frame_parameters = CameraFrameParameters(frame_parameters)
 
     def set_current_frame_parameters(self, frame_parameters):
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_current_frame_parameters(frame_parameters)
         # __current_frame_parameters_changed will be called by the controller
 
@@ -782,6 +783,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__record_parameters = CameraFrameParameters(frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_record_frame_parameters(frame_parameters)
         # __record_frame_parameters_changed will be called by the controller
 
@@ -847,6 +849,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     # used in api, tests, camera control panel
     def set_frame_parameters(self, profile_index, frame_parameters):
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_frame_parameters(profile_index, frame_parameters)
 
     # used in tuning, api, tests, camera control panel
