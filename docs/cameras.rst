@@ -235,7 +235,7 @@ data item, you must find the associated data channel name and then ask Nion Swif
 
     ronchigram = stem_controller.ronchigram_camera
 
-    reference_key = scan.make_reference_key()
+    reference_key = ronchigram.make_reference_key()
 
     data_item = api.library.get_data_item_for_reference_key(reference_key)
 
