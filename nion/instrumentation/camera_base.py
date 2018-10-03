@@ -765,6 +765,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return dict()
 
     def __current_frame_parameters_changed(self, frame_parameters):
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         if self.__acquisition_task:
             self.__acquisition_task.set_frame_parameters(frame_parameters)
         self.__frame_parameters = CameraFrameParameters(frame_parameters)
@@ -777,6 +778,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return CameraFrameParameters(self.__frame_parameters)
 
     def __record_frame_parameters_changed(self, frame_parameters):
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__record_parameters = CameraFrameParameters(frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
