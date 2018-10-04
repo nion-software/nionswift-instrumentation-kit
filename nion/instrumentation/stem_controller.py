@@ -262,18 +262,27 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
         Binds a property of an operation item to a property of a graphic item.
     """
 
-    def __init__(self, region, region_property_name, graphic, graphic_property_name):
+    def __init__(self, event_loop, region, region_property_name, graphic, graphic_property_name):
         super().__init__(region, region_property_name)
         self.__graphic = graphic
         self.__graphic_property_changed_listener = graphic.property_changed_event.listen(self.__property_changed)
         self.__graphic_property_name = graphic_property_name
         self.__region_property_name = region_property_name
+        self.__task = None
         def set_target_value(value):
-            if value is not None:
-                setattr(self.__graphic, graphic_property_name, value)
+            async def do_set_value():
+                if value is not None:
+                    setattr(self.__graphic, graphic_property_name, value)
+                self.__task = None
+            if self.__task:
+                self.__task.cancel()
+            self.__task = event_loop.create_task(do_set_value())
         self.target_setter = set_target_value
 
     def close(self):
+        if self.__task:
+            self.__task.cancel()
+            self.__task = None
         self.__graphic_property_changed_listener.close()
         self.__graphic_property_changed_listener = None
         self.__graphic = None
@@ -294,7 +303,8 @@ class PropertyToGraphicBinding(Binding.PropertyBinding):
 class ProbeGraphicConnection:
     """Manage the connection between the hardware and the graphics representing the probe on a display."""
 
-    def __init__(self, display, probe_position_value, hide_probe_graphics_fn):
+    def __init__(self, event_loop, display, probe_position_value, hide_probe_graphics_fn):
+        self.event_loop = event_loop
         self.display = display
         self.probe_position_value = probe_position_value
         self.graphic = None
@@ -328,7 +338,7 @@ class ProbeGraphicConnection:
             self.graphic.position = self.probe_position_value.value
             self.graphic.is_bounds_constrained = True
             self.display.add_graphic(self.graphic)
-            self.binding = PropertyToGraphicBinding(self.probe_position_value, "value", self.graphic, "position")
+            self.binding = PropertyToGraphicBinding(self.event_loop, self.probe_position_value, "value", self.graphic, "position")
             def graphic_removed():
                 self.hide_probe_graphic()
                 # next make sure all other probe graphics get hidden so that setting the probe_position_value
@@ -418,7 +428,7 @@ class ProbeView:
             if display:
                 # the probe position value object gives the ProbeGraphicConnection the ability to
                 # get, set, and watch for changes to the probe position.
-                probe_graphic_connection = ProbeGraphicConnection(display, self.__probe_position_value, self.__hide_probe_graphics)
+                probe_graphic_connection = ProbeGraphicConnection(self.__event_loop, display, self.__probe_position_value, self.__hide_probe_graphics)
                 probe_graphic_connection.update_probe_state(probe_position)
                 self.__probe_graphic_connections.append(probe_graphic_connection)
 

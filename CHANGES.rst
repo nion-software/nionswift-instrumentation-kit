@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.15.1 (2018-10-04)
+-------------------
+
+- Fix race condition when scripting probe position.
+
 0.15.0 (2018-10-03)
 -------------------
 
