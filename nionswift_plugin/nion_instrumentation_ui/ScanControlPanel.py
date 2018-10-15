@@ -1352,7 +1352,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
             document_model = document_controller.document_model
             data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, actual_channel_id))
-            data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, data_item_reference)
+            data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, document_model, data_item_reference)
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
             self.__channel_states[channel_index] = channel_id, name, enabled

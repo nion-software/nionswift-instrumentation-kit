@@ -605,7 +605,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         document_model = self.document_controller.document_model
         data_item_reference = document_model.get_data_item_reference(camera_controller.hardware_source_id)
-        data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, data_item_reference)
+        data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, document_model, data_item_reference)
         thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
         def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
