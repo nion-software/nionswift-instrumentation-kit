@@ -519,8 +519,9 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(len(document_model.data_items[0].displays[0].graphics), 1)
-            self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 1)
+            self.assertEqual(display_item.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_changing_processed_bounds_updates_region(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
@@ -528,24 +529,26 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
             hardware_source.data_channels[1].processor.bounds = new_bounds
-            self.assertEqual(document_model.data_items[0].displays[0].graphics[0].bounds, new_bounds)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(display_item.graphics[0].bounds, new_bounds)
 
     def test_changing_region_on_processed_view_updates_processor(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
             new_bounds = (0.45, 0.2), (0.1, 0.6)
-            document_model.data_items[0].displays[0].graphics[0].bounds = new_bounds
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item.graphics[0].bounds = new_bounds
             self.assertEqual(hardware_source.data_channels[1].processor.bounds, new_bounds)
 
     def test_restarting_processed_view_recreates_region_after_it_has_been_deleted(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
-            display = document_model.data_items[0].displays[0]
-            display.remove_graphic(display.graphics[0])
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item.remove_graphic(display_item.graphics[0])
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(display.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
+            self.assertEqual(display_item.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
     def test_acquiring_eels_sets_signal_type_for_both_copies(self):
         # assumes EELS camera produces two data items

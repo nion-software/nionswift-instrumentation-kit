@@ -841,13 +841,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
         return self.hardware_source_id
 
-    def clean_data_item(self, data_item: DataItem.DataItem, data_channel: HardwareSource.DataChannel) -> None:
-        display = data_item.displays[0]
-        for graphic in copy.copy(display.graphics):
-            if graphic.graphic_id == "probe":
-                display.remove_graphic(graphic)
-            if graphic.graphic_id == "subscan":
-                display.remove_graphic(graphic)
+    def clean_display_items(self, document_model, display_items, **kwargs) -> None:
+        for display_item in display_items:
+            for graphic in copy.copy(display_item.graphics):
+                if graphic.graphic_id == "probe":
+                    display_item.remove_graphic(graphic)
+                if graphic.graphic_id == "subscan":
+                    display_item.remove_graphic(graphic)
 
     def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[typing.Dict]]]:
         """Get recently acquired (buffered) data.

@@ -1421,7 +1421,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
     def image_panel_mouse_pressed(self, display_panel, display_specifier, image_position, modifiers):
-        data_item = display_specifier.data_item if display_specifier else None
+        data_item = display_panel.data_item if display_panel else None
         hardware_source_id = data_item and data_item.metadata.get("hardware_source", dict()).get("hardware_source_id")
         if self.__shift_click_state == "shift":
             mouse_position = image_position

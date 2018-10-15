@@ -153,8 +153,8 @@ class AcquireController(metaclass=Utility.Singleton):
             crop_region.center = (midpoint, 0.5)
             crop_region.size = (integration_width, 1)
             crop_region.is_bounds_constrained = True
-            display_specifier = DataItem.DisplaySpecifier.from_data_item(data_item)
-            display_specifier.display.add_graphic(crop_region)
+            display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+            display_item.add_graphic(crop_region)
             eels_data_item = document_controller.document_model.get_projection_new(data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")

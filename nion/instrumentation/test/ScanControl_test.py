@@ -117,7 +117,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.instrument = instrument
                 self.hardware_source = hardware_source
                 self.scan_state_controller = scan_state_controller
-                self.probe_view = stem_controller.ProbeView(self.instrument, document_controller.event_loop)
+                self.probe_view = stem_controller.ProbeView(self.instrument, self.document_model, document_controller.event_loop)
 
                 return self
 
@@ -254,30 +254,32 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 0)
             scan_state_controller.handle_positioned_check_box(True)
             document_controller.periodic()
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 1)
+            self.assertEqual(len(display_item.graphics), 1)
 
     def test_disable_positioned_after_one_frame_acquisition_should_remove_graphic(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 1)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 1)
             scan_state_controller.handle_positioned_check_box(False)
             document_controller.periodic()
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            self.assertEqual(len(display_item.graphics), 0)
 
     def test_deleting_probe_graphic_after_one_frame_acquisition_should_disable_positioned(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
-            display = document_model.data_items[0].primary_display_specifier.display
-            probe_graphic = display.graphics[0]
-            display.remove_graphic(probe_graphic)
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            probe_graphic = display_item.graphics[0]
+            display_item.remove_graphic(probe_graphic)
+            self.assertEqual(len(display_item.graphics), 0)
             self.assertIsNone(hardware_source.probe_position)
 
     def test_deleting_display_after_one_frame_acquisition_should_disable_positioned(self):
@@ -298,43 +300,44 @@ class TestScanControlClass(unittest.TestCase):
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
-            display = document_model.data_items[0].primary_display_specifier.display
-            self.assertEqual(len(display.graphics), 1)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 1)
             hardware_source.start_playing()
             hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
-            self.assertEqual(len(display.graphics), 0)
+            self.assertEqual(len(display_item.graphics), 0)
             hardware_source.stop_playing()
 
     def test_start_playing_with_existing_probe_position_graphic_should_remove_it(self):
         document_model = DocumentModel.DocumentModel()
         document_controller = DocumentController.DocumentController(self.app.ui, document_model, workspace_id="library")
         data_item = DataItem.DataItem(numpy.zeros((256, 256)) + 16)
+        document_model.append_data_item(data_item)
         graphic = Graphics.PointGraphic()
         graphic.graphic_id = "probe"
         graphic.position = 0.5, 0.5
         graphic.is_bounds_constrained = True
-        data_item.displays[0].add_graphic(graphic)
-        document_model.append_data_item(data_item)
+        display_item = document_model.get_display_item_for_data_item(data_item)
+        display_item.add_graphic(graphic)
         instrument = self._setup_instrument()
         hardware_source = self._setup_hardware_source(instrument)
         document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, hardware_source.data_channels[0].channel_id), data_item)
         HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
-        display = document_model.data_items[0].primary_display_specifier.display
+        display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
         scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
         scan_state_controller.initialize_state()
-        probe_view = stem_controller.ProbeView(instrument, document_controller.event_loop)
-        self.assertEqual(len(display.graphics), 0)
+        probe_view = stem_controller.ProbeView(instrument, document_model, document_controller.event_loop)
+        self.assertEqual(len(display_item.graphics), 0)
         with contextlib.closing(document_controller):
             try:
                 with contextlib.closing(hardware_source), contextlib.closing(probe_view), contextlib.closing(scan_state_controller):
                     scan_state_controller.handle_positioned_check_box(True)
                     self._acquire_one(document_controller, hardware_source)
-                    self.assertEqual(len(display.graphics), 1)
+                    self.assertEqual(len(display_item.graphics), 1)
                     hardware_source.start_playing()
                     hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                     document_controller.periodic()
-                    self.assertEqual(len(display.graphics), 0)
+                    self.assertEqual(len(display_item.graphics), 0)
                     hardware_source.stop_playing()
             finally:
                 HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
@@ -748,7 +751,8 @@ class TestScanControlClass(unittest.TestCase):
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
-            probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            probe_graphic = display_item.graphics[0]
             self.assertFalse(probe_graphic._closed)
             scan_state_controller.handle_positioned_check_box(False)
             document_controller.periodic()
@@ -762,13 +766,15 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(1, True)
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
-            self.assertIsNotNone(document_model.data_items[0].primary_display_specifier.display.graphics[0])
-            self.assertIsNotNone(document_model.data_items[1].primary_display_specifier.display.graphics[0])
+            display_item0 = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
+            self.assertIsNotNone(display_item0.graphics[0])
+            self.assertIsNotNone(display_item1.graphics[0])
             scan_state_controller.handle_positioned_check_box(False)
             document_controller.periodic()
             self.assertIsNone(hardware_source.probe_position)
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
-            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+            self.assertEqual(len(display_item0.graphics), 0)
+            self.assertEqual(len(display_item1.graphics), 0)
 
     def test_probe_on_multiple_channels_shuts_down_properly(self):
         with self._make_scan_context() as scan_context:
@@ -778,7 +784,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()
-            document_model.data_items[0].primary_display_specifier.display.graphics[0].position = 0.3, 0.4
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item.graphics[0].position = 0.3, 0.4
             document_controller.periodic()
             # will output extraneous messages when it fails
 
@@ -790,12 +797,14 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()
-            display = document_model.data_items[0].primary_display_specifier.display
-            probe_graphic = display.graphics[0]
-            display.remove_graphic(probe_graphic)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            probe_graphic = display_item.graphics[0]
+            display_item.remove_graphic(probe_graphic)
             document_controller.periodic()
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
-            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+            display_item0 = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
+            self.assertEqual(len(display_item0.graphics), 0)
+            self.assertEqual(len(display_item1.graphics), 0)
             self.assertIsNone(hardware_source.probe_position)
             # will output extraneous messages when it fails
 
@@ -809,8 +818,10 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             scan_state_controller.handle_positioned_check_box(False)
             document_controller.periodic()
-            self.assertEqual(len(document_model.data_items[0].primary_display_specifier.display.graphics), 0)
-            self.assertEqual(len(document_model.data_items[1].primary_display_specifier.display.graphics), 0)
+            display_item0 = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
+            self.assertEqual(len(display_item0.graphics), 0)
+            self.assertEqual(len(display_item1.graphics), 0)
             self.assertIsNone(hardware_source.probe_position)
 
     def test_setting_probe_position_updates_probe_graphic(self):
@@ -820,7 +831,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()
-            probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            probe_graphic = display_item.graphics[0]
             self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
             scan_context.instrument.set_probe_position(Geometry.FloatPoint(y=0.45, x=0.65))
             document_controller.periodic()
@@ -833,7 +845,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, hardware_source)
             document_controller.periodic()
-            probe_graphic = document_model.data_items[0].primary_display_specifier.display.graphics[0]
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            probe_graphic = display_item.graphics[0]
             self.assertEqual(scan_context.instrument.probe_position, probe_graphic.position)
             probe_graphic.position = Geometry.FloatPoint(y=0.45, x=0.65)
             document_controller.periodic()
@@ -860,33 +873,34 @@ class TestScanControlClass(unittest.TestCase):
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
                 hardware_source.start_playing()
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
-                display = document_model.data_items[0].primary_display_specifier.display
-                self.assertEqual(len(display.graphics), 0)
+                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+                self.assertEqual(len(display_item.graphics), 0)
                 hardware_source.subscan_enabled = True
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
                 hardware_source.stop_playing()
+                display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
                 self.assertEqual(2, len(document_model.data_items))
-                self.assertEqual(1, len(display.graphics))
-                self.assertEqual(0, len(document_model.data_items[1].primary_display_specifier.display.graphics))
+                self.assertEqual(1, len(display_item.graphics))
+                self.assertEqual(0, len(display_item1.graphics))
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
                 hardware_source.start_playing()
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
-                display = document_model.data_items[0].primary_display_specifier.display
-                self.assertEqual(len(display.graphics), 0)
+                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+                self.assertEqual(len(display_item.graphics), 0)
                 hardware_source.subscan_enabled = True
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
-                display.remove_graphic(display.graphics[0])
+                display_item.remove_graphic(display_item.graphics[0])
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
                 hardware_source.stop_playing()
@@ -895,17 +909,17 @@ class TestScanControlClass(unittest.TestCase):
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_controller.event_loop)):
+            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
                 hardware_source.start_playing()
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
-                display = document_model.data_items[0].primary_display_specifier.display
-                self.assertEqual(len(display.graphics), 0)
+                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+                self.assertEqual(len(display_item.graphics), 0)
                 hardware_source.subscan_enabled = True
                 hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 document_controller.periodic()
                 hardware_source.stop_playing()
-                display.remove_graphic(display.graphics[0])
+                display_item.remove_graphic(display_item.graphics[0])
                 self.assertFalse(hardware_source.subscan_enabled)
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
