@@ -158,7 +158,8 @@ class AcquireController(metaclass=Utility.Singleton):
             eels_data_item = document_controller.document_model.get_projection_new(data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
-                document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(eels_data_item))
+                eels_display_item = document_controller.document_model.get_display_item_for_data_item(eels_data_item)
+                document_controller.show_display_item(eels_display_item)
 
             document_controller.workspace_controller.display_data_item_in_display_panel(eels_data_item, display_panel_id)
 

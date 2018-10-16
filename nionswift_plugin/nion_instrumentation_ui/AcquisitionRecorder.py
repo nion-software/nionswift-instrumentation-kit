@@ -181,7 +181,8 @@ class Controller:
                 channel_ext = (" (" + channel_name + ")") if channel_name else ""
                 data_item.title = _("Recording of ") + hardware_source.display_name + channel_ext
                 document_controller.document_model.append_data_item(data_item)
-                document_controller.display_data_item(DataItem.DisplaySpecifier.from_data_item(data_item))
+                display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+                document_controller.show_display_item(display_item)
 
         if was_playing:
             print("AR: restarting")
