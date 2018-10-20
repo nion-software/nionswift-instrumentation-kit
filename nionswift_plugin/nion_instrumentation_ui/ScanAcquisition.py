@@ -59,6 +59,8 @@ class ScanAcquisitionController:
 
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
 
+        scan_hardware_source.apply_subscan(scan_frame_parameters)
+
         camera_hardware_source = self.__camera_hardware_source._hardware_source
 
         camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)

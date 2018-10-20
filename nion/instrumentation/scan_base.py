@@ -493,11 +493,18 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
             try:
                 scan_max_area = 2048 * 2048
-                scan_param_height = int(scan_frame_parameters["size"][0])
-                scan_param_width = int(scan_frame_parameters["size"][1])
-                if scan_param_height * scan_param_width > scan_max_area:
-                    scan_param_height = scan_max_area // scan_param_width
-                scan_frame_parameters["size"] = scan_param_height, scan_param_width
+                if scan_frame_parameters.get("subscan_pixel_size"):
+                    scan_param_height = int(scan_frame_parameters["subscan_pixel_size"][0])
+                    scan_param_width = int(scan_frame_parameters["subscan_pixel_size"][1])
+                    if scan_param_height * scan_param_width > scan_max_area:
+                        scan_param_height = scan_max_area // scan_param_width
+                    scan_frame_parameters["subscan_pixel_size"] = scan_param_height, scan_param_width
+                else:
+                    scan_param_height = int(scan_frame_parameters["size"][0])
+                    scan_param_width = int(scan_frame_parameters["size"][1])
+                    if scan_param_height * scan_param_width > scan_max_area:
+                        scan_param_height = scan_max_area // scan_param_width
+                    scan_frame_parameters["size"] = scan_param_height, scan_param_width
                 scan_frame_parameters["pixel_time_us"] = int(1000 * camera_frame_parameters["exposure_ms"] * 0.75)
                 # long timeout is needed until memory allocation is outside of the acquire_sequence call.
                 scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
@@ -614,6 +621,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     @subscan_region.setter
     def subscan_region(self, value):
         self.__stem_controller._subscan_region_value.value = value
+
+    def apply_subscan(self, frame_parameters):
+        context_size = Geometry.FloatSize.make(frame_parameters["size"])
+        if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
+            pass  # let the parameters speak for themselves
+        elif self.subscan_enabled and self.subscan_region:
+            subscan_region = Geometry.FloatRect.make(self.subscan_region)
+            frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
+            frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
+            frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
 
     def __subscan_state_changed(self, name):
         subscan_state = self.__stem_controller._subscan_state_value.value
