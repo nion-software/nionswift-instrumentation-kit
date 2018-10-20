@@ -2,6 +2,7 @@
 import functools
 import gettext
 import logging
+import math
 import numpy
 import sys
 import time
@@ -239,7 +240,7 @@ class CameraControlStateController:
             exposure = xdata.metadata.get("hardware_source", dict()).get("exposure")
             if xdata.intensity_calibration.units == "counts" and counts_per_electron and exposure:
                 sum_counts = xdata.intensity_calibration.convert_to_calibrated_value(numpy.sum(xdatas[0].data))
-                detector_current = sum_counts / exposure / counts_per_electron / 6.242e18
+                detector_current = sum_counts / exposure / counts_per_electron / 6.242e18 if exposure > 0 and counts_per_electron > 0 else 0.0
                 if detector_current != self.__camera_current:
                     self.__camera_current = detector_current
                     def update_camera_current():
@@ -775,7 +776,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         def camera_current_changed(camera_current):
             if camera_current:
-                camera_current_label.text = str(int(camera_current * 1e12)) + _("pA")
+                camera_current_int = int(camera_current * 1e12) if math.isfinite(camera_current) else 0
+                camera_current_label.text = str(camera_current_int) + _("pA")
                 camera_current_label.text_color = "black"
             else:
                 camera_current_label.text_color = "gray"
