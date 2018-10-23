@@ -141,7 +141,8 @@ class AcquireController(metaclass=Utility.Singleton):
 
         def show_in_panel(data_item, document_controller, display_panel_id):
             document_controller.document_model.append_data_item(data_item)
-            document_controller.workspace_controller.display_data_item_in_display_panel(data_item, display_panel_id)
+            display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+            document_controller.workspace_controller.display_display_item_in_display_panel(display_item, display_panel_id)
 
         def add_line_profile(data_item, document_controller, display_panel_id, midpoint=0.5, integration_width=.25):
             logging.debug("midpoint: {:.4f}".format(midpoint))
@@ -160,8 +161,10 @@ class AcquireController(metaclass=Utility.Singleton):
                 eels_data_item.title = _("EELS Summed")
                 eels_display_item = document_controller.document_model.get_display_item_for_data_item(eels_data_item)
                 document_controller.show_display_item(eels_display_item)
+            else:
+                eels_display_item = None
 
-            document_controller.workspace_controller.display_data_item_in_display_panel(eels_data_item, display_panel_id)
+            document_controller.workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
 
         def acquire_stack_and_sum(number_frames, energy_offset_per_frame, document_controller, final_layout_fn):
             # grab the document model and workspace for convenience
