@@ -173,13 +173,16 @@ class VideoConfiguration:
     def load(self, config_file: pathlib.Path):
         # read the configured video cameras from the config file and populate the instances list.
         self.__config_file = config_file
-        if config_file.is_file():
-            with open(config_file) as f:
-                settings_list = json.load(f)
-            if isinstance(settings_list, list):
-                for settings in settings_list:
-                    self.__instances.append(VideoDeviceInstance(None, None, settings))
-        self.__make_video_devices()
+        try:
+            if config_file.is_file():
+                with open(config_file) as f:
+                    settings_list = json.load(f)
+                if isinstance(settings_list, list):
+                    for settings in settings_list:
+                        self.__instances.append(VideoDeviceInstance(None, None, settings))
+            self.__make_video_devices()
+        except Exception as e:
+            pass
 
     def __save(self):
         # atomically overwrite
