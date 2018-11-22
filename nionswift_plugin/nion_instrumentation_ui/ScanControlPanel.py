@@ -114,7 +114,6 @@ class ScanControlStateController:
         on_record_button_state_changed(visible, enabled)
         on_record_abort_button_state_changed(visible, enabled)
         on_capture_button_state_changed(visible, enabled)
-        on_display_data_item_changed(data_item)
         on_simulate_button_state_changed(visible, enabled)
         on_display_new_data_item(data_item)
         (thread) on_channel_state_changed(channel_index, channel_id, channel_name, enabled)
@@ -163,22 +162,11 @@ class ScanControlStateController:
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
         self.on_capture_button_state_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
 
         self.__captured_xdatas_available_event = None
 
-        self.__data_item = None
-        self.__data_item_reference = None
-        self.__data_item_changed_event_listener = None
-        if self.__channel_id:
-            self.__data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
-
-            def update_display_data_item():
-                # this message may be called from a thread; switch to UI thread
-                queue_task(self.__update_display_data_item)
-
-            self.__data_item_changed_event_listener = self.__data_item_reference.data_item_changed_event.listen(update_display_data_item)
+        self.data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
 
     def close(self):
         if self.__captured_xdatas_available_event:
@@ -202,9 +190,6 @@ class ScanControlStateController:
         if self.__channel_state_changed_event_listener:
             self.__channel_state_changed_event_listener.close()
             self.__channel_state_changed_event_listener = None
-        if self.__data_item_changed_event_listener:
-            self.__data_item_changed_event_listener.close()
-            self.__data_item_changed_event_listener = None
         if self.__subscan_state_changed_listener:
             self.__subscan_state_changed_listener.close()
             self.__subscan_state_changed_listener = None
@@ -227,7 +212,6 @@ class ScanControlStateController:
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
         self.on_capture_button_state_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
         self.__scan_hardware_source = None
 
@@ -275,19 +259,6 @@ class ScanControlStateController:
         self.__update_record_button_state()
         self.__update_record_abort_button_state()
 
-    def __update_display_data_item(self):
-        data_item_reference = self.__document_model.get_data_item_reference(self.__document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
-        with data_item_reference.mutex:
-            data_item = data_item_reference.data_item
-            if data_item:
-                self.__data_item = data_item
-                if self.on_display_data_item_changed:
-                    self.on_display_data_item_changed(data_item)
-            else:
-                self.__data_item = None
-                if self.on_display_data_item_changed:
-                    self.on_display_data_item_changed(None)
-
     def initialize_state(self):
         """ Call this to initialize the state of the UI after everything has been connected. """
         if self.__scan_hardware_source:
@@ -334,8 +305,6 @@ class ScanControlStateController:
         probe_state = self.__scan_hardware_source.probe_state
         probe_position = self.__scan_hardware_source.probe_position
         self.__probe_state_changed(probe_state, probe_position)
-        if self.__channel_id:
-            self.__update_display_data_item()
 
     # must be called on ui thread
     def handle_change_profile(self, profile_label):
@@ -1658,7 +1627,8 @@ class ScanDisplayPanelController:
         self.__state_controller.on_data_channel_state_changed = data_channel_state_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
         self.__state_controller.on_display_new_data_item = display_new_data_item
-        self.__state_controller.on_display_data_item_changed = display_panel.set_displayed_data_item
+
+        display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
 
         def channel_enabled_check_box_check_state_changed(check_state):
             self.__state_controller.handle_enable_channel(self.__channel_index, check_state == "checked")

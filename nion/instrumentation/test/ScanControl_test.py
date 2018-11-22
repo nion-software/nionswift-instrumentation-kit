@@ -209,9 +209,9 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_scan_context("a") as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
             displayed_data_item = [None]
-            def display_data_item_changed(data_item):
-                displayed_data_item[0] = data_item
-            scan_state_controller.on_display_data_item_changed = display_data_item_changed
+            def display_data_item_changed():
+                displayed_data_item[0] = scan_state_controller.data_item_reference.data_item
+            data_item_reference_changed_listener = scan_state_controller.data_item_reference.data_item_reference_changed_event.listen(display_data_item_changed)
             self._record_one(document_controller, hardware_source, scan_state_controller)
             document_controller.periodic()  # extra to handle binding
             self.assertEqual(document_model.data_items[0], displayed_data_item[0])
@@ -222,6 +222,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(numpy.array_equal(document_model.data_items[0].data, document_model.data_items[1].data))
             # clean up
             hardware_source.abort_playing()
+            data_item_reference_changed_listener.close()
 
     def test_record_gets_correct_data_when_record_started_during_view(self):
         with self._make_scan_context() as scan_context:

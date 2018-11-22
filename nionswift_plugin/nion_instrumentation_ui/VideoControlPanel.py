@@ -67,21 +67,9 @@ class VideoSourceStateController:
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
         self.on_data_item_states_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
 
-        # this function is threadsafe
-        # it queues the threadsafe call to the UI thread, checking to make sure the
-        # hardware source wasn't closed before being called (mainly to make tests run).
-        def handle_data_item_changed():
-            def update_display_data_item():
-                if self.__hardware_source:
-                    self.__update_display_data_item()
-            self.queue_task(update_display_data_item)
-
-        self.__data_item = None
-        data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        self.__data_item_changed_event_listener = data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
+        self.data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
 
         def hardware_source_removed(hardware_source):
             if self.__hardware_source == hardware_source:
@@ -105,13 +93,10 @@ class VideoSourceStateController:
         if self.__data_item_states_changed_event_listener:
             self.__data_item_states_changed_event_listener.close()
             self.__data_item_states_changed_event_listener = None
-        self.__data_item_changed_event_listener.close()
-        self.__data_item_changed_event_listener = None
         self.on_display_name_changed = None
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
         self.on_data_item_states_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
         if self.__property_changed_event_listener:
             self.__property_changed_event_listener.close()
@@ -133,14 +118,6 @@ class VideoSourceStateController:
         self.__update_play_button_state()
         self.__update_abort_button_state()
 
-    # not thread safe
-    def __update_display_data_item(self):
-        data_item_reference = self.__document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        with data_item_reference.mutex:
-            self.__data_item = data_item_reference.data_item
-            if self.on_display_data_item_changed:
-                self.on_display_data_item_changed(self.__data_item)
-
     def initialize_state(self):
         """ Call this to initialize the state of the UI after everything has been connected. """
         if self.__hardware_source:
@@ -151,7 +128,6 @@ class VideoSourceStateController:
         self.__update_buttons()
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(list())
-        self.__update_display_data_item()
 
     def handle_play_clicked(self):
         """ Call this when the user clicks the play/pause button. """
@@ -264,9 +240,6 @@ class VideoDisplayPanelController:
             self.__data_item_states = data_item_states
             update_status_text()
 
-        def display_data_item_changed(data_item):
-            display_panel.set_displayed_data_item(data_item)
-
         def display_new_data_item(data_item):
             result_display_panel = display_panel.document_controller.next_result_display_panel()
             if result_display_panel:
@@ -277,33 +250,16 @@ class VideoDisplayPanelController:
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = data_item_states_changed
-        self.__state_controller.on_display_data_item_changed = display_data_item_changed
         self.__state_controller.on_display_new_data_item = display_new_data_item
+
+        display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
 
         play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_clicked
         abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
 
         self.__state_controller.initialize_state()
 
-        document_model = self.__display_panel.document_controller.document_model
-
-        # def update_display_data_item():
-        #     data_item_reference = document_model.get_data_item_reference(self.__hardware_source_id)
-        #     with data_item_reference.mutex:
-        #         data_item = data_item_reference.data_item
-        #         if data_item:
-        #             self.__display_panel.set_displayed_data_item(data_item)
-        #         else:
-        #             self.__display_panel.set_displayed_data_item(None)
-        #
-        # self.__data_item_reference = document_model.get_data_item_reference(self.__hardware_source_id)
-        # self.__data_item_changed_event_listener = self.__data_item_reference.data_item_changed_event.listen(update_display_data_item)
-        #
-        # update_display_data_item()
-
     def close(self):
-        # self.__data_item_changed_event_listener.close()
-        # self.__data_item_changed_event_listener = None
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = None
         self.__state_controller.close()

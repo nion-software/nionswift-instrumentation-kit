@@ -417,12 +417,12 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             data_items = [None, None]
-            def display_data_item_changed(data_item):
-                data_items[0] = data_item
-            def processed_data_item_changed(data_item):
-                data_items[1] = data_item
-            state_controller.on_display_data_item_changed = display_data_item_changed
-            state_controller.on_processed_data_item_changed = processed_data_item_changed
+            def display_data_item_changed():
+                data_items[0] = state_controller.data_item_reference.data_item
+            def processed_data_item_changed():
+                data_items[1] = state_controller.processed_data_item_reference.data_item
+            data_item_reference_changed_listener = state_controller.data_item_reference.data_item_reference_changed_event.listen(display_data_item_changed)
+            processed_data_item_reference_changed_listener = state_controller.processed_data_item_reference.data_item_reference_changed_event.listen(processed_data_item_changed)
             hardware_source.start_playing()
             try:
                 for _ in range(4):
@@ -433,17 +433,19 @@ class TestCameraControlClass(unittest.TestCase):
             document_model.recompute_all()
             self.assertEqual(data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
             self.assertEqual(data_items[1].data_shape, (hardware_source.get_expected_dimensions(2)[1], ))
+            data_item_reference_changed_listener.close()
+            processed_data_item_reference_changed_listener.close()
 
     def test_processed_data_is_reused(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             data_items = [None, None]
-            def display_data_item_changed(data_item):
-                data_items[0] = data_item
-            def processed_data_item_changed(data_item):
-                data_items[1] = data_item
-            state_controller.on_display_data_item_changed = display_data_item_changed
-            state_controller.on_processed_data_item_changed = processed_data_item_changed
+            def display_data_item_changed():
+                data_items[0] = state_controller.data_item_reference.data_item
+            def processed_data_item_changed():
+                data_items[1] = state_controller.processed_data_item_reference.data_item
+            data_item_reference_changed_listener = state_controller.data_item_reference.data_item_reference_changed_event.listen(display_data_item_changed)
+            processed_data_item_reference_changed_listener = state_controller.processed_data_item_reference.data_item_reference_changed_event.listen(processed_data_item_changed)
             # first acquisition
             hardware_source.start_playing()
             try:
@@ -471,6 +473,8 @@ class TestCameraControlClass(unittest.TestCase):
             document_model.recompute_all()
             self.assertEqual(len(document_model.data_items), 2)
             self.assertEqual(data_items, first_data_items)
+            data_item_reference_changed_listener.close()
+            processed_data_item_reference_changed_listener.close()
 
     def test_processed_data_is_regenerated_if_necessary(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)

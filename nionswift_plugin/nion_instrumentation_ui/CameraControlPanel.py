@@ -82,9 +82,7 @@ class CameraControlStateController:
         on_abort_button_state_changed(visible, enabled)
         on_monitor_button_state_changed(visible, enabled)
         on_capture_button_state_changed(visible, enabled)
-        on_display_data_item_changed(data_item)
         on_display_new_data_item(data_item)
-        on_processed_data_item_changed(data_item)
         on_log_messages(messages, data_elements)
         (thread) on_data_item_states_changed(data_item_states)
     """
@@ -110,9 +108,7 @@ class CameraControlStateController:
         self.on_monitor_button_state_changed = None
         self.on_data_item_states_changed = None
         self.on_capture_button_state_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
-        self.on_processed_data_item_changed = None
         self.on_camera_current_changed = None
         self.on_log_messages = None
 
@@ -122,22 +118,8 @@ class CameraControlStateController:
         self.__last_camera_current_time = 0
         self.__xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
 
-        # this function is threadsafe
-        # it queues the threadsafe call to the UI thread, checking to make sure the
-        # hardware source wasn't closed before being called (mainly to make tests run).
-        def handle_data_item_changed():
-            def update_display_data_item():
-                if self.__hardware_source:
-                    self.__update_display_data_item()
-            self.queue_task(update_display_data_item)
-
-        self.__data_item = None
-        data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        self.__data_item_changed_event_listener = data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
-
-        self.__eels_data_item = None
-        eels_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__hardware_source.hardware_source_id, "summed"))
-        self.__eels_data_item_changed_event_listener = eels_data_item_reference.data_item_changed_event.listen(handle_data_item_changed)
+        self.data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
+        self.processed_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__hardware_source.hardware_source_id, "summed"))
 
     def close(self):
         if self.__captured_xdatas_available_event:
@@ -158,10 +140,6 @@ class CameraControlStateController:
         if self.__log_messages_event_listener:
             self.__log_messages_event_listener.close()
             self.__log_messages_event_listener = None
-        self.__data_item_changed_event_listener.close()
-        self.__data_item_changed_event_listener = None
-        self.__eels_data_item_changed_event_listener.close()
-        self.__eels_data_item_changed_event_listener = None
         self.on_display_name_changed = None
         self.on_binning_values_changed = None
         self.on_profiles_changed = None
@@ -172,9 +150,7 @@ class CameraControlStateController:
         self.on_monitor_button_state_changed = None
         self.on_data_item_states_changed = None
         self.on_capture_button_state_changed = None
-        self.on_display_data_item_changed = None
         self.on_display_new_data_item = None
-        self.on_processed_data_item_changed = None
         self.on_log_messages = None
         self.__hardware_source = None
 
@@ -219,19 +195,6 @@ class CameraControlStateController:
     def has_processed_data(self):
         return self.__is_eels_camera
 
-    # not thread safe
-    def __update_display_data_item(self):
-        data_item_reference = self.__document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        with data_item_reference.mutex:
-            self.__data_item = data_item_reference.data_item
-            if self.on_display_data_item_changed:
-                self.on_display_data_item_changed(self.__data_item)
-        eels_data_item_reference = self.__document_model.get_data_item_reference(self.__document_model.make_data_item_reference_key(self.__hardware_source.hardware_source_id, "summed"))
-        with eels_data_item_reference.mutex:
-            self.__eels_data_item = eels_data_item_reference.data_item
-            if self.on_processed_data_item_changed:
-                self.on_processed_data_item_changed(self.__eels_data_item)
-
     def __receive_new_xdatas(self, xdatas):
         current_time = time.time()
         if current_time - self.__last_camera_current_time > 5.0 and len(xdatas) > 0 and callable(self.on_camera_current_changed):
@@ -270,7 +233,6 @@ class CameraControlStateController:
             self.__update_profile_index(self.__hardware_source.selected_profile_index)
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(list())
-        self.__update_display_data_item()
 
     # must be called on ui thread
     def handle_change_profile(self, profile_label):
@@ -940,8 +902,6 @@ class CameraDisplayPanelController:
         capture_button = CanvasItem.TextButtonCanvasItem(_("Capture"))
         capture_button.border_enabled = False
         playback_controls_row.add_canvas_item(capture_button)
-        self.__last_data_item = None
-        self.__last_processed_data_item = None
         self.__show_processed_checkbox = None
         if self.__state_controller.has_processed_data:
             self.__show_processed_checkbox = CanvasItem.CheckBoxCanvasItem()
@@ -1017,23 +977,13 @@ class CameraDisplayPanelController:
                 capture_button.text = str()
                 capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def display_data_item_changed(data_item):
-            if not self.__show_processed_checkbox or not self.__show_processed_checkbox.check_state == "checked":
-                self.__state_controller.use_processed_data = False  # for capture
-                display_panel.set_displayed_data_item(data_item)
-            self.__last_data_item = data_item
-
-        def processed_data_item_changed(data_item):
-            if self.__show_processed_checkbox and self.__show_processed_checkbox.check_state == "checked":
-                self.__state_controller.use_processed_data = True  # for capture
-                display_panel.set_displayed_data_item(data_item)
-            self.__last_processed_data_item = data_item
-
         def show_processed_checkbox_changed(check_state):
             if check_state == "checked":
-                processed_data_item_changed(self.__last_processed_data_item)
+                display_panel.set_data_item_reference(self.__state_controller.processed_data_item_reference)
+                self.__state_controller.use_processed_data = True  # for capture
             else:
-                display_data_item_changed(self.__last_data_item)
+                display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
+                self.__state_controller.use_processed_data = False  # for capture
 
         def display_new_data_item(data_item):
             result_display_panel = display_panel.document_controller.next_result_display_panel()
@@ -1050,15 +1000,18 @@ class CameraDisplayPanelController:
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = data_item_states_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
-        self.__state_controller.on_display_data_item_changed = display_data_item_changed
         self.__state_controller.on_display_new_data_item = display_new_data_item
-        self.__state_controller.on_processed_data_item_changed = processed_data_item_changed
 
         play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_pause_clicked
         abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
         capture_button.on_button_clicked = self.__state_controller.handle_capture_clicked
 
         self.__state_controller.initialize_state()
+
+        checkstate = self.__show_processed_checkbox.check_state if self.__show_processed_checkbox else "unchecked"
+
+        show_processed_checkbox_changed(checkstate)
+
 
     def close(self):
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
