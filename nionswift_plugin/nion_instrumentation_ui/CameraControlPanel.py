@@ -1083,6 +1083,10 @@ class CameraDisplayPanelController:
     def key_released(self, key):
         return False
 
+    @property
+    def hardware_source_id(self):
+        return self.__hardware_source_id
+
 
 hardware_source_added_event_listener = None
 hardware_source_removed_event_listener = None
@@ -1119,7 +1123,7 @@ def run():
                         selected_display_panel.change_display_panel_content(d)
 
                     action = display_type_menu.add_menu_item(hardware_source.display_name, functools.partial(switch_to_live_controller, hardware_source))
-                    action.checked = False
+                    action.checked = isinstance(selected_display_panel.display_panel_controller, CameraDisplayPanelController) and selected_display_panel.display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
                     return [action]
 
                 def make_new(self, controller_type, display_panel, d):

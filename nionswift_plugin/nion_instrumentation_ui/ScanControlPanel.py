@@ -1697,6 +1697,14 @@ class ScanDisplayPanelController:
     def key_released(self, key):
         return False
 
+    @property
+    def channel_id(self):
+        return self.__data_channel_id
+
+    @property
+    def hardware_source_id(self):
+        return self.__hardware_source_id
+
 
 hardware_source_added_event_listener = None
 hardware_source_removed_event_listener = None
@@ -1726,7 +1734,7 @@ def run():
 
                         display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
                         action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, channel_id))
-                        action.checked = False
+                        action.checked = isinstance(selected_display_panel.display_panel_controller, ScanDisplayPanelController) and selected_display_panel.display_panel_controller.channel_id == channel_id and selected_display_panel.display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
                         actions.append(action)
                     return actions
 
