@@ -2,6 +2,7 @@
 import asyncio
 import functools
 import gettext
+import pkgutil
 import sys
 
 # third party libraries
@@ -10,7 +11,6 @@ import math
 # local libraries
 from nion.instrumentation import stem_controller
 from nion.swift import DataItemThumbnailWidget
-from nion.swift import Decorators
 from nion.swift import DisplayPanel
 from nion.swift import Panel
 from nion.swift import Workspace
@@ -928,7 +928,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                     result_display_panel.request_focus()
             document_controller.queue_task(perform)
 
-        open_controls_button = CanvasItem.BitmapButtonCanvasItem(document_controller.ui.load_rgba_data_from_file(Decorators.relative_file(__file__, "resources/sliders_icon_24.png")))
+        open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/sliders_icon_24.png"), "png"))
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
         simulate_button = ui.create_push_button_widget(_("Simulate"))
