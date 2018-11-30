@@ -1,6 +1,13 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.16.0 (UNRELEASED)
+-------------------
+
+- Add checkmark in context menu to indicate active display panel controller.
+
+- Use new display item capabilities in Nion Swift.
+
 0.15.1 (2018-10-04)
 -------------------
 
