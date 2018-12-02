@@ -609,7 +609,7 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
-            self.assertIsNotNone(document_model.data_items[0].metadata["description"]["time_zone"])
+            self.assertIsNotNone(document_model.data_items[0].timezone)
 
     def test_acquire_sequence_2d_calibrations(self):
         document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source()
