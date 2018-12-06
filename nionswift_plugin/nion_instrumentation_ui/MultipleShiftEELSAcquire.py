@@ -15,9 +15,9 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import Graphics
-from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
+from nion.utils import Registry
 
 from . import HardwareSourceChoice
 
@@ -34,8 +34,6 @@ eels_hardware_source_id = "eels_camera"
 energy_adjust_control = "EELS_MagneticShift_Offset"
 blank_control = "C_Blank"
 
-STEM_CONTROLLER_ID = "autostem_controller"
-
 
 class AcquireController(metaclass=Utility.Singleton):
 
@@ -48,15 +46,15 @@ class AcquireController(metaclass=Utility.Singleton):
         super(AcquireController, self).__init__()
         self.__acquire_thread = None
 
-    def start_threaded_acquire_and_sum(self, autostem_controller, camera, number_frames, energy_offset_per_frame, sleep_time, document_controller, final_layout_fn):
+    def start_threaded_acquire_and_sum(self, stem_controller, camera, number_frames, energy_offset_per_frame, sleep_time, document_controller, final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
 
         def set_offset_energy(offset, sleep_time=1):
-            current_energy = autostem_controller.GetVal(energy_adjust_control)
+            current_energy = stem_controller.GetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the desired value (or until timeout)
-            autostem_controller.SetValAndConfirm(energy_adjust_control, float(current_energy)+offset, 1, int(sleep_time*1000))
+            stem_controller.SetValAndConfirm(energy_adjust_control, float(current_energy) + offset, 1, int(sleep_time * 1000))
             # sleep 1 sec to avoid double peaks and ghosting
             time.sleep(sleep_time)
 
@@ -69,7 +67,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
 
-            reference_energy = autostem_controller.GetVal(energy_adjust_control)
+            reference_energy = stem_controller.GetVal(energy_adjust_control)
             for frame_index in range(number_frames):
                 set_offset_energy(offset_per_spectrum, 1)
                 # use next frame to start to make sure we're getting a frame with the new energy offset
@@ -78,7 +76,7 @@ class AcquireController(metaclass=Utility.Singleton):
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
 
-            autostem_controller.SetValWait(blank_control, 1.0, 200)
+            stem_controller.SetValWait(blank_control, 1.0, 200)
             # sleep 4 seconds to allow afterglow to die out
             time.sleep(sleep_time)
             dark_sum = None
@@ -92,8 +90,8 @@ class AcquireController(metaclass=Utility.Singleton):
                 if task_object is not None:
                     task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
-            autostem_controller.SetVal(blank_control, 0)
-            autostem_controller.SetVal(energy_adjust_control, reference_energy)
+            stem_controller.SetVal(blank_control, 0)
+            stem_controller.SetVal(energy_adjust_control, reference_energy)
             image_stack_data -= dark_sum / number_frames
 
             dimension_calibration0 = first_xdata.dimensional_calibrations[0]
@@ -287,8 +285,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             self.__configure_start_workspace(self.document_controller.workspace_controller, eels_camera.hardware_source_id)
             # start the EELS acquisition
             eels_camera.start_playing()
-            autostem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(STEM_CONTROLLER_ID)
-            AcquireController().start_threaded_acquire_and_sum(autostem_controller, eels_camera, number_frames,
+            stem_controller = Registry.get_component("stem_controller")
+            AcquireController().start_threaded_acquire_and_sum(stem_controller, eels_camera, number_frames,
                                                                energy_offset, sleep_time, self.document_controller,
                                                                functools.partial(self.set_final_layout))
 
