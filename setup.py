@@ -11,7 +11,7 @@ import os
 
 setuptools.setup(
     name="nionswift-instrumentation",
-    version="0.15.1",
+    version="0.16.0",
     author="Nion Software",
     author_email="swift@nion.com",
     description="A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope).",
@@ -19,12 +19,12 @@ setuptools.setup(
     url="https://github.com/nion-software/nionswift-instrumentation-kit",
     packages=["nion.instrumentation", "nion.instrumentation.test", "nionswift_plugin.nion_instrumentation_ui"],
     package_data={"nionswift_plugin.nion_instrumentation_ui": ["resources/*", "manifest.json"]},
-    install_requires=[],
+    install_requires=["nionswift>=0.14.0"],
     license='GPLv3',
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",
-        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.6",
     ],
     include_package_data=True,
-    python_requires='~=3.5',
+    python_requires='~=3.6',
 )
