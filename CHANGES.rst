@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.16.1 (2018-12-21)
+-------------------
+
+- Change spectrum and 4d images to go into new data items each acquisition.
+
 0.16.0 (2018-12-12)
 -------------------
 

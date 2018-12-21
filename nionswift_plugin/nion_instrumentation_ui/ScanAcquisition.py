@@ -6,6 +6,8 @@ import logging
 import threading
 
 # local libraries
+from nion.swift import Facade
+from nion.swift.model import DataItem
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
 from nion.utils import Binding
@@ -35,7 +37,13 @@ class ScanAcquisitionController:
 
         def create_and_display_data_item(library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source):
             camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
-            data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
+
+            # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
+
+            data_item = Facade.DataItem(DataItem.DataItem(large_format=True))
+            library._document_model.append_data_item(data_item._data_item)
+            data_item._data_item.session_id = library._document_model.session_id
+
             data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
             # the data item should not have any other 'clients' at this point; so setting the
             # data and metadata will immediately unload the data (and write to disk). this is important,
@@ -48,7 +56,13 @@ class ScanAcquisitionController:
                 scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
                 scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
                 channel_id = camera_hardware_source_id + "_" + scan_channel_id
-                data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
+
+                # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
+
+                data_item = Facade.DataItem(DataItem.DataItem())
+                library._document_model.append_data_item(data_item._data_item)
+                data_item._data_item.session_id = library._document_model.session_id
+
                 data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
                 data_item.set_data_and_metadata(scan_data_and_metadata)
                 document_window.display_data_item(data_item)
