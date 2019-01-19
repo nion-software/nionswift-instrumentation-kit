@@ -125,6 +125,9 @@ class CameraControlStateController:
         if self.__captured_xdatas_available_event:
             self.__captured_xdatas_available_event.close()
             self.__captured_xdatas_available_event = None
+        if self.__xdatas_available_event:
+            self.__xdatas_available_event.close()
+            self.__xdatas_available_event = None
         if self.__profile_changed_event_listener:
             self.__profile_changed_event_listener.close()
             self.__profile_changed_event_listener = None
@@ -153,6 +156,9 @@ class CameraControlStateController:
         self.on_display_new_data_item = None
         self.on_log_messages = None
         self.__hardware_source = None
+
+    def _reset_camera_current(self):
+        self.__last_camera_current_time = 0
 
     def __update_play_button_state(self):
         enabled = self.__hardware_source is not None
@@ -818,6 +824,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
     def image_panel_key_released(self, display_panel, key):
         self.__shift_click_state = None
         return False
+
+    @property
+    def state_controller(self):
+        return self.__state_controller
 
 
 class CameraControlPanel(Panel.Panel):
