@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.16.2 (UNRELEASED)
+0.16.2 (2018-01-18)
 -------------------
 
 - Fix closing bug in state controller leading to errors when closing document window.
