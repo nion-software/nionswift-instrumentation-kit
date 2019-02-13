@@ -155,7 +155,22 @@ class CameraDevice(abc.ABC):
     @property
     @abc.abstractmethod
     def calibration_controls(self) -> dict:
-        """Return list of calibration controls to be read from STEM controller for this device."""
+        """Return lookup dict of calibration controls to be read from instrument controller for this device.
+
+        The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", or "intensity",
+        <field> is "scale", "offset", or "units", and <type> is "control" or "value". If <type> is "control", then
+        the value for that axis/field will use the value of that key to read the calibration field value from the
+        instrument controller. If <type> is "value", then the calibration field value will be the value of that key.
+
+        For example, the dict with the following keys will read x_scale and x_offset from the instrument controller
+        values "cam_scale' and "cam_offset", but supply the units directly as "nm".
+
+        { "x_scale_control": "cam_scale", "x_offset_control": "cam_offset", "x_units_value": "nm" }
+
+        In addition to the calibration controls, a "counts_per_electron" control or value can also be specified.
+
+        { "counts_per_electron_value": 32 }
+        """
         ...
 
     @abc.abstractmethod
@@ -181,6 +196,14 @@ class CameraDevice(abc.ABC):
         If integration_count is non-zero and is handled directly in this method, the 'properties' should also contain
         a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
         value of 1 is assumed.
+
+        Calibrations may be specified by including keys 'intensity_calibration' or 'spatial_calibrations'. However,
+        if the calibration is dependent on the instrument settings, it may be better to use the 'calibration_controls'
+        method to specify that calibration should be read from the instrument settings instead. If calibrations are
+        directly included in the data element dict, the `intensity_calibration` should be a dict with `offset`, `scale`,
+        and `units` key and the `spatial_calibrations` should be a list of dicts, one for each dimension, with the same
+        keys. Specifying calibrations directly in the data element take precedence over using the `calibration_controls`
+        method.
         """
         ...
 
