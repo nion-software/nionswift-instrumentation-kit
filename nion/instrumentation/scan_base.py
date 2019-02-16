@@ -489,6 +489,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_synchronized(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
         self.__camera_hardware_source = camera
         try:
+            self.__stem_controller._enter_synchronized_state(self, camera=camera)
             self.__grab_synchronized_is_scanning = True
             self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
             try:
@@ -556,6 +557,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                         # aborted
                         scan_task.cancel()
             finally:
+                self.__stem_controller._exit_synchronized_state(self, camera=camera)
                 self.__grab_synchronized_is_scanning = False
                 self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
                 logging.debug("end sequence acquisition")

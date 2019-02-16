@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.16.3 (UNRELEASED)
+-------------------
+
+- Add 'synchronized state' messages to instrument controller, invoked at start/end of synchronized acquisition.
+
 0.16.2 (2018-01-18)
 -------------------
 

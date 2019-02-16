@@ -101,15 +101,21 @@ class STEMController:
 
     # end configuration methods
 
-    def _enter_scanning_state(self):
+    def _enter_scanning_state(self) -> None:
         self.__probe_state_stack.append("scanning")
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
         if self._subscan_state_value.value == SubscanState.INVALID:
             self._subscan_state_value.value = SubscanState.DISABLED
 
-    def _exit_scanning_state(self):
+    def _exit_scanning_state(self) -> None:
         self.__probe_state_stack.pop()
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
+
+    def _enter_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: HardwareSource.HardwareSource=None) -> None:
+        pass
+
+    def _exit_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: HardwareSource.HardwareSource=None) -> None:
+        pass
 
     @property
     def _probe_position_value(self):
