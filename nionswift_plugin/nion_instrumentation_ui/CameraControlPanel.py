@@ -716,7 +716,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             blocked = self.__changes_blocked
             self.__changes_blocked = True
             try:
-                exposure_field.text = str("{0:.1f}".format(float(frame_parameters.exposure_ms)))
+                exposure_field.text = str("{0:.2f}".format(float(frame_parameters.exposure_ms)))
                 if exposure_field.focused:
                     exposure_field.request_refocus()
                 binning_combo.current_text = str(frame_parameters.binning)

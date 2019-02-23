@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 0.16.3 (UNRELEASED)
 -------------------
 
+- Change camera exposure time and scan pixel time to have two digits of precision.
+
 - Add 'synchronized state' messages to instrument controller, invoked at start/end of synchronized acquisition.
 
 - Limit scan device pixel time in the case of long camera exposure during synchronized acquisition.

@@ -1233,7 +1233,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def frame_parameters_changed(frame_parameters):
             width_field.text = str(int(frame_parameters.size[1]))
             height_field.text = str(int(frame_parameters.size[0]))
-            time_field.text = str("{0:.1f}".format(float(frame_parameters.pixel_time_us)))
+            time_field.text = str("{0:.2f}".format(float(frame_parameters.pixel_time_us)))
             fov_field.text = str("{0:.1f}".format(float(frame_parameters.fov_nm)))
             rotation_field.text = str("{0:.1f}".format(float(frame_parameters.rotation_rad) * 180.0 / math.pi))
             rotation_tracker.text = rotation_field.text
