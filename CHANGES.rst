@@ -6,6 +6,8 @@ Changelog (nionswift-instrumentation)
 
 - Add 'synchronized state' messages to instrument controller, invoked at start/end of synchronized acquisition.
 
+- Limit scan device pixel time in the case of long camera exposure during synchronized acquisition.
+
 0.16.2 (2018-01-18)
 -------------------
 

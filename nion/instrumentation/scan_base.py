@@ -506,7 +506,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     if scan_param_height * scan_param_width > scan_max_area:
                         scan_param_height = scan_max_area // scan_param_width
                     scan_frame_parameters["size"] = scan_param_height, scan_param_width
-                scan_frame_parameters["pixel_time_us"] = int(1000 * camera_frame_parameters["exposure_ms"] * 0.75)
+                # TODO: let the scan device adjust these parameters for synchronized acquisition instead of hardcoded values here
+                # pixel time should be limited to the max allowed by the scan device
+                scan_frame_parameters["pixel_time_us"] = min(5120000, int(1000 * camera_frame_parameters["exposure_ms"] * 0.75))
                 # long timeout is needed until memory allocation is outside of the acquire_sequence call.
                 scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
                 scan_frame_parameters["external_clock_mode"] = 1
