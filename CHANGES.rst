@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.16.3 (UNRELEASED)
+0.16.3 (2019-02-27)
 -------------------
 
 - Change camera exposure time and scan pixel time to have two digits of precision.
