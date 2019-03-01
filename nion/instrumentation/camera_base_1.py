@@ -593,12 +593,12 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             calibration_controls = camera.calibration_controls
             x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x)
             y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y)
-            if camera_category.lower() != "eels" and len(data_shape) == 2:
+            if camera_category.lower() != "eels" and camera_category.lower() != "eire" and len(data_shape) == 2:
                 y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
                 x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
                 data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
             else:
-                # cover the possibility that EELS data is returned as 1D
+                # cover the possibility that EELS and EIRE data is returned as 1D
                 if len(data_shape) == 2:
                     data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
                 else:
