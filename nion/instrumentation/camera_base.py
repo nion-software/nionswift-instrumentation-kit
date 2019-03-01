@@ -349,7 +349,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
-        if self.__camera_category in ("eels", "ronchigram"):
+        if self.__camera_category in ("eels", "ronchigram", "eire"):
             data_element["properties"]["signal_type"] = self.__camera_category
         return [data_element]
 
@@ -547,6 +547,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.features["is_ronchigram_camera"] = True
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
+            self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
+        if self.__camera_category.lower() == "eire":
+            self.features["is_eire_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
 
         # add channels
