@@ -90,6 +90,7 @@ class CameraControlStateController:
     def __init__(self, camera_hardware_source, queue_task, document_model):
         self.__hardware_source = camera_hardware_source
         self.__is_eels_camera = self.__hardware_source and self.__hardware_source.features.get("is_eels_camera", False)
+        # add support for Electron Induced Radiation Spectroscopy
         self.__is_eire_camera = self.__hardware_source and self.__hardware_source.features.get("is_eire_camera", False)
         self.use_processed_data = False
         self.queue_task = queue_task
@@ -200,6 +201,7 @@ class CameraControlStateController:
 
     @property
     def has_processed_data(self):
+        # add support for Electron Induced Radiation Spectroscopy
         return self.__is_eels_camera or self.__is_eire_camera
 
     def __receive_new_xdatas(self, xdatas):
@@ -1070,6 +1072,7 @@ def run():
         # check to see if we handle this hardware source.
         is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
         is_eels_camera = hardware_source.features.get("is_eels_camera", False)
+        # add support for Electron Induced Radiation Spectroscopy
         is_eire_camera = hardware_source.features.get("is_eire_camera", False)
         if is_ronchigram_camera or is_eels_camera or is_eire_camera:
 
@@ -1111,6 +1114,7 @@ def run():
             panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
 
             camera_panel_type = hardware_source.features.get("camera_panel_type")
+            # add support for Electron Induced Radiation Spectroscopy
             if not camera_panel_type or camera_panel_type in ("ronchigram", "eels", "eire"):
                 Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
             else:
@@ -1121,6 +1125,7 @@ def run():
         """Called when a hardware source is removed from the hardware source manager."""
         is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
         is_eels_camera = hardware_source.features.get("is_eels_camera", False)
+        # add support for Electron Induced Radiation Spectroscopy
         is_eire_camera = hardware_source.features.get("is_eire_camera", False)
         if is_ronchigram_camera or is_eels_camera or is_eire_camera:
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)

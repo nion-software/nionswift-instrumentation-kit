@@ -349,6 +349,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
+# add support for Electron Induced Radiation Spectroscopy
         if self.__camera_category in ("eels", "ronchigram", "eire"):
             data_element["properties"]["signal_type"] = self.__camera_category
         return [data_element]
@@ -547,7 +548,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.features["is_ronchigram_camera"] = True
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
-            self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
+            # self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
+        # add support for Electron Induced Radiation Spectroscopy
         if self.__camera_category.lower() == "eire":
             self.features["is_eire_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
@@ -955,17 +957,25 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             calibration_controls = camera.calibration_controls
             x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x)
             y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y)
-            if camera_category.lower() != "eels" and len(data_shape) == 2:
+            if camera_category.lower() != "eels" and camera_category.lower() != "eire" and len(data_shape) == 2:
                 y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
                 x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
                 data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
             else:
                 # cover the possibility that EELS data is returned as 1D
-                if len(data_shape) == 2:
-                    data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
-                else:
-                    data_element["spatial_calibrations"] = [x_calibration_dict]
-
+                if "properties" in data_element:
+                    if (data_element["properties"]["acquisition_mode"] == "Focus") or (data_element["properties"]["acquisition_mode"] == "Cumul"):
+                        if len(data_shape) == 2:
+                            data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+                        else:
+                            data_element["spatial_calibrations"] = [x_calibration_dict]
+                    else:
+                        scale = camera.readoutTime
+                        time_scale_dict = Calibration.Calibration(0, scale, "s").rpc_dict
+                        if (data_element["properties"]["acquisition_mode"] == "1D-Chrono") or (data_element["properties"]["acquisition_mode"] == "1D-Chrono-Live"):
+                                data_element["spatial_calibrations"] = [time_scale_dict, x_calibration_dict]
+                        else:
+                            data_element["spatial_calibrations"] = [time_scale_dict, y_calibration_dict, x_calibration_dict]
 
 def update_intensity_calibration(data_element, stem_controller, camera):
     if "intensity_calibration" not in data_element:
