@@ -7,7 +7,10 @@ import threading
 
 # local libraries
 from nion.swift import Facade
+from nion.swift import HistogramPanel
 from nion.swift.model import DataItem
+from nion.swift.model import DisplayItem
+from nion.swift.model import Graphics
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
 from nion.utils import Binding
@@ -164,6 +167,10 @@ class PanelDelegate:
         self.__camera_width_ref = [0]
         self.__camera_height_ref = [0]
         self.__scan_acquisition_preference_panel = None
+        self.__target_display_item_stream = None
+        self.__target_region_stream = None
+        self.__target_display_item_stream_listener = None
+        self.__target_region_stream_listener = None
 
     def create_panel_widget(self, ui, document_controller):
 
@@ -172,12 +179,80 @@ class PanelDelegate:
         self.__scan_acquisition_preference_panel = ScanAcquisitionPreferencePanel(self.__scan_hardware_source_choice, self.__camera_hardware_source_choice)
         # PreferencesDialog.PreferencesManager().register_preference_pane(self.__scan_acquisition_preference_panel)
 
+        # need the target graphic where the graphic sits on a scan or subscan
+
+        self.__target_display_item_stream = HistogramPanel.TargetDisplayItemStream(document_controller._document_window).add_ref()
+        self.__target_region_stream = HistogramPanel.TargetRegionStream(self.__target_display_item_stream).add_ref()
+
+        def matches_scan_display_item(display_item: DisplayItem.DisplayItem) -> bool:
+            scan_hardware_source = self.__scan_hardware_source_choice.hardware_source
+            if scan_hardware_source:
+                for data_channel in scan_hardware_source.data_channels:
+                    data_item_reference_key = "_".join([scan_hardware_source.hardware_source_id, data_channel.channel_id])
+                    data_channel_data_item = document_controller.library.get_data_item_for_reference_key(data_item_reference_key)
+                    data_channel_display_item = data_channel_data_item.display if data_channel_data_item else None
+                    if data_channel_display_item and display_item == data_channel_display_item._display_item:
+                        return True
+                    data_item_reference_key = "_".join([scan_hardware_source.hardware_source_id, data_channel.channel_id + ".subscan"])
+                    data_channel_data_item = document_controller.library.get_data_item_for_reference_key(data_item_reference_key)
+                    data_channel_display_item = data_channel_data_item.display if data_channel_data_item else None
+                    if data_channel_display_item and display_item == data_channel_display_item._display_item:
+                        return True
+            return False
+
+        def update_context() -> None:
+            # this is called when the graphic stream gets a new target graphic. if there are more than one graphics
+            # selected, the graphic passed to this function will be None. the graphic stream only provides the graphic
+            # so the containing display item is retrieved directly from the display item stream.
+            # this method updates the text to describe what area the user has selected. it also adjusts the edit
+            # fields for the appropriate graphic.
+            display_item = self.__target_display_item_stream.value
+            display_item = display_item if matches_scan_display_item(display_item) else None
+            graphic = self.__target_region_stream.value if display_item else None
+            display_data_shape = display_item.display_data_shape if display_item else None
+            display_data_calibrations = display_item.displayed_dimensional_calibrations if display_item else None
+            if isinstance(graphic, Graphics.LineGraphic):
+                calibration = display_data_calibrations[-1]
+                dimensional_shape = display_item.dimensional_shape
+                length = graphic.length * dimensional_shape[-1]
+                length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
+                line_str = _("Line")
+                self.__roi_description.text = f"{line_str} {length_str} ({int(length)})"
+            elif isinstance(graphic, Graphics.RectangleGraphic):
+                dimensional_shape = display_item.dimensional_shape
+                width = graphic.size[1] * dimensional_shape[-1]
+                height = graphic.size[0] * dimensional_shape[-1]
+                width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
+                height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
+                rect_str = _("Rectangle")
+                self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
+            elif display_item and display_data_shape is not None:
+                width = display_data_shape[1]
+                height = display_data_shape[0]
+                width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
+                height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
+                data_str = _("Data")
+                self.__roi_description.text = f"{data_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
+            else:
+                self.__roi_description.text = _("Scan context not active")
+
+        def new_region(graphic: Graphics.Graphic) -> None:
+            update_context()
+
+        def new_display_item(display_item: DisplayItem.DisplayItem) -> None:
+            update_context()
+
+        self.__target_display_item_stream_listener = self.__target_display_item_stream.value_stream.listen(new_display_item)
+        self.__target_region_stream_listener = self.__target_region_stream.value_stream.listen(new_region)
+
         column = ui.create_column_widget()
 
         self.__style_combo_box = ui.create_combo_box_widget([_("2d x 1d (SI)"), _("2d x 2d (4d)")])
         self.__style_combo_box.current_index = 0
 
         acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
+
+        self.__roi_description = ui.create_label_widget()
 
         self.__scan_width_widget = ui.create_line_edit_widget()
         self.__scan_height_widget = ui.create_line_edit_widget()
@@ -207,6 +282,12 @@ class PanelDelegate:
         scan_row.add(ComboBoxWidget(self.__scan_hardware_source_choice.create_combo_box(ui._ui)))
         scan_row.add_spacing(12)
         scan_row.add_stretch()
+
+        roi_size_row = ui.create_row_widget()
+        roi_size_row.add_spacing(12)
+        roi_size_row.add(self.__roi_description)
+        roi_size_row.add_spacing(12)
+        roi_size_row.add_stretch()
 
         scan_size_row = ui.create_row_widget()
         scan_size_row.add_spacing(12)
@@ -240,6 +321,8 @@ class PanelDelegate:
         column.add_spacing(8)
         column.add(camera_row)
         column.add_spacing(8)
+        column.add(roi_size_row)
+        column.add_spacing(8)
         column.add(scan_size_row)
         column.add_spacing(8)
         column.add(eels_exposure_row)
@@ -249,6 +332,8 @@ class PanelDelegate:
         column.add(acquire_sequence_button_row)
         column.add_spacing(8)
         column.add_stretch()
+
+        new_region(self.__target_region_stream.value)
 
         def camera_hardware_source_changed(hardware_source):
             self.disconnect_camera_hardware_source()
@@ -433,6 +518,16 @@ class PanelDelegate:
         if self.__scan_acquisition_preference_panel:
             # PreferencesDialog.PreferencesManager().unregister_preference_pane(self.__scan_acquisition_preference_panel)
             self.__scan_acquisition_preference_panel = None
+        if self.__target_display_item_stream_listener:
+            self.__target_display_item_stream_listener.close()
+            self.__target_display_item_stream_listener = None
+        if self.__target_region_stream_listener:
+            self.__target_region_stream_listener.close()
+            self.__target_region_stream_listener = None
+        if self.__target_region_stream:
+            self.__target_region_stream.remove_ref()
+        if self.__target_display_item_stream:
+            self.__target_display_item_stream.remove_ref()
 
 
 class ScanAcquisitionPreferencePanel:
