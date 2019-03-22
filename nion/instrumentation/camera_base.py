@@ -823,7 +823,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             defocus_value = stem_controller.get_value("C10")  # get the defocus
             dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
             dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
-            logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
+            logging.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
             stem_controller.set_value("SShft.x", stem_controller.get_value("SShft.x") - dx)
             stem_controller.set_value("SShft.y", stem_controller.get_value("SShft.y") - dy)
 
@@ -833,7 +833,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             radians_per_pixel = stem_controller.get_value("TVPixelAngle")
             da = radians_per_pixel * (mouse_position[1] - (camera_shape[1] / 2))
             db = radians_per_pixel * (mouse_position[0] - (camera_shape[0] / 2))
-            logging.info("Tilting (%s,%s) rad.\n", da, db)
+            logging.info("Tilting (%s,%s) rad.\n", -da, -db)
             stem_controller.set_value("STilt.x", stem_controller.get_value("STilt.x") - da)
             stem_controller.set_value("STilt.y", stem_controller.get_value("STilt.y") - db)
 

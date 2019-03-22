@@ -969,7 +969,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # calculate dx, dy in meters
         dx = 1e-9 * pixel_size_nm * (mouse_position[1] - (camera_shape[1] / 2))
         dy = 1e-9 * pixel_size_nm * (mouse_position[0] - (camera_shape[0] / 2))
-        logging.info("Shifting (%s,%s) um.\n", dx * 1e6, dy * 1e6)
+        logging.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
         self.__stem_controller.change_stage_position(dy=dy, dx=dx)
 
     def increase_pmt(self, channel_index):
