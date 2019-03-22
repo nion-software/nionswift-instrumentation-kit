@@ -617,12 +617,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__handle_log_messages_event()
 
     def __get_stem_controller(self):
-        if not self.__stem_controller:
+        if not self.__stem_controller and self.__stem_controller_id:
             self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
-            if not self.__stem_controller:
-                print("STEM Controller (" + self.__stem_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
-                from nion.instrumentation import stem_controller
-                self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
+        if not self.__stem_controller and not self.__stem_controller_id:
+            self.__stem_controller = Registry.get_component("stem_controller")
+        if not self.__stem_controller:
+            print("STEM Controller (" + self.__stem_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
+            from nion.instrumentation import stem_controller
+            self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
         return self.__stem_controller
 
     def __handle_log_messages_event(self):
@@ -1003,7 +1005,7 @@ def run(configuration_location: pathlib.Path):
     def component_registered(component, component_types):
         if "camera_module" in component_types:
             camera_module = component
-            stem_controller_id = getattr(camera_module, "stem_controller_id", "autostem_controller")
+            stem_controller_id = getattr(camera_module, "stem_controller_id", None)
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)

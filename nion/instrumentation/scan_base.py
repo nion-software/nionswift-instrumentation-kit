@@ -997,7 +997,12 @@ _component_unregistered_listener = None
 def run():
     def component_registered(component, component_types):
         if "scan_device" in component_types:
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id)
+            stem_controller = None
+            stem_controller_id = getattr(component, "stem_controller_id", None)
+            if not stem_controller and stem_controller_id:
+                stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id)
+            if not stem_controller and not stem_controller_id:
+                stem_controller = Registry.get_component("stem_controller")
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 from nion.instrumentation import stem_controller

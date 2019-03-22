@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 0.16.4 (UNRELEASED)
 -------------------
 
+- Improve handling of default stem_controller for camera, scan modules.
+
 - Change shift output messages to match sign of change.
 
 0.16.3 (2019-02-27)
