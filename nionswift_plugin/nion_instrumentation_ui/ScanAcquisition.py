@@ -156,16 +156,22 @@ class PanelDelegate:
         self.__acquisition_state_changed_event_listener = None
         self.__line_scan_acquisition_controller = None
         self.__eels_frame_parameters_changed_event_listener = None
-        self.__scan_frame_parameters_changed_event_listener = None
         self.__camera_hardware_changed_event_listener = None
         self.__scan_hardware_changed_event_listener = None
         self.__exposure_time_ms_value_model = None
-        self.__scan_width_model = None
-        self.__scan_height_model = None
         self.__scan_hardware_source_choice = None
         self.__camera_hardware_source_choice = None
-        self.__camera_width_ref = [0]
-        self.__camera_height_ref = [0]
+        self.__camera_width = 0
+        self.__camera_height = 0
+
+        # one or the other of the two following fields will be non-None
+        self.__scan_spacing_px = 1
+        self.__scan_spacing_cal = None
+
+        # the calibration and characteristic length is updated when the context image changes
+        self.__calibration = None
+        self.__calibration_len = 0
+
         self.__scan_acquisition_preference_panel = None
         self.__target_display_item_stream = None
         self.__target_region_stream = None
@@ -211,30 +217,82 @@ class PanelDelegate:
             graphic = self.__target_region_stream.value if display_item else None
             display_data_shape = display_item.display_data_shape if display_item else None
             display_data_calibrations = display_item.displayed_dimensional_calibrations if display_item else None
+
             if isinstance(graphic, Graphics.LineGraphic):
                 calibration = display_data_calibrations[-1]
                 dimensional_shape = display_item.dimensional_shape
                 length = graphic.length * dimensional_shape[-1]
-                length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
-                line_str = _("Line")
-                self.__roi_description.text = f"{line_str} {length_str} ({int(length)})"
+                length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, display_data_shape[-1]), samples=display_data_shape[-1])
+                line_str = _("Context (Line)")
+                self.__roi_description.text = f"{line_str} {length_str} ({int(length)} px)"
+                self.__calibration = display_data_calibrations[-1]
+                self.__calibration_len = display_data_shape[-1]
+                scan_str = _("Scan Dimensions (Line)")
+                if self.__scan_spacing_px is not None:
+                    scan_length = int(length / self.__scan_spacing_px)
+                elif self.__scan_spacing_cal is not None:
+                    scan_length = int(calibration.convert_to_calibrated_size(length) / self.__scan_spacing_cal)
+                else:
+                    scan_length = 0
+                self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
             elif isinstance(graphic, Graphics.RectangleGraphic):
                 dimensional_shape = display_item.dimensional_shape
                 width = graphic.size[1] * dimensional_shape[-1]
                 height = graphic.size[0] * dimensional_shape[-1]
                 width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
                 height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
-                rect_str = _("Rectangle")
-                self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
+                rect_str = _("Context (Rectangle)")
+                self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} px x {int(height)} px)"
+                self.__calibration = display_data_calibrations[-1]
+                self.__calibration_len = display_data_shape[-1]
+                scan_str = _("Scan Dimensions (Rectangle)")
+                if self.__scan_spacing_px is not None:
+                    scan_width = int(width / self.__scan_spacing_px)
+                    scan_height = int(height / self.__scan_spacing_px)
+                elif self.__scan_spacing_cal is not None:
+                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_cal)
+                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_cal)
+                else:
+                    scan_width = 0
+                    scan_height = 0
+                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
             elif display_item and display_data_shape is not None:
                 width = display_data_shape[1]
                 height = display_data_shape[0]
                 width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
                 height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
-                data_str = _("Data")
+                data_str = _("Context (Full Rect)")
                 self.__roi_description.text = f"{data_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
+                self.__calibration = display_data_calibrations[-1]
+                self.__calibration_len = display_data_shape[-1]
+                scan_str = _("Scan Dimensions (Rectangle)")
+                if self.__scan_spacing_px is not None:
+                    scan_width = int(width / self.__scan_spacing_px)
+                    scan_height = int(height / self.__scan_spacing_px)
+                elif self.__scan_spacing_cal is not None:
+                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_cal)
+                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_cal)
+                else:
+                    scan_width = 0
+                    scan_height = 0
+                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
             else:
                 self.__roi_description.text = _("Scan context not active")
+                self.__calibration = None
+                self.__calibration_len = 0
+                self.__scan_label_widget.text = None
+
+            if self.__scan_spacing_px is not None and self.__calibration:
+                self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(self.__scan_spacing_px)
+                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_to_calibrated_size_str(self.__scan_spacing_px, value_range=(0, self.__calibration_len), samples=self.__calibration_len)
+            elif self.__scan_spacing_cal is not None and self.__calibration:
+                calibrated_value_range = self.__calibration.convert_to_calibrated_size(self.__calibration_len)
+                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_calibrated_size_to_str(self.__scan_spacing_cal, calibrated_value_range=(0, calibrated_value_range), samples=self.__calibration_len)
+                spacing_px = self.__calibration.convert_from_calibrated_size(self.__scan_spacing_cal)
+                self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(spacing_px)
+            else:
+                self.__scan_spacing_pixels_widget.text = None
+                self.__scan_spacing_calibrated_widget.text = None
 
         def new_region(graphic: Graphics.Graphic) -> None:
             update_context()
@@ -247,19 +305,21 @@ class PanelDelegate:
 
         column = ui.create_column_widget()
 
-        self.__style_combo_box = ui.create_combo_box_widget([_("2d x 1d (SI)"), _("2d x 2d (4d)")])
+        self.__style_combo_box = ui.create_combo_box_widget([_("1d (SI)"), _("2d (RI)")])
         self.__style_combo_box.current_index = 0
 
         acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
 
         self.__roi_description = ui.create_label_widget()
 
-        self.__scan_width_widget = ui.create_line_edit_widget()
-        self.__scan_height_widget = ui.create_line_edit_widget()
+        self.__scan_spacing_pixels_widget = ui.create_line_edit_widget()
+        self.__scan_spacing_calibrated_widget = ui.create_line_edit_widget()
 
         self.__exposure_time_widget = ui.create_line_edit_widget()
 
         self.__estimate_label_widget = ui.create_label_widget()
+
+        self.__scan_label_widget = ui.create_label_widget()
 
         class ComboBoxWidget:
             def __init__(self, widget):
@@ -277,11 +337,11 @@ class PanelDelegate:
         camera_row.add_spacing(12)
         camera_row.add_stretch()
 
-        scan_row = ui.create_row_widget()
-        scan_row.add_spacing(12)
-        scan_row.add(ComboBoxWidget(self.__scan_hardware_source_choice.create_combo_box(ui._ui)))
-        scan_row.add_spacing(12)
-        scan_row.add_stretch()
+        scan_choice_row = ui.create_row_widget()
+        scan_choice_row.add_spacing(12)
+        scan_choice_row.add(ComboBoxWidget(self.__scan_hardware_source_choice.create_combo_box(ui._ui)))
+        scan_choice_row.add_spacing(12)
+        scan_choice_row.add_stretch()
 
         roi_size_row = ui.create_row_widget()
         roi_size_row.add_spacing(12)
@@ -289,22 +349,34 @@ class PanelDelegate:
         roi_size_row.add_spacing(12)
         roi_size_row.add_stretch()
 
-        scan_size_row = ui.create_row_widget()
-        scan_size_row.add_spacing(12)
-        scan_size_row.add(ui.create_label_widget("Scan Size (pixels)"))
-        scan_size_row.add_spacing(12)
-        scan_size_row.add(self.__scan_width_widget)
-        scan_size_row.add_spacing(12)
-        scan_size_row.add(self.__scan_height_widget)
-        scan_size_row.add_spacing(12)
-        scan_size_row.add_stretch()
+        scan_spacing_pixels_row = ui.create_row_widget()
+        scan_spacing_pixels_row.add_spacing(12)
+        scan_spacing_pixels_row.add(ui.create_label_widget("Scan Spacing (pixels)"))
+        scan_spacing_pixels_row.add_spacing(12)
+        scan_spacing_pixels_row.add(self.__scan_spacing_pixels_widget)
+        scan_spacing_pixels_row.add_spacing(12)
+        scan_spacing_pixels_row.add_stretch()
+
+        scan_spacing_calibrated_row = ui.create_row_widget()
+        scan_spacing_calibrated_row.add_spacing(12)
+        scan_spacing_calibrated_row.add(ui.create_label_widget("Scan Spacing (nm)"))
+        scan_spacing_calibrated_row.add_spacing(12)
+        scan_spacing_calibrated_row.add(self.__scan_spacing_calibrated_widget)
+        scan_spacing_calibrated_row.add_spacing(12)
+        scan_spacing_calibrated_row.add_stretch()
 
         eels_exposure_row = ui.create_row_widget()
-        eels_exposure_row.add_stretch()
+        eels_exposure_row.add_spacing(12)
         eels_exposure_row.add(ui.create_label_widget("Camera Exposure Time (ms)"))
         eels_exposure_row.add_spacing(12)
         eels_exposure_row.add(self.__exposure_time_widget)
         eels_exposure_row.add_spacing(12)
+        eels_exposure_row.add_stretch()
+
+        scan_row = ui.create_row_widget()
+        scan_row.add_spacing(12)
+        scan_row.add(self.__scan_label_widget)
+        scan_row.add_stretch()
 
         estimate_row = ui.create_row_widget()
         estimate_row.add_spacing(12)
@@ -317,23 +389,25 @@ class PanelDelegate:
 
         if self.__scan_hardware_source_choice.hardware_source_count > 1:
             column.add_spacing(8)
-            column.add(scan_row)
+            column.add(scan_choice_row)
         column.add_spacing(8)
         column.add(camera_row)
         column.add_spacing(8)
         column.add(roi_size_row)
         column.add_spacing(8)
-        column.add(scan_size_row)
+        column.add(scan_spacing_pixels_row)
+        column.add_spacing(8)
+        column.add(scan_spacing_calibrated_row)
         column.add_spacing(8)
         column.add(eels_exposure_row)
+        column.add_spacing(8)
+        column.add(scan_row)
         column.add_spacing(8)
         column.add(estimate_row)
         column.add_spacing(8)
         column.add(acquire_sequence_button_row)
         column.add_spacing(8)
         column.add_stretch()
-
-        new_region(self.__target_region_stream.value)
 
         def camera_hardware_source_changed(hardware_source):
             self.disconnect_camera_hardware_source()
@@ -343,18 +417,42 @@ class PanelDelegate:
         self.__camera_hardware_changed_event_listener = self.__camera_hardware_source_choice.hardware_source_changed_event.listen(camera_hardware_source_changed)
         camera_hardware_source_changed(self.__camera_hardware_source_choice.hardware_source)
 
-        def scan_hardware_source_changed(hardware_source):
-            self.disconnect_scan_hardware_source()
-            if hardware_source:
-                self.connect_scan_hardware_source(hardware_source)
-
-        self.__scan_hardware_changed_event_listener = self.__scan_hardware_source_choice.hardware_source_changed_event.listen(scan_hardware_source_changed)
-        scan_hardware_source_changed(self.__scan_hardware_source_choice.hardware_source)
-
         def style_current_item_changed(current_item):
             self.__update_estimate()
 
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
+
+        def scan_spacing_pixels_changed(text):
+            spacing = Converter.FloatToStringConverter().convert_back(text)
+            if spacing > 0 and self.__calibration:
+                if self.__scan_spacing_px != spacing:
+                    self.__scan_spacing_px = spacing
+                    self.__scan_spacing_cal = None
+                    update_context()
+                    self.__scan_spacing_pixels_widget.select_all()
+            else:
+                self.__scan_spacing_px = None
+                self.__scan_spacing_cal = None
+
+        def scan_spacing_calibrated_changed(text):
+            spacing = Converter.FloatToStringConverter().convert_back(text)
+            if spacing > 0 and self.__calibration:
+                if self.__scan_spacing_cal != spacing:
+                    self.__scan_spacing_cal = spacing
+                    self.__scan_spacing_px = None
+                    update_context()
+                    self.__scan_spacing_calibrated_widget.select_all()
+            else:
+                self.__scan_spacing_px = None
+                self.__scan_spacing_cal = None
+
+        self.__scan_spacing_pixels_widget.on_editing_finished = scan_spacing_pixels_changed
+        self.__scan_spacing_calibrated_widget.on_editing_finished = scan_spacing_calibrated_changed
+
+        self.__scan_spacing_px = 1
+        self.__scan_spacing_cal = None
+
+        new_region(self.__target_region_stream.value)
 
         def acquisition_state_changed(acquisition_state: SequenceState) -> None:
 
@@ -391,15 +489,17 @@ class PanelDelegate:
 
         acquire_sequence_button_widget.on_clicked = acquire_sequence
 
+        self.__update_estimate()
+
         return column
 
     def __update_estimate(self):
-        if self.__exposure_time_ms_value_model and self.__scan_width_model and self.__scan_height_model:
+        if self.__exposure_time_ms_value_model:
             camera_hardware_source = self.__camera_hardware_source_choice.hardware_source
-            camera_width = self.__camera_width_ref[0]
-            camera_height = self.__camera_height_ref[0]
-            scan_width = self.__scan_width_model.value
-            scan_height = self.__scan_height_model.value
+            camera_width = self.__camera_width
+            camera_height = self.__camera_height
+            scan_width = 1  # self.__scan_width_model.value
+            scan_height = 1  # self.__scan_height_model.value
             is_summed = self.__style_combo_box.current_index == 0
             exposure_time = self.__exposure_time_ms_value_model.value / 1000
             time_str, size_str = calculate_time_size(camera_hardware_source, scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time)
@@ -425,8 +525,8 @@ class PanelDelegate:
         def eels_profile_parameters_changed(profile_index, frame_parameters):
             if profile_index == 0:
                 expected_dimensions = camera_hardware_source.get_expected_dimensions(frame_parameters.binning)
-                self.__camera_width_ref[0] = expected_dimensions[1]
-                self.__camera_height_ref[0] = expected_dimensions[0]
+                self.__camera_width = expected_dimensions[1]
+                self.__camera_height = expected_dimensions[0]
                 self.__exposure_time_ms_value_model.value = frame_parameters.exposure_ms
                 self.__update_estimate()
 
@@ -445,61 +545,7 @@ class PanelDelegate:
             self.__exposure_time_ms_value_model.close()
             self.__exposure_time_ms_value_model = None
 
-    def connect_scan_hardware_source(self, scan_hardware_source):
-
-        self.__scan_width_model = Model.PropertyModel()
-        self.__scan_height_model = Model.PropertyModel()
-
-        scan_width_binding = Binding.PropertyBinding(self.__scan_width_model, "value", converter=Converter.IntegerToStringConverter())
-        scan_height_binding = Binding.PropertyBinding(self.__scan_height_model, "value", converter=Converter.IntegerToStringConverter())
-
-        def scan_profile_parameters_changed(profile_index, frame_parameters):
-            if profile_index == 2:
-                self.__scan_width_model.value = frame_parameters.size[1]
-                self.__scan_height_model.value = frame_parameters.size[0]
-
-        self.__scan_frame_parameters_changed_event_listener = scan_hardware_source.frame_parameters_changed_event.listen(scan_profile_parameters_changed)
-
-        scan_profile_parameters_changed(2, scan_hardware_source.get_frame_parameters(2))
-
-        def update_scan_width(scan_width):
-            if scan_width > 0:
-                frame_parameters = scan_hardware_source.get_frame_parameters(2)
-                frame_parameters.size = frame_parameters.size[0], scan_width
-                scan_hardware_source.set_frame_parameters(2, frame_parameters)
-            self.__update_estimate()
-
-        def update_scan_height(scan_height):
-            if scan_height > 0:
-                frame_parameters = scan_hardware_source.get_frame_parameters(2)
-                frame_parameters.size = scan_height, frame_parameters.size[1]
-                scan_hardware_source.set_frame_parameters(2, frame_parameters)
-            self.__update_estimate()
-
-        # only connect model to update hardware source after it has been initialized.
-        self.__scan_width_model.on_value_changed = update_scan_width
-        self.__scan_height_model.on_value_changed = update_scan_height
-
-        self.__scan_width_widget._widget.bind_text(scan_width_binding)  # the widget will close the binding
-        self.__scan_height_widget._widget.bind_text(scan_height_binding)  # the widget will close the binding
-
-    def disconnect_scan_hardware_source(self):
-        self.__scan_width_widget._widget.unbind_text()
-        self.__scan_height_widget._widget.unbind_text()
-        if self.__scan_frame_parameters_changed_event_listener:
-            self.__scan_frame_parameters_changed_event_listener.close()
-            self.__scan_frame_parameters_changed_event_listener = None
-        if self.__scan_width_model:
-            self.__scan_width_model.close()
-            self.__scan_width_model = None
-        if self.__scan_height_model:
-            self.__scan_height_model.close()
-            self.__scan_height_model = None
-
     def close(self):
-        if self.__scan_frame_parameters_changed_event_listener:
-            self.__scan_frame_parameters_changed_event_listener.close()
-            self.__scan_frame_parameters_changed_event_listener = None
         if self.__eels_frame_parameters_changed_event_listener:
             self.__eels_frame_parameters_changed_event_listener.close()
             self.__eels_frame_parameters_changed_event_listener = None
