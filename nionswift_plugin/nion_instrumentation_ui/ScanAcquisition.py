@@ -235,9 +235,9 @@ class PanelDelegate:
         self.__camera_height = 0
         self.__scan_specifier = ScanSpecifier()
 
-        # one or the other of the two following fields will be non-None
+        # track spacing rather than pixels so that it is consistent if user switches graphics
         self.__scan_spacing_px = 1
-        self.__scan_spacing_calibrated = None
+        self.__graphic_width = None
 
         # the calibration and characteristic length is updated when the context image changes
         self.__calibration = None
@@ -301,9 +301,7 @@ class PanelDelegate:
                 self.__calibration_len = display_data_shape[-1]
                 scan_str = _("Scan (1D)")
                 if self.__scan_spacing_px is not None:
-                    scan_length = int(length / self.__scan_spacing_px)
-                elif self.__scan_spacing_calibrated is not None:
-                    scan_length = int(calibration.convert_to_calibrated_size(length) / self.__scan_spacing_calibrated)
+                    scan_length = round(length / self.__scan_spacing_px)
                 else:
                     scan_length = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
@@ -312,8 +310,8 @@ class PanelDelegate:
                 self.__scan_specifier.rect = None
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
-                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
                 self.__acquire_button._widget.enabled = True
+                self.__graphic_width = length
             elif isinstance(graphic, Graphics.RectangleGraphic):
                 dimensional_shape = display_item.dimensional_shape
                 width = graphic.size[1] * dimensional_shape[-1]
@@ -326,11 +324,8 @@ class PanelDelegate:
                 self.__calibration_len = display_data_shape[-1]
                 scan_str = _("Scan (2D)")
                 if self.__scan_spacing_px is not None:
-                    scan_width = int(width / self.__scan_spacing_px)
-                    scan_height = int(height / self.__scan_spacing_px)
-                elif self.__scan_spacing_calibrated is not None:
-                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_calibrated)
-                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_calibrated)
+                    scan_width = round(width / self.__scan_spacing_px)
+                    scan_height = round(height / self.__scan_spacing_px)
                 else:
                     scan_width = 0
                     scan_height = 0
@@ -340,8 +335,8 @@ class PanelDelegate:
                 self.__scan_specifier.rect = graphic.bounds
                 self.__scan_specifier.rect_rotation = graphic.rotation
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
-                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
                 self.__acquire_button._widget.enabled = True
+                self.__graphic_width = int(width)
             elif display_item and display_data_shape is not None:
                 width = display_data_shape[1]
                 height = display_data_shape[0]
@@ -353,11 +348,8 @@ class PanelDelegate:
                 self.__calibration_len = display_data_shape[-1]
                 scan_str = _("Scan (2D)")
                 if self.__scan_spacing_px is not None:
-                    scan_width = int(width / self.__scan_spacing_px)
-                    scan_height = int(height / self.__scan_spacing_px)
-                elif self.__scan_spacing_calibrated is not None:
-                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_calibrated)
-                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_calibrated)
+                    scan_width = round(width / self.__scan_spacing_px)
+                    scan_height = round(height / self.__scan_spacing_px)
                 else:
                     scan_width = 0
                     scan_height = 0
@@ -367,8 +359,8 @@ class PanelDelegate:
                 self.__scan_specifier.rect = None
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
-                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
                 self.__acquire_button._widget.enabled = True
+                self.__graphic_width = width
             else:
                 self.__roi_description.text = _("Scan context not active")
                 self.__calibration = None
@@ -381,18 +373,12 @@ class PanelDelegate:
                 self.__scan_specifier.spacing_px = None
                 self.__scan_specifier.spacing_calibrated = None
                 self.__acquire_button._widget.enabled = False
+                self.__graphic_width = None
 
-            if self.__scan_spacing_px is not None and self.__calibration:
-                self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(self.__scan_spacing_px)
-                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_to_calibrated_size_str(self.__scan_spacing_px, value_range=(0, self.__calibration_len), samples=self.__calibration_len)
-            elif self.__scan_spacing_calibrated is not None and self.__calibration:
-                calibrated_value_range = self.__calibration.convert_to_calibrated_size(self.__calibration_len)
-                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_calibrated_size_to_str(self.__scan_spacing_calibrated, calibrated_value_range=(0, calibrated_value_range), samples=self.__calibration_len)
-                spacing_px = self.__calibration.convert_from_calibrated_size(self.__scan_spacing_calibrated)
-                self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(spacing_px)
+            if self.__scan_spacing_px is not None and self.__scan_spacing_px > 0 and self.__calibration and self.__graphic_width is not None:
+                self.__scan_width_widget.text = Converter.IntegerToStringConverter().convert(int(self.__graphic_width / self.__scan_spacing_px))
             else:
-                self.__scan_spacing_pixels_widget.text = None
-                self.__scan_spacing_calibrated_widget.text = None
+                self.__scan_width_widget.text = None
 
         def new_region(graphic: Graphics.Graphic) -> None:
             update_context()
@@ -412,8 +398,7 @@ class PanelDelegate:
 
         self.__roi_description = ui.create_label_widget()
 
-        self.__scan_spacing_pixels_widget = ui.create_line_edit_widget()
-        self.__scan_spacing_calibrated_widget = ui.create_line_edit_widget()
+        self.__scan_width_widget = ui.create_line_edit_widget()
 
         self.__exposure_time_widget = ui.create_line_edit_widget()
 
@@ -451,19 +436,11 @@ class PanelDelegate:
 
         scan_spacing_pixels_row = ui.create_row_widget()
         scan_spacing_pixels_row.add_spacing(12)
-        scan_spacing_pixels_row.add(ui.create_label_widget("Scan Spacing (pixels)"))
+        scan_spacing_pixels_row.add(ui.create_label_widget("Scan Width (pixels)"))
         scan_spacing_pixels_row.add_spacing(12)
-        scan_spacing_pixels_row.add(self.__scan_spacing_pixels_widget)
+        scan_spacing_pixels_row.add(self.__scan_width_widget)
         scan_spacing_pixels_row.add_spacing(12)
         scan_spacing_pixels_row.add_stretch()
-
-        scan_spacing_calibrated_row = ui.create_row_widget()
-        scan_spacing_calibrated_row.add_spacing(12)
-        scan_spacing_calibrated_row.add(ui.create_label_widget("Scan Spacing (nm)"))
-        scan_spacing_calibrated_row.add_spacing(12)
-        scan_spacing_calibrated_row.add(self.__scan_spacing_calibrated_widget)
-        scan_spacing_calibrated_row.add_spacing(12)
-        scan_spacing_calibrated_row.add_stretch()
 
         eels_exposure_row = ui.create_row_widget()
         eels_exposure_row.add_spacing(12)
@@ -497,8 +474,6 @@ class PanelDelegate:
         column.add_spacing(8)
         column.add(scan_spacing_pixels_row)
         column.add_spacing(8)
-        column.add(scan_spacing_calibrated_row)
-        column.add_spacing(8)
         column.add(eels_exposure_row)
         column.add_spacing(8)
         column.add(scan_row)
@@ -522,35 +497,18 @@ class PanelDelegate:
 
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
 
-        def scan_spacing_pixels_changed(text):
-            spacing = Converter.FloatToStringConverter().convert_back(text)
+        def scan_width_changed(text):
+            displayed_width = Converter.IntegerToStringConverter().convert_back(text) if text else 1
+            spacing = self.__graphic_width / displayed_width if self.__graphic_width and self.__graphic_width > 0 else 0
             if spacing > 0 and self.__calibration:
                 if self.__scan_spacing_px != spacing:
                     self.__scan_spacing_px = spacing
-                    self.__scan_spacing_calibrated = None
                     update_context()
-                    self.__scan_spacing_pixels_widget.select_all()
+                self.__scan_width_widget.select_all()
             else:
                 self.__scan_spacing_px = None
-                self.__scan_spacing_calibrated = None
 
-        def scan_spacing_calibrated_changed(text):
-            spacing = Converter.FloatToStringConverter().convert_back(text)
-            if spacing > 0 and self.__calibration:
-                if self.__scan_spacing_calibrated != spacing:
-                    self.__scan_spacing_calibrated = spacing
-                    self.__scan_spacing_px = None
-                    update_context()
-                    self.__scan_spacing_calibrated_widget.select_all()
-            else:
-                self.__scan_spacing_px = None
-                self.__scan_spacing_calibrated = None
-
-        self.__scan_spacing_pixels_widget.on_editing_finished = scan_spacing_pixels_changed
-        self.__scan_spacing_calibrated_widget.on_editing_finished = scan_spacing_calibrated_changed
-
-        self.__scan_spacing_px = 1
-        self.__scan_spacing_calibrated = None
+        self.__scan_width_widget.on_editing_finished = scan_width_changed
 
         new_region(self.__target_region_stream.value)
 
