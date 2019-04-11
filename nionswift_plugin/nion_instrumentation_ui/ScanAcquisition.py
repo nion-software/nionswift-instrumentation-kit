@@ -1,9 +1,11 @@
 # system imports
+import copy
 import enum
-import functools
 import gettext
 import logging
+import math
 import threading
+import typing
 
 # local libraries
 from nion.swift import Facade
@@ -22,53 +24,66 @@ from . import HardwareSourceChoice
 _ = gettext.gettext
 
 
+def create_and_display_data_item(document_window, data_and_metadata, scan_data_list, camera_hardware_source):
+    camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
+
+    # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
+
+    data_item = Facade.DataItem(DataItem.DataItem(large_format=True))
+    document_window.library._document_model.append_data_item(data_item._data_item)
+    data_item._data_item.session_id = document_window.library._document_model.session_id
+
+    data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
+    # the data item should not have any other 'clients' at this point; so setting the
+    # data and metadata will immediately unload the data (and write to disk). this is important,
+    # because the data (up to this point) can be shared data from the DLL.
+    data_item.set_data_and_metadata(data_and_metadata)
+    # assert not data_item._data_item.is_data_loaded
+    # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
+    document_window.display_data_item(data_item)
+    for scan_data_and_metadata in scan_data_list:
+        scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
+        scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
+        channel_id = camera_hardware_source_id + "_" + scan_channel_id
+
+        # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
+
+        data_item = Facade.DataItem(DataItem.DataItem())
+        document_window.library._document_model.append_data_item(data_item._data_item)
+        data_item._data_item.session_id = document_window.library._document_model.session_id
+
+        data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
+        data_item.set_data_and_metadata(scan_data_and_metadata)
+        document_window.display_data_item(data_item)
+
+
 class SequenceState(enum.Enum):
     idle = 0
     scanning = 1
 
 
+class ScanSpecifier:
+
+    def __init__(self):
+        self.context_data_item = None
+        self.line = None
+        self.rect = None
+        self.rect_rotation = None
+        self.spacing_px = None
+        self.spacing_calibrated = None
+
+
 class ScanAcquisitionController:
 
-    def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source):
+    def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
         self.__api = api
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
+        self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, sum_frames: bool) -> None:
-
-        def create_and_display_data_item(library, data_and_metadata, scan_data_list, scan_hardware_source, camera_hardware_source):
-            camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
-
-            # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
-
-            data_item = Facade.DataItem(DataItem.DataItem(large_format=True))
-            library._document_model.append_data_item(data_item._data_item)
-            data_item._data_item.session_id = library._document_model.session_id
-
-            data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
-            # the data item should not have any other 'clients' at this point; so setting the
-            # data and metadata will immediately unload the data (and write to disk). this is important,
-            # because the data (up to this point) can be shared data from the DLL.
-            data_item.set_data_and_metadata(data_and_metadata)
-            # assert not data_item._data_item.is_data_loaded
-            # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
-            document_window.display_data_item(data_item)
-            for scan_data_and_metadata in scan_data_list:
-                scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
-                scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
-                channel_id = camera_hardware_source_id + "_" + scan_channel_id
-
-                # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
-
-                data_item = Facade.DataItem(DataItem.DataItem())
-                library._document_model.append_data_item(data_item._data_item)
-                data_item._data_item.session_id = library._document_model.session_id
-
-                data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
-                data_item.set_data_and_metadata(scan_data_and_metadata)
-                document_window.display_data_item(data_item)
 
         document_window = self.__document_controller
 
@@ -76,7 +91,55 @@ class ScanAcquisitionController:
 
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
 
-        scan_hardware_source.apply_subscan(scan_frame_parameters)
+        if self.__scan_specifier.context_data_item:
+            # one or the other of spacing px or spacing calibrated will be non-None
+            context_data_shape = self.__scan_specifier.context_data_item._data_item.data_shape
+            # print(f"{self.__scan_specifier.context_data_item.metadata}")
+            # print(f"{self.__scan_specifier.spacing_px} {self.__scan_specifier.spacing_calibrated}")
+            if self.__scan_specifier.line:
+                # print(f"{self.__scan_specifier.line}")
+                line_start = self.__scan_specifier.line[0][0] * context_data_shape[0], self.__scan_specifier.line[0][1] * context_data_shape[1]
+                line_end = self.__scan_specifier.line[1][0] * context_data_shape[0], self.__scan_specifier.line[1][1] * context_data_shape[1]
+                dy = line_end[0] - line_start[0]
+                dx = line_end[1] - line_start[1]
+                line_length = int(math.sqrt(math.pow(dy, 2) + math.pow(dx, 2)))
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                scan_frame_parameters.subscan_pixel_size = (1, line_length / self.__scan_specifier.spacing_px)
+                # for fraction size/center, the line will start as horizontal and be rotated from there
+                scan_frame_parameters.subscan_fractional_size = 1 / context_data_shape[0], line_length / context_data_shape[1]
+                scan_frame_parameters.subscan_fractional_center = (((line_start[0] + line_end[0]) / 2) / context_data_shape[0], ((line_start[1] + line_end[1]) / 2) / context_data_shape[0])
+                # scan_frame_parameters.subscan_rotation = math.atan2(dy, dx)  # radians counterclockwise
+                # print(f"{scan_frame_parameters}")
+            elif self.__scan_specifier.rect:
+                # print(f"{self.__scan_specifier.rect}")
+                height = self.__scan_specifier.rect[1][0] * context_data_shape[0]
+                width = self.__scan_specifier.rect[1][1] * context_data_shape[1]
+                cy = (self.__scan_specifier.rect[0][0] * context_data_shape[0] + self.__scan_specifier.rect[1][0] * context_data_shape[0] / 2) / context_data_shape[0]
+                cx = (self.__scan_specifier.rect[0][1] * context_data_shape[1] + self.__scan_specifier.rect[1][1] * context_data_shape[1] / 2) / context_data_shape[1]
+                scan_frame_parameters.size = context_data_shape
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                # print(f"{cx}, {cy}  {width} x {height}")
+                scan_frame_parameters.subscan_pixel_size = (height / self.__scan_specifier.spacing_px, width / self.__scan_specifier.spacing_px)
+                scan_frame_parameters.subscan_fractional_size = height / context_data_shape[0], width / context_data_shape[1]
+                scan_frame_parameters.subscan_fractional_center = (cy, cx)
+                # scan_frame_parameters.subscan_rotation = math.atan2(dy, dx)  # radians counterclockwise
+            else:
+                # print("FULL")
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                scan_frame_parameters.subscan_pixel_size = None
+                scan_frame_parameters.subscan_fractional_size = None
+                scan_frame_parameters.subscan_fractional_center = None
+                # scan_frame_parameters.subscan_rotation = 0.0  # radians counterclockwise
+        else:
+            scan_hardware_source.apply_subscan(scan_frame_parameters)
+
+        # useful code for testing to exit cleanly at this point.
+        # self.acquisition_state_changed_event.fire(SequenceState.scanning)
+        # self.acquisition_state_changed_event.fire(SequenceState.idle)
+        # return
 
         camera_hardware_source = self.__camera_hardware_source._hardware_source
 
@@ -93,9 +156,16 @@ class ScanAcquisitionController:
                                                                        camera_frame_parameters=camera_frame_parameters)
                 if combined_data is not None:
                     scan_data_list, camera_data_list = combined_data
-                    document_window.queue_task(
-                        functools.partial(create_and_display_data_item, document_window.library, camera_data_list[0],
-                                          scan_data_list, self.__scan_hardware_source, self.__camera_hardware_source))
+
+                    def create_and_display_data_item_task():
+                        # this will be executed in UI thread
+                        create_and_display_data_item(document_window,
+                                                     camera_data_list[0],
+                                                     scan_data_list,
+                                                     self.__camera_hardware_source)
+
+                    # queue the task to be executed in UI thread
+                    document_window.queue_task(create_and_display_data_item_task)
             finally:
                 self.acquisition_state_changed_event.fire(SequenceState.idle)
 
@@ -163,10 +233,11 @@ class PanelDelegate:
         self.__camera_hardware_source_choice = None
         self.__camera_width = 0
         self.__camera_height = 0
+        self.__scan_specifier = ScanSpecifier()
 
         # one or the other of the two following fields will be non-None
         self.__scan_spacing_px = 1
-        self.__scan_spacing_cal = None
+        self.__scan_spacing_calibrated = None
 
         # the calibration and characteristic length is updated when the context image changes
         self.__calibration = None
@@ -190,7 +261,7 @@ class PanelDelegate:
         self.__target_display_item_stream = HistogramPanel.TargetDisplayItemStream(document_controller._document_window).add_ref()
         self.__target_region_stream = HistogramPanel.TargetRegionStream(self.__target_display_item_stream).add_ref()
 
-        def matches_scan_display_item(display_item: DisplayItem.DisplayItem) -> bool:
+        def match_scan_display_item(display_item: DisplayItem.DisplayItem) -> typing.Optional[DataItem.DataItem]:
             scan_hardware_source = self.__scan_hardware_source_choice.hardware_source
             if scan_hardware_source:
                 for data_channel in scan_hardware_source.data_channels:
@@ -198,13 +269,13 @@ class PanelDelegate:
                     data_channel_data_item = document_controller.library.get_data_item_for_reference_key(data_item_reference_key)
                     data_channel_display_item = data_channel_data_item.display if data_channel_data_item else None
                     if data_channel_display_item and display_item == data_channel_display_item._display_item:
-                        return True
+                        return data_channel_data_item
                     data_item_reference_key = "_".join([scan_hardware_source.hardware_source_id, data_channel.channel_id + ".subscan"])
                     data_channel_data_item = document_controller.library.get_data_item_for_reference_key(data_item_reference_key)
                     data_channel_display_item = data_channel_data_item.display if data_channel_data_item else None
                     if data_channel_display_item and display_item == data_channel_display_item._display_item:
-                        return True
-            return False
+                        return data_channel_data_item
+            return None
 
         def update_context() -> None:
             # this is called when the graphic stream gets a new target graphic. if there are more than one graphics
@@ -213,7 +284,8 @@ class PanelDelegate:
             # this method updates the text to describe what area the user has selected. it also adjusts the edit
             # fields for the appropriate graphic.
             display_item = self.__target_display_item_stream.value
-            display_item = display_item if matches_scan_display_item(display_item) else None
+            context_data_item = match_scan_display_item(display_item)
+            display_item = display_item if context_data_item else None
             graphic = self.__target_region_stream.value if display_item else None
             display_data_shape = display_item.display_data_shape if display_item else None
             display_data_calibrations = display_item.displayed_dimensional_calibrations if display_item else None
@@ -223,72 +295,100 @@ class PanelDelegate:
                 dimensional_shape = display_item.dimensional_shape
                 length = graphic.length * dimensional_shape[-1]
                 length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, display_data_shape[-1]), samples=display_data_shape[-1])
-                line_str = _("Context (Line)")
+                line_str = _("Line")
                 self.__roi_description.text = f"{line_str} {length_str} ({int(length)} px)"
                 self.__calibration = display_data_calibrations[-1]
                 self.__calibration_len = display_data_shape[-1]
-                scan_str = _("Scan Dimensions (Line)")
+                scan_str = _("Scan (1D)")
                 if self.__scan_spacing_px is not None:
                     scan_length = int(length / self.__scan_spacing_px)
-                elif self.__scan_spacing_cal is not None:
-                    scan_length = int(calibration.convert_to_calibrated_size(length) / self.__scan_spacing_cal)
+                elif self.__scan_spacing_calibrated is not None:
+                    scan_length = int(calibration.convert_to_calibrated_size(length) / self.__scan_spacing_calibrated)
                 else:
                     scan_length = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
+                self.__scan_specifier.context_data_item = context_data_item
+                self.__scan_specifier.line = graphic.vector
+                self.__scan_specifier.rect = None
+                self.__scan_specifier.rect_rotation = 0
+                self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
+                self.__acquire_button._widget.enabled = True
             elif isinstance(graphic, Graphics.RectangleGraphic):
                 dimensional_shape = display_item.dimensional_shape
                 width = graphic.size[1] * dimensional_shape[-1]
                 height = graphic.size[0] * dimensional_shape[-1]
                 width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
                 height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
-                rect_str = _("Context (Rectangle)")
+                rect_str = _("Rectangle")
                 self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} px x {int(height)} px)"
                 self.__calibration = display_data_calibrations[-1]
                 self.__calibration_len = display_data_shape[-1]
-                scan_str = _("Scan Dimensions (Rectangle)")
+                scan_str = _("Scan (2D)")
                 if self.__scan_spacing_px is not None:
                     scan_width = int(width / self.__scan_spacing_px)
                     scan_height = int(height / self.__scan_spacing_px)
-                elif self.__scan_spacing_cal is not None:
-                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_cal)
-                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_cal)
+                elif self.__scan_spacing_calibrated is not None:
+                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_calibrated)
+                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_calibrated)
                 else:
                     scan_width = 0
                     scan_height = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                self.__scan_specifier.context_data_item = context_data_item
+                self.__scan_specifier.line = None
+                self.__scan_specifier.rect = graphic.bounds
+                self.__scan_specifier.rect_rotation = graphic.rotation
+                self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
+                self.__acquire_button._widget.enabled = True
             elif display_item and display_data_shape is not None:
                 width = display_data_shape[1]
                 height = display_data_shape[0]
                 width_str = display_data_calibrations[1].convert_to_calibrated_size_str(width, value_range=(0, display_data_shape[1]), samples=display_data_shape[1])
                 height_str = display_data_calibrations[0].convert_to_calibrated_size_str(height, value_range=(0, display_data_shape[0]), samples=display_data_shape[0])
-                data_str = _("Context (Full Rect)")
+                data_str = _("Full Rectangle")
                 self.__roi_description.text = f"{data_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
                 self.__calibration = display_data_calibrations[-1]
                 self.__calibration_len = display_data_shape[-1]
-                scan_str = _("Scan Dimensions (Rectangle)")
+                scan_str = _("Scan (2D)")
                 if self.__scan_spacing_px is not None:
                     scan_width = int(width / self.__scan_spacing_px)
                     scan_height = int(height / self.__scan_spacing_px)
-                elif self.__scan_spacing_cal is not None:
-                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_cal)
-                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_cal)
+                elif self.__scan_spacing_calibrated is not None:
+                    scan_width = int(display_data_calibrations[-1].convert_to_calibrated_size(width) / self.__scan_spacing_calibrated)
+                    scan_height = int(display_data_calibrations[-1].convert_to_calibrated_size(height) / self.__scan_spacing_calibrated)
                 else:
                     scan_width = 0
                     scan_height = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                self.__scan_specifier.context_data_item = context_data_item
+                self.__scan_specifier.line = None
+                self.__scan_specifier.rect = None
+                self.__scan_specifier.rect_rotation = 0
+                self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.spacing_calibrated = self.__scan_spacing_calibrated
+                self.__acquire_button._widget.enabled = True
             else:
                 self.__roi_description.text = _("Scan context not active")
                 self.__calibration = None
                 self.__calibration_len = 0
                 self.__scan_label_widget.text = None
+                self.__scan_specifier.context_data_item = None
+                self.__scan_specifier.line = None
+                self.__scan_specifier.rect = None
+                self.__scan_specifier.rect_rotation = 0
+                self.__scan_specifier.spacing_px = None
+                self.__scan_specifier.spacing_calibrated = None
+                self.__acquire_button._widget.enabled = False
 
             if self.__scan_spacing_px is not None and self.__calibration:
                 self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(self.__scan_spacing_px)
                 self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_to_calibrated_size_str(self.__scan_spacing_px, value_range=(0, self.__calibration_len), samples=self.__calibration_len)
-            elif self.__scan_spacing_cal is not None and self.__calibration:
+            elif self.__scan_spacing_calibrated is not None and self.__calibration:
                 calibrated_value_range = self.__calibration.convert_to_calibrated_size(self.__calibration_len)
-                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_calibrated_size_to_str(self.__scan_spacing_cal, calibrated_value_range=(0, calibrated_value_range), samples=self.__calibration_len)
-                spacing_px = self.__calibration.convert_from_calibrated_size(self.__scan_spacing_cal)
+                self.__scan_spacing_calibrated_widget.text = self.__calibration.convert_calibrated_size_to_str(self.__scan_spacing_calibrated, calibrated_value_range=(0, calibrated_value_range), samples=self.__calibration_len)
+                spacing_px = self.__calibration.convert_from_calibrated_size(self.__scan_spacing_calibrated)
                 self.__scan_spacing_pixels_widget.text = Converter.FloatToStringConverter().convert(spacing_px)
             else:
                 self.__scan_spacing_pixels_widget.text = None
@@ -305,10 +405,10 @@ class PanelDelegate:
 
         column = ui.create_column_widget()
 
-        self.__style_combo_box = ui.create_combo_box_widget([_("1d (SI)"), _("2d (RI)")])
+        self.__style_combo_box = ui.create_combo_box_widget([_("Spectra"), _("Images")])
         self.__style_combo_box.current_index = 0
 
-        acquire_sequence_button_widget = ui.create_push_button_widget(_("Acquire"))
+        self.__acquire_button = ui.create_push_button_widget(_("Acquire"))
 
         self.__roi_description = ui.create_label_widget()
 
@@ -384,7 +484,7 @@ class PanelDelegate:
         estimate_row.add_stretch()
 
         acquire_sequence_button_row = ui.create_row_widget()
-        acquire_sequence_button_row.add(acquire_sequence_button_widget)
+        acquire_sequence_button_row.add(self.__acquire_button)
         acquire_sequence_button_row.add_stretch()
 
         if self.__scan_hardware_source_choice.hardware_source_count > 1:
@@ -427,37 +527,37 @@ class PanelDelegate:
             if spacing > 0 and self.__calibration:
                 if self.__scan_spacing_px != spacing:
                     self.__scan_spacing_px = spacing
-                    self.__scan_spacing_cal = None
+                    self.__scan_spacing_calibrated = None
                     update_context()
                     self.__scan_spacing_pixels_widget.select_all()
             else:
                 self.__scan_spacing_px = None
-                self.__scan_spacing_cal = None
+                self.__scan_spacing_calibrated = None
 
         def scan_spacing_calibrated_changed(text):
             spacing = Converter.FloatToStringConverter().convert_back(text)
             if spacing > 0 and self.__calibration:
-                if self.__scan_spacing_cal != spacing:
-                    self.__scan_spacing_cal = spacing
+                if self.__scan_spacing_calibrated != spacing:
+                    self.__scan_spacing_calibrated = spacing
                     self.__scan_spacing_px = None
                     update_context()
                     self.__scan_spacing_calibrated_widget.select_all()
             else:
                 self.__scan_spacing_px = None
-                self.__scan_spacing_cal = None
+                self.__scan_spacing_calibrated = None
 
         self.__scan_spacing_pixels_widget.on_editing_finished = scan_spacing_pixels_changed
         self.__scan_spacing_calibrated_widget.on_editing_finished = scan_spacing_calibrated_changed
 
         self.__scan_spacing_px = 1
-        self.__scan_spacing_cal = None
+        self.__scan_spacing_calibrated = None
 
         new_region(self.__target_region_stream.value)
 
         def acquisition_state_changed(acquisition_state: SequenceState) -> None:
 
             async def update_button_text(text: str) -> None:
-                acquire_sequence_button_widget.text = text
+                self.__acquire_button.text = text
 
             if acquisition_state == SequenceState.idle:
                 self.__scan_acquisition_controller = None
@@ -483,11 +583,11 @@ class PanelDelegate:
                     camera_hardware_source = None
 
                 if scan_hardware_source and camera_hardware_source:
-                    self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source)
+                    self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source, self.__scan_specifier)
                     self.__acquisition_state_changed_event_listener = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(acquisition_state_changed)
                     self.__scan_acquisition_controller.start(self.__style_combo_box.current_index == 0)
 
-        acquire_sequence_button_widget.on_clicked = acquire_sequence
+        self.__acquire_button.on_clicked = acquire_sequence
 
         self.__update_estimate()
 
