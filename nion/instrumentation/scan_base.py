@@ -4,6 +4,7 @@ import contextlib
 import copy
 import gettext
 import logging
+import math
 import queue
 import threading
 import time
@@ -42,6 +43,7 @@ class ScanFrameParameters(dict):
         self.subscan_pixel_size = self.get("subscan_pixel_size", None)
         self.subscan_fractional_size = self.get("subscan_fractional_size", None)
         self.subscan_fractional_center = self.get("subscan_fractional_center", None)
+        self.subscan_rotation = self.get("subscan_rotation", 0.0)
         self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
         self.ac_line_sync = self.get("ac_line_sync", False)
@@ -76,6 +78,8 @@ class ScanFrameParameters(dict):
             d["subscan_fractional_size"] = self.subscan_fractional_size
         if self.subscan_fractional_center is not None:
             d["subscan_fractional_center"] = self.subscan_fractional_center
+        if self.subscan_rotation:  # don't store None or 0.0
+            d["subscan_rotation"] = self.subscan_rotation
         return d
 
     def __repr__(self):
@@ -89,11 +93,16 @@ class ScanFrameParameters(dict):
                "\nexternal clock mode: " + str(self.external_clock_mode) +\
                "\nac line sync: " + str(self.ac_line_sync) +\
                "\nac frame sync: " + str(self.ac_frame_sync) +\
-               "\nflyback time: " + str(self.flyback_time_us)
+               "\nflyback time: " + str(self.flyback_time_us) +\
+               ("\nsubscan pixel size: " + str(self.subscan_pixel_size) if self.subscan_pixel_size is not None else "") +\
+               ("\nsubscan fractional size: " + str(self.subscan_fractional_size) if self.subscan_fractional_size is not None else "") +\
+               ("\nsubscan fractional center: " + str(self.subscan_fractional_center) if self.subscan_fractional_center is not None else "") +\
+               ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_fractional_center is not None else "")
+
 
 
 # set the calibrations for this image
-def update_calibration_metadata(data_element, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata):
+def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata, subscan_region, subscan_rotation):
     pixel_time_us = float(image_metadata["pixel_time_us"])
     center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
     center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
@@ -108,8 +117,6 @@ def update_calibration_metadata(data_element, data_shape, scan_id, frame_number,
         {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
     )
     properties = dict()
-    if image_metadata is not None:
-        properties["autostem"] = copy.deepcopy(image_metadata)
     exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
     properties["exposure"] = exposure_s
     properties["frame_index"] = frame_number
@@ -120,14 +127,41 @@ def update_calibration_metadata(data_element, data_shape, scan_id, frame_number,
     properties["center_y_nm"] = center_y_nm
     properties["pixel_time_us"] = pixel_time_us
     properties["fov_nm"] = fov_nm
-    properties["rotation_deg"] = float(image_metadata["rotation_deg"])
+    if "rotation_deg" in image_metadata:
+        properties["rotation_deg"] = float(image_metadata["rotation_deg"])
+        if not "rotation" in image_metadata:
+            properties["rotation"] = math.radians(properties["rotation_deg"])
+    if "rotation" in image_metadata:
+        properties["rotation"] = float(image_metadata["rotation"])
+        if not "rotation_deg" in image_metadata:
+            properties["rotation_deg"] = math.degrees(properties["rotation"])
     properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
+
+    if frame_parameters is not None:
+        if frame_parameters.subscan_pixel_size is not None:
+            properties["subscan_pixel_size"] = tuple(frame_parameters.subscan_pixel_size)
+        if frame_parameters.subscan_fractional_size is not None:
+            properties["subscan_fractional_size"] = tuple(frame_parameters.subscan_fractional_size)
+        if frame_parameters.subscan_fractional_center is not None:
+            properties["subscan_fractional_center"] = tuple(frame_parameters.subscan_fractional_center)
+        if frame_parameters.subscan_rotation is not None:
+            properties["subscan_rotation"] = frame_parameters.subscan_rotation
+
+    if subscan_region is not None:
+        subscan_region = Geometry.FloatRect.make(subscan_region)
+        context_size = Geometry.IntSize.make(data_shape)
+        properties["subscan_pixel_size"] = context_size.height, context_size.width
+        properties["subscan_fractional_size"] = subscan_region.height, subscan_region.width
+        properties["subscan_fractional_center"] = subscan_region.center.y, subscan_region.center.x
+        properties["subscan_rotation"] = subscan_rotation
+        print(properties)
+
     data_element["properties"] = properties
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, subscan_rotation, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
@@ -145,6 +179,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__last_read_time = 0
         self.__subscan_enabled = subscan_enabled
         self.__subscan_region = subscan_region
+        self.__subscan_rotation = subscan_rotation
 
     def set_frame_parameters(self, frame_parameters):
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
@@ -170,6 +205,15 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
     @subscan_region.setter
     def subscan_region(self, value):
         self.__subscan_region = value
+        self.__activate_frame_parameters()
+
+    @property
+    def subscan_rotation(self):
+        return self.__subscan_rotation
+
+    @subscan_rotation.setter
+    def subscan_rotation(self, value):
+        self.__subscan_rotation = value
         self.__activate_frame_parameters()
 
     def _start_acquisition(self) -> bool:
@@ -231,21 +275,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
                 channel_id += "_subscan"
             elif self.subscan_enabled:
                 channel_id += "_subscan"
-            update_calibration_metadata(data_element, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties)
+            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties, self.subscan_region if self.subscan_enabled else None, self.subscan_rotation)
             data_element["properties"]["hardware_source_name"] = self.__display_name
             data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
             data_element["data"] = npdata
             data_element["sub_area"] = sub_area
             data_element["state"] = "complete" if complete else "partial"
             data_element["properties"]["valid_rows"] = sub_area[0][0] + sub_area[1][0]
-
-        def get_autostem_properties():
-            autostem_properties = None
-            try:
-                autostem_properties = self.__stem_controller.get_autostem_properties()
-            except Exception as e:
-                logging.info("autostem.get_autostem_properties has failed")
-            return autostem_properties
 
         _data_elements, complete, bad_frame, sub_area, self.__frame_number, self.__pixels_to_skip = self.__device.read_partial(self.__frame_number, self.__pixels_to_skip)
 
@@ -258,13 +294,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         if not self.__scan_id:
             self.__scan_id = uuid.uuid4()
 
-        autostem_properties = get_autostem_properties()
-
         # merge the _data_elements into data_elements
         data_elements = []
         for _data_element in _data_elements:
-            if autostem_properties is not None:
-                _data_element["properties"].update(autostem_properties)
             # calculate the valid sub area for this iteration
             channel_index = int(_data_element["properties"]["channel_id"])
             _data = _data_element["data"]
@@ -273,6 +305,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # '_data_element' is the format returned from the Device.
             data_element = dict()
             update_data_element(data_element, channel_index, complete, sub_area, _data, _properties, self.__frame_number, self.__scan_id)
+            update_autostem_properties(data_element, self.__stem_controller)
             data_elements.append(data_element)
 
         if complete or bad_frame:
@@ -294,6 +327,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             device_frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
             device_frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
             device_frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
+            device_frame_parameters.subscan_rotation = self.subscan_rotation
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
@@ -354,6 +388,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__subscan_state_changed_event_listener = self.__stem_controller._subscan_state_value.property_changed_event.listen(self.__subscan_state_changed)
         self.__subscan_region_changed_event_listener = self.__stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
+        self.__subscan_rotation_changed_event_listener = self.__stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
@@ -404,6 +439,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if self.__subscan_region_changed_event_listener:
             self.__subscan_region_changed_event_listener.close()
             self.__subscan_region_changed_event_listener = None
+        if self.__subscan_rotation_changed_event_listener:
+            self.__subscan_rotation_changed_event_listener.close()
+            self.__subscan_rotation_changed_event_listener = None
         super().close()
 
         # keep the device around until super close is called, since super
@@ -626,6 +664,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def subscan_region(self, value):
         self.__stem_controller._subscan_region_value.value = value
 
+    @property
+    def subscan_rotation(self):
+        return self.__stem_controller._subscan_rotation_value.value
+
+    @subscan_rotation.setter
+    def subscan_rotation(self, value):
+        self.__stem_controller._subscan_rotation_value.value = value
+
     def apply_subscan(self, frame_parameters):
         context_size = Geometry.FloatSize.make(frame_parameters["size"])
         if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
@@ -635,13 +681,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
             frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
+            frame_parameters.subscan_rotation = self.subscan_rotation
 
     def __subscan_state_changed(self, name):
         subscan_state = self.__stem_controller._subscan_state_value.value
         subscan_enabled = subscan_state == stem_controller.SubscanState.ENABLED
         subscan_region_value = self.__stem_controller._subscan_region_value
+        subscan_rotation_value = self.__stem_controller._subscan_rotation_value
         if subscan_enabled and not subscan_region_value.value:
             subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
+            subscan_rotation_value.value = 0.0
         if self.__acquisition_task:
             self.__acquisition_task.subscan_enabled = subscan_enabled
 
@@ -652,11 +701,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.subscan_enabled = False
             self.__acquisition_task.subscan_region = subscan_region
 
+    def __subscan_rotation_changed(self, name):
+        if self.__acquisition_task:
+            self.__acquisition_task.subscan_rotation = self.subscan_rotation
+
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.__frame_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.subscan_rotation, self.__frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -665,7 +718,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, self.subscan_enabled, self.subscan_region, self.__record_parameters, channel_states, self.display_name)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, self.subscan_enabled, self.subscan_region, self.subscan_rotation, self.__record_parameters, channel_states, self.display_name)
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level. no need to set them.
@@ -866,12 +919,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if hasattr(self.__device, "get_buffer_data"):
             buffer_data = self.__device.get_buffer_data(start, count)
 
-            autostem_properties = None
-            try:
-                autostem_properties = self.__stem_controller.get_autostem_properties()
-            except Exception as e:
-                logging.info("autostem.get_autostem_properties has failed")
-
             enabled_channel_states = list()
             for channel_index in range(self.channel_count):
                 channel_state = self.get_channel_state(channel_index)
@@ -887,9 +934,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     if self.subscan_enabled:
                         channel_id += "_subscan"
                     properties = data_element["properties"]
-                    if autostem_properties:
-                        properties.update(autostem_properties)
-                    update_calibration_metadata(data_element, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties)
+                    update_autostem_properties(data_element, self.__stem_controller)
+                    update_calibration_metadata(data_element, None, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties, None, 0)
                     data_element["properties"]["channel_index"] = channel_index
                     data_element["properties"]["hardware_source_name"] = self.display_name
                     data_element["properties"]["hardware_source_id"] = self.hardware_source_id
@@ -989,6 +1035,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 pass
 
         return CameraFacade()
+
+
+def update_autostem_properties(data_element, stem_controller):
+    if stem_controller:
+        try:
+            autostem_properties = stem_controller.get_autostem_properties()
+            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+        except Exception as e:
+            pass
 
 
 _component_registered_listener = None

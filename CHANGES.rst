@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 0.16.4 (UNRELEASED)
 -------------------
 
+- Support subscan rotation and subscan resolution.
+
 - Improve handling of default stem_controller for camera, scan modules.
 
 - Change shift output messages to match sign of change.

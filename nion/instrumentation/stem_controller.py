@@ -60,6 +60,7 @@ class STEMController:
         self.probe_state_changed_event = Event.Event()
         self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value = Model.PropertyModel(None)
+        self.__subscan_rotation_value = Model.PropertyModel(0.0)
         self.scan_data_items_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
@@ -131,6 +132,11 @@ class STEMController:
     def _subscan_region_value(self):
         """Internal use."""
         return self.__subscan_region_value
+
+    @property
+    def _subscan_rotation_value(self):
+        """Internal use."""
+        return self.__subscan_rotation_value
 
     def disconnect_probe_connections(self):
         self.scan_data_items_changed_event.fire(list())
@@ -457,9 +463,13 @@ class SubscanView:
         self.__subscan_connections = list()
         self.__subscan_state_model = stem_controller._subscan_state_value
         self.__subscan_region_value = stem_controller._subscan_region_value
+        self.__subscan_rotation_value = stem_controller._subscan_rotation_value
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
+        self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
         self.__scan_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__scan_data_items_changed)
         self.__subscan_graphic_trackers = list()
+        self.__update_subscan_region_value = None
+        self.__update_subscan_rotation_value = 0.0
 
     def close(self):
         self.__scan_data_items_changed_listener.close()
@@ -478,8 +488,14 @@ class SubscanView:
         self.__update_subscan_region_value = self.__subscan_region_value.value
         self.__event_loop.create_task(self.__update_subscan_region())
 
+    def __subscan_rotation_changed(self, name):
+        # pass the value to update subscan region via the field; that way less worry about overruns
+        self.__update_subscan_rotation_value = self.__subscan_rotation_value.value
+        self.__event_loop.create_task(self.__update_subscan_region())
+
     async def __update_subscan_region(self):
         subscan_region = self.__update_subscan_region_value
+        subscan_rotation = self.__update_subscan_rotation_value
         with self.__last_data_items_lock:
             scan_data_items = self.__scan_data_items
         if subscan_region:
@@ -492,11 +508,14 @@ class SubscanView:
                         subscan_graphic.graphic_id = "subscan"
                         subscan_graphic.label = _("Subscan")
                         subscan_graphic.bounds = subscan_region
+                        subscan_graphic.rotation = subscan_rotation
                         subscan_graphic.is_bounds_constrained = True
 
                         def subscan_graphic_property_changed(subscan_graphic, name):
                             if name == "bounds":
                                 self.__subscan_region_value.value = subscan_graphic.bounds
+                            if name == "rotation":
+                                self.__subscan_rotation_value.value = subscan_graphic.rotation
 
                         subscan_graphic_property_changed_listener = subscan_graphic.property_changed_event.listen(functools.partial(subscan_graphic_property_changed, subscan_graphic))
 
@@ -515,6 +534,7 @@ class SubscanView:
             # apply new value to any existing subscan graphics
             for subscan_graphic, l1, l2, l3 in self.__subscan_graphic_trackers:
                 subscan_graphic.bounds = subscan_region
+                subscan_graphic.rotation = subscan_rotation
         else:
             # remove any graphics
             for subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:

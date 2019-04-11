@@ -248,6 +248,7 @@ How do I configure the scan for acquire a subscan of an existing scan?
 -----------------------------------------------------------------------
 A subscan can be specified within the context of an individual scan by specifying additional parameters. ::
 
+    import math
     import time
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
@@ -258,6 +259,7 @@ A subscan can be specified within the context of an individual scan by specifyin
     frame_parameters["subscan_pixel_size"] = (100, 100)
     frame_parameters["subscan_fractional_size"] = (0.4, 0.3)
     frame_parameters["subscan_fractional_center"] = (0.5, 0.5)
+    frame_parameters["subscan_rotation"] = math.radians(15)
     # adjust frame_parameters further here if desired
 
     scan.start_playing(frame_parameters)
@@ -268,13 +270,14 @@ Name                            Immediate   Description
 subscan_pixel_size              yes         the subscan desired size tuple (h, w), in pixels
 subscan_fractional_size         yes         the subscan fractional size, relative to field of view
 subscan_fractional_center       yes         the subscan fractional center, relative to field of view
+subscan_rotation                yes         the subscan rotation around subscan fractional center, in radians
 ============================    =========   ===========
 
 The fractional size and center are relative to the field of view and have the same rotation. The (0, 0) tuple is at the
 top left and the (1, 1) tuple is at the bottom right. Coordinates are specified in y-axis, x-axis order.
 
 Changing the rotation will rotate the scan around the microscope axis and the subscan will generally be off axis; so a
-rotation will effectively shift a subscan in addition to rotating it.
+rotation will effectively shift a subscan in addition to rotating it. Positive rotation is counterclockwise.
 
 .. _synced-acquisition:
 
