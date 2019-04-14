@@ -154,7 +154,6 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
         properties["subscan_fractional_size"] = subscan_region.height, subscan_region.width
         properties["subscan_fractional_center"] = subscan_region.center.y, subscan_region.center.x
         properties["subscan_rotation"] = subscan_rotation
-        print(properties)
 
     data_element["properties"] = properties
 
