@@ -8,6 +8,7 @@ import threading
 import typing
 
 # local libraries
+from nion.data import xdata_1_0 as xd
 from nion.swift import Facade
 from nion.swift import HistogramPanel
 from nion.swift.model import DataItem
@@ -53,6 +54,10 @@ def create_and_display_data_item(document_window, data_and_metadata, scan_data_l
         data_item._data_item.session_id = document_window.library._document_model.session_id
 
         data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
+
+        if scan_data_and_metadata.data_shape[0] == 1:
+            scan_data_and_metadata = xd.squeeze(scan_data_and_metadata)
+
         data_item.set_data_and_metadata(scan_data_and_metadata)
         document_window.display_data_item(data_item)
 
@@ -108,7 +113,7 @@ class ScanAcquisitionController:
                 scan_frame_parameters.subscan_pixel_size = (1, line_length / self.__scan_specifier.spacing_px)
                 # for fraction size/center, the line will start as horizontal and be rotated from there
                 scan_frame_parameters.subscan_fractional_size = 1 / context_data_shape[0], line_length / context_data_shape[1]
-                scan_frame_parameters.subscan_fractional_center = (((line_start[0] + line_end[0]) / 2) / context_data_shape[0], ((line_start[1] + line_end[1]) / 2) / context_data_shape[0])
+                scan_frame_parameters.subscan_fractional_center = (((line_start[0] + line_end[0]) / 2) / context_data_shape[0], ((line_start[1] + line_end[1]) / 2) / context_data_shape[1])
                 scan_frame_parameters.subscan_rotation = -math.atan2(dy, dx)  # radians counterclockwise
                 # print(f"{scan_frame_parameters}")
             elif self.__scan_specifier.rect:
