@@ -109,7 +109,7 @@ class ScanAcquisitionController:
                 # for fraction size/center, the line will start as horizontal and be rotated from there
                 scan_frame_parameters.subscan_fractional_size = 1 / context_data_shape[0], line_length / context_data_shape[1]
                 scan_frame_parameters.subscan_fractional_center = (((line_start[0] + line_end[0]) / 2) / context_data_shape[0], ((line_start[1] + line_end[1]) / 2) / context_data_shape[0])
-                # scan_frame_parameters.subscan_rotation = math.atan2(dy, dx)  # radians counterclockwise
+                scan_frame_parameters.subscan_rotation = -math.atan2(dy, dx)  # radians counterclockwise
                 # print(f"{scan_frame_parameters}")
             elif self.__scan_specifier.rect:
                 # print(f"{self.__scan_specifier.rect}")
@@ -124,15 +124,16 @@ class ScanAcquisitionController:
                 scan_frame_parameters.subscan_pixel_size = (height / self.__scan_specifier.spacing_px, width / self.__scan_specifier.spacing_px)
                 scan_frame_parameters.subscan_fractional_size = height / context_data_shape[0], width / context_data_shape[1]
                 scan_frame_parameters.subscan_fractional_center = (cy, cx)
-                # scan_frame_parameters.subscan_rotation = math.atan2(dy, dx)  # radians counterclockwise
+                scan_frame_parameters.subscan_rotation = self.__scan_specifier.rect_rotation  # radians counterclockwise
             else:
                 # print("FULL")
+                scan_frame_parameters.size = context_data_shape
                 scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
                 scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
                 scan_frame_parameters.subscan_pixel_size = None
                 scan_frame_parameters.subscan_fractional_size = None
                 scan_frame_parameters.subscan_fractional_center = None
-                # scan_frame_parameters.subscan_rotation = 0.0  # radians counterclockwise
+                scan_frame_parameters.subscan_rotation = 0  # radians counterclockwise
         else:
             scan_hardware_source.apply_subscan(scan_frame_parameters)
 
