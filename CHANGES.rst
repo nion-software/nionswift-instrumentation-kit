@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 0.16.4 (UNRELEASED)
 -------------------
 
+- Add multi-acquire panel for acquiring multiple summed sets of spectra with optional energy offsets.
+
 - Support subscan rotation and subscan resolution.
 
 - Improve handling of default stem_controller for camera, scan modules.

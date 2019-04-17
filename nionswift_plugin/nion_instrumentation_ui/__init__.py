@@ -5,6 +5,7 @@ from . import CameraControlPanel
 from . import ScanControlPanel
 from . import ScanAcquisition
 from . import AcquisitionRecorder
+from . import MultiAcquirePanel
 from . import MultipleShiftEELSAcquire
 from . import VideoControlPanel
 
