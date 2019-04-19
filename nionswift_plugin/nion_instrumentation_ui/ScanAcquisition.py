@@ -132,7 +132,7 @@ class ScanAcquisitionController:
                 scan_frame_parameters.subscan_rotation = self.__scan_specifier.rect_rotation  # radians counterclockwise
             else:
                 # print("FULL")
-                scan_frame_parameters.size = context_data_shape
+                scan_frame_parameters.size = context_data_shape[0] / self.__scan_specifier.spacing_px, context_data_shape[1] / self.__scan_specifier.spacing_px
                 scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
                 scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
                 scan_frame_parameters.subscan_pixel_size = None
