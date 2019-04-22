@@ -144,6 +144,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
+        self.features["has_processed_channel"] = self.processor is not None
+        # future version will also include the processed channel type;
+        # candidates for the official name are "vertical_sum" or "vertical_projection_profile"
 
         # on_low_level_parameter_changed is handled for backwards compatibility (old DLLs with new hardware source).
         # new DLLs should call on_mode_changed and on_mode_parameter_changed (handled below) and should NOT call

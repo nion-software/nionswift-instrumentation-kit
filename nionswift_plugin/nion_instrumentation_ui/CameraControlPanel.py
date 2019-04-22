@@ -7,6 +7,7 @@ import numpy
 import pkgutil
 import sys
 import time
+import typing
 
 # local libraries
 from nion.swift import DataItemThumbnailWidget
@@ -89,7 +90,7 @@ class CameraControlStateController:
 
     def __init__(self, camera_hardware_source, queue_task, document_model):
         self.__hardware_source = camera_hardware_source
-        self.__is_eels_camera = self.__hardware_source and self.__hardware_source.features.get("is_eels_camera", False)
+        self.__has_processed_channel = self.__hardware_source and self.__hardware_source.features.get("has_processed_channel", False)
         self.use_processed_data = False
         self.queue_task = queue_task
         self.__document_model = document_model
@@ -198,8 +199,8 @@ class CameraControlStateController:
                 self.queue_task(functools.partial(update_profile_state_and_frame_parameters, name))
 
     @property
-    def has_processed_data(self):
-        return self.__is_eels_camera
+    def has_processed_data(self) -> bool:
+        return self.__has_processed_channel
 
     def __receive_new_xdatas(self, xdatas):
         current_time = time.time()
@@ -1067,9 +1068,8 @@ def run():
         """Called when a hardware source is added to the hardware source manager."""
 
         # check to see if we handle this hardware source.
-        is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
-        is_eels_camera = hardware_source.features.get("is_eels_camera", False)
-        if is_ronchigram_camera or is_eels_camera:
+        is_camera = hardware_source.features.get("is_camera", False)
+        if is_camera:
 
             panel_id = "camera-control-panel-" + hardware_source.hardware_source_id
             name = hardware_source.display_name + " " + _("Camera Control")
@@ -1099,7 +1099,7 @@ def run():
                         return CameraDisplayPanelController(display_panel, hardware_source_id, show_processed_data)
                     return None
 
-                def match(self, document_model, data_item: DataItem.DataItem) -> dict:
+                def match(self, document_model, data_item: DataItem.DataItem) -> typing.Optional[typing.Dict]:
                     if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, document_model, data_item):
                         return {"controller_type": CameraDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
                     return None
@@ -1109,7 +1109,7 @@ def run():
             panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
 
             camera_panel_type = hardware_source.features.get("camera_panel_type")
-            if not camera_panel_type or camera_panel_type in ("ronchigram", "eels"):
+            if not camera_panel_type:
                 Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
             else:
                 panel_properties["camera_panel_type"] = camera_panel_type
@@ -1117,9 +1117,8 @@ def run():
 
     def unregister_camera_panel(hardware_source):
         """Called when a hardware source is removed from the hardware source manager."""
-        is_ronchigram_camera = hardware_source.features.get("is_ronchigram_camera", False)
-        is_eels_camera = hardware_source.features.get("is_eels_camera", False)
-        if is_ronchigram_camera or is_eels_camera:
+        is_camera = hardware_source.features.get("is_camera", False)
+        if is_camera:
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
             panel_id = camera_control_panels.get(hardware_source.hardware_source_id)
             if panel_id:

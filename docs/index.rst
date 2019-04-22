@@ -11,6 +11,10 @@ Getting Started
    * Read about using the :ref:`using-cameras`.
    * Read about using :ref:`using-video`.
 
+Advanced
+--------
+   * Creating custom components :ref:`creating-components`.
+
 Table of Contents
 -----------------
 .. toctree::
@@ -18,5 +22,6 @@ Table of Contents
     scanning
     cameras
     video
+    extensions
     :maxdepth: 1
     :caption: Contents:

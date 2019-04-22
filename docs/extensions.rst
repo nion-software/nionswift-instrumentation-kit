@@ -1,5 +1,10 @@
-Instrumentation Developers Kit
-==============================
+.. _creating-components:
+
+Creating Instrumentation Components
+===================================
+Create custom components based on classes in the instrumentation kit.
+
+*The information on this page is incomplete. Refer to example implementations for more information.*
 
 Overview
 --------
@@ -28,151 +33,120 @@ Cameras and detectors provide a user interface and a means of acquiring data int
 Acquisition devices provide the ability to acquire data and interact with applications such as a live data viewer or
 spectrum imaging via settings describing the data acquisition.
 
-Acquisition Settings
+.. TODO: handling actions, state from STEM events (e.g., flip of EELS camera)
+
+STEM Scan Controller
 --------------------
-The acquisition settings are layered so that various parts of the system can contribute to the settings.
+The scan control panel and scan control bar provide a UI for the scan device. A standard basic UI is provided and cannot be extended currently.
 
-- Default settings - fallback values if not specified elsewhere
-- Configuration settings - configuration values, not frequently changed
-- Application settings - values specific to the application using the device
-- User settings - values configurable by the user
-- Automatic settings - values automatically updated depending on the STEM controller
+The standard scan control panel provides play/pause/abort buttons, record/abort buttons, basic mode selection, access to settings dialog, scan settings (time, field of view, pixel size, rotation, etc.), scan status, channel selection and live data previews, and beam control (when not scanning).
 
-.. TODO: are there any missing layers or capabilities not provided by these layers?
+The standard scan control bar provides scan/abort/stop buttons, integrated PMT controls, channel enable/disable.
 
-The UI will typically allow the user to save/load user settings and possibly configuration settings.
+.. TODO: allow primary and secondary scan controllers
 
-The settings for a particular acquisition will be constructed starting with default settings and applying any more
-specific settings from each layer. Acquisition settings may change (frame by frame) explicitly from the user or
-automatically from changes to the state of the STEM controller.
+Cameras
+-------
+The camera control panels and camera control bars provide a UI for each camera instance. A standard basic UI is provided but additional custom UI's can be provided in plug-in packages.
 
-Example of application settings: external trigger mode (spectrum imaging).
+The standard camera control panel provides play/pause/abort buttons, basic mode selection, access to settings dialog, access to a monitor view, binning and exposure controls, and a live data preview.
 
-Example of user setting: exposure time, binning, dark and gain mode.
+The standard camera control bar provides play/pause button and a checkbox to display the processing channel if there is one.
 
-Example of automatic setting: calibration, readout area (EELS), horizontal flip (EELS).
+A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, and optional camera panel type. If the camera panel type is not defined, the standard camera panel is used.
 
-Acquisition UI
---------------
-The acquisition panel allows the user to display and edit current settings, start/stop acquisition, save/load settings,
-open a configuration dialog, and preview the acquisition data or image.
+A camera device defines several methods, including a features dictionary.
 
-The configuration dialog allows the user to edit configuration settings.
+The camera device must set `is_camera` to `True` to be recognized as a camera.
 
-.. TODO: does the configuration dialog ever affect current acquisition exposure/binning?
+.. TODO: Document camera modules.
 
-Acquisition begins with a copy of settings constructed from each of the settings layers. Changes to any of the layers
-will result in update settings being passed to the low level device acquisition.
+If the camera device features sets `has_processing_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
 
-The acquisition panel will reflect the current settings as closely as possible.
+.. TODO: dark subtraction, gain normalization, blemish removal
+.. TODO: dark reference collection, gain image collection, blemish configuration
+.. TODO: readout area, other camera configuration
+.. TODO: settings storage, settings dialog
+.. TODO: monitor configuration, button
+.. TODO: processing channel configuration, settings including readout area
+.. TODO: synchronized acquisition
+.. TODO: sequence acquisition
+.. TODO: handling integrated scan/camera systems
+.. TODO: frame summing, averaging (rolling), recording
 
-The current settings are persistent between launches.
+Video Camera
+------------
+The video control panel and video control bars provide a UI for each video camera instance. A standard basic UI is provided and can be extended by plug-in packages.
 
-The acquisition panel provides options to load/save settings. Loading previously saved settings will affect the current
-acquisition.
+The video control panel provides a play/stop button and live data preview for each video source.
 
-.. TODO: which settings are allowed to be changed during acquisition? (currently: anything)
-.. TODO: how to prevent user from switching settings while an application is running?
-.. TODO: how to prevent multiple applications from running conflicting settings?
+The video control bar provides a play/stop button.
 
-Acquisition Settings Model
---------------------------
-The acquisition settings model provides storage for acquisition settings, configuration, and other persistent settings.
-It can be used to provide a full UI and storage in Python, but it can also provide a common interface when the UI and
-storage are implemented at a lower level.
+The video control preference panel provides the ability to add/remove video sources and edit their settings. The settings are defined by plug-in packages and can be have a customized UI.
 
-Acquisition devices can have the following optional customizations. If a particular device doesn't customize one or
-more of the items below, a default will be used according to the device type (camera, scan).
+..
+    Data Elements
+    -------------
+    The data elements are a list of data elements ``dict`` describing the data. The data elements can contain the
+    following keys.
 
-- Custom acquisition panel
-- Custom configuration dialog
-- Custom storage
+    =============================== =============== ===============================================================
+    Key                             Default         Description
+    =============================== =============== ===============================================================
+    version                         required        data element version, must be the integer 1
+    data                            required        the data, a numpy array
+    timestamp                       current time    the timestamp of the data, datetime object
+    is_sequence                     False           whether the data represents a sequence
+    collection_dimension_count      0               an integer describing the collection dimension count
+    datum_dimension_count           data shape      an integer describing the datum dimension count
+    properties                      none            a dict of properties, see below
+    properties.frame_number
+    properties.frame_index
+    properties.integration_count
+    properties.counts_per_electron
+    intensity_calibration           none            a calibration dict
+    spatial_calibrations            none            a list of calibration dicts
+    reader_version
+    large_format
+    metadata
+    datetime_modified
+    datetime_original
+    description.timezone (tz, dst)
+    =============================== =============== ===============================================================
 
-Camera
-------
-The system provides capabilities for acquisition, dark subtraction, gain normalization, blemish removal,
-configuration storage, dark and gain image storage, settings storage, settings model, a standard acquisition panel,
-ability to use custom acquisition panel, and ability to use custom configuration panel.
+    Data is stored with the fastest varying index last (numpy default).
 
-Acquisition styles include viewing, sequence acquisition (SI, ptychography), frame summing, frame averaging (rolling),
-single frame, and recording.
+    Data elements that have height=1 are expected to be returned as 1d data.
 
-Provides a mechanism to link configuration or settings to other objects such as UI or the stem controller. This
-allows camera configuration, saved settings, and current settings to be edited and viewed.
+    Integration count is optional; passed in settings, but should return how many were actually integrated.
 
-Camera Device
-^^^^^^^^^^^^^
+    Exposure, binning, and signal type will be automatically determined from settings.
 
-Data Elements
-^^^^^^^^^^^^^
-The data elements are a list of data elements ``dict`` describing the data. The data elements can contain the
-following keys.
+    frame_number comes from camera; frame_index comes from Swift.
 
-=============================== =============== ===============================================================
-Key                             Default         Description
-=============================== =============== ===============================================================
-version                         none            should be set to 1
-data                            required        an ndarray
-timestamp                                       default now
-is_sequence
-collection_dimension_count      0               an integer describing the collection dimension count
-datum_dimension_count           data shape      an integer describing the datum dimension count
-properties                      none            a dict of properties, see below
-properties.frame_number
-properties.integration_count
-properties.counts_per_electron
-intensity_calibration           none            a calibration dict
-spatial_calibrations            none            a list of calibration dicts
-reader_version
-large_format
-metadata
-datetime_modified
-datetime_original
-description.timezone (tz, dst)
-properties.integration_count
-properties.frame_number
-=============================== =============== ===============================================================
+    hardware_source_name, hardware_source_id, state, and valid_rows will be set after acquisition.
 
-Data is stored with the fastest varying index last.
+    .. TODO: Explain how counts_per_electron and spatial/intensity calibrations handle binning.
 
-Data elements that have height=1 are expected to be returned as 1d data.
+    swift processes the data using the following data_element keys:
+    channel_id
+    state
+    sub_area
+    ImportExportManager.convert_data_element_to_data_and_metadata:
+    * data
+    * is_sequence, collection_dimension_count, datum_dimension_count
+    * spatial_calibrations
+    * intensity_calibration
+    * metadata
+    * properties (get stored into metdata.hardware_source)
+    * timestamp or datetime_modified
+    * if datetime_modified (dst, tz) (converted to timestamp; then timezone gets stored into metadata.description.timezone)
 
-Integration count is optional; passed in settings, but should return how many were actually integrated.
+    Calibration
+    -----------
+    Providing calibrations directly in the data element.
 
-Exposure, binning, and signal type will be automatically determined from settings.
-
-frame_number comes from camera; frame_index comes from Swift.
-
-hardware_source_name, hardware_source_id, state, and valid_rows will be set after acquisition.
-
-.. TODO: Explain how counts_per_electron and spatial/intensity calibrations handle binning.
-
-swift processes the data using the following data_element keys:
-channel_id
-state
-sub_area
-ImportExportManager.convert_data_element_to_data_and_metadata:
-* data
-* is_sequence, collection_dimension_count, datum_dimension_count
-* spatial_calibrations
-* intensity_calibration
-* metadata
-* properties (get stored into metdata.hardware_source)
-* timestamp or datetime_modified
-* if datetime_modified (dst, tz) (converted to timestamp; then timezone gets stored into metadata.description.timezone)
-
-Calibration
-^^^^^^^^^^^
-Providing calibrations directly in the data element.
-
-Providing a set of controls from which to read the calibrations.
-
-Scan
-----
-Acquire list of regions (rectangle, line, point) with action between each region. The action could be defined
-declaratively (i.e. change AS2 setting, etc.). Or we could go full-out and make callbacks to Python.
-
-Control the probe position.
+    Providing a set of controls from which to read the calibrations.
 
 .. toctree::
    :maxdepth: 2
