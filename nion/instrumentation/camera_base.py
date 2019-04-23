@@ -157,7 +157,7 @@ class CameraDevice(abc.ABC):
     def calibration_controls(self) -> dict:
         """Return lookup dict of calibration controls to be read from instrument controller for this device.
 
-        The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", or "intensity",
+        The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", "z", or "intensity",
         <field> is "scale", "offset", or "units", and <type> is "control" or "value". If <type> is "control", then
         the value for that axis/field will use the value of that key to read the calibration field value from the
         instrument controller. If <type> is "value", then the calibration field value will be the value of that key.
@@ -167,9 +167,17 @@ class CameraDevice(abc.ABC):
 
         { "x_scale_control": "cam_scale", "x_offset_control": "cam_offset", "x_units_value": "nm" }
 
+        The dict can contain the key <axis>_origin_override with the value "center" to indicate that the origin is
+        at the center of the data for that axis.
+
+        { "x_scale_control": "cam_scale",
+          "x_offset_control": "cam_offset",
+          "x_units_value": "nm",
+          "x_origin_override": "center" }
+
         In addition to the calibration controls, a "counts_per_electron" control or value can also be specified.
 
-        { "counts_per_electron_value": 32 }
+        { "counts_per_electron_control": "Camera1_CountsPerElectron" }
         """
         ...
 
@@ -197,13 +205,22 @@ class CameraDevice(abc.ABC):
         a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
         value of 1 is assumed.
 
-        Calibrations may be specified by including keys 'intensity_calibration' or 'spatial_calibrations'. However,
-        if the calibration is dependent on the instrument settings, it may be better to use the 'calibration_controls'
-        method to specify that calibration should be read from the instrument settings instead. If calibrations are
-        directly included in the data element dict, the `intensity_calibration` should be a dict with `offset`, `scale`,
-        and `units` key and the `spatial_calibrations` should be a list of dicts, one for each dimension, with the same
-        keys. Specifying calibrations directly in the data element take precedence over using the `calibration_controls`
-        method.
+        Calibrations can be directly by including a 'calibration_controls' dictionary that follows the guidelines
+        described under that property, by including keys 'intensity calibration' and 'spatial_calibrations', or by
+        doing nothing and falling back to the having the 'calibration_controls' property define the calibrations.
+
+        Use the 'calibration_controls' dictionary when the calibrations are read from the instrument and dependent on
+        the camera state. Use the 'calibration_controls' property when read from the instrument but independent of
+        camera state. Use 'intensity_calibration' and 'spatial_calibrations' when the calibrations are only dependent
+        on the camera state but not the instrument.
+
+        If the calibrations are specified with the 'intensity calibration' and 'spatial_calibrations' keys, the
+        `intensity_calibration` should be a dict with `offset`, `scale`, and `units` key and the `spatial_calibrations`
+        should be a list of dicts, one for each dimension, with the same keys.
+
+        Specifying calibrations directly using 'intensity_calibration' and 'spatial_calibrations' take precedence over
+        supplying `calibration_controls` in the data_element. And that takes precedence over using the
+        'calibration_controls' property.
         """
         ...
 
@@ -943,11 +960,13 @@ def get_stem_control(stem_controller, calibration_controls, key):
     return None
 
 
-def build_calibration_dict(stem_controller, calibration_controls, prefix, relative_scale=1):
+def build_calibration_dict(stem_controller, calibration_controls, prefix, relative_scale=1, data_len=0):
     scale = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "scale")
     scale = scale * relative_scale if scale is not None else scale
     offset = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "offset")
     units = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "units")
+    if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
+        offset = -scale * data_len * 0.5
     return Calibration.Calibration(offset, scale, units).rpc_dict
 
 
@@ -957,32 +976,43 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
         elif hasattr(camera, "calibration"):  # used in nionccd1010
             data_element["spatial_calibrations"] = camera.calibration
-        elif stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
-            x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x)
-            y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y)
-            if camera_category.lower() != "eels" and len(data_shape) == 2:
-                y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
-                x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
-                data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+        elif stem_controller:
+            if "calibration_controls" in data_element["properties"]:
+                calibration_controls = data_element["properties"]["calibration_controls"]
+            elif hasattr(camera, "calibration_controls"):
+                calibration_controls = camera.calibration_controls
             else:
-                # cover the possibility that EELS data is returned as 1D
+                calibration_controls = None
+            if calibration_controls is not None:
+                x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x, data_shape[0])
+                y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
+                z_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
+                # leave this here for backwards compatibility until origin is specified in NionCameraManager.py
+                if camera_category.lower() == "ronchigram" and len(data_shape) == 2:
+                    y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
+                    x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
+                if len(data_shape) == 1:
+                    data_element["spatial_calibrations"] = [x_calibration_dict]
                 if len(data_shape) == 2:
                     data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
-                else:
-                    data_element["spatial_calibrations"] = [x_calibration_dict]
+                if len(data_shape) == 3:
+                    data_element["spatial_calibrations"] = [z_calibration_dict, y_calibration_dict, x_calibration_dict]
 
 
 def update_intensity_calibration(data_element, stem_controller, camera):
+    if stem_controller and "calibration_controls" in data_element["properties"]:
+        calibration_controls = data_element["properties"]["calibration_controls"]
+    elif stem_controller and hasattr(camera, "calibration_controls"):
+        calibration_controls = camera.calibration_controls
+    else:
+        calibration_controls = None
     if "intensity_calibration" not in data_element:
         if "intensity_calibration" in data_element["properties"]:
             data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
-        elif stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
+        elif calibration_controls is not None:
             data_element["intensity_calibration"] = build_calibration_dict(stem_controller, calibration_controls, "intensity")
     if "counts_per_electron" not in data_element:
-        if stem_controller and hasattr(camera, "calibration_controls"):
-            calibration_controls = camera.calibration_controls
+        if calibration_controls is not None:
             counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
             if counts_per_electron:
                 data_element["properties"]["counts_per_electron"] = counts_per_electron

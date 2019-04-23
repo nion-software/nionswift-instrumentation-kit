@@ -67,6 +67,12 @@ The camera device should also specify a `signal_type` in the features dictionary
 
 If the camera device features sets `has_processing_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
 
+The camera device acquires images and returns data in a data element.
+
+The data element can directly specify calibrations (using the `intensity_calibration` and `spatial_calibrations` keys in the data element), can directly specify how to read the calibrations from the instrument (using the `calibration_controls` key in the data element), or can indirectly specify how to read the calibrations from the instrument (using the `calibration_controls` camera device property).
+
+The `calibration_controls` data element key or camera device propery returns a `dict` describing how to read the calibrations from the instrument controller. If the calibrations are dependent on the camera device state, the `calibration_controls` should be provided as a key in the data element; otherwise the `calibration_controls` can be specified as a property of the camera device.
+
 .. TODO: dark subtraction, gain normalization, blemish removal
 .. TODO: dark reference collection, gain image collection, blemish configuration
 .. TODO: readout area, other camera configuration
