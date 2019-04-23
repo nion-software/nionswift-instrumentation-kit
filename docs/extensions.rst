@@ -65,7 +65,7 @@ The camera device should also specify a `signal_type` in the features dictionary
 
 .. TODO: Document camera modules.
 
-If the camera device features sets `has_processing_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
+If the camera device features sets `has_processed_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
 
 The camera device acquires images and returns data in a data element.
 
