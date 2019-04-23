@@ -59,6 +59,10 @@ A camera device defines several methods, including a features dictionary.
 
 The camera device must set `is_camera` to `True` to be recognized as a camera.
 
+The camera device should specify a `camera_category` in the features dictionary. Although not limited to these, `eels` and `ronchigram` are two possible values.
+
+The camera device should also specify a `signal_type` in the features dictionary. Although not limited to these, `eels` and `ronchigram` are two possible values.
+
 .. TODO: Document camera modules.
 
 If the camera device features sets `has_processing_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.

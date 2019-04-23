@@ -263,13 +263,14 @@ class CameraDevice(abc.ABC):
 
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_category: str, frame_parameters, display_name):
+    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_category: str, signal_type: typing.Optional[str], frame_parameters, display_name):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
         self.__camera_category = camera_category
+        self.__signal_type = signal_type
         self.__display_name = display_name
         self.__frame_parameters = None
         self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
@@ -349,8 +350,8 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
-        if self.__camera_category in ("eels", "ronchigram"):
-            data_element["properties"]["signal_type"] = self.__camera_category
+        if self.__signal_type:
+            data_element["properties"]["signal_type"] = self.__signal_type
         return [data_element]
 
     def __activate_frame_parameters(self):
@@ -535,6 +536,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
         self.__camera = camera
         self.__camera_category = camera.camera_type
+        # signal type falls back to camera category if camera category is "eels" or "ronchigram". this is only for
+        # backward compatibility. new camera instances should define signal_type directly.
+        self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
         self.processor = None
 
         # configure the features
@@ -713,14 +717,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__record_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
     def acquire_sequence_prepare(self, n: int) -> None:
         frame_parameters = self.get_current_frame_parameters()
@@ -733,7 +737,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             return self.__camera.acquire_sequence(n)
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
-        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, frame_parameters, self.display_name)
+        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
         acquisition_task._start_acquisition()
         try:
             properties = None
