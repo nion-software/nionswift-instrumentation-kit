@@ -63,6 +63,15 @@ class Camera(abc.ABC):
 
 class CameraDevice(abc.ABC):
 
+    """Properties that should be defined for the camera device:
+
+    camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
+    camera_name (required, the name of the camera. example: 'Bottom Camera')
+    camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
+    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram')
+    has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
+    """
+
     @abc.abstractmethod
     def close(self) -> None:
         """Close the camera."""
@@ -568,6 +577,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.features["is_ronchigram_camera"] = True
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
+        if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
         self.features["has_processed_channel"] = self.processor is not None
         # future version will also include the processed channel type;
