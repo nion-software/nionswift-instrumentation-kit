@@ -248,6 +248,30 @@ class CameraDevice(abc.ABC):
         """
         return dict()
 
+    # def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
+        """Prepare for synchronized acquisition.
+
+        Default implementation calls acquire_sequence_prepare.
+        """
+        # pass
+
+    # def acquire_synchronized(self, data_shape, **kwargs) -> typing.Optional[typing.Dict]:
+        """Acquire a sequence of images with the data_shape. Return a single data element with two dimensions n x data_shape.
+
+        Default implementation calls acquire_sequence.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+
+        Return None for cancellation.
+
+        Raise exception for error.
+        """
+        # pass
+
     # def acquire_sequence_prepare(self, n: int) -> None:
         """Prepare for acquire_sequence."""
         # pass
@@ -754,15 +778,32 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
+    def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
+        if callable(getattr(self.__camera, "acquire_synchronized_prepare", None)):
+            frame_parameters = self.get_current_frame_parameters()
+            self.__camera.set_frame_parameters(frame_parameters)
+            self.__camera.acquire_synchronized_prepare(data_shape, **kwargs)
+        else:
+            self.acquire_sequence_prepare(numpy.product(data_shape))
+
+    def acquire_synchronized(self, data_shape, **kwargs) -> typing.Sequence[typing.Dict]:
+        if callable(getattr(self.__camera, "acquire_synchronized", None)):
+            frame_parameters = self.get_current_frame_parameters()
+            data_element = self.__camera.acquire_synchronized(data_shape, **kwargs)
+            if data_element:
+                self.__update_data_element_for_sequence(data_element, frame_parameters)
+                return [data_element]
+            return []
+        else:
+            return self.acquire_sequence(numpy.product(data_shape))
+
     def acquire_sequence_prepare(self, n: int) -> None:
         frame_parameters = self.get_current_frame_parameters()
         self.__camera.set_frame_parameters(frame_parameters)
         if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
             self.__camera.acquire_sequence_prepare(n)
 
-    def __acquire_sequence(self, n: int, frame_parameters) -> dict:
-        if callable(getattr(self.__camera, "acquire_sequence", None)):
-            return self.__camera.acquire_sequence(n)
+    def __acquire_sequence_fallback(self, n: int, frame_parameters) -> dict:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
         acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
@@ -797,23 +838,30 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
         frame_parameters = self.get_current_frame_parameters()
-        binning = frame_parameters.binning
-        data_element = self.__acquire_sequence(n, frame_parameters)
+        if callable(getattr(self.__camera, "acquire_sequence", None)):
+            data_element = self.__camera.acquire_sequence(n)
+        else:
+            data_element = self.__acquire_sequence_fallback(n, frame_parameters)
         if data_element:
-            data_element["version"] = 1
-            data_element["state"] = "complete"
-            stem_controller = self.__get_stem_controller()
-            if "spatial_calibrations" not in data_element:
-                update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category, data_element["data"].shape[1:], binning, binning)
-                if "spatial_calibrations" in data_element:
-                    data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
-            update_intensity_calibration(data_element, stem_controller, self.__camera)
-            update_autostem_properties(data_element, stem_controller, self.__camera)
-            data_element["properties"]["hardware_source_name"] = self.display_name
-            data_element["properties"]["hardware_source_id"] = self.hardware_source_id
-            data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
+            self.__update_data_element_for_sequence(data_element, frame_parameters)
             return [data_element]
         return []
+
+    def __update_data_element_for_sequence(self, data_element, frame_parameters):
+        binning = frame_parameters.binning
+        data_element["version"] = 1
+        data_element["state"] = "complete"
+        stem_controller = self.__get_stem_controller()
+        if "spatial_calibrations" not in data_element:
+            update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category,
+                                        data_element["data"].shape[1:], binning, binning)
+            if "spatial_calibrations" in data_element:
+                data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
+        update_intensity_calibration(data_element, stem_controller, self.__camera)
+        update_autostem_properties(data_element, stem_controller, self.__camera)
+        data_element["properties"]["hardware_source_name"] = self.display_name
+        data_element["properties"]["hardware_source_id"] = self.hardware_source_id
+        data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
 
     def acquire_sequence_cancel(self) -> None:
         if callable(getattr(self.__camera, "acquire_sequence_cancel", None)):

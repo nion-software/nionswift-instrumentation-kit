@@ -559,11 +559,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.abort_playing()
                 self.__grab_synchronized_aborted = False
 
+                scan_shape = (scan_height, scan_width)
+
                 self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-                self.__camera_hardware_source.acquire_sequence_prepare(scan_width * scan_height)
+                self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
 
                 with contextlib.closing(RecordTask(self, scan_frame_parameters)) as scan_task:
-                    data_elements = self.__camera_hardware_source.acquire_sequence(scan_width * scan_height)
+                    data_elements = self.__camera_hardware_source.acquire_synchronized(scan_shape)
                     # acquire_sequence should return None or no elements if aborted or error; but use flag anyway just in case
                     if data_elements and len(data_elements) >= 1 and not self.__grab_synchronized_aborted:
                         # not aborted
