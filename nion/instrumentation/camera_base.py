@@ -987,8 +987,8 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
         elif hasattr(camera, "calibration"):  # used in nionccd1010
             data_element["spatial_calibrations"] = camera.calibration
         elif stem_controller:
-            if "calibration_controls" in data_element["properties"]:
-                calibration_controls = data_element["properties"]["calibration_controls"]
+            if "calibration_controls" in data_element:
+                calibration_controls = data_element["calibration_controls"]
             elif hasattr(camera, "calibration_controls"):
                 calibration_controls = camera.calibration_controls
             else:
@@ -1010,8 +1010,8 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
 
 
 def update_intensity_calibration(data_element, stem_controller, camera):
-    if stem_controller and "calibration_controls" in data_element["properties"]:
-        calibration_controls = data_element["properties"]["calibration_controls"]
+    if stem_controller and "calibration_controls" in data_element:
+        calibration_controls = data_element["calibration_controls"]
     elif stem_controller and hasattr(camera, "calibration_controls"):
         calibration_controls = camera.calibration_controls
     else:

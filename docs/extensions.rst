@@ -55,17 +55,15 @@ The standard camera control bar provides play/pause button and a checkbox to dis
 
 A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, and optional camera panel type. If the camera panel type is not defined, the standard camera panel is used.
 
-A camera device defines several methods, including a features dictionary.
+A camera device defines several methods and properties that define its behavior.
 
-The camera device must set `is_camera` to `True` to be recognized as a camera.
+The camera device should define a `camera_category` property. Although not limited to these, `eels` and `ronchigram` are two possible values.
 
-The camera device should specify a `camera_category` in the features dictionary. Although not limited to these, `eels` and `ronchigram` are two possible values.
-
-The camera device should also specify a `signal_type` in the features dictionary. Although not limited to these, `eels` and `ronchigram` are two possible values.
+The camera device should also define a `signal_type` property. Although not limited to these, `eels` and `ronchigram` are two possible values.
 
 .. TODO: Document camera modules.
 
-If the camera device features sets `has_processed_channel` to `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
+If the camera device has a property `has_processed_channel` with a value of `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
 
 The camera device acquires images and returns data in a data element.
 
