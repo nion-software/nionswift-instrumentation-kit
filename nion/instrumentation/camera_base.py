@@ -784,7 +784,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.__camera.set_frame_parameters(frame_parameters)
             self.__camera.acquire_synchronized_prepare(data_shape, **kwargs)
         else:
-            self.acquire_sequence_prepare(numpy.product(data_shape))
+            self.acquire_sequence_prepare(int(numpy.product(data_shape)))
 
     def acquire_synchronized(self, data_shape, **kwargs) -> typing.Sequence[typing.Dict]:
         if callable(getattr(self.__camera, "acquire_synchronized", None)):
@@ -795,7 +795,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 return [data_element]
             return []
         else:
-            return self.acquire_sequence(numpy.product(data_shape))
+            return self.acquire_sequence(int(numpy.product(data_shape)))
 
     def acquire_sequence_prepare(self, n: int) -> None:
         frame_parameters = self.get_current_frame_parameters()
