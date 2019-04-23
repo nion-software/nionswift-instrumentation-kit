@@ -55,19 +55,15 @@ The standard camera control bar provides play/pause button and a checkbox to dis
 
 A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, and optional camera panel type. If the camera panel type is not defined, the standard camera panel is used.
 
-A camera device defines several methods and properties that define its behavior.
+A camera device uses several methods and properties to define its behavior. As part of this behavior, the camera device acquires images and returns data in a data element. Some properties can be specified by the camera object, while others can be or need to be specified in the data element returned from the acquisition methods. When both options are available, the data element version takes precedence.
 
 The camera device should define a `camera_category` property. Although not limited to these, `eels` and `ronchigram` are two possible values.
 
-The camera device should also define a `signal_type` property. Although not limited to these, `eels` and `ronchigram` are two possible values.
+The camera device may also define a `signal_type` property. Although not limited to these, `eels` and `ronchigram` are two possible values. The `signal_type` can also be returned as an entry in the data element dictionary.
 
-.. TODO: Document camera modules.
+If the camera device may also define a `has_processed_channel` property. If this property is true or if the camera type is 'eels' and this property is not defined, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data. If the camera type is 'eels' and this checkbox is not desired, then set `has_processed_channel` to false.
 
-If the camera device has a property `has_processed_channel` with a value of `True`, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data.
-
-The camera device acquires images and returns data in a data element.
-
-The data element can directly specify calibrations (using the `intensity_calibration` and `spatial_calibrations` keys in the data element), can directly specify how to read the calibrations from the instrument (using the `calibration_controls` key in the data element), or can indirectly specify how to read the calibrations from the instrument (using the `calibration_controls` camera device property).
+The data element can directly specify calibrations (using the `intensity_calibration` and `spatial_calibrations` keys in the data element), or it can directly specify how to read the calibrations from the instrument (using the `calibration_controls` key in the data element), or it can indirectly specify how to read the calibrations from the instrument (using the `calibration_controls` camera device property).
 
 The `calibration_controls` data element key or camera device propery returns a `dict` describing how to read the calibrations from the instrument controller. If the calibrations are dependent on the camera device state, the `calibration_controls` should be provided as a key in the data element; otherwise the `calibration_controls` can be specified as a property of the camera device.
 
@@ -92,50 +88,52 @@ The video control bar provides a play/stop button.
 
 The video control preference panel provides the ability to add/remove video sources and edit their settings. The settings are defined by plug-in packages and can be have a customized UI.
 
+Data Elements
+-------------
+Methods that return data or lists of data do so by using a data element `dict`.
+
+The following keys are used in the data element.
+
+=============================== =============== ===============================================================
+Key                             Default         Description
+=============================== =============== ===============================================================
+version                         1               data element version, must be the integer 1
+data                            *required*      the data, a numpy array
+timestamp                       current time    the timestamp of the data, datetime object
+is_sequence                     False           whether the data represents a sequence
+collection_dimension_count      0               an integer describing the collection dimension count
+datum_dimension_count           data shape      an integer describing the datum dimension count
+properties                      none            a dict of properties, see below
+properties.frame_number
+properties.frame_index
+properties.integration_count
+counts_per_electron             none            *deprecated* use calibration_controls instead
+intensity_calibration           none            *deprecated* use calibration_controls instead
+spatial_calibrations            none            *deprecated* use calibration_controls instead
+calibration_controls            none            see description below
+reader_version
+large_format
+metadata
+datetime_modified
+datetime_original
+description.timezone (tz, dst)
+=============================== =============== ===============================================================
+
+Data is stored with the fastest varying index last (numpy default).
+
+Data elements that have height=1 are expected to be returned as 1d data.
+
+frame_number comes from camera; frame_index comes from Swift.
+
+Integration count is optional; passed in settings, but should return how many were actually integrated.
+
+Exposure, binning, and signal type will be automatically determined from settings.
+
+hardware_source_name, hardware_source_id, state, and valid_rows will be set after acquisition.
+
+.. TODO: Explain how counts_per_electron and spatial/intensity calibrations handle binning.
+
 ..
-    Data Elements
-    -------------
-    The data elements are a list of data elements ``dict`` describing the data. The data elements can contain the
-    following keys.
-
-    =============================== =============== ===============================================================
-    Key                             Default         Description
-    =============================== =============== ===============================================================
-    version                         required        data element version, must be the integer 1
-    data                            required        the data, a numpy array
-    timestamp                       current time    the timestamp of the data, datetime object
-    is_sequence                     False           whether the data represents a sequence
-    collection_dimension_count      0               an integer describing the collection dimension count
-    datum_dimension_count           data shape      an integer describing the datum dimension count
-    properties                      none            a dict of properties, see below
-    properties.frame_number
-    properties.frame_index
-    properties.integration_count
-    properties.counts_per_electron
-    intensity_calibration           none            a calibration dict
-    spatial_calibrations            none            a list of calibration dicts
-    reader_version
-    large_format
-    metadata
-    datetime_modified
-    datetime_original
-    description.timezone (tz, dst)
-    =============================== =============== ===============================================================
-
-    Data is stored with the fastest varying index last (numpy default).
-
-    Data elements that have height=1 are expected to be returned as 1d data.
-
-    Integration count is optional; passed in settings, but should return how many were actually integrated.
-
-    Exposure, binning, and signal type will be automatically determined from settings.
-
-    frame_number comes from camera; frame_index comes from Swift.
-
-    hardware_source_name, hardware_source_id, state, and valid_rows will be set after acquisition.
-
-    .. TODO: Explain how counts_per_electron and spatial/intensity calibrations handle binning.
-
     swift processes the data using the following data_element keys:
     channel_id
     state
@@ -150,11 +148,27 @@ The video control preference panel provides the ability to add/remove video sour
     * timestamp or datetime_modified
     * if datetime_modified (dst, tz) (converted to timestamp; then timezone gets stored into metadata.description.timezone)
 
-    Calibration
-    -----------
-    Providing calibrations directly in the data element.
+Calibration Controls
+--------------------
+To faciliate integration with the instrument controller, calibrations can be passed directly or read from the instrument controller.
 
-    Providing a set of controls from which to read the calibrations.
+The dict should have keys of the form `<axis>_<field>_<type>` where `<axis>` is `x`, `y`, `z`, or `intensity`, `<field>` is `scale`, `offset`, `units`, or `origin_override`, and `<type>` is `control` or `value`. If `<type>` is `control`, then the value for that axis/field will use the value of that key to read the calibration field value from the instrument controller. If `<type>` is `value`, then the calibration field value will be the value of that key.
+
+For example, the dict with the following keys will read `x_scale` and `x_offset` from the instrument controller values `cam_scale` and `cam_offset`, but supply the units directly as "nm". ::
+
+    { "x_scale_control": "cam_scale", "x_offset_control": "cam_offset", "x_units_value": "nm" }
+
+The dict can contain the key `<axis>_origin_override` with the value `center` to indicate that the origin is at the center of the data for that axis. ::
+
+    { "x_scale_control": "cam_scale",
+      "x_offset_control": "cam_offset",
+      "x_units_value": "nm",
+      "x_origin_override": "center" }
+
+In addition to the calibration controls, a `counts_per_electron` control or value can also be specified. ::
+
+    { "counts_per_electron_control": "Camera1_CountsPerElectron" }
+
 
 .. toctree::
    :maxdepth: 2

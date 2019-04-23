@@ -68,7 +68,7 @@ class CameraDevice(abc.ABC):
     camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
     camera_name (required, the name of the camera. example: 'Bottom Camera')
     camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
-    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram')
+    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
     has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
     """
 
@@ -376,8 +376,9 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
-        if self.__signal_type:
-            data_element["properties"]["signal_type"] = self.__signal_type
+        signal_type = data_element.get("signal_type", self.__signal_type)
+        if signal_type:
+            data_element["properties"]["signal_type"] = signal_type
         return [data_element]
 
     def __activate_frame_parameters(self):
