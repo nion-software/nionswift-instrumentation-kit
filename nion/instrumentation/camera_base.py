@@ -313,20 +313,21 @@ class CameraDevice(abc.ABC):
 
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_category: str, signal_type: typing.Optional[str], frame_parameters, display_name):
+    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_settings: "CameraSettings", camera_category: str, signal_type: typing.Optional[str], frame_parameters, display_name):
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
+        self.__camera_settings = camera_settings
         self.__camera_category = camera_category
         self.__signal_type = signal_type
         self.__display_name = display_name
         self.__frame_parameters = None
-        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
+        self.__pending_frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
 
     def set_frame_parameters(self, frame_parameters):
-        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters)
+        self.__pending_frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
         self.__activate_frame_parameters()
 
     @property
@@ -623,8 +624,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # define events
         self.log_messages_event = Event.Event()
 
-        self.__frame_parameters = CameraFrameParameters(self.__camera_settings.get_current_frame_parameters().as_dict())
-        self.__record_parameters = CameraFrameParameters(self.__camera_settings.get_record_frame_parameters().as_dict())
+        self.__frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(self.__camera_settings.get_current_frame_parameters())
+        self.__record_parameters = self.__camera_settings.get_frame_parameters_from_dict(self.__camera_settings.get_record_frame_parameters())
 
         self.__acquisition_task = None
 
@@ -769,14 +770,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
     def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
         if callable(getattr(self.__camera, "acquire_synchronized_prepare", None)):
@@ -806,7 +807,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def __acquire_sequence_fallback(self, n: int, frame_parameters) -> dict:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
-        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
+        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
         acquisition_task._start_acquisition()
         try:
             properties = None
@@ -873,25 +874,23 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return dict()
 
     def __current_frame_parameters_changed(self, frame_parameters):
-        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         if self.__acquisition_task:
-            self.__acquisition_task.set_frame_parameters(frame_parameters)
-        self.__frame_parameters = CameraFrameParameters(frame_parameters)
+            self.__acquisition_task.set_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(frame_parameters))
+        self.__frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
 
     def set_current_frame_parameters(self, frame_parameters):
-        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
         self.__camera_settings.set_current_frame_parameters(frame_parameters)
         # __current_frame_parameters_changed will be called by the controller
 
     def get_current_frame_parameters(self):
-        return CameraFrameParameters(self.__frame_parameters)
+        return self.__camera_settings.get_frame_parameters_from_dict(self.__frame_parameters)
 
     def __record_frame_parameters_changed(self, frame_parameters):
-        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
-        self.__record_parameters = CameraFrameParameters(frame_parameters)
+        self.__record_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
-        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
         self.__camera_settings.set_record_frame_parameters(frame_parameters)
         # __record_frame_parameters_changed will be called by the controller
 
@@ -957,7 +956,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     # used in api, tests, camera control panel
     def set_frame_parameters(self, profile_index, frame_parameters):
-        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters)
         self.__camera_settings.set_frame_parameters(profile_index, frame_parameters)
 
     # used in tuning, api, tests, camera control panel
@@ -983,6 +982,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
 
 class CameraFrameParameters(dict):
+    """Example implementation for camera frame parameters; used in tests too."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
