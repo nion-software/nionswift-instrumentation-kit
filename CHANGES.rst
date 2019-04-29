@@ -1,8 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.16.4 (UNRELEASED)
+0.17.0 (UNRELEASED)
 -------------------
+
+- Add synchronized acquisition of sub areas and lines.
+
+- Expand ability of custom devices to specify calibration and processing.
 
 - Add multi-acquire panel for acquiring multiple summed sets of spectra with optional energy offsets.
 
