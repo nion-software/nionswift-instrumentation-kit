@@ -192,9 +192,9 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f%s%s" % (num, 'Y', suffix)
 
 
-def calculate_time_size(camera_hardware_source, scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time):
-    acquire_pixel_count = (scan_width + 2) * scan_height
-    storage_pixel_count = scan_width * scan_height
+def calculate_time_size(camera_hardware_source, scan_pixels, camera_width, camera_height, is_summed, exposure_time):
+    acquire_pixel_count = scan_pixels
+    storage_pixel_count = scan_pixels
     camera_frame_parameters = camera_hardware_source.get_frame_parameters(0).as_dict()
     camera_frame_parameters["acquisition_frame_count"] = acquire_pixel_count
     camera_frame_parameters["storage_frame_count"] = storage_pixel_count
@@ -248,6 +248,7 @@ class PanelDelegate:
         # the calibration and characteristic length is updated when the context image changes
         self.__calibration = None
         self.__calibration_len = 0
+        self.__scan_pixels = 0
 
         self.__scan_acquisition_preference_panel = None
         self.__target_display_item_stream = None
@@ -311,6 +312,7 @@ class PanelDelegate:
                 else:
                     scan_length = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
+                self.__scan_pixels = scan_length
                 self.__scan_specifier.context_data_item = context_data_item
                 self.__scan_specifier.line = graphic.vector
                 self.__scan_specifier.rect = None
@@ -336,6 +338,7 @@ class PanelDelegate:
                     scan_width = 0
                     scan_height = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.context_data_item = context_data_item
                 self.__scan_specifier.line = None
                 self.__scan_specifier.rect = graphic.bounds
@@ -360,6 +363,7 @@ class PanelDelegate:
                     scan_width = 0
                     scan_height = 0
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.context_data_item = context_data_item
                 self.__scan_specifier.line = None
                 self.__scan_specifier.rect = None
@@ -380,11 +384,14 @@ class PanelDelegate:
                 self.__scan_specifier.spacing_calibrated = None
                 self.__acquire_button._widget.enabled = False
                 self.__graphic_width = None
+                self.__scan_pixels = 0
 
             if self.__scan_spacing_px is not None and self.__scan_spacing_px > 0 and self.__calibration and self.__graphic_width is not None:
                 self.__scan_width_widget.text = Converter.IntegerToStringConverter().convert(int(self.__graphic_width / self.__scan_spacing_px))
             else:
                 self.__scan_width_widget.text = None
+
+            self.__update_estimate()
 
         def new_region(graphic: Graphics.Graphic) -> None:
             update_context()
@@ -562,11 +569,9 @@ class PanelDelegate:
             camera_hardware_source = self.__camera_hardware_source_choice.hardware_source
             camera_width = self.__camera_width
             camera_height = self.__camera_height
-            scan_width = 1  # self.__scan_width_model.value
-            scan_height = 1  # self.__scan_height_model.value
             is_summed = self.__style_combo_box.current_index == 0
             exposure_time = self.__exposure_time_ms_value_model.value / 1000
-            time_str, size_str = calculate_time_size(camera_hardware_source, scan_width, scan_height, camera_width, camera_height, is_summed, exposure_time)
+            time_str, size_str = calculate_time_size(camera_hardware_source, self.__scan_pixels, camera_width, camera_height, is_summed, exposure_time)
             self.__estimate_label_widget.text = "{0} / {1}".format(time_str, size_str)
         else:
             self.__estimate_label_widget.text = None
