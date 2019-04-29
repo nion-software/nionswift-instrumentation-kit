@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.17.0 (UNRELEASED)
+0.17.0 (2019-04-29)
 -------------------
 
 - Add synchronized acquisition of sub areas and lines.
