@@ -3,6 +3,7 @@ import copy
 import random
 import time
 import unittest
+import zlib
 
 import numpy
 
@@ -579,12 +580,12 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 data = hardware_source.get_next_xdatas_to_finish()[0].data
-                last_average = numpy.average(data)
+                last_hash = zlib.crc32(data)
                 for _ in range(16):
                     data = hardware_source.get_next_xdatas_to_finish()[0].data
-                    next_average = numpy.average(data)
-                    self.assertNotEqual(last_average, next_average)
-                    last_average = next_average
+                    next_hash = zlib.crc32(data)
+                    self.assertNotEqual(last_hash, next_hash)
+                    last_hash = next_hash
             finally:
                 hardware_source.abort_playing()
             numpy.random.seed()
