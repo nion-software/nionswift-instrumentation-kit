@@ -45,7 +45,7 @@ Get the plug-in main window by selecting it from the "Window" menu.
 
 Screenshot:
 
-![Screenshot of MultiAcquire main window](doc_resources/multi_acquire_main_window.png "Screenshot of MultiAcquire main window")
+![Screenshot of MultiAcquire main window](docs_resources/multi_acquire_main_window.png "Screenshot of MultiAcquire main window")
 
 ### Summary
 This plugin allows you to acquire EEL spectra with multiple energy offsets and exposure settings. The acquisitions can
@@ -59,7 +59,7 @@ Settings Window
 +++++++++++++++
 You can access the settings menu via the "Settings..." button in the top-right corner of the main window.
 
-![Screenshot of MultiAcquire settings window](doc_resources/multi_acquire_settings_window.png "Screenshot of MutliAcquire settings window")
+![Screenshot of MultiAcquire settings window](docs_resources/multi_acquire_settings_window.png "Screenshot of MutliAcquire settings window")
 
 ### Summary
 In order to set the energy offsets, the plugin needs to know which control it has to change in AS2. Type the name of
@@ -79,4 +79,4 @@ stacks of spectra or stacks of images, depending on the settings. Additionaly th
 contains all acquired spectra as multiple line plots. This last data item will only be created if "Bin data in y-direction"
 is selected in the settings window.
 
-![Screenshot of stacked output](doc_resources/multi_acquire_output_stacked.png "Screenshot of stacked output")
+![Screenshot of stacked output](docs_resources/multi_acquire_output_stacked.png "Screenshot of stacked output")
