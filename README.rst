@@ -30,3 +30,7 @@ More Information
 ----------------
 
 - `Changelog <https://github.com/nion-software/nionswift-instrumentation-kit/blob/master/CHANGES.rst>`_
+
+- `Documentation (stable) <https://nionswift-instrumentation.readthedocs.io/en/latest/>`_
+
+- `Documentation (latest) <https://nionswift-instrumentation.readthedocs.io/en/latest/>`_
