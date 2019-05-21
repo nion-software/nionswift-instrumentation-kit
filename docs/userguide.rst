@@ -10,6 +10,8 @@ User's Guide
 Using the Camera Panel and Control Bar
 --------------------------------------
 
+Readout area is always specified in un-binned coordinates. Binning is applied to the data read from the readout area.
+
 .. _scan-panel:
 
 Using the Scan Panel and Control Bar
@@ -22,8 +24,39 @@ Using Video Panels and Control Bars
 
 .. _synchronized-acquisition-panel:
 
-Using Synchronized Acquisition (Spectrum Imaging, 4D Imaging)
--------------------------------------------------------------
+Synchronized Acquisition (aka Spectrum Imaging / 4D Acquisition)
+----------------------------------------------------------------
+Synchronized acquisition is camera acquisition synchronized with scanning. Specific examples include spectrum imaging and 4D STEM.
+
+Your system must be configured properly for synchronized acquisition. This may include physical triggering connections between cameras and the scan device. It may also include software connections to route the trigger connections.
+
+To use synchronized acquisition, open the `Spectrum Imaging / 4D Scan Acquisition` panel using the `Window` menu.
+
+Next, establish a context image by performing a scan with one or more channels enabled. Confirm the scan data is shown in a display panel and click on that display panel to ensure it has keyboard focus.
+
+Next, select the type of data you wish to acquire, spectra or images, using the menu at the top right of the `Spectrum Imaging / 4D Scan Acquisition` panel.
+
+You can perform synchronized acquisition on the full scan, a sub-area rectangle (possibly rotated), or on a line.
+
+.. image:: resources/synchronized_acquisition_panel.png
+   :scale: 50 %
+
+Full Context Synchronized Acquisition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To perform a full scan, click on the context image and make sure no graphics are selected. Enter the desired scan width in the `Spectrum Imaging / 4D Scan Acquisition` panel, check the acquisition estimated time and size, and click `Acquire`. The context image will update during the acquisition process.
+
+Sub Area (Rectangle) Synchronized Acquisition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To perform a rectangle scan, add a rectangle graphic to the context image (a quick way to do this is click on the `Subscan Enabled` in the Scan Control panel). Adjust the rectangle by dragging and adjust its rotation using the inspector. Now enter the desired scan width in the `Spectrum Imaging / 4D Scan Acquisition` panel, check the acquisition estimated time and size, and click `Acquire`. The *subscan* image will update during the acquisition process. If the *subscan* image is not visible, make it visible by right clicking in an empty display panel and choosing the desired channel with "Subscan" in its title.
+
+Line Scan Synchronized Acquisition
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To perform a line scan, add a line graphic to the context image. After adjusting its position, enter the desired scan width in the `Spectrum Imaging / 4D Scan Acquisition` panel, check the acquisition estimated time and size, and click `Acquire`. The *subscan* image will update during the acquisition process. If the *subscan* image is not visible, make it visible by right clicking in an empty display panel and choosing the desired channel with "Subscan" in its title.
+
+The resulting data will be a collection (one dimension) of your selected data type (spectra or image). You can display the data in its default mode (a spectra or an image) and scroll through the collection using the Ctrl-Right-Arrow and Ctrl-Left-Arrow keys. Or you can use the menu item `Processing > Redimension Data > Redimension to a Collection of 1 Image of Shape 400x2048` or similar to display an image with a collection index on one axis and the data dimension (energy) on the other axis.
 
 .. _multi-acquire-panel:
 
