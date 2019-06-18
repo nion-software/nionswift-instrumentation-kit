@@ -34,6 +34,9 @@ class SubscanState(enum.Enum):
     ENABLED = 1
 
 
+AxisType = typing.Tuple[str, str]
+
+
 class STEMController:
     """An interface to a STEM microscope.
 
@@ -236,7 +239,7 @@ class STEMController:
         return False, None
 
     def GetVal(self, s: str, default_value: float=None) -> float:
-        raise Exception("No element named '{}' exists! Cannot get value.".format(s))
+        raise Exception(f"No element named '{s}' exists! Cannot get value.")
 
     def SetVal(self, s: str, val: float) -> bool:
         return False
@@ -250,7 +253,28 @@ class STEMController:
     def SetValDelta(self, s: str, delta: float) -> bool:
         return False
 
+    def SetValDeltaAndConfirm(self, s: str, delta: float, tolfactor: float, timeout_ms: int) -> bool:
+        return False
+
     def InformControl(self, s: str, val: float) -> bool:
+        return False
+
+    def GetVal2D(self, s:str, default_value: Geometry.FloatPoint=None, *, axis: AxisType) -> Geometry.FloatPoint:
+        raise Exception(f"No 2D element named '{s}' exists! Cannot get value.")
+
+    def SetVal2D(self, s:str, value: Geometry.FloatPoint, *, axis: AxisType) -> bool:
+        return False
+
+    def SetVal2DAndConfirm(self, s: str, val: Geometry.FloatPoint, tolfactor: float, timeout_ms: int, *, axis: AxisType) -> bool:
+        return False
+
+    def SetVal2DDelta(self, s: str, delta: Geometry.FloatPoint, *, axis: AxisType) -> bool:
+        return False
+
+    def SetVal2DDeltaAndConfirm(self, s: str, delta: Geometry.FloatPoint, tolfactor: float, timeout_ms: int, *, axis: AxisType) -> bool:
+        return False
+
+    def InformControl2D(self, s: str, val: Geometry.FloatPoint, *, axis: AxisType) -> bool:
         return False
 
     # end required functions

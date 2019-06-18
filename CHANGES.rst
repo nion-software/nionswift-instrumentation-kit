@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.18.0 (UNRELEASED)
+-------------------
+
+- Add stubs for 2D control methods.
+
 0.17.0 (2019-04-29)
 -------------------
 
