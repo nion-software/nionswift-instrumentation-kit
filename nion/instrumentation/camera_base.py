@@ -311,11 +311,33 @@ class CameraDevice(abc.ABC):
         pass
 
 
+class InstrumentController(abc.ABC):
+
+    @abc.abstractmethod
+    def TryGetVal(self, s: str) -> (bool, float): ...
+
+    @abc.abstractmethod
+    def get_value(self, value_id: str, default_value: float=None) -> typing.Optional[float]: ...
+
+    @abc.abstractmethod
+    def set_value(self, value_id: str, value: float) -> None: ...
+
+    def get_autostem_properties(self) -> typing.Dict: return dict()
+
+    def update_acquisition_properties(self, d: typing.Dict, **kwargs) -> None: pass
+
+    def apply_metadata_groups(self, properties: typing.Dict, metatdata_groups: typing.Tuple[typing.List[str], str]) -> None: pass
+
+    def handle_shift_click(self, **kwargs) -> None: pass
+
+    def handle_tilt_click(self, **kwargs) -> None: pass
+
+
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_settings: "CameraSettings", camera_category: str, signal_type: typing.Optional[str], frame_parameters, display_name):
+    def __init__(self, instrument_controller: InstrumentController, hardware_source_id, is_continuous: bool, camera: CameraDevice, camera_settings: "CameraSettings", camera_category: str, signal_type: typing.Optional[str], frame_parameters, display_name):
         super().__init__(is_continuous)
-        self.__stem_controller = stem_controller
+        self.__instrument_controller = instrument_controller
         self.hardware_source_id = hardware_source_id
         self.is_continuous = is_continuous
         self.__camera = camera
@@ -390,9 +412,9 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["version"] = 1
         data_element["state"] = "complete"
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
-        update_spatial_calibrations(data_element, self.__stem_controller, self.__camera, self.__camera_category, cumulative_data.shape, binning, binning)
-        update_intensity_calibration(data_element, self.__stem_controller, self.__camera)
-        update_autostem_properties(data_element, self.__stem_controller, self.__camera)
+        update_spatial_calibrations(data_element, self.__instrument_controller, self.__camera, self.__camera_category, cumulative_data.shape, binning, binning)
+        update_intensity_calibration(data_element, self.__instrument_controller, self.__camera)
+        update_instrument_properties(data_element, self.__instrument_controller, self.__camera)
         # grab metadata from the autostem
         data_element["properties"]["hardware_source_name"] = self.__display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
@@ -545,7 +567,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
+    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -583,8 +605,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
             self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
 
-        self.__stem_controller_id = stem_controller_id
-        self.__stem_controller = None
+        self.__instrument_controller_id = instrument_controller_id
+        self.__instrument_controller = None
 
         self.__camera = camera
         self.__camera_category = camera.camera_type
@@ -676,16 +698,18 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__event_loop.run_forever()
         self.__handle_log_messages_event()
 
-    def __get_stem_controller(self):
-        if not self.__stem_controller and self.__stem_controller_id:
-            self.__stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__stem_controller_id)
-        if not self.__stem_controller and not self.__stem_controller_id:
-            self.__stem_controller = Registry.get_component("stem_controller")
-        if not self.__stem_controller:
-            print("STEM Controller (" + self.__stem_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
+    def __get_instrument_controller(self) -> InstrumentController:
+        if not self.__instrument_controller and self.__instrument_controller_id:
+            self.__instrument_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__instrument_controller_id)
+        if not self.__instrument_controller and not self.__instrument_controller_id:
+            self.__instrument_controller = Registry.get_component("instrument_controller")
+        if not self.__instrument_controller and not self.__instrument_controller_id:
+            self.__instrument_controller = Registry.get_component("stem_controller")
+        if not self.__instrument_controller:
+            print("Instrument Controller (" + self.__instrument_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
             from nion.instrumentation import stem_controller
-            self.__stem_controller = self.__stem_controller or stem_controller.STEMController()
-        return self.__stem_controller
+            self.__instrument_controller = self.__instrument_controller or stem_controller.STEMController()
+        return self.__instrument_controller
 
     def __handle_log_messages_event(self):
         if callable(self.__periodic_logger_fn):
@@ -770,14 +794,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
     def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
         if callable(getattr(self.__camera, "acquire_synchronized_prepare", None)):
@@ -807,7 +831,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def __acquire_sequence_fallback(self, n: int, frame_parameters) -> dict:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
-        acquisition_task = CameraAcquisitionTask(self.__get_stem_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
+        acquisition_task = CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
         acquisition_task._start_acquisition()
         try:
             properties = None
@@ -852,14 +876,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         binning = frame_parameters.binning
         data_element["version"] = 1
         data_element["state"] = "complete"
-        stem_controller = self.__get_stem_controller()
+        instrument_controller = self.__get_instrument_controller()
         if "spatial_calibrations" not in data_element:
-            update_spatial_calibrations(data_element, stem_controller, self.__camera, self.__camera_category,
+            update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category,
                                         data_element["data"].shape[1:], binning, binning)
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
-        update_intensity_calibration(data_element, stem_controller, self.__camera)
-        update_autostem_properties(data_element, stem_controller, self.__camera)
+        update_intensity_calibration(data_element, instrument_controller, self.__camera)
+        update_instrument_properties(data_element, instrument_controller, self.__camera)
         data_element["properties"]["hardware_source_name"] = self.display_name
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
@@ -901,25 +925,33 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return self.__camera_settings.get_frame_parameters_from_dict(d)
 
     def shift_click(self, mouse_position, camera_shape):
-        if self.__camera_category.lower() == "ronchigram":
-            stem_controller = self.__get_stem_controller()
-            radians_per_pixel = stem_controller.get_value("TVPixelAngle")
-            defocus_value = stem_controller.get_value("C10")  # get the defocus
-            dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
-            dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
-            logging.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
-            stem_controller.set_value("SShft.x", stem_controller.get_value("SShft.x") - dx)
-            stem_controller.set_value("SShft.y", stem_controller.get_value("SShft.y") - dy)
+        instrument_controller = self.__get_instrument_controller()
+        if callable(getattr(instrument_controller, "handle_shift_click", None)):
+            instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+        else:
+            # TODO: remove this backwards compatibility code once everyone updated to new technique above
+            if self.__camera_category.lower() == "ronchigram":
+                radians_per_pixel = instrument_controller.get_value("TVPixelAngle")
+                defocus_value = instrument_controller.get_value("C10")  # get the defocus
+                dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
+                dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
+                logging.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
+                instrument_controller.set_value("SShft.x", instrument_controller.get_value("SShft.x") - dx)
+                instrument_controller.set_value("SShft.y", instrument_controller.get_value("SShft.y") - dy)
 
     def tilt_click(self, mouse_position, camera_shape):
-        if self.__camera_category.lower() == "ronchigram":
-            stem_controller = self.__get_stem_controller()
-            radians_per_pixel = stem_controller.get_value("TVPixelAngle")
-            da = radians_per_pixel * (mouse_position[1] - (camera_shape[1] / 2))
-            db = radians_per_pixel * (mouse_position[0] - (camera_shape[0] / 2))
-            logging.info("Tilting (%s,%s) rad.\n", -da, -db)
-            stem_controller.set_value("STilt.x", stem_controller.get_value("STilt.x") - da)
-            stem_controller.set_value("STilt.y", stem_controller.get_value("STilt.y") - db)
+        instrument_controller = self.__get_instrument_controller()
+        if callable(getattr(instrument_controller, "handle_shift_click", None)):
+            instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+        else:
+            # TODO: remove this backwards compatibility code once everyone updated to new technique above
+            if self.__camera_category.lower() == "ronchigram":
+                radians_per_pixel = instrument_controller.get_value("TVPixelAngle")
+                da = radians_per_pixel * (mouse_position[1] - (camera_shape[1] / 2))
+                db = radians_per_pixel * (mouse_position[0] - (camera_shape[0] / 2))
+                logging.info("Tilting (%s,%s) rad.\n", -da, -db)
+                instrument_controller.set_value("STilt.x", instrument_controller.get_value("STilt.x") - da)
+                instrument_controller.set_value("STilt.y", instrument_controller.get_value("STilt.y") - db)
 
     def get_property(self, name):
         return getattr(self.__camera, name)
@@ -1009,9 +1041,9 @@ class CameraFrameParameters(dict):
         }
 
 
-def get_stem_control(stem_controller, calibration_controls, key):
+def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls, key) -> typing.Optional[float]:
     if key + "_control" in calibration_controls:
-        valid, value = stem_controller.TryGetVal(calibration_controls[key + "_control"])
+        valid, value = instrument_controller.TryGetVal(calibration_controls[key + "_control"])
         if valid:
             return value
     if key + "_value" in calibration_controls:
@@ -1019,23 +1051,23 @@ def get_stem_control(stem_controller, calibration_controls, key):
     return None
 
 
-def build_calibration_dict(stem_controller, calibration_controls, prefix, relative_scale=1, data_len=0):
-    scale = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "scale")
+def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls, prefix, relative_scale=1, data_len=0):
+    scale = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "scale")
     scale = scale * relative_scale if scale is not None else scale
-    offset = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "offset")
-    units = get_stem_control(stem_controller, calibration_controls, prefix + "_" + "units")
+    offset = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "offset")
+    units = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "units")
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
     return Calibration.Calibration(offset, scale, units).rpc_dict
 
 
-def update_spatial_calibrations(data_element, stem_controller, camera, camera_category, data_shape, scaling_x, scaling_y):
+def update_spatial_calibrations(data_element, instrument_controller: InstrumentController, camera, camera_category, data_shape, scaling_x, scaling_y):
     if "spatial_calibrations" not in data_element:
         if "spatial_calibrations" in data_element["properties"]:
             data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
         elif hasattr(camera, "calibration"):  # used in nionccd1010
             data_element["spatial_calibrations"] = camera.calibration
-        elif stem_controller:
+        elif instrument_controller:
             if "calibration_controls" in data_element:
                 calibration_controls = data_element["calibration_controls"]
             elif hasattr(camera, "calibration_controls"):
@@ -1043,10 +1075,10 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
             else:
                 calibration_controls = None
             if calibration_controls is not None:
-                x_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "x", scaling_x, data_shape[0])
-                y_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
-                z_calibration_dict = build_calibration_dict(stem_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
-                # leave this here for backwards compatibility until origin is specified in NionCameraManager.py
+                x_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "x", scaling_x, data_shape[0])
+                y_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
+                z_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
+                # leave this here for backwards compatibility until origin override is specified in NionCameraManager.py
                 if camera_category.lower() == "ronchigram" and len(data_shape) == 2:
                     y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
                     x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
@@ -1058,10 +1090,10 @@ def update_spatial_calibrations(data_element, stem_controller, camera, camera_ca
                     data_element["spatial_calibrations"] = [z_calibration_dict, y_calibration_dict, x_calibration_dict]
 
 
-def update_intensity_calibration(data_element, stem_controller, camera):
-    if stem_controller and "calibration_controls" in data_element:
+def update_intensity_calibration(data_element, instrument_controller: InstrumentController, camera):
+    if instrument_controller and "calibration_controls" in data_element:
         calibration_controls = data_element["calibration_controls"]
-    elif stem_controller and hasattr(camera, "calibration_controls"):
+    elif instrument_controller and hasattr(camera, "calibration_controls"):
         calibration_controls = camera.calibration_controls
     else:
         calibration_controls = None
@@ -1069,29 +1101,34 @@ def update_intensity_calibration(data_element, stem_controller, camera):
         if "intensity_calibration" in data_element["properties"]:
             data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
         elif calibration_controls is not None:
-            data_element["intensity_calibration"] = build_calibration_dict(stem_controller, calibration_controls, "intensity")
+            data_element["intensity_calibration"] = build_calibration_dict(instrument_controller, calibration_controls, "intensity")
     if "counts_per_electron" not in data_element:
         if calibration_controls is not None:
-            counts_per_electron = get_stem_control(stem_controller, calibration_controls, "counts_per_electron")
+            counts_per_electron = get_instrument_calibration_value(instrument_controller, calibration_controls, "counts_per_electron")
             if counts_per_electron:
                 data_element["properties"]["counts_per_electron"] = counts_per_electron
 
 
-def update_autostem_properties(data_element, stem_controller, camera):
-    if stem_controller:
-        try:
-            autostem_properties = stem_controller.get_autostem_properties()
-            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
-        except Exception as e:
-            pass
+def update_instrument_properties(data_element, instrument_controller: InstrumentController, camera):
+    if instrument_controller:
+        # give the instrument controller opportunity to add properties
+        # TODO: get_autostem_properties is deprecated. use update_acquisition_properties instead.
+        if callable(getattr(instrument_controller, "get_autostem_properties", None)):
+            try:
+                autostem_properties = instrument_controller.get_autostem_properties()
+                data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+            except Exception as e:
+                pass
+        if callable(getattr(instrument_controller, "update_acquisition_properties", None)):
+            instrument_controller.update_acquisition_properties(data_element["properties"], camera=camera)
         # give camera a chance to add additional properties not already supplied. this also gives
         # the camera a place to add properties outside of the 'autostem' dict.
-        camera_update_properties = getattr(camera, "update_acquisition_properties", None)
-        if callable(camera_update_properties):
+        if callable(getattr(camera, "update_acquisition_properties", None)):
             camera.update_acquisition_properties(data_element["properties"])
+        # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(camera, "acquisition_metatdata_groups"):
             acquisition_metatdata_groups = camera.acquisition_metatdata_groups
-            stem_controller.apply_metadata_groups(data_element["properties"], acquisition_metatdata_groups)
+            instrument_controller.apply_metadata_groups(data_element["properties"], acquisition_metatdata_groups)
 
 
 _component_registered_listener = None
@@ -1101,11 +1138,13 @@ def run(configuration_location: pathlib.Path):
     def component_registered(component, component_types):
         if "camera_module" in component_types:
             camera_module = component
-            stem_controller_id = getattr(camera_module, "stem_controller_id", None)
+            instrument_controller_id = getattr(camera_module, "instrument_controller_id", None)
+            # TODO: remove next line when backwards compatibility no longer needed
+            instrument_controller_id = instrument_controller_id or getattr(camera_module, "stem_controller_id", None)
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)
-            camera_hardware_source = CameraHardwareSource(stem_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
+            camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
             if hasattr(camera_module, "priority"):
                 camera_hardware_source.priority = camera_module.priority
             component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
