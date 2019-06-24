@@ -706,7 +706,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if not self.__instrument_controller and not self.__instrument_controller_id:
             self.__instrument_controller = Registry.get_component("stem_controller")
         if not self.__instrument_controller:
-            print("Instrument Controller (" + self.__instrument_controller_id + ") for (" + self.hardware_source_id + ") not found. Using proxy.")
+            print(f"Instrument Controller ({self.__instrument_controller_id}) for ({self.hardware_source_id}) not found. Using proxy.")
             from nion.instrumentation import stem_controller
             self.__instrument_controller = self.__instrument_controller or stem_controller.STEMController()
         return self.__instrument_controller
