@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.18.0 (UNRELEASED)
+0.18.0 (2019-06-25)
 -------------------
 
 - Change camera to use instrument controller (generalized stem controller).
