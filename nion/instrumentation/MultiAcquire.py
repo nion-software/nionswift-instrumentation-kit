@@ -416,11 +416,14 @@ class MultiAcquireController:
             settings_list = []
             for i in range(len(data_dict_list)):
                 data_element = data_dict_list[i]['data_element']
+                # remove the collection calibration (we acquired only "one pixel")
+                data_element['spatial_calibrations'].pop(0 if self.__active_settings['sum_frames'] else 1)
                 data_element['data'] = numpy.squeeze(data_element['data'])
                 # this makes sure we do not create a length 1 sequence
                 if not self.__active_settings['sum_frames'] and data_dict_list[i]['parameters']['frames'] < 2:
                     data_element['is_sequence'] = False
-                data_element['spatial_calibrations'].pop(0 if self.__active_settings['sum_frames'] else 1)
+                    # We also need to delete the sequence axis calibration
+                    data_element['spatial_calibrations'].pop(0)
                 data_element['collection_dimension_count'] = 0
                 data_element_list.append(data_element)
                 parameter_list.append(data_dict_list[i]['parameters'])

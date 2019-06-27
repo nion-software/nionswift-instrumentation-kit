@@ -83,11 +83,13 @@ class TestMultiAcquire(unittest.TestCase):
         frame_parameters['binning'] = 8
         multi_acquire.camera.set_current_frame_parameters(frame_parameters)
         event = threading.Event()
-        def run_and_check_result():
+        event2 = threading.Event()
+        data_dict = None
+        def run():
+            nonlocal data_dict
             data_dict = multi_acquire.acquire_multi_eels_spectrum()
-            self.assertEqual(len(data_dict['data_element_list']), len(parameters))
-
-        thread = threading.Thread(target=run_and_check_result, daemon=True)
+            event2.set()
+        thread = threading.Thread(target=run, daemon=True)
         def react_to_event(message):
             if message['message'] == 'end' and message['description'] == 'single spectrum':
                 event.set()
@@ -100,6 +102,8 @@ class TestMultiAcquire(unittest.TestCase):
         thread.start()
         self.assertTrue(event.wait(total_acquisition_time), msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
         self.assertAlmostEqual(progress, 1.0)
+        self.assertTrue(event2.wait(total_acquisition_time), msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+        self.assertEqual(len(data_dict['data_element_list']), len(parameters))
         del acquisition_event_listener, progress_event_listener
 
     def test_data_intensity_scale_is_correct_for_summed_frames(self):
@@ -167,6 +171,47 @@ class TestMultiAcquire(unittest.TestCase):
         for val in processed_data:
             self.assertAlmostEqual(val, processed_data[0])
         del event_listener
+
+    def test_acquire_multi_eels_spectrum_produces_data_with_correct_number_of_dimensional_calibrations(self):
+        for sum_frames in [True, False]:
+            with self.subTest(sum_frames=sum_frames):
+                settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'y_shifter': '', 'x_units_per_ev': 1,
+                            'y_units_per_px': 0.00081, 'blanker': 'C_Blank', 'x_shift_delay': 0.05, 'y_shift_delay': 0.05,
+                            'focus': '', 'focus_delay': 0, 'saturation_value': 12000, 'y_align': True,
+                            'stitch_spectra': False, 'auto_dark_subtract': True, 'bin_spectra': True,
+                            'blanker_delay': 0.05, 'sum_frames': sum_frames, 'camera_hardware_source_id': ''}
+                parameters = [{'index': 0, 'offset_x': 0, 'offset_y': 0, 'exposure_ms': 5, 'frames': 10},
+                              {'index': 1, 'offset_x': 160, 'offset_y': 0, 'exposure_ms': 8, 'frames': 1},
+                              {'index': 2, 'offset_x': 320, 'offset_y': 0, 'exposure_ms': 16, 'frames': 1}]
+                total_acquisition_time = 0.0
+                for parms in parameters:
+                    # the simulator cant go super fast, so make sure we give it enough time
+                    total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)*1e-3
+                    # add some extra overhead time
+                    total_acquisition_time += 0.15
+                    total_acquisition_time += settings['x_shift_delay']*2
+                total_acquisition_time += settings['x_shift_delay']*2
+                total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
+                multi_acquire = self._set_up_multi_acquire(settings, parameters)
+                multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera()
+                # enable binning for speed
+                frame_parameters = multi_acquire.camera.get_current_frame_parameters()
+                frame_parameters['binning'] = 8
+                multi_acquire.camera.set_current_frame_parameters(frame_parameters)
+                event = threading.Event()
+                data_dict = None
+                def run():
+                    nonlocal data_dict
+                    data_dict = multi_acquire.acquire_multi_eels_spectrum()
+                    event.set()
+
+                thread = threading.Thread(target=run, daemon=True)
+                thread.start()
+                self.assertTrue(event.wait(total_acquisition_time), msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+                self.assertEqual(len(data_dict['data_element_list']), len(parameters))
+                for i, data_element in enumerate(data_dict['data_element_list']):
+                    with self.subTest(parameters=parameters[i]):
+                        self.assertEqual(len(data_element['spatial_calibrations']), len(data_element['data'].shape))
 
 if __name__ == '__main__':
     unittest.main()

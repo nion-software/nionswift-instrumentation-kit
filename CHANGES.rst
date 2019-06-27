@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.18.1 (UNRELEASED)
+-------------------
+
+- Fixed multi acquire data item calibration handling.
+
 0.18.0 (2019-06-25)
 -------------------
 
