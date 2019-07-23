@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.18.2 (UNRELEASED)
+0.18.2 (2019-07-22)
 -------------------
 
 - Fix metadata handling in scan devices (was not copying it to the image).
