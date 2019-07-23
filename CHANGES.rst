@@ -1,10 +1,15 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.18.2 (UNRELEASED)
+-------------------
+
+- Fix metadata handling in scan devices (was not copying it to the image).
+
 0.18.1 (2019-06-27)
 -------------------
 
-- Fixed multi acquire data item calibration handling.
+- Fix multi acquire data item calibration handling.
 
 0.18.0 (2019-06-25)
 -------------------

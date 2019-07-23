@@ -102,7 +102,9 @@ class ScanFrameParameters(dict):
 
 
 # set the calibrations for this image
+# set the calibrations for this image
 def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata, subscan_region, subscan_rotation):
+    image_metadata = copy.deepcopy(image_metadata)
     pixel_time_us = float(image_metadata["pixel_time_us"])
     center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
     center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
@@ -136,6 +138,16 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
         if not "rotation_deg" in image_metadata:
             properties["rotation_deg"] = math.degrees(properties["rotation"])
     properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
+
+    image_metadata.pop("pixel_time_us", None)
+    image_metadata.pop("center_x_nm", None)
+    image_metadata.pop("center_y_nm", None)
+    image_metadata.pop("fov_nm", None)
+    image_metadata.pop("rotation_deg", None)
+    image_metadata.pop("rotation", None)
+    image_metadata.pop("ac_line_sync", None)
+
+    properties["autostem"] = image_metadata
 
     if frame_parameters is not None:
         if frame_parameters.subscan_pixel_size is not None:
