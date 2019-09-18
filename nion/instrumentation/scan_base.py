@@ -100,12 +100,12 @@ class ScanFrameParameters(dict):
                ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_fractional_center is not None else "")
 
 
-
 # set the calibrations for this image
 # set the calibrations for this image
 def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata, subscan_region, subscan_rotation):
     image_metadata = copy.deepcopy(image_metadata)
     pixel_time_us = float(image_metadata["pixel_time_us"])
+    line_time_us = float(image_metadata["line_time_us"]) if "line_time_us" in image_metadata else pixel_time_us * data_shape[1]
     center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
     center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
     fov_nm = float(image_metadata["fov_nm"])
@@ -114,11 +114,17 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     data_element["version"] = 1
     data_element["channel_id"] = channel_id  # needed to match to the channel
     data_element["channel_name"] = channel_name  # needed to match to the channel
-    data_element["spatial_calibrations"] = (
-        {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-        {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-    )
-    properties = dict()
+    if image_metadata.get("calibration_style") == "time":
+        data_element["spatial_calibrations"] = (
+            {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"},
+            {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"}
+        )
+    else:
+        data_element["spatial_calibrations"] = (
+            {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+            {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+        )
+    properties = data_element["properties"]
     exposure_s = data_shape[0] * data_shape[1] * pixel_time_us / 1000000
     properties["exposure"] = exposure_s
     properties["frame_index"] = frame_number
@@ -128,6 +134,7 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     properties["center_x_nm"] = center_x_nm
     properties["center_y_nm"] = center_y_nm
     properties["pixel_time_us"] = pixel_time_us
+    properties["line_time_us"] = line_time_us
     properties["fov_nm"] = fov_nm
     if "rotation_deg" in image_metadata:
         properties["rotation_deg"] = float(image_metadata["rotation_deg"])
@@ -147,7 +154,7 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     image_metadata.pop("rotation", None)
     image_metadata.pop("ac_line_sync", None)
 
-    properties["autostem"] = image_metadata
+    properties.setdefault("autostem", dict()).update(image_metadata)
 
     if frame_parameters is not None:
         if frame_parameters.subscan_pixel_size is not None:
@@ -166,8 +173,6 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
         properties["subscan_fractional_size"] = subscan_region.height, subscan_region.width
         properties["subscan_fractional_center"] = subscan_region.center.y, subscan_region.center.x
         properties["subscan_rotation"] = subscan_rotation
-
-    data_element["properties"] = properties
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
@@ -314,9 +319,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             _properties = _data_element["properties"]
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
-            data_element = dict()
-            update_data_element(data_element, channel_index, complete, sub_area, _data, _properties, self.__frame_number, self.__scan_id)
+            data_element = {"properties": dict()}
             update_autostem_properties(data_element, self.__stem_controller)
+            update_data_element(data_element, channel_index, complete, sub_area, _data, _properties, self.__frame_number, self.__scan_id)
             data_elements.append(data_element)
 
         if complete or bad_frame:
