@@ -1,6 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.18.3 (UNRELEASED)
+-------------------
+
+- Improve exception handling during camera initialization.
+- Add support for time-based initial calibration style for scans.
+
 0.18.2 (2019-07-22)
 -------------------
 

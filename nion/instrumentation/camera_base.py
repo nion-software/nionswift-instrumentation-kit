@@ -10,6 +10,7 @@ import logging
 import os
 import pathlib
 import typing
+import traceback
 
 # typing
 # None
@@ -1135,7 +1136,7 @@ _component_registered_listener = None
 _component_unregistered_listener = None
 
 def run(configuration_location: pathlib.Path):
-    def component_registered(component, component_types):
+    def component_registered(component, component_types: typing.Set[str]) -> None:
         if "camera_module" in component_types:
             camera_module = component
             instrument_controller_id = getattr(camera_module, "instrument_controller_id", None)
@@ -1144,13 +1145,19 @@ def run(configuration_location: pathlib.Path):
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)
-            camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
-            if hasattr(camera_module, "priority"):
-                camera_hardware_source.priority = camera_module.priority
-            component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
-            Registry.register_component(camera_hardware_source, component_types)
-            HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
-            camera_module.hardware_source = camera_hardware_source
+            try:
+                camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
+                if hasattr(camera_module, "priority"):
+                    camera_hardware_source.priority = camera_module.priority
+                component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
+                Registry.register_component(camera_hardware_source, component_types)
+                HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+                camera_module.hardware_source = camera_hardware_source
+            except Exception as e:
+                camera_id = str(getattr(getattr(component, "camera_device", None), "camera_id", None))
+                camera_id = camera_id or "UNKNOWN"
+                logging.info("Camera Plug-in '" + camera_id + "' exception during initialization.")
+                logging.info(traceback.format_exc())
 
     def component_unregistered(component, component_types):
         if "camera_module" in component_types:
