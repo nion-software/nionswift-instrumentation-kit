@@ -15,6 +15,8 @@ from nion.swift import Facade
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
+from nion.utils import Geometry
+from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
 
 """
@@ -636,6 +638,26 @@ class TestCameraControlClass(unittest.TestCase):
             data_element = data_elements[0]
             self.assertEqual(2, len(data_element["data"].shape))
             self.assertEqual(2, len(data_element["spatial_calibrations"]))
+
+    def test_acquire_with_probe_position(self):
+        # used to test out the code path, but no specific asserts
+        document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source()
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            stem_controller = Registry.get_component("stem_controller")
+            stem_controller.validate_probe_position()
+            stem_controller._update_scan_context(Geometry.FloatPoint(), Geometry.FloatSize(width=12, height=12), 0.0)
+            self._acquire_one(document_controller, hardware_source)
+            self.assertIsNotNone(document_model.data_items[0].timezone)
+
+    def test_eels_acquire_with_probe_position(self):
+        # used to test out the code path, but no specific asserts
+        document_controller, document_model, hardware_source, state_controller = self._setup_hardware_source(is_eels=True)
+        with contextlib.closing(document_controller), contextlib.closing(state_controller):
+            stem_controller = Registry.get_component("stem_controller")
+            stem_controller.validate_probe_position()
+            stem_controller._update_scan_context(Geometry.FloatPoint(), Geometry.FloatSize(width=12, height=12), 0.0)
+            self._acquire_one(document_controller, hardware_source)
+            self.assertIsNotNone(document_model.data_items[0].timezone)
 
     def test_facade_frame_parameter_methods(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()

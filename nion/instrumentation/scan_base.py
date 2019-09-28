@@ -995,11 +995,17 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def _set_probe_position(self, probe_position):
         if probe_position is not None:
-            self.__device.set_idle_position_by_percentage(probe_position.x, probe_position.y)
+            if hasattr(self.__device, "set_scan_context_probe_position"):
+                self.__device.set_scan_context_probe_position(self.__stem_controller.scan_context, probe_position)
+            else:
+                self.__device.set_idle_position_by_percentage(probe_position.x, probe_position.y)
             self.__last_idle_position = probe_position
         else:
-            # pass magic value to position to default position which may be top left or center depending on configuration.
-            self.__device.set_idle_position_by_percentage(-1.0, -1.0)
+            if hasattr(self.__device, "set_scan_context_probe_position"):
+                self.__device.set_scan_context_probe_position(self.__stem_controller.scan_context, None)
+            else:
+                # pass magic value to position to default position which may be top left or center depending on configuration.
+                self.__device.set_idle_position_by_percentage(-1.0, -1.0)
             self.__last_idle_position = -1.0, -1.0
 
     def _get_last_idle_position_for_test(self):
