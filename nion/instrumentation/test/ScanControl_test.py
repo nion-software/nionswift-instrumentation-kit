@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import threading
 import time
 import unittest
@@ -117,13 +118,13 @@ class TestScanControlClass(unittest.TestCase):
                 self.instrument = instrument
                 self.hardware_source = hardware_source
                 self.scan_state_controller = scan_state_controller
-                self.probe_view = stem_controller.ProbeView(self.instrument, self.document_model, document_controller.event_loop)
+                self.probe_view_controller = stem_controller.ProbeViewController(self.document_model, self.document_controller.event_loop)
 
                 return self
 
             def __exit__(self, *exc_details):
-                self.probe_view.close()
-                self.probe_view = None
+                self.probe_view_controller.close()
+                self.probe_view_controller = None
                 self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.instrument, self.hardware_source, self.scan_state_controller)
 
             @property
@@ -308,42 +309,6 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(display_item.graphics), 0)
             hardware_source.stop_playing()
-
-    def test_start_playing_with_existing_probe_position_graphic_should_remove_it(self):
-        document_model = DocumentModel.DocumentModel()
-        document_controller = DocumentController.DocumentController(self.app.ui, document_model, workspace_id="library")
-        data_item = DataItem.DataItem(numpy.zeros((256, 256)) + 16)
-        document_model.append_data_item(data_item)
-        graphic = Graphics.PointGraphic()
-        graphic.graphic_id = "probe"
-        graphic.position = 0.5, 0.5
-        graphic.is_bounds_constrained = True
-        display_item = document_model.get_display_item_for_data_item(data_item)
-        display_item.add_graphic(graphic)
-        instrument = self._setup_instrument()
-        hardware_source = self._setup_hardware_source(instrument)
-        document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, hardware_source.data_channels[0].channel_id), data_item)
-        HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
-        display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-        scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
-        scan_state_controller.initialize_state()
-        probe_view = stem_controller.ProbeView(instrument, document_model, document_controller.event_loop)
-        self.assertEqual(len(display_item.graphics), 0)
-        with contextlib.closing(document_controller):
-            try:
-                with contextlib.closing(hardware_source), contextlib.closing(probe_view), contextlib.closing(scan_state_controller):
-                    scan_state_controller.handle_positioned_check_box(True)
-                    self._acquire_one(document_controller, hardware_source)
-                    self.assertEqual(len(display_item.graphics), 1)
-                    hardware_source.start_playing()
-                    hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                    document_controller.periodic()
-                    self.assertEqual(len(display_item.graphics), 0)
-                    hardware_source.stop_playing()
-            finally:
-                HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
-                self._close_hardware_source()
-                self._close_instrument(instrument)
 
     def test_acquiring_multiple_channels_attaches_common_scan_id(self):
         with self._make_scan_context() as scan_context:
@@ -874,54 +839,143 @@ class TestScanControlClass(unittest.TestCase):
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
-                hardware_source.start_playing()
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-                self.assertEqual(len(display_item.graphics), 0)
-                hardware_source.subscan_enabled = True
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                hardware_source.stop_playing()
-                display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
-                self.assertEqual(2, len(document_model.data_items))
-                self.assertEqual(1, len(display_item.graphics))
-                self.assertEqual(0, len(display_item1.graphics))
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(1, len(document_model.data_items))
+            self.assertEqual(0, len(display_item.graphics))
+            hardware_source.validate_probe_position()  # enabled probe position
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
+            self.assertEqual(2, len(document_model.data_items))
+            self.assertEqual(2, len(display_item.graphics))  # subscan and position
+            self.assertEqual(0, len(display_item1.graphics))
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
-                hardware_source.start_playing()
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-                self.assertEqual(len(display_item.graphics), 0)
-                hardware_source.subscan_enabled = True
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                display_item.remove_graphic(display_item.graphics[0])
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                hardware_source.stop_playing()
-                self.assertFalse(hardware_source.subscan_enabled)
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 0)
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item.remove_graphic(display_item.graphics[0])
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            hardware_source.stop_playing()
+            self.assertFalse(hardware_source.subscan_enabled)
+
+    def test_scan_context_updated_when_starting_playing(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            stem_controller_ = scan_context.instrument
+            self.assertFalse(stem_controller_.scan_context.is_valid)
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            self.assertTrue(stem_controller_.scan_context.is_valid)
+            hardware_source.stop_playing()
+            self.assertTrue(stem_controller_.scan_context.is_valid)
+
+    def test_scan_context_updated_when_changing_parameters(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            stem_controller_ = scan_context.instrument
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
+            frame_parameters_0 = hardware_source.get_frame_parameters(0)
+            frame_parameters_0.fov_nm = 20
+            hardware_source.set_frame_parameters(0, frame_parameters_0)
+            hardware_source.stop_playing()
+            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
+            self.assertEqual(20, scan_context2.fov_size_nm.width)
+            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
+
+    def test_scan_context_update_after_changing_parameters_during_subscan_and_disabling(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            stem_controller_ = scan_context.instrument
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
+            frame_parameters_0 = hardware_source.get_frame_parameters(0)
+            frame_parameters_0.fov_nm = 20
+            hardware_source.set_frame_parameters(0, frame_parameters_0)
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context3 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.subscan_enabled = False
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context4 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.stop_playing()
+            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
+            self.assertNotEqual(20, scan_context2.fov_size_nm.width)
+            self.assertFalse(scan_context3.is_valid)
+            self.assertEqual(20, scan_context4.fov_size_nm.width)
+
+    def test_scan_context_cleared_after_changing_parameters_during_subscan_and_stopping(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            stem_controller_ = scan_context.instrument
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
+            frame_parameters_0 = hardware_source.get_frame_parameters(0)
+            frame_parameters_0.fov_nm = 20
+            hardware_source.set_frame_parameters(0, frame_parameters_0)
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            scan_context3 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.stop_playing()
+            scan_context4 = copy.deepcopy(stem_controller_.scan_context)
+            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
+            self.assertNotEqual(20, scan_context2.fov_size_nm.width)
+            self.assertFalse(scan_context3.is_valid)
+            self.assertFalse(scan_context4.is_valid)
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            with contextlib.closing(stem_controller.ProbeViewController(document_model, document_controller.event_loop)):
-                hardware_source.start_playing()
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-                self.assertEqual(len(display_item.graphics), 0)
-                hardware_source.subscan_enabled = True
-                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                document_controller.periodic()
-                hardware_source.stop_playing()
-                display_item.remove_graphic(display_item.graphics[0])
-                self.assertFalse(hardware_source.subscan_enabled)
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 0)
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            hardware_source.stop_playing()
+            display_item.remove_graphic(display_item.graphics[0])
+            self.assertFalse(hardware_source.subscan_enabled)
+
+    def test_facade_record_data_with_immediate_close(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            api = Facade.get_api("~1.0", "~1.0")
+            hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
+            scan_frame_parameters = hardware_source_facade.get_frame_parameters_for_profile_by_index(2)
+            scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
+            scan_frame_parameters["external_clock_mode"] = 1
+            scan_frame_parameters["ac_line_sync"] = False
+            scan_frame_parameters["ac_frame_sync"] = False
+            # this tests an issue for a race condition where thread for record task isn't started before the task
+            # is canceled, resulting in the close waiting for the thread and the thread waiting for the acquire.
+            # this reduces the problem, but it's still possible that during external sync, the acquisition starts
+            # before being canceled and must timeout.
+            with contextlib.closing(hardware_source_facade.create_record_task(scan_frame_parameters)) as task:
+                pass
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

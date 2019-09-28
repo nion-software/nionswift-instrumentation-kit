@@ -4,6 +4,7 @@ import copy
 import enum
 import functools
 import gettext
+import math
 import threading
 import typing
 
@@ -37,6 +38,42 @@ class SubscanState(enum.Enum):
 AxisType = typing.Tuple[str, str]
 
 
+class ScanContext:
+    def __init__(self):
+        self.center_nm = None
+        self.fov_size_nm = None
+        self.rotation_rad = None
+
+    def __repr__(self) -> str:
+        return f"{self.fov_size_nm[0]}nm {math.degrees(self.rotation_rad)}deg" if self.fov_size_nm else "NO CONTEXT"
+
+    def __eq__(self, other) -> bool:
+        return other is not None and isinstance(other, self.__class__) and other.center_nm == self.center_nm and other.fov_size_nm == self.fov_size_nm and other.rotation_rad == self.rotation_rad
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        result.center_nm = self.center_nm
+        result.fov_size_nm = self.fov_size_nm
+        result.rotation_rad = self.rotation_rad
+        return result
+
+    @property
+    def is_valid(self) -> bool:
+        return self.fov_size_nm is not None
+
+    def clear(self) -> None:
+        self.center_nm = None
+        self.fov_size_nm = None
+        self.rotation_rad = None
+
+    def update(self, center_nm: Geometry.FloatPoint, fov_size_nm: Geometry.FloatSize, rotation_rad: float) -> None:
+        self.center_nm = Geometry.FloatPoint.make(center_nm)
+        self.fov_size_nm = Geometry.FloatSize.make(fov_size_nm)
+        self.rotation_rad = rotation_rad
+
+
 class STEMController:
     """An interface to a STEM microscope.
 
@@ -60,11 +97,12 @@ class STEMController:
         self.__probe_position_value.on_value_changed = self.set_probe_position
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
+        self.__scan_context = ScanContext()
         self.probe_state_changed_event = Event.Event()
         self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value = Model.PropertyModel(None)
         self.__subscan_rotation_value = Model.PropertyModel(0.0)
-        self.scan_data_items_changed_event = Event.Event()
+        self.scan_data_item_states_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
         self.__scan_controller = None
@@ -106,12 +144,16 @@ class STEMController:
     # end configuration methods
 
     def _enter_scanning_state(self) -> None:
+        # push 'scanning' onto the probe state stack; the `probe_state` will now be `scanning`
         self.__probe_state_stack.append("scanning")
+        # fire off the probe state changed event.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
+        # ensure that SubscanState is valid (ENABLED or DISABLED, not INVALID)
         if self._subscan_state_value.value == SubscanState.INVALID:
             self._subscan_state_value.value = SubscanState.DISABLED
 
     def _exit_scanning_state(self) -> None:
+        # pop the 'scanning' probe state and fire off the probe state changed event.
         self.__probe_state_stack.pop()
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
@@ -142,11 +184,21 @@ class STEMController:
         return self.__subscan_rotation_value
 
     def disconnect_probe_connections(self):
-        self.scan_data_items_changed_event.fire(list())
+        self.scan_data_item_states_changed_event.fire(list())
 
     def _data_item_states_changed(self, data_item_states):
         if len(data_item_states) > 0:
-            self.scan_data_items_changed_event.fire([data_item_state.get("data_item") for data_item_state in data_item_states])
+            self.scan_data_item_states_changed_event.fire(data_item_states)
+
+    @property
+    def scan_context(self) -> ScanContext:
+        return self.__scan_context
+
+    def _update_scan_context(self, center_nm: Geometry.FloatPoint, fov_size_nm: Geometry.FloatSize, rotation_rad: float) -> None:
+        self.__scan_context.update(center_nm, fov_size_nm, rotation_rad)
+
+    def _clear_scan_context(self) -> None:
+        self.__scan_context.clear()
 
     @property
     def probe_position(self):
@@ -410,7 +462,7 @@ class ProbeView:
         self.__probe_graphic_connections = list()
         self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
-        self.__probe_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__probe_data_items_changed)
+        self.__probe_data_items_changed_listener = stem_controller.scan_data_item_states_changed_event.listen(self.__probe_data_item_states_changed)
 
     def close(self):
         self.__probe_data_items_changed_listener.close()
@@ -420,10 +472,11 @@ class ProbeView:
         self.__last_data_items = list()
         self.__event_loop = None
 
-    def __probe_data_items_changed(self, data_items):
+    def __probe_data_item_states_changed(self, data_item_states):
         # thread safe.
-        with self.__last_data_items_lock:
-            self.__last_data_items = copy.copy(data_items)
+        if not any(data_item_state.get("channel_id").endswith("_subscan") for data_item_state in data_item_states):
+            with self.__last_data_items_lock:
+                self.__last_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
 
     def __probe_state_changed(self, probe_state, probe_position):
         # thread safe. move actual call to main thread using the event loop.
@@ -490,7 +543,7 @@ class SubscanView:
         self.__subscan_rotation_value = stem_controller._subscan_rotation_value
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
         self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
-        self.__scan_data_items_changed_listener = stem_controller.scan_data_items_changed_event.listen(self.__scan_data_items_changed)
+        self.__scan_data_items_changed_listener = stem_controller.scan_data_item_states_changed_event.listen(self.__scan_data_item_states_changed)
         self.__subscan_graphic_trackers = list()
         self.__update_subscan_region_value = None
         self.__update_subscan_rotation_value = 0.0
@@ -501,11 +554,11 @@ class SubscanView:
         self.__scan_data_items = list()
         self.__event_loop = None
 
-    def __scan_data_items_changed(self, data_items):
+    def __scan_data_item_states_changed(self, data_item_states):
         # thread safe.
         if self.__subscan_state_model.value == SubscanState.DISABLED:
             with self.__last_data_items_lock:
-                self.__scan_data_items = copy.copy(data_items)
+                self.__scan_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
 
     def __subscan_region_changed(self, name):
         # pass the value to update subscan region via the field; that way less worry about overruns

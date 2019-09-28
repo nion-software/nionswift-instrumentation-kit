@@ -17,7 +17,6 @@ from nion.instrumentation import stem_controller
 
 # local libraries
 from nion.data import DataAndMetadata
-from nion.swift.model import DataItem
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
@@ -36,7 +35,7 @@ class ScanFrameParameters(dict):
         self.__dict__ = self
         self.size = self.get("size", (512, 512))
         self.center_nm = self.get("center_nm", (0, 0))
-        self.fov_size_nm = self.get("fov_size_nm", (8, 8))
+        self.fov_size_nm = self.get("fov_size_nm")  # this is a device level parameter; not used at the user level
         self.pixel_time_us = self.get("pixel_time_us", 10)
         self.fov_nm = self.get("fov_nm", 8)
         self.rotation_rad = self.get("rotation_rad", 0)
@@ -177,9 +176,9 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, subscan_rotation, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, subscan_enabled: bool, subscan_region, subscan_rotation, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
         super().__init__(is_continuous)
-        self.__stem_controller = stem_controller
+        self.__stem_controller = stem_controller_
         self.hardware_source_id = hardware_source_id
         self.__device = device
         self.__weak_scan_hardware_source = weakref.ref(scan_hardware_source)
@@ -388,7 +387,7 @@ class RecordTask:
 
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller, device, hardware_source_id: str, display_name: str):
+    def __init__(self, stem_controller_: stem_controller.STEMController, device, hardware_source_id: str, display_name: str):
         super().__init__(hardware_source_id, display_name)
 
         self.features["is_scanning"] = True
@@ -399,7 +398,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
 
-        self.__stem_controller = stem_controller
+        self.__stem_controller = stem_controller_
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__subscan_state_changed_event_listener = self.__stem_controller._subscan_state_value.property_changed_event.listen(self.__subscan_state_changed)
@@ -672,7 +671,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     @subscan_enabled.setter
     def subscan_enabled(self, value: bool) -> None:
-        self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.ENABLED if value else stem_controller.SubscanState.DISABLED
+        if value:
+            self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.ENABLED
+        else:
+            self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.DISABLED
+            fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
+            self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def subscan_region(self):
@@ -727,6 +731,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
+        if not self.subscan_enabled:
+            fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
+            self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.subscan_rotation, self.__frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
@@ -764,6 +771,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def set_current_frame_parameters(self, frame_parameters):
         if self.__acquisition_task:
             self.__acquisition_task.set_frame_parameters(frame_parameters)
+            if not self.subscan_enabled:
+                fov_size_nm = Geometry.FloatSize(height=frame_parameters.fov_nm * Geometry.FloatSize.make(frame_parameters.size).aspect_ratio, width=frame_parameters.fov_nm)
+                self.__stem_controller._update_scan_context(frame_parameters.center_nm, fov_size_nm, frame_parameters.rotation_rad)
+            else:
+                self.__stem_controller._clear_scan_context()
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
 
     def get_current_frame_parameters(self):
@@ -981,7 +993,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def probe_state(self):
         return self.__stem_controller.probe_state
 
-    # override from BaseScanHardwareSource
     def _set_probe_position(self, probe_position):
         if probe_position is not None:
             self.__device.set_idle_position_by_percentage(probe_position.x, probe_position.y)
