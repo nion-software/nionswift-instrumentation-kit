@@ -116,8 +116,8 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     data_element["channel_name"] = channel_name  # needed to match to the channel
     if image_metadata.get("calibration_style") == "time":
         data_element["spatial_calibrations"] = (
-            {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"},
-            {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"}
+            {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
+            {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
         )
     else:
         data_element["spatial_calibrations"] = (
