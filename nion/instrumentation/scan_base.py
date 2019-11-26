@@ -192,9 +192,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__pixels_to_skip = 0
         self.__channel_states = channel_states
         self.__last_read_time = 0
-        self.__subscan_enabled = subscan_enabled
-        self.__subscan_region = subscan_region
-        self.__subscan_rotation = subscan_rotation
+        self.__subscan_enabled = False
 
     def set_frame_parameters(self, frame_parameters):
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
@@ -203,33 +201,6 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
     @property
     def frame_parameters(self):
         return self.__frame_parameters
-
-    @property
-    def subscan_enabled(self):
-        return self.__subscan_enabled
-
-    @subscan_enabled.setter
-    def subscan_enabled(self, value):
-        self.__subscan_enabled = value
-        self.__activate_frame_parameters()
-
-    @property
-    def subscan_region(self):
-        return self.__subscan_region
-
-    @subscan_region.setter
-    def subscan_region(self, value):
-        self.__subscan_region = value
-        self.__activate_frame_parameters()
-
-    @property
-    def subscan_rotation(self):
-        return self.__subscan_rotation
-
-    @subscan_rotation.setter
-    def subscan_rotation(self, value):
-        self.__subscan_rotation = value
-        self.__activate_frame_parameters()
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
@@ -286,11 +257,15 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_id = self.__channel_states[channel_index].channel_id
+            subscan_region = None
+            subscan_rotation = 0.0
             if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
                 channel_id += "_subscan"
-            elif self.subscan_enabled:
-                channel_id += "_subscan"
-            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties, self.subscan_region if self.subscan_enabled else None, self.subscan_rotation)
+                subscan_center = Geometry.FloatPoint(y=self.__frame_parameters.subscan_fractional_center[0], x=self.__frame_parameters.subscan_fractional_center[1])
+                subscan_size = Geometry.FloatSize(height=self.__frame_parameters.subscan_fractional_size[0], width=self.__frame_parameters.subscan_fractional_size[1])
+                subscan_region = Geometry.FloatRect.from_center_and_size(subscan_center, subscan_size)
+                subscan_rotation = self.__frame_parameters.subscan_rotation
+            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties, subscan_region, subscan_rotation)
             data_element["properties"]["hardware_source_name"] = self.__display_name
             data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
             data_element["data"] = npdata
@@ -335,14 +310,6 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         device_frame_parameters = ScanFrameParameters(self.__frame_parameters)
         context_size = Geometry.FloatSize.make(device_frame_parameters.size)
         device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
-        if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
-            pass  # let the parameters speak for themselves
-        elif self.subscan_enabled and self.subscan_region:
-            subscan_region = Geometry.FloatRect.make(self.subscan_region)
-            device_frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
-            device_frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
-            device_frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
-            device_frame_parameters.subscan_rotation = self.subscan_rotation
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
@@ -713,19 +680,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if subscan_enabled and not subscan_region_value.value:
             subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
             subscan_rotation_value.value = 0.0
-        if self.__acquisition_task:
-            self.__acquisition_task.subscan_enabled = subscan_enabled
+        self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     def __subscan_region_changed(self, name):
-        if self.__acquisition_task:
-            subscan_region = self.subscan_region
-            if not subscan_region:
-                self.subscan_enabled = False
-            self.__acquisition_task.subscan_region = subscan_region
+        subscan_region = self.subscan_region
+        if not subscan_region:
+            self.subscan_enabled = False
+        self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     def __subscan_rotation_changed(self, name):
-        if self.__acquisition_task:
-            self.__acquisition_task.subscan_rotation = self.subscan_rotation
+        self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
@@ -769,12 +733,28 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return copy.copy(self.__profiles[profile])
 
     def set_current_frame_parameters(self, frame_parameters):
+        self.__set_current_frame_parameters(frame_parameters, True)
+
+    def __set_current_frame_parameters(self, frame_parameters, is_context: bool) -> None:
         if self.__acquisition_task:
-            self.__acquisition_task.set_frame_parameters(frame_parameters)
-            if not self.subscan_enabled:
-                fov_size_nm = Geometry.FloatSize(height=frame_parameters.fov_nm * Geometry.FloatSize.make(frame_parameters.size).aspect_ratio, width=frame_parameters.fov_nm)
-                self.__stem_controller._update_scan_context(frame_parameters.center_nm, fov_size_nm, frame_parameters.rotation_rad)
+            frame_parameters_copy = copy.deepcopy(frame_parameters)
+            if self.subscan_enabled and self.subscan_region:
+                subscan_region = Geometry.FloatRect.make(self.subscan_region)
+                context_size = Geometry.FloatSize.make(frame_parameters_copy["size"])
+                frame_parameters_copy.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
+                frame_parameters_copy.subscan_fractional_size = subscan_region.height, subscan_region.width
+                frame_parameters_copy.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
+                frame_parameters_copy.subscan_rotation = self.subscan_rotation
             else:
+                frame_parameters_copy.subscan_pixel_size = None
+                frame_parameters_copy.subscan_fractional_size = None
+                frame_parameters_copy.subscan_fractional_center = None
+                frame_parameters_copy.subscan_rotation = 0.0
+            self.__acquisition_task.set_frame_parameters(frame_parameters_copy)
+            if not self.subscan_enabled:
+                fov_size_nm = Geometry.FloatSize(height=frame_parameters_copy.fov_nm * Geometry.FloatSize.make(frame_parameters_copy.size).aspect_ratio, width=frame_parameters_copy.fov_nm)
+                self.__stem_controller._update_scan_context(frame_parameters_copy.center_nm, fov_size_nm, frame_parameters_copy.rotation_rad)
+            elif is_context:
                 self.__stem_controller._clear_scan_context()
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
 

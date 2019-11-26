@@ -39,7 +39,7 @@ STEM Scan Controller
 --------------------
 The scan control panel and scan control bar provide a UI for the scan device. A standard basic UI is provided and cannot be extended currently.
 
-The standard scan control panel provides play/pause/abort buttons, record/abort buttons, basic mode selection, access to settings dialog, scan settings (time, field of view, pixel size, rotation, etc.), scan status, channel selection and live data previews, and beam control (when not scanning).
+The standard scan control panel provides play/pause/abort buttons, record/abort buttons, basic mode selection, access to settings dialog, scan settings (time, field of view, pixel size, rotation, etc.), scan status, channel selection and live data previews, sub-scan control, and beam control (when not scanning).
 
 The standard scan control bar provides scan/abort/stop buttons, integrated PMT controls, channel enable/disable.
 
