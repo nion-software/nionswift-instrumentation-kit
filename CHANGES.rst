@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.18.3 (UNRELEASED)
+0.18.3 (2019-11-26)
 -------------------
 - Fix issue with subscan handling during SI.
 - Improve exception handling during camera initialization.
