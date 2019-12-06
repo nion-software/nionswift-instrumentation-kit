@@ -17,7 +17,10 @@ from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.instrumentation import camera_base
 from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
+from nionswift_plugin.usim import InstrumentDevice
+from nionswift_plugin.usim import CameraDevice
 
 """
 # running in Swift
@@ -61,7 +64,38 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller.periodic()
 
     def _setup_hardware_source(self, initialize: bool=True, is_eels: bool=False) -> (DocumentController.DocumentController, DocumentModel.DocumentModel, HardwareSource.HardwareSource, CameraControlPanel.CameraControlStateController):
-        raise NotImplementedError()
+
+        document_model = DocumentModel.DocumentModel()
+        document_controller = DocumentController.DocumentController(self.app.ui, document_model, workspace_id="library")
+
+        # this is simulator specific. replace this code but be sure to set up self.exposure and blanked and positioned
+        # initial settings.
+        self.exposure = 0.04
+
+        instrument = InstrumentDevice.Instrument("usim_stem_controller")
+        Registry.register_component(instrument, {"stem_controller"})
+
+        camera_id = "usim_ronchigram_camera" if not is_eels else "usim_eels_camera"
+        camera_type = "ronchigram" if not is_eels else "eels"
+        camera_name = "uSim Camera"
+        camera_settings = CameraDevice.CameraSettings(camera_id)
+        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, instrument)
+        camera_hardware_source = camera_base.CameraHardwareSource("usim_stem_controller", camera_device, camera_settings, None, None)
+        if is_eels:
+            camera_hardware_source.features["is_eels_camera"] = True
+            camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0))))
+        camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000, "binning": 2}))
+        camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000, "binning": 2}))
+        camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000 * 2, "binning": 1}))
+        camera_hardware_source.set_selected_profile_index(0)
+
+        HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+
+        state_controller = CameraControlPanel.CameraControlStateController(camera_hardware_source, document_controller.queue_task, document_controller.document_model)
+        if initialize:
+            state_controller.initialize_state()
+
+        return document_controller, document_model, camera_hardware_source, state_controller
 
     def __setup_hardware_source(self, initialize: bool=True, is_eels: bool=False) -> (DocumentController.DocumentController, DocumentModel.DocumentModel, HardwareSource.HardwareSource, CameraControlPanel.CameraControlStateController):
         return self._setup_hardware_source(initialize, is_eels)

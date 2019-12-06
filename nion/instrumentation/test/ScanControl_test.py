@@ -8,17 +8,19 @@ import numpy
 
 from nion.swift import Application
 from nion.swift import DocumentController
-from nion.swift.model import DataItem
+from nion.swift import Facade
 from nion.swift.model import DocumentModel
-from nion.swift.model import Graphics
 from nion.swift.model import HardwareSource
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Registry
 from nion.instrumentation import stem_controller
 from nion.instrumentation import scan_base
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
+from nionswift_plugin.usim import InstrumentDevice
+from nionswift_plugin.usim import ScanDevice
 
 """
 # running in Swift
@@ -83,17 +85,21 @@ class TestScanControlClass(unittest.TestCase):
         scan_state_controller.initialize_state()
         return document_controller, document_model, instrument, hardware_source, scan_state_controller
 
-    def _setup_instrument(self):
-        raise NotImplementedError()
-
-    def _close_instrument(self, instrument) -> None:
-        raise NotImplementedError()
-
-    def _setup_hardware_source(self, instrument) -> scan_base.ScanHardwareSource:
-        raise NotImplementedError()
+    def _setup_hardware_source(self, instrument) -> HardwareSource.HardwareSource:
+        stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+        scan_hardware_source = scan_base.ScanHardwareSource(stem_controller, ScanDevice.Device(instrument), "usim_scan_device", "uSim Scan")
+        return scan_hardware_source
 
     def _close_hardware_source(self) -> None:
-        raise NotImplementedError()
+        pass
+
+    def _setup_instrument(self):
+        instrument = InstrumentDevice.Instrument("usim_stem_controller")
+        Registry.register_component(instrument, {"stem_controller"})
+        return instrument
+
+    def _close_instrument(self, instrument) -> None:
+        HardwareSource.HardwareSourceManager().unregister_instrument("usim_stem_controller")
 
     def _close_scan_hardware_source(self, document_controller, document_model, instrument, hardware_source, scan_state_controller):
         scan_state_controller.close()
