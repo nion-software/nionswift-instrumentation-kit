@@ -1,7 +1,6 @@
 # standard libraries
 import abc
 import asyncio
-import concurrent.futures
 import copy
 import datetime
 import gettext
@@ -26,6 +25,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
+from nion.utils import Process
 from nion.utils import Registry
 
 
@@ -658,22 +658,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
 
     def close(self):
-        # give cancelled tasks a chance to finish
-        self.__event_loop.stop()
-        self.__event_loop.run_forever()
-        try:
-            # this assumes that all outstanding tasks finish in a reasonable time (i.e. no infinite loops).
-            self.__event_loop.run_until_complete(asyncio.gather(*asyncio.Task.all_tasks(loop=self.__event_loop), loop=self.__event_loop))
-        except concurrent.futures.CancelledError:
-            pass
-        # now close
-        # due to a bug in Python libraries, the default executor needs to be shutdown explicitly before the event loop
-        # see http://bugs.python.org/issue28464
-        if self.__event_loop._default_executor:
-            self.__event_loop._default_executor.shutdown()
-        self.__event_loop.close()
+        Process.close_event_loop(self.__event_loop)
         self.__event_loop = None
-
         self.__periodic_logger_fn = None
         super().close()
         if self.__settings_changed_event_listener:
