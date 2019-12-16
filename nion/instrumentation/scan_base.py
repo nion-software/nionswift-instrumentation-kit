@@ -911,9 +911,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def clean_display_items(self, document_model, display_items, **kwargs) -> None:
         for display_item in display_items:
             for graphic in copy.copy(display_item.graphics):
-                if graphic.graphic_id == "probe":
+                graphic_id = graphic.graphic_id
+                if graphic_id == "probe":
                     display_item.remove_graphic(graphic)
-                if graphic.graphic_id == "subscan":
+                elif graphic_id == "subscan":
                     display_item.remove_graphic(graphic)
 
     def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[typing.Dict]]]:

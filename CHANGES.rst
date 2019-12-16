@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.18.4 (UNRELEASED)
+-------------------
+- Fix issue with reloading scans with leftover probe/subscan graphics.
+
 0.18.3 (2019-11-26)
 -------------------
 - Fix issue with subscan handling during SI.
