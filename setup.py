@@ -25,6 +25,5 @@ setuptools.setup(
         "Development Status :: 2 - Pre-Alpha",
         "Programming Language :: Python :: 3.6",
     ],
-    include_package_data=True,
     python_requires='~=3.6',
 )
