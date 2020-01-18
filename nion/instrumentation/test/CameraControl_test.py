@@ -531,12 +531,8 @@ class TestCameraControlClass(unittest.TestCase):
     def test_deleting_processed_data_item_during_acquisition_recovers_correctly(self):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=TIMEOUT)
             try:
-                start_time = time.time()
-                while not hardware_source.is_playing:
-                    time.sleep(0.01)
-                    self.assertTrue(time.time() - start_time < TIMEOUT)
                 start_time = time.time()
                 while len(document_model.data_items) < 2:
                     time.sleep(0.01)
@@ -549,11 +545,7 @@ class TestCameraControlClass(unittest.TestCase):
                     document_controller.periodic()
                     self.assertTrue(time.time() - start_time < TIMEOUT)
             finally:
-                hardware_source.abort_playing()
-            start_time = time.time()
-            while hardware_source.is_playing:
-                time.sleep(0.01)
-                self.assertTrue(time.time() - start_time < TIMEOUT)
+                hardware_source.abort_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
 
     def test_starting_processed_view_initializes_source_region(self):
