@@ -43,6 +43,7 @@ class ScanFrameParameters(dict):
         self.subscan_fractional_size = self.get("subscan_fractional_size", None)
         self.subscan_fractional_center = self.get("subscan_fractional_center", None)
         self.subscan_rotation = self.get("subscan_rotation", 0.0)
+        self.channel_modifier = self.get("channel_modifier")
         self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
         self.ac_line_sync = self.get("ac_line_sync", False)
@@ -79,6 +80,8 @@ class ScanFrameParameters(dict):
             d["subscan_fractional_center"] = self.subscan_fractional_center
         if self.subscan_rotation:  # don't store None or 0.0
             d["subscan_rotation"] = self.subscan_rotation
+        if self.channel_modifier:  # don't store None or 0.0
+            d["channel_modifier"] = self.channel_modifier
         return d
 
     def __repr__(self):
@@ -96,7 +99,8 @@ class ScanFrameParameters(dict):
                ("\nsubscan pixel size: " + str(self.subscan_pixel_size) if self.subscan_pixel_size is not None else "") +\
                ("\nsubscan fractional size: " + str(self.subscan_fractional_size) if self.subscan_fractional_size is not None else "") +\
                ("\nsubscan fractional center: " + str(self.subscan_fractional_center) if self.subscan_fractional_center is not None else "") +\
-               ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_fractional_center is not None else "")
+               ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_rotation is not None else "") +\
+               ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "")
 
 
 # set the calibrations for this image
@@ -256,11 +260,11 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
         def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
-            channel_id = self.__channel_states[channel_index].channel_id
+            channel_modifier = self.__frame_parameters.channel_modifier
+            channel_id = self.__channel_states[channel_index].channel_id + (("_" + channel_modifier) if channel_modifier else "")
             subscan_region = None
             subscan_rotation = 0.0
             if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
-                channel_id += "_subscan"
                 subscan_center = Geometry.FloatPoint(y=self.__frame_parameters.subscan_fractional_center[0], x=self.__frame_parameters.subscan_fractional_center[1])
                 subscan_size = Geometry.FloatSize(height=self.__frame_parameters.subscan_fractional_size[0], width=self.__frame_parameters.subscan_fractional_size[1])
                 subscan_region = Geometry.FloatRect.from_center_and_size(subscan_center, subscan_size)
@@ -705,7 +709,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if not self.subscan_enabled:
             fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
             self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.subscan_rotation, self.__frame_parameters, channel_states, self.display_name)
+        frame_parameters = copy.deepcopy(self.__frame_parameters)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, self.subscan_enabled, self.subscan_region, self.subscan_rotation, frame_parameters, channel_states, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -714,17 +719,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, self.subscan_enabled, self.subscan_region, self.subscan_rotation, self.__record_parameters, channel_states, self.display_name)
-
-    def __update_frame_parameters(self, profile_index, frame_parameters):
-        # update the frame parameters as they are changed from the low level. no need to set them.
-        frame_parameters = ScanFrameParameters(frame_parameters)
-        self.__profiles[profile_index] = frame_parameters
-        if profile_index == self.__current_profile_index:
-            self.__frame_parameters = ScanFrameParameters(frame_parameters)
-        if profile_index == 2:
-            self.__record_parameters = ScanFrameParameters(frame_parameters)
-        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
+        frame_parameters = copy.deepcopy(self.__record_parameters)
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, self.subscan_enabled, self.subscan_region, self.subscan_rotation, frame_parameters, channel_states, self.display_name)
 
     def set_frame_parameters(self, profile_index, frame_parameters):
         frame_parameters = ScanFrameParameters(frame_parameters)
@@ -743,24 +739,26 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__set_current_frame_parameters(frame_parameters, True)
 
     def __set_current_frame_parameters(self, frame_parameters, is_context: bool) -> None:
+        frame_parameters = ScanFrameParameters(frame_parameters)
+        if self.subscan_enabled and self.subscan_region:
+            subscan_region = Geometry.FloatRect.make(self.subscan_region)
+            context_size = Geometry.FloatSize.make(frame_parameters["size"])
+            frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
+            frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
+            frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
+            frame_parameters.subscan_rotation = self.subscan_rotation
+            frame_parameters.channel_modifier = "subscan"
+        else:
+            frame_parameters.subscan_pixel_size = None
+            frame_parameters.subscan_fractional_size = None
+            frame_parameters.subscan_fractional_center = None
+            frame_parameters.subscan_rotation = 0.0
+            frame_parameters.channel_modifier = None
         if self.__acquisition_task:
-            frame_parameters_copy = copy.deepcopy(frame_parameters)
-            if self.subscan_enabled and self.subscan_region:
-                subscan_region = Geometry.FloatRect.make(self.subscan_region)
-                context_size = Geometry.FloatSize.make(frame_parameters_copy["size"])
-                frame_parameters_copy.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
-                frame_parameters_copy.subscan_fractional_size = subscan_region.height, subscan_region.width
-                frame_parameters_copy.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
-                frame_parameters_copy.subscan_rotation = self.subscan_rotation
-            else:
-                frame_parameters_copy.subscan_pixel_size = None
-                frame_parameters_copy.subscan_fractional_size = None
-                frame_parameters_copy.subscan_fractional_center = None
-                frame_parameters_copy.subscan_rotation = 0.0
-            self.__acquisition_task.set_frame_parameters(frame_parameters_copy)
+            self.__acquisition_task.set_frame_parameters(frame_parameters)
             if not self.subscan_enabled:
-                fov_size_nm = Geometry.FloatSize(height=frame_parameters_copy.fov_nm * Geometry.FloatSize.make(frame_parameters_copy.size).aspect_ratio, width=frame_parameters_copy.fov_nm)
-                self.__stem_controller._update_scan_context(frame_parameters_copy.center_nm, fov_size_nm, frame_parameters_copy.rotation_rad)
+                fov_size_nm = Geometry.FloatSize(height=frame_parameters.fov_nm * Geometry.FloatSize.make(frame_parameters.size).aspect_ratio, width=frame_parameters.fov_nm)
+                self.__stem_controller._update_scan_context(frame_parameters.center_nm, fov_size_nm, frame_parameters.rotation_rad)
             elif is_context:
                 self.__stem_controller._clear_scan_context()
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
@@ -837,6 +835,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     @property
     def selected_profile_index(self):
         return self.__current_profile_index
+
+    def __update_frame_parameters(self, profile_index, frame_parameters):
+        # update the frame parameters as they are changed from the low level.
+        frame_parameters = ScanFrameParameters(frame_parameters)
+        self.__profiles[profile_index] = frame_parameters
+        if profile_index == self.__current_profile_index:
+            # set the new frame parameters, keeping the channel modifier
+            new_frame_parameters = ScanFrameParameters(frame_parameters)
+            new_frame_parameters.channel_modifier = self.__frame_parameters.channel_modifier
+            self.__frame_parameters = new_frame_parameters
+        if profile_index == 2:
+            # set the new record parameters, keeping the channel modifier
+            new_record_parameters = ScanFrameParameters(frame_parameters)
+            new_record_parameters.channel_modifier = self.__record_parameters.channel_modifier
+            self.__record_parameters = new_record_parameters
+        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
     def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
         # this method will be called when the device changes parameters (via a dialog or something similar).

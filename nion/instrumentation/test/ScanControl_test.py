@@ -9,6 +9,7 @@ import numpy
 from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift import Facade
+from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.swift.test import HardwareSource_test
@@ -982,6 +983,130 @@ class TestScanControlClass(unittest.TestCase):
             # before being canceled and must timeout.
             with contextlib.closing(hardware_source_facade.create_record_task(scan_frame_parameters)) as task:
                 pass
+
+    def test_enabling_subscan_changes_output_data_item(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source_id = hardware_source.hardware_source_id
+            self.assertEqual(len(document_model.data_items), 0)
+            data_item = DataItem.DataItem()
+            document_model.append_data_item(data_item)
+            data_item2 = DataItem.DataItem()
+            document_model.append_data_item(data_item2)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id), data_item)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id + "_subscan"), data_item2)
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                self.assertEqual(data_item.data.shape, (256, 256))
+                self.assertIsNone(data_item2.data)
+                # turn on subscan
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+                # save modified times; only subscan should be modified
+                modified = data_item.modified
+                modified2 = data_item2.modified
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+                self.assertEqual(modified, data_item.modified)
+                self.assertLess(modified2, data_item2.modified)
+                self.assertEqual(data_item.data.shape, (256, 256))
+                self.assertEqual(data_item2.data.shape, (128, 128))
+                # turn off subscan
+                hardware_source.subscan_enabled = False
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+                # save modified times; only scan should be modified
+                modified = data_item.modified
+                modified2 = data_item2.modified
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+                self.assertLess(modified, data_item.modified)
+                self.assertEqual(modified2, data_item2.modified)
+            finally:
+                hardware_source.abort_playing()
+
+    def test_restarting_with_subscan_enabled_changes_correct_data_item(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source_id = hardware_source.hardware_source_id
+            self.assertEqual(len(document_model.data_items), 0)
+            data_item = DataItem.DataItem()
+            document_model.append_data_item(data_item)
+            data_item2 = DataItem.DataItem()
+            document_model.append_data_item(data_item2)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id), data_item)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id + "_subscan"), data_item2)
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                self.assertEqual(data_item.data.shape, (256, 256))
+                self.assertIsNone(data_item2.data)
+                # turn on subscan
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(data_item.data.shape, (256, 256))
+            self.assertEqual(data_item2.data.shape, (128, 128))
+            # save modified times; only scan should be modified
+            modified = data_item.modified
+            modified2 = data_item2.modified
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(modified, data_item.modified)
+            self.assertLess(modified2, data_item2.modified)
+
+    def test_restarting_with_subscan_disabled_after_stopping_with_enabled_changes_correct_data_item(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source_id = hardware_source.hardware_source_id
+            self.assertEqual(len(document_model.data_items), 0)
+            data_item = DataItem.DataItem()
+            document_model.append_data_item(data_item)
+            data_item2 = DataItem.DataItem()
+            document_model.append_data_item(data_item2)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id), data_item)
+            document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id, hardware_source.get_channel_state(0).channel_id + "_subscan"), data_item2)
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+                self.assertEqual(data_item.data.shape, (256, 256))
+                self.assertIsNone(data_item2.data)
+                # turn on subscan
+                hardware_source.subscan_enabled = True
+                hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(data_item.data.shape, (256, 256))
+            self.assertEqual(data_item2.data.shape, (128, 128))
+            # disable subscan
+            hardware_source.subscan_enabled = False
+            # save modified times; only scan should be modified
+            modified = data_item.modified
+            modified2 = data_item2.modified
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertLess(modified, data_item.modified)
+            self.assertEqual(modified2, data_item2.modified)
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
