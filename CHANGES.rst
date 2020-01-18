@@ -3,6 +3,7 @@ Changelog (nionswift-instrumentation)
 
 0.18.4 (UNRELEASED)
 -------------------
+- Fix issue starting scan record immediately after another one.
 - Fix issue with reloading scans with leftover probe/subscan graphics.
 
 0.18.3 (2019-11-26)

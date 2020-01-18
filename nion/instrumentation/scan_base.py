@@ -317,8 +317,13 @@ class RecordTask:
 
     def __init__(self, hardware_source, frame_parameters):
         self.__hardware_source = hardware_source
+        self.__thread = None
+
+        assert not self.__hardware_source.is_recording
+
         if frame_parameters:
             self.__hardware_source.set_record_frame_parameters(frame_parameters)
+
         self.__data_and_metadata_list = None
         # synchronize start of thread; if this sync doesn't occur, the task can be closed before the acquisition
         # is started. in that case a deadlock occurs because the abort doesn't apply and the thread is waiting
@@ -329,6 +334,7 @@ class RecordTask:
             self.__hardware_source.start_recording()
             self.__recording_started.set()
             self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
+            self.__hardware_source.stop_recording(sync_timeout=3.0)
 
         self.__thread = threading.Thread(target=record_thread)
         self.__thread.start()
@@ -339,6 +345,7 @@ class RecordTask:
             self.__hardware_source.abort_recording()
             self.__thread.join()
         self.__data_and_metadata_list = None
+        self.__recording_started = None
 
     @property
     def is_finished(self) -> bool:
