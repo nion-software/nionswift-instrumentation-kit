@@ -136,6 +136,58 @@ class CameraDevice(abc.ABC):
         ...
 
     @property
+    def is_dark_subtraction_enabled(self) -> bool:
+        """Return whether dark subtraction is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        return False
+
+    @is_dark_subtraction_enabled.setter
+    def is_dark_subtraction_enabled(self, is_dark_subtraction_enabled: bool) -> None:
+        """Set whether dark subtraction is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        pass
+
+    @property
+    def is_dark_subtraction_available(self) -> bool:
+        """Return whether dark subtraction is available on this camera.
+        """
+        return False
+
+    def set_dark_image(self, data: numpy.ndarray, exposure: float, bin: int, t: int, l: int, b: int, r: int) -> bool:
+        """Set the dark image for the given exposure, bin, and readout area."""
+        return False
+
+    def remove_all_dark_images(self) -> None:
+        """Set the dark image for the given exposure, bin, and readout area."""
+        pass
+
+    @property
+    def is_gain_normalization_enabled(self) -> bool:
+        """Return whether gain normalization is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        return False
+
+    @is_gain_normalization_enabled.setter
+    def is_gain_normalization_enabled(self, is_gain_normalization_enabled: bool) -> None:
+        """Set whether gain normalization is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        pass
+
+    @property
+    def is_gain_normalization_available(self) -> bool:
+        """Return whether gain normalization is available on this camera.
+        """
+        return False
+
+    @property
     @abc.abstractmethod
     def binning_values(self) -> typing.List[int]:
         """Return a list of valid binning values (int's).
