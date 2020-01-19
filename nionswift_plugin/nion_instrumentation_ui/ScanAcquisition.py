@@ -4,10 +4,12 @@ import enum
 import gettext
 import logging
 import math
+import numpy
 import threading
 import typing
 
 # local libraries
+from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.swift import Facade
 from nion.swift import HistogramPanel
@@ -19,47 +21,39 @@ from nion.typeshed import UI_1_0 as UserInterface
 from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import Model
 from . import HardwareSourceChoice
 
 _ = gettext.gettext
 
+title_base = _("Spectrum Image")
 
-def create_and_display_data_item(document_window, data_and_metadata, scan_data_list, camera_hardware_source):
-    camera_hardware_source_id = camera_hardware_source._hardware_source.hardware_source_id
 
-    # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=camera_hardware_source_id, processor_id="summed", create_if_needed=True, large_format=True)
-
-    data_item = Facade.DataItem(DataItem.DataItem(large_format=True))
+def create_and_display_data_item(document_window, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    # create the data item; large format if it's a collection
+    data_item = Facade.DataItem(DataItem.DataItem(large_format=data_and_metadata.is_collection))
     document_window.library._document_model.append_data_item(data_item._data_item)
+
+    # update the session id
     data_item._data_item.session_id = document_window.library._document_model.session_id
 
-    data_item.title = _("Spectrum Image {}".format(" x ".join([str(d) for d in data_and_metadata.dimensional_shape])))
+    # set the title
+    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name", data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name", "Data"))
+    dimension_str = (" " + " x ".join([str(d) for d in data_and_metadata.collection_dimension_shape])) if data_and_metadata.is_collection else str()
+    data_item.title = f"{title_base}{dimension_str} ({channel_name})"
+
+    # if the last dimension is 1, squeeze the data (1D SI)
+    if data_and_metadata.data_shape[0] == 1:
+        data_and_metadata = xd.squeeze(data_and_metadata)
+
     # the data item should not have any other 'clients' at this point; so setting the
     # data and metadata will immediately unload the data (and write to disk). this is important,
     # because the data (up to this point) can be shared data from the DLL.
     data_item.set_data_and_metadata(data_and_metadata)
-    # assert not data_item._data_item.is_data_loaded
+
     # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
     document_window.display_data_item(data_item)
-    for scan_data_and_metadata in scan_data_list:
-        scan_channel_id = scan_data_and_metadata.metadata["hardware_source"]["channel_id"]
-        scan_channel_name = scan_data_and_metadata.metadata["hardware_source"]["channel_name"]
-        channel_id = camera_hardware_source_id + "_" + scan_channel_id
-
-        # data_item = library.get_data_item_for_hardware_source(scan_hardware_source, channel_id=channel_id, create_if_needed=True)
-
-        data_item = Facade.DataItem(DataItem.DataItem())
-        document_window.library._document_model.append_data_item(data_item._data_item)
-        data_item._data_item.session_id = document_window.library._document_model.session_id
-
-        data_item.title = "{} ({})".format(_("Spectrum Image"), scan_channel_name)
-
-        if scan_data_and_metadata.data_shape[0] == 1:
-            scan_data_and_metadata = xd.squeeze(scan_data_and_metadata)
-
-        data_item.set_data_and_metadata(scan_data_and_metadata)
-        document_window.display_data_item(data_item)
 
 
 class SequenceState(enum.Enum):
@@ -154,25 +148,74 @@ class ScanAcquisitionController:
         if sum_frames:
             camera_frame_parameters["processing"] = "sum_project"
 
+        scan_size, camera_readout_size, channel_id_list = scan_hardware_source.grab_synchronized_prepare(
+            scan_frame_parameters=scan_frame_parameters,
+            camera=camera_hardware_source,
+            camera_frame_parameters=camera_frame_parameters)
+
+        data_item = DataItem.DataItem(large_format=True)
+        channel_name = camera_hardware_source.display_name
+        data_item.title = f"{title_base} ({channel_name})"
+        self.__document_controller.library._document_model.append_data_item(data_item)
+        self.__document_controller.display_data_item(Facade.DataItem(data_item))
+        data_shape = scan_size + camera_readout_size
+        data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
+        data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+
+        class CameraDataChannel:
+            def __init__(self, document_model, data_item: DataItem.DataItem):
+                self.__document_model = document_model
+                self.__data_item = data_item
+                self.__data_item_transaction = None
+                self.__data_and_metadata = None
+
+            def start(self) -> None:
+                self.__data_item.increment_data_ref_count()
+                self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
+                self.__document_model.begin_data_item_live(self.__data_item)
+
+            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+                data_metadata = DataAndMetadata.DataMetadata(
+                    (tuple(data_shape) + data_and_metadata.data_shape[2:], data_and_metadata.data_dtype),
+                    data_and_metadata.intensity_calibration,
+                    data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
+                    data_descriptor=DataAndMetadata.DataDescriptor(False, 2, len(data_and_metadata.data_shape) - 2))
+                src_slice = sub_area.slice + (Ellipsis,)
+                dst_slice = dest_sub_area.slice + (Ellipsis,)
+                self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+
+            def stop(self) -> None:
+                if self.__data_item_transaction:
+                    self.__data_item_transaction.close()
+                    self.__data_item_transaction = None
+                    self.__document_model.end_data_item_live(self.__data_item)
+                    self.__data_item.decrement_data_ref_count()
+
+        camera_data_channel = CameraDataChannel(self.__document_controller.library._document_model, data_item)
+        camera_data_channel.start()
+
         def grab_synchronized():
             self.acquisition_state_changed_event.fire(SequenceState.scanning)
             try:
                 combined_data = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                        camera=camera_hardware_source,
-                                                                       camera_frame_parameters=camera_frame_parameters)
+                                                                       camera_frame_parameters=camera_frame_parameters,
+                                                                       camera_data_channel=camera_data_channel)
                 if combined_data is not None:
                     scan_data_list, camera_data_list = combined_data
 
                     def create_and_display_data_item_task():
                         # this will be executed in UI thread
-                        create_and_display_data_item(document_window,
-                                                     camera_data_list[0],
-                                                     scan_data_list,
-                                                     self.__camera_hardware_source)
+                        for data_and_metadata in scan_data_list:
+                            create_and_display_data_item(document_window, data_and_metadata)
 
                     # queue the task to be executed in UI thread
                     document_window.queue_task(create_and_display_data_item_task)
             finally:
+                def stop_channel():
+                    camera_data_channel.stop()
+
+                document_window.queue_task(stop_channel)
                 self.acquisition_state_changed_event.fire(SequenceState.idle)
 
         self.__thread = threading.Thread(target=grab_synchronized)
@@ -229,6 +272,7 @@ class PanelDelegate:
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
         self.__scan_acquisition_controller = None
+        self.__acquisition_state = SequenceState.idle
         self.__acquisition_state_changed_event_listener = None
         self.__line_scan_acquisition_controller = None
         self.__eels_frame_parameters_changed_event_listener = None
@@ -382,7 +426,7 @@ class PanelDelegate:
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = None
                 self.__scan_specifier.spacing_calibrated = None
-                self.__acquire_button._widget.enabled = False
+                self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
                 self.__graphic_width = None
                 self.__scan_pixels = 0
 
@@ -526,9 +570,11 @@ class PanelDelegate:
         new_region(self.__target_region_stream.value)
 
         def acquisition_state_changed(acquisition_state: SequenceState) -> None:
+            self.__acquisition_state = acquisition_state
 
             async def update_button_text(text: str) -> None:
                 self.__acquire_button.text = text
+                update_context()  # update the cancel button
 
             if acquisition_state == SequenceState.idle:
                 self.__scan_acquisition_controller = None

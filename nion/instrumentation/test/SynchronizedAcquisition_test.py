@@ -131,13 +131,14 @@ class TestScanControlClass(unittest.TestCase):
             scan_frame_parameters["size"] = (16, 16)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            camera_data_channel = None
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             # check the data
             self.assertEqual(scans[0].data_shape, spectrum_images[0].data_shape[:-1])
             self.assertEqual(numpy.float32, spectrum_images[0].data_dtype)
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), spectrum_images[0].data_descriptor)
             # check the calibrations
-            self.assertEqual(scans[0].dimensional_calibrations, spectrum_images[0].dimensional_calibrations[:-1])
+            self.assertEqual(tuple(scans[0].dimensional_calibrations), tuple(spectrum_images[0].dimensional_calibrations[:-1]))
             self.assertEqual("eV", spectrum_images[0].dimensional_calibrations[-1].units)
             self.assertEqual("counts", spectrum_images[0].intensity_calibration.units)
             # check the timestamp
@@ -149,8 +150,8 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIn("hardware_source", spectrum_images[0].metadata)
             self.assertIn("center_x_nm", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("center_y_nm", spectrum_images[0].metadata["scan_detector"])
-            # self.assertNotIn("channel_index", spectrum_images[0].metadata["scan_detector"])
-            # self.assertNotIn("channel_name", spectrum_images[0].metadata["scan_detector"])
+            self.assertNotIn("channel_index", spectrum_images[0].metadata["scan_detector"])
+            self.assertNotIn("channel_name", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("exposure", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("fov_nm", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("hardware_source_id", spectrum_images[0].metadata["scan_detector"])
