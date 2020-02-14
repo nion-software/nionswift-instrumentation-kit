@@ -148,10 +148,13 @@ class ScanAcquisitionController:
         if sum_frames:
             camera_frame_parameters["processing"] = "sum_project"
 
-        scan_size, camera_readout_size, channel_id_list = scan_hardware_source.grab_synchronized_prepare(
+        grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
             scan_frame_parameters=scan_frame_parameters,
             camera=camera_hardware_source,
             camera_frame_parameters=camera_frame_parameters)
+
+        scan_size = tuple(grab_sync_info.scan_size)
+        camera_readout_size = grab_sync_info.camera_readout_size_squeezed
 
         data_item = DataItem.DataItem(large_format=True)
         channel_name = camera_hardware_source.display_name
@@ -174,12 +177,13 @@ class ScanAcquisitionController:
                 self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
                 self.__document_model.begin_data_item_live(self.__data_item)
 
-            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+                collection_rank = len(scan_shape)
                 data_metadata = DataAndMetadata.DataMetadata(
-                    (tuple(data_shape) + data_and_metadata.data_shape[2:], data_and_metadata.data_dtype),
+                    (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
                     data_and_metadata.intensity_calibration,
                     data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
-                    data_descriptor=DataAndMetadata.DataDescriptor(False, 2, len(data_and_metadata.data_shape) - 2))
+                    data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
                 src_slice = sub_area.slice + (Ellipsis,)
                 dst_slice = dest_sub_area.slice + (Ellipsis,)
                 self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)

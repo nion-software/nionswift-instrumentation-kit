@@ -106,6 +106,7 @@ class ScanFrameParameters(dict):
                ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_rotation is not None else "") +\
                ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "")
 
+
 # set the calibrations for this image
 def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation):
     scan_properties = copy.deepcopy(scan_properties)
@@ -531,7 +532,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_sequence_get_progress(self) -> typing.Optional[float]:
         return None
 
-    def grab_synchronized_prepare(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.Tuple[int, ...], typing.Tuple[int, ...], typing.List[str]]:
+    # typing.Tuple[typing.Tuple[int, ...], typing.Tuple[int, ...], typing.List[str]]
+    GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo", ["scan_size", "fractional_area", "is_subscan", "camera_readout_size", "camera_readout_size_squeezed", "channel_modifier", "channel_id_list"])
+
+    def grab_synchronized_get_info(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> GrabSynchronizedInfo:
 
         scan_max_area = 2048 * 2048
         if scan_frame_parameters.get("subscan_pixel_size"):
@@ -539,48 +543,48 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             scan_param_width = int(scan_frame_parameters["subscan_pixel_size"][1])
             if scan_param_height * scan_param_width > scan_max_area:
                 scan_param_height = scan_max_area // scan_param_width
+            fractional_size = Geometry.FloatSize.make(scan_frame_parameters["subscan_fractional_size"])
+            fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint.make(scan_frame_parameters["subscan_fractional_center"]), fractional_size)
+            is_subscan = True
             channel_modifier = "subscan"
         else:
             scan_param_height = int(scan_frame_parameters["size"][0])
             scan_param_width = int(scan_frame_parameters["size"][1])
             if scan_param_height * scan_param_width > scan_max_area:
                 scan_param_height = scan_max_area // scan_param_width
+            fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
+            is_subscan = False
             channel_modifier = None
 
-        camera_readout_size = camera.get_expected_dimensions(camera_frame_parameters.get("binning", 1))
+        camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.get("binning", 1)))
 
-        if camera_frame_parameters.get("processing") == "sum_project":
-            camera_readout_size = camera_readout_size[1:]
+        camera_readout_size_squeezed = (camera_readout_size.width,) if camera_frame_parameters.get("processing") == "sum_project" else tuple(camera_readout_size)
 
-        scan_size = scan_param_height, scan_param_width
+        scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
         channel_id_list = list()
         for channel_index in self.get_enabled_channels():
             channel_id = self.__make_channel_id(channel_index) + (("_" + channel_modifier) if channel_modifier else "")
             channel_id_list.append(channel_id)
 
-        return scan_size, camera_readout_size, channel_id_list
+        return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size, camera_readout_size_squeezed, channel_modifier, channel_id_list)
 
-    def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None, camera_frame_parameters: dict = None, camera_data_channel: SynchronizedDataChannelInterface = None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
+    def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None,
+                          camera_frame_parameters: dict = None,
+                          camera_data_channel: SynchronizedDataChannelInterface = None,
+                          section_height: int = None) -> typing.Tuple[
+        typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
         self.__camera_hardware_source = camera
         try:
             self.__stem_controller._enter_synchronized_state(self, camera=camera)
             self.__grab_synchronized_is_scanning = True
             self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
             try:
-                scan_max_area = 2048 * 2048
-                if scan_frame_parameters.get("subscan_pixel_size"):
-                    scan_param_height = int(scan_frame_parameters["subscan_pixel_size"][0])
-                    scan_param_width = int(scan_frame_parameters["subscan_pixel_size"][1])
-                    if scan_param_height * scan_param_width > scan_max_area:
-                        scan_param_height = scan_max_area // scan_param_width
-                    scan_frame_parameters["subscan_pixel_size"] = scan_param_height, scan_param_width
+                scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters, camera=camera, camera_frame_parameters=camera_frame_parameters)
+                if scan_info.is_subscan:
+                    scan_frame_parameters["subscan_pixel_size"] = tuple(scan_info.scan_size)
                 else:
-                    scan_param_height = int(scan_frame_parameters["size"][0])
-                    scan_param_width = int(scan_frame_parameters["size"][1])
-                    if scan_param_height * scan_param_width > scan_max_area:
-                        scan_param_height = scan_max_area // scan_param_width
-                    scan_frame_parameters["size"] = scan_param_height, scan_param_width
+                    scan_frame_parameters["size"] = tuple(scan_info.scan_size)
                 # TODO: let the scan device adjust these parameters for synchronized acquisition instead of hardcoded values here
                 # pixel time should be limited to the max allowed by the scan device
                 scan_frame_parameters["pixel_time_us"] = min(5120000, int(1000 * camera_frame_parameters["exposure_ms"] * 0.75))
@@ -590,29 +594,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 scan_frame_parameters["ac_line_sync"] = False
                 scan_frame_parameters["ac_frame_sync"] = False
                 flyback_pixels = self.flyback_pixels  # using internal API
+                scan_size = scan_info.scan_size
+                scan_param_height, scan_param_width = tuple(scan_size)
                 scan_height = scan_param_height
                 scan_width = scan_param_width + flyback_pixels
+                channel_modifier = scan_info.channel_modifier
+                fractional_size = scan_info.fractional_area.size
+                fractional_top_left = scan_info.fractional_area.top_left
 
                 # abort the scan to not interfere with setup; and clear the aborted flag
                 self.abort_playing()
                 self.__grab_synchronized_aborted = False
 
-                subscan_pixel_size = scan_frame_parameters.get("subscan_pixel_size")
-                if subscan_pixel_size:
-                    scan_size = Geometry.IntSize.make(scan_frame_parameters["subscan_pixel_size"])
-                    fractional_size = Geometry.FloatSize.make(scan_frame_parameters["subscan_fractional_size"])
-                    fractional_top_left = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint.make(scan_frame_parameters["subscan_fractional_center"]), fractional_size).top_left
-                    channel_modifier = "subscan"
-                else:
-                    scan_size = Geometry.IntSize.make(scan_frame_parameters["size"])
-                    fractional_size = Geometry.FloatSize.make((1.0, 1.0))
-                    fractional_top_left = Geometry.FloatRect.from_center_and_size(Geometry.FloatSize.make((0.5, 0.5)), fractional_size).top_left
-                    channel_modifier = None
-
                 aborted = False
                 data_and_metadata_list = list()  # only used (for return value) if camera_data_channel is None
                 scan_data_list_list = list()
-                section_height = scan_height
+                section_height = section_height or scan_height
                 section_count = (scan_height + section_height - 1) // section_height
                 scan_id = None
                 for section in range(section_count):
@@ -728,6 +725,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         except Exception as e:
             import traceback
             traceback.print_exc()
+            raise
 
     def grab_synchronized_abort(self) -> None:
         if self.__grab_synchronized_is_scanning:

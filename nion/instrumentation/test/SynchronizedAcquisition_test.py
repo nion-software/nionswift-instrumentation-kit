@@ -8,6 +8,7 @@ from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.ui import TestUI
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import Registry
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
