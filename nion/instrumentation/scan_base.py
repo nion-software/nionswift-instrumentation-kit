@@ -158,7 +158,11 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     scan_properties.pop("rotation", None)
     scan_properties.pop("ac_line_sync", None)
 
-    properties.setdefault("autostem", dict()).update(scan_properties)
+    if "autostem" in scan_properties:
+        properties.setdefault("autostem", dict()).update(scan_properties.pop("autostem"))
+        properties.update(scan_properties)
+    else:  # special case for backwards compatibility
+        properties.setdefault("autostem", dict()).update(scan_properties)
 
     if frame_parameters is not None:
         if frame_parameters.subscan_pixel_size is not None:
@@ -299,7 +303,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
             data_element = {"properties": dict()}
-            update_instrument_properties(data_element, self.__stem_controller, self.__device)
+            update_instrument_properties(_data_element, self.__stem_controller, self.__device)
             update_data_element(data_element, channel_index, complete, sub_area, _data, _scan_properties, self.__frame_number, self.__scan_id)
             data_elements.append(data_element)
 
@@ -1079,7 +1083,9 @@ class InstrumentController(abc.ABC):
 
     def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
 
-    def update_acquisition_properties(self, properties: typing.MutableMapping) -> None: pass
+    def update_acquisition_properties(self, properties: typing.MutableMapping, **kwargs) -> None: pass
+
+    def get_autostem_properties(self) -> typing.Dict: return dict()
 
     def handle_shift_click(self, **kwargs) -> None: pass
 
@@ -1088,6 +1094,15 @@ class InstrumentController(abc.ABC):
 
 def update_instrument_properties(data_element, instrument_controller: InstrumentController, scan_device) -> None:
     if instrument_controller:
+        # give the instrument controller opportunity to add properties
+        if callable(getattr(instrument_controller, "get_autostem_properties", None)):
+            try:
+                autostem_properties = instrument_controller.get_autostem_properties()
+                data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+            except Exception as e:
+                pass
+        if callable(getattr(instrument_controller, "update_acquisition_properties", None)):
+            instrument_controller.update_acquisition_properties(data_element["properties"])
         # give scan device a chance to add additional properties not already supplied. this also gives
         # the scan device a place to add properties outside of the 'autostem' dict.
         if callable(getattr(scan_device, "update_acquisition_properties", None)):
