@@ -379,7 +379,7 @@ class InstrumentController(abc.ABC):
 
     def update_acquisition_properties(self, d: typing.Dict, **kwargs) -> None: pass
 
-    def apply_metadata_groups(self, properties: typing.Dict, metatdata_groups: typing.Tuple[typing.List[str], str]) -> None: pass
+    def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
 
     def handle_shift_click(self, **kwargs) -> None: pass
 

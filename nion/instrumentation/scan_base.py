@@ -1,4 +1,5 @@
 # standard libraries
+import abc
 import collections
 import contextlib
 import copy
@@ -105,19 +106,19 @@ class ScanFrameParameters(dict):
 
 # set the calibrations for this image
 # set the calibrations for this image
-def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, image_metadata, subscan_region, subscan_rotation):
-    image_metadata = copy.deepcopy(image_metadata)
-    pixel_time_us = float(image_metadata["pixel_time_us"])
-    line_time_us = float(image_metadata["line_time_us"]) if "line_time_us" in image_metadata else pixel_time_us * data_shape[1]
-    center_x_nm = float(image_metadata.get("center_x_nm", 0.0))
-    center_y_nm = float(image_metadata.get("center_y_nm", 0.0))
-    fov_nm = float(image_metadata["fov_nm"])
+def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation):
+    scan_properties = copy.deepcopy(scan_properties)
+    pixel_time_us = float(scan_properties["pixel_time_us"])
+    line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
+    center_x_nm = float(scan_properties.get("center_x_nm", 0.0))
+    center_y_nm = float(scan_properties.get("center_y_nm", 0.0))
+    fov_nm = float(scan_properties["fov_nm"])
     pixel_size_nm = fov_nm / max(data_shape)
     data_element["title"] = channel_name
     data_element["version"] = 1
     data_element["channel_id"] = channel_id  # needed to match to the channel
     data_element["channel_name"] = channel_name  # needed to match to the channel
-    if image_metadata.get("calibration_style") == "time":
+    if scan_properties.get("calibration_style") == "time":
         data_element["spatial_calibrations"] = (
             {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
             {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
@@ -139,25 +140,25 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     properties["pixel_time_us"] = pixel_time_us
     properties["line_time_us"] = line_time_us
     properties["fov_nm"] = fov_nm
-    if "rotation_deg" in image_metadata:
-        properties["rotation_deg"] = float(image_metadata["rotation_deg"])
-        if not "rotation" in image_metadata:
+    if "rotation_deg" in scan_properties:
+        properties["rotation_deg"] = float(scan_properties["rotation_deg"])
+        if not "rotation" in scan_properties:
             properties["rotation"] = math.radians(properties["rotation_deg"])
-    if "rotation" in image_metadata:
-        properties["rotation"] = float(image_metadata["rotation"])
-        if not "rotation_deg" in image_metadata:
+    if "rotation" in scan_properties:
+        properties["rotation"] = float(scan_properties["rotation"])
+        if not "rotation_deg" in scan_properties:
             properties["rotation_deg"] = math.degrees(properties["rotation"])
-    properties["ac_line_sync"] = int(image_metadata["ac_line_sync"])
+    properties["ac_line_sync"] = int(scan_properties["ac_line_sync"])
 
-    image_metadata.pop("pixel_time_us", None)
-    image_metadata.pop("center_x_nm", None)
-    image_metadata.pop("center_y_nm", None)
-    image_metadata.pop("fov_nm", None)
-    image_metadata.pop("rotation_deg", None)
-    image_metadata.pop("rotation", None)
-    image_metadata.pop("ac_line_sync", None)
+    scan_properties.pop("pixel_time_us", None)
+    scan_properties.pop("center_x_nm", None)
+    scan_properties.pop("center_y_nm", None)
+    scan_properties.pop("fov_nm", None)
+    scan_properties.pop("rotation_deg", None)
+    scan_properties.pop("rotation", None)
+    scan_properties.pop("ac_line_sync", None)
 
-    properties.setdefault("autostem", dict()).update(image_metadata)
+    properties.setdefault("autostem", dict()).update(scan_properties)
 
     if frame_parameters is not None:
         if frame_parameters.subscan_pixel_size is not None:
@@ -258,7 +259,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _acquire_data_elements(self):
 
-        def update_data_element(data_element, channel_index, complete, sub_area, npdata, autostem_properties, frame_number, scan_id):
+        def update_data_element(data_element, channel_index, complete, sub_area, npdata, scan_properties, frame_number, scan_id):
             channel_name = self.__device.get_channel_name(channel_index)
             channel_modifier = self.__frame_parameters.channel_modifier
             channel_id = self.__channel_states[channel_index].channel_id + (("_" + channel_modifier) if channel_modifier else "")
@@ -269,7 +270,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
                 subscan_size = Geometry.FloatSize(height=self.__frame_parameters.subscan_fractional_size[0], width=self.__frame_parameters.subscan_fractional_size[1])
                 subscan_region = Geometry.FloatRect.from_center_and_size(subscan_center, subscan_size)
                 subscan_rotation = self.__frame_parameters.subscan_rotation
-            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, autostem_properties, subscan_region, subscan_rotation)
+            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation)
             data_element["properties"]["hardware_source_name"] = self.__display_name
             data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
             data_element["data"] = npdata
@@ -294,12 +295,12 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # calculate the valid sub area for this iteration
             channel_index = int(_data_element["properties"]["channel_id"])
             _data = _data_element["data"]
-            _properties = _data_element["properties"]
+            _scan_properties = _data_element["properties"]
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
             data_element = {"properties": dict()}
-            update_autostem_properties(data_element, self.__stem_controller)
-            update_data_element(data_element, channel_index, complete, sub_area, _data, _properties, self.__frame_number, self.__scan_id)
+            update_instrument_properties(data_element, self.__stem_controller, self.__device)
+            update_data_element(data_element, channel_index, complete, sub_area, _data, _scan_properties, self.__frame_number, self.__scan_id)
             data_elements.append(data_element)
 
         if complete or bad_frame:
@@ -966,7 +967,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     if self.subscan_enabled:
                         channel_id += "_subscan"
                     properties = data_element["properties"]
-                    update_autostem_properties(data_element, self.__stem_controller)
+                    update_instrument_properties(data_element, self.__stem_controller, self.__device)
                     update_calibration_metadata(data_element, None, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties, None, 0)
                     data_element["properties"]["channel_index"] = channel_index
                     data_element["properties"]["hardware_source_name"] = self.display_name
@@ -1074,13 +1075,27 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return CameraFacade()
 
 
-def update_autostem_properties(data_element, stem_controller):
-    if stem_controller:
-        try:
-            autostem_properties = stem_controller.get_autostem_properties()
-            data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
-        except Exception as e:
-            pass
+class InstrumentController(abc.ABC):
+
+    def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
+
+    def update_acquisition_properties(self, properties: typing.MutableMapping) -> None: pass
+
+    def handle_shift_click(self, **kwargs) -> None: pass
+
+    def handle_tilt_click(self, **kwargs) -> None: pass
+
+
+def update_instrument_properties(data_element, instrument_controller: InstrumentController, scan_device) -> None:
+    if instrument_controller:
+        # give scan device a chance to add additional properties not already supplied. this also gives
+        # the scan device a place to add properties outside of the 'autostem' dict.
+        if callable(getattr(scan_device, "update_acquisition_properties", None)):
+            scan_device.update_acquisition_properties(data_element["properties"])
+        # give the instrument controller opportunity to update metadata groups specified by the camera
+        if hasattr(scan_device, "acquisition_metatdata_groups"):
+            acquisition_metatdata_groups = scan_device.acquisition_metatdata_groups
+            instrument_controller.apply_metadata_groups(data_element["properties"], acquisition_metatdata_groups)
 
 
 _component_registered_listener = None
