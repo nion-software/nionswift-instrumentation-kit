@@ -378,6 +378,39 @@ class RecordTask:
         self.__hardware_source.abort_recording()
 
 
+def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rect: Geometry.IntRect, scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect, channel_modifier: str) -> typing.MutableMapping:
+    section_rect = Geometry.IntRect.make(section_rect)
+    section_rect_f = section_rect.to_float_rect()
+    section_frame_parameters = copy.deepcopy(scan_frame_parameters)
+    section_frame_parameters["section_rect"] = tuple(section_rect)
+    section_frame_parameters["subscan_pixel_size"] = tuple(section_rect.size)
+    section_frame_parameters["subscan_fractional_size"] = fractional_area.height * section_rect_f.height / scan_size.height, fractional_area.width * section_rect_f.width / scan_size.width
+    section_frame_parameters["subscan_fractional_center"] = fractional_area.top + fractional_area.height * section_rect_f.center.y / scan_size.height, fractional_area.left + fractional_area.width * section_rect_f.center.x / scan_size.width
+    section_frame_parameters["channel_modifier"] = channel_modifier
+    section_frame_parameters["data_shape_override"] = tuple(scan_size)  # no flyback addition since this is data from scan device
+    section_frame_parameters["state_override"] = "complete" if section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1] else "partial"
+    section_frame_parameters["top_left_override"] = tuple(section_rect.top_left)
+    return section_frame_parameters
+
+
+def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback_pixels: int,
+                       scan_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
+                       metadata: typing.Mapping) -> DataAndMetadata.DataAndMetadata:
+    data_shape = uncropped_xdata.data_shape
+    scan_shape = uncropped_xdata.collection_dimension_shape
+    scan_calibrations = scan_calibrations or uncropped_xdata.collection_dimensional_calibrations
+    if flyback_pixels > 0:
+        data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
+    else:
+        data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])
+    dimensional_calibrations = tuple(scan_calibrations) + tuple(uncropped_xdata.dimensional_calibrations[len(scan_calibrations):])
+    return DataAndMetadata.new_data_and_metadata(data, uncropped_xdata.intensity_calibration,
+                                                 dimensional_calibrations,
+                                                 metadata, None,
+                                                 uncropped_xdata.data_descriptor, None,
+                                                 None)
+
+
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, stem_controller_: stem_controller.STEMController, device, hardware_source_id: str, display_name: str):
@@ -598,9 +631,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 scan_param_height, scan_param_width = tuple(scan_size)
                 scan_height = scan_param_height
                 scan_width = scan_param_width + flyback_pixels
-                channel_modifier = scan_info.channel_modifier
-                fractional_size = scan_info.fractional_area.size
-                fractional_top_left = scan_info.fractional_area.top_left
 
                 # abort the scan to not interfere with setup; and clear the aborted flag
                 self.abort_playing()
@@ -618,40 +648,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
                     self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
 
-                    section_frame_parameters = copy.deepcopy(scan_frame_parameters)
-                    section_frame_parameters["section_rect"] = tuple(section_rect)
-
-                    def apply_section_rect(scan_frame_parameters, section_rect):
-                        section_rect = Geometry.IntRect.make(section_rect)
-                        section_rect_f = section_rect.to_float_rect()
-                        section_frame_parameters = copy.deepcopy(scan_frame_parameters)
-                        section_frame_parameters["subscan_pixel_size"] = tuple(section_rect.size)
-                        section_frame_parameters["subscan_fractional_size"] = fractional_size.height * section_rect_f.height / scan_size.height, fractional_size.width * section_rect_f.width / scan_size.width
-                        section_frame_parameters["subscan_fractional_center"] = fractional_top_left.y + fractional_size.height * section_rect_f.center.y / scan_size.height, fractional_top_left.x + fractional_size.width * section_rect_f.center.x / scan_size.width
-                        section_frame_parameters["channel_modifier"] = channel_modifier
-                        section_frame_parameters["data_shape_override"] = tuple(scan_size)  # no flyback addition since this is data from scan device
-                        section_frame_parameters["state_override"] = "complete" if section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1] else "partial"
-                        section_frame_parameters["top_left_override"] = tuple(section_rect.top_left)
-                        return section_frame_parameters
-
-                    section_frame_parameters = apply_section_rect(scan_frame_parameters, section_frame_parameters["section_rect"])
-
-                    def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback_pixels: int,
-                                           scan_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
-                                           metadata: typing.Mapping) -> DataAndMetadata.DataAndMetadata:
-                        data_shape = uncropped_xdata.data_shape
-                        scan_shape = uncropped_xdata.collection_dimension_shape
-                        scan_calibrations = scan_calibrations or uncropped_xdata.collection_dimensional_calibrations
-                        if flyback_pixels > 0:
-                            data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_width, :]
-                        else:
-                            data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])
-                        dimensional_calibrations = tuple(scan_calibrations) + tuple(uncropped_xdata.dimensional_calibrations[len(scan_calibrations):])
-                        return DataAndMetadata.new_data_and_metadata(data, uncropped_xdata.intensity_calibration,
-                                                                     dimensional_calibrations,
-                                                                     metadata, None,
-                                                                     uncropped_xdata.data_descriptor, None,
-                                                                     None)
+                    section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size, scan_info.fractional_area, scan_info.channel_modifier)
 
                     with contextlib.closing(RecordTask(self, section_frame_parameters)) as scan_task:
                         is_last_section = section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1]
