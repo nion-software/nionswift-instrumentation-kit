@@ -12,6 +12,7 @@ import uuid
 # local libraries
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
+from nion.instrumentation import scan_base
 from nion.swift import Facade
 from nion.swift import HistogramPanel
 from nion.swift.model import DataItem
@@ -74,11 +75,36 @@ class ScanSpecifier:
 
 
 class CameraDataChannel:
-    def __init__(self, document_model, data_item: DataItem.DataItem):
+    def __init__(self, document_model, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
         self.__document_model = document_model
-        self.__data_item = data_item
+        self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.__data_item_transaction = None
         self.__data_and_metadata = None
+
+    def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
+        scan_calibrations = grab_sync_info.scan_calibrations
+        data_calibrations = grab_sync_info.data_calibrations
+        data_intensity_calibration = grab_sync_info.data_intensity_calibration
+        data_item = DataItem.DataItem(large_format=True)
+        data_item.title = f"{title_base} ({channel_name})"
+        self.__document_model.append_data_item(data_item)
+        if hasattr(data_item, "reserve_data"):
+            scan_size = tuple(grab_sync_info.scan_size)
+            camera_readout_size = grab_sync_info.camera_readout_size_squeezed
+            data_shape = scan_size + camera_readout_size
+            data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
+            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
+        data_item.intensity_calibration = data_intensity_calibration
+        data_item_metadata = data_item.metadata
+        data_item_metadata["hardware_source"] = grab_sync_info.camera_metadata
+        data_item_metadata["scan_detector"] = grab_sync_info.scan_metadata
+        data_item.metadata = data_item_metadata
+        return data_item
+
+    @property
+    def data_item(self) -> DataItem.DataItem:
+        return self.__data_item
 
     def start(self) -> None:
         self.__data_item.increment_data_ref_count()
@@ -86,15 +112,21 @@ class CameraDataChannel:
         self.__document_model.begin_data_item_live(self.__data_item)
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-        collection_rank = len(tuple(scan_shape))
-        data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
-            data_and_metadata.intensity_calibration,
-            data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
-            data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
-        src_slice = sub_area.slice + (Ellipsis,)
-        dst_slice = dest_sub_area.slice + (Ellipsis,)
-        self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+        if hasattr(self.__document_model, "update_data_item_partial"):
+            collection_rank = len(tuple(scan_shape))
+            data_metadata = DataAndMetadata.DataMetadata(
+                (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
+                data_and_metadata.intensity_calibration,
+                data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
+                data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
+            src_slice = sub_area.slice + (Ellipsis,)
+            dst_slice = dest_sub_area.slice + (Ellipsis,)
+            self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+        elif state == "complete":
+            # hack for Swift 0.14
+            def update_data_item():
+                self.__data_item.set_data_and_metadata(data_and_metadata)
+            self.__document_model.call_soon_event.fire_any(update_data_item)
 
     def stop(self) -> None:
         if self.__data_item_transaction:
@@ -187,24 +219,9 @@ class ScanAcquisitionController:
             camera=camera_hardware_source,
             camera_frame_parameters=camera_frame_parameters)
 
-        scan_size = tuple(grab_sync_info.scan_size)
-        camera_readout_size = grab_sync_info.camera_readout_size_squeezed
-        scan_calibrations = grab_sync_info.scan_calibrations
-        data_calibrations = grab_sync_info.data_calibrations
-        data_intensity_calibration = grab_sync_info.data_intensity_calibration
+        camera_data_channel = CameraDataChannel(self.__document_controller.library._document_model, camera_hardware_source.display_name, grab_sync_info)
+        self.__document_controller.display_data_item(Facade.DataItem(camera_data_channel.data_item))
 
-        data_item = DataItem.DataItem(large_format=True)
-        channel_name = camera_hardware_source.display_name
-        data_item.title = f"{title_base} ({channel_name})"
-        self.__document_controller.library._document_model.append_data_item(data_item)
-        self.__document_controller.display_data_item(Facade.DataItem(data_item))
-        data_shape = scan_size + camera_readout_size
-        data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
-        data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
-        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
-        data_item.intensity_calibration = data_intensity_calibration
-
-        camera_data_channel = CameraDataChannel(self.__document_controller.library._document_model, data_item)
         camera_data_channel.start()
 
         def grab_synchronized():

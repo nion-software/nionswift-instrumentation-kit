@@ -376,6 +376,8 @@ def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rec
 
 def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback_pixels: int,
                        scan_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
+                       data_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
+                       data_intensity_calibration: typing.Optional[Calibration.Calibration],
                        metadata: typing.Mapping) -> DataAndMetadata.DataAndMetadata:
     data_shape = uncropped_xdata.data_shape
     scan_shape = uncropped_xdata.collection_dimension_shape
@@ -384,8 +386,8 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
         data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
     else:
         data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])
-    dimensional_calibrations = tuple(scan_calibrations) + tuple(uncropped_xdata.dimensional_calibrations[len(scan_calibrations):])
-    return DataAndMetadata.new_data_and_metadata(data, uncropped_xdata.intensity_calibration,
+    dimensional_calibrations = tuple(scan_calibrations) + tuple(data_calibrations)
+    return DataAndMetadata.new_data_and_metadata(data, data_intensity_calibration,
                                                  dimensional_calibrations,
                                                  metadata, None,
                                                  uncropped_xdata.data_descriptor, None,
@@ -642,6 +644,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 scan_param_height, scan_param_width = tuple(scan_size)
                 scan_height = scan_param_height
                 scan_width = scan_param_width + flyback_pixels
+                scan_calibrations = scan_info.scan_calibrations
+                data_calibrations = scan_info.data_calibrations
+                data_intensity_calibration = scan_info.data_intensity_calibration
 
                 # abort the scan to not interfere with setup; and clear the aborted flag
                 self.abort_playing()
@@ -653,6 +658,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 section_height = section_height or scan_height
                 section_count = (scan_height + section_height - 1) // section_height
                 for section in range(section_count):
+                    # print(f"************ {section}/{section_count}")
                     section_rect = Geometry.IntRect.from_tlhw(section * section_height, 0, min(section_height, scan_height - section * section_height), scan_param_width)
                     scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
                     self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
@@ -662,35 +668,51 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
                     with contextlib.closing(RecordTask(self, section_frame_parameters)) as scan_task:
                         is_last_section = section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1]
-                        data_elements = self.__camera_hardware_source.acquire_synchronized(scan_shape)
-                        # acquire_sequence should return None or no elements if aborted or error; but use flag anyway just in case
-                        if data_elements and len(data_elements) >= 1 and not self.__grab_synchronized_aborted:
+                        partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+                        try:
+                            uncropped_xdata = partial_data_info.xdata
+                            is_complete = partial_data_info.is_complete
+                            is_canceled = partial_data_info.is_canceled
+                            # this loop is awkward because to make it easy to implement synchronized begin in a backwards
+                            # compatible manner, it must return all of its data on the first call. this means that we need
+                            # to handle the data by sending it to the channel. and this leads to the awkward implementation
+                            # below.
+                            while uncropped_xdata and not is_canceled and not self.__grab_synchronized_aborted:
+                                # xdata is the full data and includes flyback pixels. crop the flyback pixels in the
+                                # next line, but retain other metadata.
+                                metadata = copy.deepcopy(uncropped_xdata.metadata)
+                                metadata["scan_detector"] = copy.deepcopy(scan_info.scan_metadata)
+                                partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations, data_calibrations, data_intensity_calibration, metadata)
+                                if camera_data_channel:
+                                    data_channel_state = "complete" if is_complete and is_last_section else "partial"
+                                    data_channel_data_and_metadata = partial_xdata
+                                    data_channel_sub_area = Geometry.IntRect(Geometry.IntPoint(), Geometry.IntSize.make(data_channel_data_and_metadata.collection_dimension_shape))
+                                    data_channel_view_id = None
+                                    camera_data_channel.update(data_channel_data_and_metadata, data_channel_state,
+                                                               Geometry.IntSize(h=scan_param_height, w=scan_param_width),
+                                                               section_rect, data_channel_sub_area, data_channel_view_id)
+                                # break out if we're complete
+                                if is_complete:
+                                    break
+                                # otherwise, acquire the next section and continue
+                                update_period = camera_data_channel._update_period if hasattr(camera_data_channel, "_update_period") else 1.0
+                                partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue(update_period=update_period)
+                                is_complete = partial_data_info.is_complete
+                                is_canceled = partial_data_info.is_canceled
+                                # unless it's cancelled or aborted, of course.
+                                if is_canceled or self.__grab_synchronized_aborted:
+                                    break
+                        finally:
+                            self.__camera_hardware_source.acquire_synchronized_end()
+                        if uncropped_xdata and not is_canceled and not self.__grab_synchronized_aborted:
                             # not aborted
-                            data_element = data_elements[0]
-                            data_shape = data_element["data"].shape
-                            data_element["data"] = data_element["data"].reshape(*scan_shape, *data_shape[1:])
-                            data_element["spatial_calibrations"] = [{} for _ in scan_shape] + data_element["spatial_calibrations"][1:]
                             # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
                             # quickly. see note below.
                             scan_data_list = scan_task.grab()
-                            if len(scan_data_list) > 0:
-                                collection_calibrations = scan_data_list[0].dimensional_calibrations
-                                scan_properties = scan_data_list[0].metadata
-                            else:
-                                collection_calibrations = [Calibration.Calibration(), Calibration.Calibration()]
-                                scan_properties = {}
-                            uncropped_xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                             metadata = copy.deepcopy(uncropped_xdata.metadata)
                             metadata["scan_detector"] = copy.deepcopy(scan_info.scan_metadata)
-                            section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, collection_calibrations, metadata)
-                            if camera_data_channel:
-                                data_channel_state = "complete" if is_last_section else "partial"
-                                data_channel_data_and_metadata = section_xdata
-                                data_channel_sub_area = Geometry.IntRect(Geometry.IntPoint(), Geometry.IntSize.make(data_channel_data_and_metadata.collection_dimension_shape))
-                                data_channel_view_id = scan_data_list[0].metadata["hardware_source"]["view_id"]
-                                camera_data_channel.update(data_channel_data_and_metadata, data_channel_state, Geometry.IntSize(h=scan_param_height, w=scan_param_width), section_rect, data_channel_sub_area, data_channel_view_id)
-                            else:
-                                data_and_metadata_list.append(section_xdata)
+                            section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations, data_calibrations, data_intensity_calibration, metadata)
+                            data_and_metadata_list.append(section_xdata)
                             scan_data_list_list.append([scan_data[section_rect.slice] for scan_data in scan_data_list])
                         else:
                             # aborted

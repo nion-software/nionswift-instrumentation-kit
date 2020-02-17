@@ -1,3 +1,5 @@
+import collections
+import copy
 import numpy
 import unittest
 import uuid
@@ -178,12 +180,7 @@ class TestScanControlClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            data_item = DataItem.DataItem(large_format=True)
-            document_model.append_data_item(data_item)
-            data_shape = tuple(grab_sync_info.scan_size) + tuple(grab_sync_info.camera_readout_size_squeezed)
-            data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
-            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
-            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, data_item)
+            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
             camera_data_channel.start()
             try:
                 scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
@@ -257,6 +254,72 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIn("fov_nm", scan_metadata)
             self.assertIn("rotation", scan_metadata)
             self.assertEqual(scan_frame_parameters["scan_id"], scan_metadata["scan_id"])
+
+    def test_partial_acquisition_has_proper_metadata(self):
+
+        PartialUpdate = collections.namedtuple("PartialUpdate", ["xdata", "state", "scan_shape", "dest_sub_area", "sub_area", "view_id"])
+
+        class CameraDataChannel(ScanAcquisition.CameraDataChannel):
+            def __init__(self, document_model, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo, update_period: float = 1.0):
+                super().__init__(document_model, channel_name, grab_sync_info)
+                self._update_period = update_period
+                self.updates = list()
+
+            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+                super().update(data_and_metadata, state, scan_shape, dest_sub_area, sub_area, view_id)
+                self.updates.append(PartialUpdate(
+                    copy.deepcopy(self.data_item.xdata),
+                    state,
+                    scan_shape,
+                    dest_sub_area,
+                    sub_area,
+                    view_id
+                ))
+                # print(f"update {len(self.updates)}")
+
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (6, 6)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            camera_data_channel = CameraDataChannel(document_model, "test", grab_sync_info, update_period=0.0)
+            section_height = 5
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters,
+                                                   camera_data_channel=camera_data_channel,
+                                                   section_height=section_height)
+            for partial_update in camera_data_channel.updates:
+                self.assertEqual("counts", partial_update.xdata.intensity_calibration.units)
+                self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[0].units)
+                self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[1].units)
+                self.assertEqual("eV", partial_update.xdata.dimensional_calibrations[2].units)
+                camera_metadata = partial_update.xdata.metadata["hardware_source"]
+                self.assertIn("autostem", camera_metadata)
+                self.assertIn("hardware_source_id", camera_metadata)
+                self.assertIn("hardware_source_name", camera_metadata)
+                self.assertIn("exposure", camera_metadata)
+                self.assertIn("binning", camera_metadata)
+                self.assertIn("signal_type", camera_metadata)
+                scan_metadata = partial_update.xdata.metadata["scan_detector"]
+                self.assertIn("autostem", scan_metadata)
+                self.assertIn("hardware_source_id", scan_metadata)
+                self.assertIn("hardware_source_name", scan_metadata)
+                self.assertIn("center_x_nm", scan_metadata)
+                self.assertIn("center_y_nm", scan_metadata)
+                self.assertNotIn("channel_index", scan_metadata)
+                self.assertNotIn("channel_name", scan_metadata)
+                self.assertIn("fov_nm", scan_metadata)
+                self.assertIn("rotation", scan_metadata)
+                self.assertIn("scan_id", scan_metadata)
+
+    # TODO: check for counts per electron
 
 
 if __name__ == '__main__':

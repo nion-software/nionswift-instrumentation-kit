@@ -1,6 +1,7 @@
 # standard libraries
 import abc
 import asyncio
+import collections
 import copy
 import datetime
 import gettext
@@ -833,6 +834,29 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+
+    PartialData = collections.namedtuple("PartialData", ["xdata", "is_complete", "is_canceled", "valid_rows"])
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: typing.Mapping, scan_shape: typing.Tuple[int, ...]) -> PartialData:
+        if callable(getattr(self.__camera, "acquire_synchronized_begin", None)):
+            return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+        else:
+            data_elements = self.acquire_synchronized(scan_shape)
+            if len(data_elements) > 0:
+                data_elements[0]["data"] = data_elements[0]["data"].reshape(*scan_shape, *(data_elements[0]["data"].shape[1:]))
+                xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_elements[0])
+                return CameraHardwareSource.PartialData(xdata, True, False, scan_shape[0])
+        return CameraHardwareSource.PartialData(None, True, True, 0)
+
+
+    def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
+        if callable(getattr(self.__camera, "acquire_synchronized_continue", None)):
+            return self.__camera.acquire_synchronized_continue(update_period=update_period)
+        return CameraHardwareSource.PartialData(None, True, True, 0)
+
+    def acquire_synchronized_end(self) -> None:
+        if callable(getattr(self.__camera, "acquire_synchronized_end", None)):
+            self.__camera.acquire_synchronized_end()
 
     def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
         if callable(getattr(self.__camera, "acquire_synchronized_prepare", None)):
