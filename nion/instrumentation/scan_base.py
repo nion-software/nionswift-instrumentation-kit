@@ -618,15 +618,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     scan_frame_parameters["subscan_pixel_size"] = tuple(scan_info.scan_size)
                 else:
                     scan_frame_parameters["size"] = tuple(scan_info.scan_size)
-                # TODO: let the scan device adjust these parameters for synchronized acquisition instead of hardcoded values here
-                # pixel time should be limited to the max allowed by the scan device
-                scan_frame_parameters["pixel_time_us"] = min(5120000, int(1000 * camera_frame_parameters["exposure_ms"] * 0.75))
-                # long timeout is needed until memory allocation is outside of the acquire_sequence call.
-                scan_frame_parameters["external_clock_wait_time_ms"] = 20000 # int(camera_frame_parameters["exposure_ms"] * 1.5)
-                scan_frame_parameters["external_clock_mode"] = 1
-                scan_frame_parameters["ac_line_sync"] = False
-                scan_frame_parameters["ac_frame_sync"] = False
-                flyback_pixels = self.flyback_pixels  # using internal API
+                self.__device.prepare_synchronized_scan(scan_frame_parameters, camera_exposure_ms=camera_frame_parameters["exposure_ms"])
+                flyback_pixels = self.__device.flyback_pixels
                 scan_size = scan_info.scan_size
                 scan_param_height, scan_param_width = tuple(scan_size)
                 scan_height = scan_param_height
