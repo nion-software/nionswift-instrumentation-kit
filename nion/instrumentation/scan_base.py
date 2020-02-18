@@ -565,8 +565,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_sequence_get_progress(self) -> typing.Optional[float]:
         return None
 
-    # typing.Tuple[typing.Tuple[int, ...], typing.Tuple[int, ...], typing.List[str]]
-    GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo", ["scan_size", "fractional_area", "is_subscan", "camera_readout_size", "camera_readout_size_squeezed", "channel_modifier", "channel_id_list"])
+    GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo",
+                                                  ["scan_size",
+                                                   "fractional_area",
+                                                   "is_subscan",
+                                                   "camera_readout_size",
+                                                   "camera_readout_size_squeezed",
+                                                   "channel_modifier"])
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> GrabSynchronizedInfo:
 
@@ -595,12 +600,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
-        channel_id_list = list()
-        for channel_index in self.get_enabled_channels():
-            channel_id = self.__make_channel_id(channel_index) + (("_" + channel_modifier) if channel_modifier else "")
-            channel_id_list.append(channel_id)
-
-        return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size, camera_readout_size_squeezed, channel_modifier, channel_id_list)
+        return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
+                                                       camera_readout_size_squeezed, channel_modifier)
 
     def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None,
                           camera_frame_parameters: dict = None,
