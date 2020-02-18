@@ -927,6 +927,23 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         data_element["properties"]["hardware_source_id"] = self.hardware_source_id
         data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
 
+    def get_camera_calibrations(self, camera_frame_parameters: "CameraFrameParameters") -> typing.Tuple[Calibration.Calibration, ...]:
+        processing = camera_frame_parameters.get("processing")
+        instrument_controller = self.__get_instrument_controller()
+        calibration_controls = self.__camera.calibration_controls
+        binning = camera_frame_parameters.get("binning", 1)
+        data_shape = self.get_expected_dimensions(binning)
+        if processing != "sum_project":
+            y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (y_calibration, x_calibration)
+        else:
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (x_calibration,)
+
+    def get_camera_intensity_calibration(self, camera_frame_parameters: "CameraFrameParameters") -> Calibration.Calibration:
+        return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")
+
     def acquire_sequence_cancel(self) -> None:
         if callable(getattr(self.__camera, "acquire_sequence_cancel", None)):
             self.__camera.acquire_sequence_cancel()
@@ -1090,14 +1107,20 @@ def get_instrument_calibration_value(instrument_controller: InstrumentController
     return None
 
 
-def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls, prefix, relative_scale=1, data_len=0):
+def build_calibration(instrument_controller: InstrumentController, calibration_controls: typing.Mapping, prefix: str,
+                      relative_scale: float = 1, data_len: int = 0) -> Calibration.Calibration:
     scale = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "scale")
     scale = scale * relative_scale if scale is not None else scale
     offset = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "offset")
     units = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "units")
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
-    return Calibration.Calibration(offset, scale, units).rpc_dict
+    return Calibration.Calibration(offset, scale, units)
+
+
+def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls: typing.Mapping,
+                           prefix: str, relative_scale: float = 1, data_len: int = 0) -> typing.Dict:
+    return build_calibration(instrument_controller, calibration_controls, prefix, relative_scale, data_len).rpc_dict
 
 
 def update_spatial_calibrations(data_element, instrument_controller: InstrumentController, camera, camera_category, data_shape, scaling_x, scaling_y):

@@ -4,6 +4,7 @@ import unittest
 from nion.data import DataAndMetadata
 from nion.swift import Application
 from nion.swift import DocumentController
+from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.ui import TestUI
@@ -13,6 +14,7 @@ from nion.utils import Registry
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import scan_base
+from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
 from nionswift_plugin.usim import CameraDevice
 from nionswift_plugin.usim import InstrumentDevice
 from nionswift_plugin.usim import ScanDevice
@@ -129,7 +131,7 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            scan_frame_parameters["size"] = (16, 16)
+            scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
@@ -161,6 +163,51 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIn("pixel_time_us", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("rotation", spectrum_images[0].metadata["scan_detector"])
             self.assertEqual(scans[0].metadata["hardware_source"]["scan_id"], spectrum_images[0].metadata["scan_detector"]["scan_id"])
+
+    def test_grab_synchronized_camera_data_channel_basic_use(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["size"] = (4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            data_item = DataItem.DataItem(large_format=True)
+            document_model.append_data_item(data_item)
+            data_shape = tuple(grab_sync_info.scan_size) + tuple(grab_sync_info.camera_readout_size_squeezed)
+            data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
+            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, data_item)
+            camera_data_channel.start()
+            try:
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            finally:
+                camera_data_channel.stop()
+
+    def test_grab_sync_info_has_proper_calibrations(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["size"] = (8, 8)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            self.assertEqual(2, len(grab_sync_info.scan_calibrations))
+            self.assertEqual("nm", grab_sync_info.scan_calibrations[0].units)
+            self.assertEqual("nm", grab_sync_info.scan_calibrations[1].units)
+            self.assertEqual(1, len(grab_sync_info.data_calibrations))
+            self.assertEqual("eV", grab_sync_info.data_calibrations[0].units)
+            self.assertEqual("counts", grab_sync_info.data_intensity_calibration.units)
+            # import pprint; pprint.pprint(grab_sync_info._fields)
+            # print(grab_sync_info.scan_calibrations)
+            # print(grab_sync_info.data_calibrations)
+            # print(grab_sync_info.data_intensity_calibration)
 
 
 if __name__ == '__main__':

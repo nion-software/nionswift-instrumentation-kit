@@ -72,6 +72,37 @@ class ScanSpecifier:
         self.spacing_calibrated = None
 
 
+class CameraDataChannel:
+    def __init__(self, document_model, data_item: DataItem.DataItem):
+        self.__document_model = document_model
+        self.__data_item = data_item
+        self.__data_item_transaction = None
+        self.__data_and_metadata = None
+
+    def start(self) -> None:
+        self.__data_item.increment_data_ref_count()
+        self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
+        self.__document_model.begin_data_item_live(self.__data_item)
+
+    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+        collection_rank = len(tuple(scan_shape))
+        data_metadata = DataAndMetadata.DataMetadata(
+            (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
+            data_and_metadata.intensity_calibration,
+            data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
+            data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
+        src_slice = sub_area.slice + (Ellipsis,)
+        dst_slice = dest_sub_area.slice + (Ellipsis,)
+        self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+
+    def stop(self) -> None:
+        if self.__data_item_transaction:
+            self.__data_item_transaction.close()
+            self.__data_item_transaction = None
+            self.__document_model.end_data_item_live(self.__data_item)
+            self.__data_item.decrement_data_ref_count()
+
+
 class ScanAcquisitionController:
 
     def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
@@ -155,6 +186,9 @@ class ScanAcquisitionController:
 
         scan_size = tuple(grab_sync_info.scan_size)
         camera_readout_size = grab_sync_info.camera_readout_size_squeezed
+        scan_calibrations = grab_sync_info.scan_calibrations
+        data_calibrations = grab_sync_info.data_calibrations
+        data_intensity_calibration = grab_sync_info.data_intensity_calibration
 
         data_item = DataItem.DataItem(large_format=True)
         channel_name = camera_hardware_source.display_name
@@ -164,36 +198,8 @@ class ScanAcquisitionController:
         data_shape = scan_size + camera_readout_size
         data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
         data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
-
-        class CameraDataChannel:
-            def __init__(self, document_model, data_item: DataItem.DataItem):
-                self.__document_model = document_model
-                self.__data_item = data_item
-                self.__data_item_transaction = None
-                self.__data_and_metadata = None
-
-            def start(self) -> None:
-                self.__data_item.increment_data_ref_count()
-                self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
-                self.__document_model.begin_data_item_live(self.__data_item)
-
-            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-                collection_rank = len(scan_shape)
-                data_metadata = DataAndMetadata.DataMetadata(
-                    (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
-                    data_and_metadata.intensity_calibration,
-                    data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
-                    data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
-                src_slice = sub_area.slice + (Ellipsis,)
-                dst_slice = dest_sub_area.slice + (Ellipsis,)
-                self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
-
-            def stop(self) -> None:
-                if self.__data_item_transaction:
-                    self.__data_item_transaction.close()
-                    self.__data_item_transaction = None
-                    self.__document_model.end_data_item_live(self.__data_item)
-                    self.__data_item.decrement_data_ref_count()
+        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
+        data_item.intensity_calibration = data_intensity_calibration
 
         camera_data_channel = CameraDataChannel(self.__document_controller.library._document_model, data_item)
         camera_data_channel.start()

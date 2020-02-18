@@ -108,7 +108,7 @@ class ScanFrameParameters(dict):
 
 
 # set the calibrations for this image
-def update_calibration_metadata(data_element, frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation):
+def update_scan_data_element(data_element, scan_frame_parameters, data_shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation):
     scan_properties = copy.deepcopy(scan_properties)
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
@@ -166,15 +166,15 @@ def update_calibration_metadata(data_element, frame_parameters, data_shape, scan
     else:  # special case for backwards compatibility
         properties.setdefault("autostem", dict()).update(scan_properties)
 
-    if frame_parameters is not None:
-        if frame_parameters.subscan_pixel_size is not None:
-            properties["subscan_pixel_size"] = tuple(frame_parameters.subscan_pixel_size)
-        if frame_parameters.subscan_fractional_size is not None:
-            properties["subscan_fractional_size"] = tuple(frame_parameters.subscan_fractional_size)
-        if frame_parameters.subscan_fractional_center is not None:
-            properties["subscan_fractional_center"] = tuple(frame_parameters.subscan_fractional_center)
-        if frame_parameters.subscan_rotation is not None:
-            properties["subscan_rotation"] = frame_parameters.subscan_rotation
+    if scan_frame_parameters is not None:
+        if scan_frame_parameters.subscan_pixel_size is not None:
+            properties["subscan_pixel_size"] = tuple(scan_frame_parameters.subscan_pixel_size)
+        if scan_frame_parameters.subscan_fractional_size is not None:
+            properties["subscan_fractional_size"] = tuple(scan_frame_parameters.subscan_fractional_size)
+        if scan_frame_parameters.subscan_fractional_center is not None:
+            properties["subscan_fractional_center"] = tuple(scan_frame_parameters.subscan_fractional_center)
+        if scan_frame_parameters.subscan_rotation is not None:
+            properties["subscan_rotation"] = scan_frame_parameters.subscan_rotation
 
     if subscan_region is not None:
         subscan_region = Geometry.FloatRect.make(subscan_region)
@@ -270,18 +270,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _acquire_data_elements(self):
 
-        def update_data_element(data_element, channel_index, complete, sub_area, npdata, scan_properties, frame_number, scan_id):
-            channel_name = self.__device.get_channel_name(channel_index)
-            channel_modifier = self.__frame_parameters.channel_modifier
-            channel_id = self.__channel_states[channel_index].channel_id + (("_" + channel_modifier) if channel_modifier else "")
-            subscan_region = None
-            subscan_rotation = 0.0
-            if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
-                subscan_center = Geometry.FloatPoint(y=self.__frame_parameters.subscan_fractional_center[0], x=self.__frame_parameters.subscan_fractional_center[1])
-                subscan_size = Geometry.FloatSize(height=self.__frame_parameters.subscan_fractional_size[0], width=self.__frame_parameters.subscan_fractional_size[1])
-                subscan_region = Geometry.FloatRect.from_center_and_size(subscan_center, subscan_size)
-                subscan_rotation = self.__frame_parameters.subscan_rotation
-            update_calibration_metadata(data_element, self.__frame_parameters, npdata.shape, scan_id, frame_number, channel_name, channel_id, scan_properties, subscan_region, subscan_rotation)
+        def update_data_element(data_element, complete, sub_area, npdata):
             data_element["properties"]["hardware_source_name"] = self.__display_name
             data_element["properties"]["hardware_source_id"] = self.__hardware_source_id
             data_element["data"] = npdata
@@ -313,8 +302,19 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
             data_element = {"properties": dict()}
+            channel_name = self.__device.get_channel_name(channel_index)
+            channel_modifier = self.__frame_parameters.channel_modifier
+            channel_id = self.__channel_states[channel_index].channel_id + (("_" + channel_modifier) if channel_modifier else "")
+            subscan_region = None
+            subscan_rotation = 0.0
+            if self.__frame_parameters.get("subscan_fractional_size") and self.__frame_parameters.get("subscan_fractional_center"):
+                subscan_center = Geometry.FloatPoint(y=self.__frame_parameters.subscan_fractional_center[0], x=self.__frame_parameters.subscan_fractional_center[1])
+                subscan_size = Geometry.FloatSize(height=self.__frame_parameters.subscan_fractional_size[0], width=self.__frame_parameters.subscan_fractional_size[1])
+                subscan_region = Geometry.FloatRect.from_center_and_size(subscan_center, subscan_size)
+                subscan_rotation = self.__frame_parameters.subscan_rotation
             update_instrument_properties(_data_element, self.__stem_controller, self.__device)
-            update_data_element(data_element, channel_index, complete, sub_area, _data, _scan_properties, self.__frame_number, self.__scan_id)
+            update_scan_data_element(data_element, self.__frame_parameters, _data.shape, self.__scan_id, self.__frame_number, channel_name, channel_id, _scan_properties, subscan_region, subscan_rotation)
+            update_data_element(data_element, complete, sub_area, _data)
             data_elements.append(data_element)
 
         if complete or bad_frame:
@@ -571,7 +571,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                    "is_subscan",
                                                    "camera_readout_size",
                                                    "camera_readout_size_squeezed",
-                                                   "channel_modifier"])
+                                                   "channel_modifier",
+                                                   "scan_calibrations",
+                                                   "data_calibrations",
+                                                   "data_intensity_calibration"])
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> GrabSynchronizedInfo:
 
@@ -600,8 +603,27 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
+        scan_shape = Geometry.IntSize.make(scan_frame_parameters["size"])
+        center_x_nm = float(scan_frame_parameters.get("center_x_nm", 0.0))
+        center_y_nm = float(scan_frame_parameters.get("center_y_nm", 0.0))
+        fov_nm = float(scan_frame_parameters["fov_nm"])
+        pixel_size_nm = fov_nm / max(scan_shape)
+
+        # only spatial and angular make sense for synchronized scan; exclude temporal calibrations.
+        if hasattr(self.__device, "get_scan_calibrations"):
+            scan_calibrations = self.__device.get_scan_calibrations(scan_frame_parameters, allow_temporal=False)
+        else:
+            scan_calibrations = (
+                Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
+                Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
+            )
+
+        data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
+        data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
+
         return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
-                                                       camera_readout_size_squeezed, channel_modifier)
+                                                       camera_readout_size_squeezed, channel_modifier,
+                                                       scan_calibrations, data_calibrations, data_intensity_calibration)
 
     def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None,
                           camera_frame_parameters: dict = None,
@@ -1085,7 +1107,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                         channel_id += "_subscan"
                     properties = data_element["properties"]
                     update_instrument_properties(data_element, self.__stem_controller, self.__device)
-                    update_calibration_metadata(data_element, None, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties, None, 0)
+                    update_scan_data_element(data_element, None, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties, None, 0)
                     data_element["properties"]["channel_index"] = channel_index
                     data_element["properties"]["hardware_source_name"] = self.display_name
                     data_element["properties"]["hardware_source_id"] = self.hardware_source_id
