@@ -434,7 +434,6 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
             self.__activate_frame_parameters()
         assert self.__frame_parameters is not None
         frame_parameters = self.__frame_parameters
-        exposure_ms = frame_parameters.exposure_ms
         binning = frame_parameters.binning
         integration_count = frame_parameters.integration_count if frame_parameters.integration_count else 1
         cumulative_frame_count = 0  # used for integration_count
@@ -467,18 +466,11 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
         update_spatial_calibrations(data_element, self.__instrument_controller, self.__camera, self.__camera_category, cumulative_data.shape, binning, binning)
         update_intensity_calibration(data_element, self.__instrument_controller, self.__camera)
-        update_instrument_properties(data_element, self.__instrument_controller, self.__camera)
-        # grab metadata from the autostem
-        data_element["properties"]["hardware_source_name"] = self.__display_name
-        data_element["properties"]["hardware_source_id"] = self.hardware_source_id
-        data_element["properties"]["exposure"] = exposure_ms / 1000.0
-        data_element["properties"]["binning"] = binning
+        update_instrument_properties(data_element["properties"], self.__instrument_controller, self.__camera)
+        update_camera_properties(data_element["properties"], frame_parameters, self.hardware_source_id, self.__display_name, data_element.get("signal_type", self.__signal_type))
         data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
         data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
         data_element["properties"]["integration_count"] = cumulative_frame_count
-        signal_type = data_element.get("signal_type", self.__signal_type)
-        if signal_type:
-            data_element["properties"]["signal_type"] = signal_type
         return [data_element]
 
     def __activate_frame_parameters(self):
@@ -922,10 +914,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         update_intensity_calibration(data_element, instrument_controller, self.__camera)
-        update_instrument_properties(data_element, instrument_controller, self.__camera)
-        data_element["properties"]["hardware_source_name"] = self.display_name
-        data_element["properties"]["hardware_source_id"] = self.hardware_source_id
-        data_element["properties"]["exposure"] = frame_parameters.exposure_ms / 1000.0
+        update_instrument_properties(data_element["properties"], instrument_controller, self.__camera)
+        update_camera_properties(data_element["properties"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+
+    def update_camera_properties(self, properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", signal_type: str = None) -> None:
+        update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
+        update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: "CameraFrameParameters") -> typing.Tuple[Calibration.Calibration, ...]:
         processing = camera_frame_parameters.get("processing")
@@ -1171,26 +1165,35 @@ def update_intensity_calibration(data_element, instrument_controller: Instrument
                 data_element["properties"]["counts_per_electron"] = counts_per_electron
 
 
-def update_instrument_properties(data_element, instrument_controller: InstrumentController, camera):
+def update_instrument_properties(properties, instrument_controller: InstrumentController, camera):
     if instrument_controller:
         # give the instrument controller opportunity to add properties
         # TODO: get_autostem_properties is deprecated. use update_acquisition_properties instead.
         if callable(getattr(instrument_controller, "get_autostem_properties", None)):
             try:
                 autostem_properties = instrument_controller.get_autostem_properties()
-                data_element["properties"].setdefault("autostem", dict()).update(autostem_properties)
+                properties.setdefault("autostem", dict()).update(autostem_properties)
             except Exception as e:
                 pass
         if callable(getattr(instrument_controller, "update_acquisition_properties", None)):
-            instrument_controller.update_acquisition_properties(data_element["properties"], camera=camera)
+            instrument_controller.update_acquisition_properties(properties, camera=camera)
         # give camera a chance to add additional properties not already supplied. this also gives
         # the camera a place to add properties outside of the 'autostem' dict.
         if callable(getattr(camera, "update_acquisition_properties", None)):
-            camera.update_acquisition_properties(data_element["properties"])
+            camera.update_acquisition_properties(properties)
         # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(camera, "acquisition_metatdata_groups"):
             acquisition_metatdata_groups = camera.acquisition_metatdata_groups
-            instrument_controller.apply_metadata_groups(data_element["properties"], acquisition_metatdata_groups)
+            instrument_controller.apply_metadata_groups(properties, acquisition_metatdata_groups)
+
+
+def update_camera_properties(properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", hardware_source_id: str, display_name: str, signal_type: str = None) -> None:
+    properties["hardware_source_id"] = hardware_source_id
+    properties["hardware_source_name"] = display_name
+    properties["exposure"] = frame_parameters.exposure_ms / 1000.0
+    properties["binning"] = frame_parameters.binning
+    if signal_type:
+        properties["signal_type"] = signal_type
 
 
 _component_registered_listener = None

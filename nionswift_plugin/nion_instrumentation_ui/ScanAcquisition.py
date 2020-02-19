@@ -7,6 +7,7 @@ import math
 import numpy
 import threading
 import typing
+import uuid
 
 # local libraries
 from nion.data import DataAndMetadata
@@ -166,6 +167,8 @@ class ScanAcquisitionController:
                 scan_frame_parameters.subscan_rotation = 0  # radians counterclockwise
         else:
             scan_hardware_source.apply_subscan(scan_frame_parameters)
+
+        scan_frame_parameters["scan_id"] = str(uuid.uuid4())
 
         # useful code for testing to exit cleanly at this point.
         # self.acquisition_state_changed_event.fire(SequenceState.scanning)

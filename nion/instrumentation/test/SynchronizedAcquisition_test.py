@@ -1,5 +1,6 @@
 import numpy
 import unittest
+import uuid
 
 from nion.data import DataAndMetadata
 from nion.swift import Application
@@ -142,6 +143,8 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), spectrum_images[0].data_descriptor)
             # check the calibrations
             self.assertEqual(tuple(scans[0].dimensional_calibrations), tuple(spectrum_images[0].dimensional_calibrations[:-1]))
+            self.assertEqual("nm", spectrum_images[0].dimensional_calibrations[0].units)
+            self.assertEqual("nm", spectrum_images[0].dimensional_calibrations[1].units)
             self.assertEqual("eV", spectrum_images[0].dimensional_calibrations[-1].units)
             self.assertEqual("counts", spectrum_images[0].intensity_calibration.units)
             # check the timestamp
@@ -168,6 +171,7 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
@@ -191,6 +195,7 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
@@ -204,10 +209,55 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(grab_sync_info.data_calibrations))
             self.assertEqual("eV", grab_sync_info.data_calibrations[0].units)
             self.assertEqual("counts", grab_sync_info.data_intensity_calibration.units)
-            # import pprint; pprint.pprint(grab_sync_info._fields)
-            # print(grab_sync_info.scan_calibrations)
-            # print(grab_sync_info.data_calibrations)
-            # print(grab_sync_info.data_intensity_calibration)
+
+    def test_grab_sync_info_has_proper_camera_metadata(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (8, 8)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            camera_metadata = grab_sync_info.camera_metadata
+            self.assertIn("autostem", camera_metadata)
+            self.assertIn("hardware_source_id", camera_metadata)
+            self.assertIn("hardware_source_name", camera_metadata)
+            self.assertIn("exposure", camera_metadata)
+            self.assertIn("binning", camera_metadata)
+            self.assertIn("signal_type", camera_metadata)
+            # 'is_dark_subtracted': False,
+            # 'is_flipped_horizontally': False,
+            # 'is_gain_corrected': False,
+            # 'sensor_dimensions_hw': (2048, 2048),
+            # 'sensor_readout_area_tlbr': (964, 0, 1084, 2048),
+
+    def test_grab_sync_info_has_proper_scan_metadata(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (8, 8)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            scan_metadata = grab_sync_info.scan_metadata
+            self.assertIn("autostem", scan_metadata)
+            self.assertIn("hardware_source_id", scan_metadata)
+            self.assertIn("hardware_source_name", scan_metadata)
+            self.assertIn("center_x_nm", scan_metadata)
+            self.assertIn("center_y_nm", scan_metadata)
+            self.assertNotIn("channel_index", scan_metadata)
+            self.assertNotIn("channel_name", scan_metadata)
+            self.assertIn("fov_nm", scan_metadata)
+            self.assertIn("rotation", scan_metadata)
+            self.assertIn("scan_id", scan_metadata)
 
 
 if __name__ == '__main__':
