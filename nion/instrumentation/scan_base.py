@@ -621,8 +621,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None,
                           camera_frame_parameters: dict = None,
                           camera_data_channel: SynchronizedDataChannelInterface = None,
-                          section_height: int = None) -> typing.Tuple[
-        typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]:
+                          section_height: int = None) -> typing.Optional[typing.Tuple[
+        typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]:
         self.__camera_hardware_source = camera
         try:
             self.__stem_controller._enter_synchronized_state(self, camera=camera)
@@ -720,6 +720,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                         return new_scan_data_list, [camera_data_and_metadata]
                     else:
                         return new_scan_data_list, []
+                return None
             finally:
                 self.__stem_controller._exit_synchronized_state(self, camera=camera)
                 self.__grab_synchronized_is_scanning = False
