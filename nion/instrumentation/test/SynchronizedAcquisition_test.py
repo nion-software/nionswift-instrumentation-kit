@@ -132,6 +132,7 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
@@ -158,14 +159,12 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIn("center_y_nm", spectrum_images[0].metadata["scan_detector"])
             self.assertNotIn("channel_index", spectrum_images[0].metadata["scan_detector"])
             self.assertNotIn("channel_name", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("exposure", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("fov_nm", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("hardware_source_id", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("hardware_source_name", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("line_time_us", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("pixel_time_us", spectrum_images[0].metadata["scan_detector"])
             self.assertIn("rotation", spectrum_images[0].metadata["scan_detector"])
-            self.assertEqual(scans[0].metadata["hardware_source"]["scan_id"], spectrum_images[0].metadata["scan_detector"]["scan_id"])
+            self.assertEqual(scan_frame_parameters["scan_id"], scans[0].metadata["hardware_source"]["scan_id"])
+            self.assertEqual(scan_frame_parameters["scan_id"], spectrum_images[0].metadata["scan_detector"]["scan_id"])
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
         with self._make_acquisition_context() as context:
@@ -257,7 +256,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertNotIn("channel_name", scan_metadata)
             self.assertIn("fov_nm", scan_metadata)
             self.assertIn("rotation", scan_metadata)
-            self.assertIn("scan_id", scan_metadata)
+            self.assertEqual(scan_frame_parameters["scan_id"], scan_metadata["scan_id"])
 
 
 if __name__ == '__main__':

@@ -191,8 +191,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__hardware_source_id = hardware_source_id
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
         self.__frame_number = None
-        self.__scan_id = uuid.UUID(frame_parameters["scan_id"]) if "scan_id" in frame_parameters else None
+        self.__scan_id = None
         self.__last_scan_id = None
+        self.__fixed_scan_id = uuid.UUID(frame_parameters["scan_id"]) if "scan_id" in frame_parameters else None
         self.__pixels_to_skip = 0
         self.__channel_states = channel_states
         self.__last_read_time = 0
@@ -214,7 +215,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             return False
         self._resume_acquisition()
         self.__frame_number = None
-        self.__scan_id = None
+        self.__scan_id = self.__fixed_scan_id
         return True
 
     def _suspend_acquisition(self) -> None:
@@ -252,7 +253,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         while self.__device.is_scanning and time.time() - start_time < 1.0:
             time.sleep(0.01)
         self.__frame_number = None
-        self.__scan_id = None
+        self.__scan_id = self.__fixed_scan_id
         self.__weak_scan_hardware_source()._exit_scanning_state()
 
     def _acquire_data_elements(self):
@@ -300,7 +301,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         if complete or bad_frame:
             # proceed to next frame
             self.__frame_number = None
-            self.__scan_id = None
+            self.__scan_id = self.__fixed_scan_id
             self.__pixels_to_skip = 0
 
         return data_elements
@@ -628,8 +629,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__grab_synchronized_is_scanning = True
             self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
             scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
-            scan_id = uuid.uuid4()
-            scan_frame_parameters["scan_id"] = str(scan_id)
+            scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
             try:
                 scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters, camera=camera, camera_frame_parameters=camera_frame_parameters)
                 if scan_info.is_subscan:
@@ -680,11 +680,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 collection_calibrations = [Calibration.Calibration(), Calibration.Calibration()]
                                 scan_properties = {}
                             uncropped_xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                            metadata = uncropped_xdata.metadata
-                            metadata["scan_detector"] = scan_properties.get("hardware_source", dict())
-                            metadata["scan_detector"].pop("channel_index", None)
-                            metadata["scan_detector"].pop("channel_name", None)
-                            metadata["scan_detector"]["scan_id"] = str(scan_id)
+                            metadata = copy.deepcopy(uncropped_xdata.metadata)
+                            metadata["scan_detector"] = copy.deepcopy(scan_info.scan_metadata)
                             section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, collection_calibrations, metadata)
                             if camera_data_channel:
                                 data_channel_state = "complete" if is_last_section else "partial"
