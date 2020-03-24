@@ -5,6 +5,7 @@ import logging
 import math
 import numpy
 import pkgutil
+import os
 import sys
 import time
 import typing
@@ -233,6 +234,9 @@ class CameraControlStateController:
         if self.on_monitor_button_state_changed:
             has_monitor = self.__hardware_source and self.__hardware_source.features.get("has_monitor", False)
             self.on_monitor_button_state_changed(has_monitor, has_monitor)
+        if self.on_help_button_state_changed:
+            has_help = self.__hardware_source and self.__hardware_source.features.get("has_help", False)
+            self.on_help_button_state_changed(has_help, has_help)
         self.__update_buttons()
         if self.on_profiles_changed:
             profile_items = self.__hardware_source.modes
@@ -258,6 +262,11 @@ class CameraControlStateController:
         """ Call this when the user clicks the abort button. """
         if self.__hardware_source:
             self.__hardware_source.abort_playing()
+
+    # must be called on ui thread
+    def handle_help_button_clicked(self, api_broker):
+        if self.__hardware_source:
+            self.__hardware_source.open_help(api_broker)
 
     # must be called on ui thread
     def handle_settings_button_clicked(self, api_broker):
@@ -558,7 +567,23 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
+        stylesheet="""
+QPushButton {
+    border-color: transparent;
+    background-color: transparent;
+    border-radius: 15px;
+    width: 30px;
+    height: 30px;
+}
 
+QPushButton:hover {
+    background-color: lightgrey;
+}
+
+"""
+        help_button = ui.create_push_button_widget(properties={'stylesheet': stylesheet})
+        icon = ui.load_rgba_data_from_file(os.path.join(os.path.dirname(__file__), 'resources', 'help_icon_27.png'))
+        help_button.icon = icon
         open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/sliders_icon_24.png"), "png"))
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
@@ -587,6 +612,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         button_row1.add(profile_combo)
         button_row1.add_stretch()
         button_row1.add(open_controls_widget)
+        button_row1.add(help_button)
 
         button_row1a = ui.create_row_widget(properties={"spacing": 2})
         button_row1a.add(monitor_button)
@@ -596,7 +622,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         def monitor_button_state_changed(visible, enabled):
             monitor_button.visible = visible
             monitor_button.enabled = enabled
-            button_row1a.visible = visible
+
+        def help_button_state_changed(visible, enabled):
+            help_button.visible = visible
+            help_button.enabled = enabled
 
         def binning_combo_text_changed(text):
             if not self.__changes_blocked:
@@ -689,6 +718,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 self.__state_controller.handle_change_profile(text)
                 profile_combo.request_refocus()
 
+        help_button.on_clicked = functools.partial(self.__state_controller.handle_help_button_clicked, PlugInManager.APIBroker())
         open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
         profile_combo.on_current_text_changed = profile_combo_text_changed
@@ -767,6 +797,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
+        self.__state_controller.on_help_button_state_changed = help_button_state_changed
         self.__state_controller.on_monitor_button_state_changed = monitor_button_state_changed
         self.__state_controller.on_camera_current_changed = camera_current_changed
         self.__state_controller.on_log_messages = log_messages

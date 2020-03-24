@@ -72,6 +72,8 @@ class CameraDevice(abc.ABC):
     camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
     signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
     has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
+    has_monitor (optional, whether to show the "Monitor View" button)
+    has_help (optional, whether to show the "help" button)
     """
 
     @abc.abstractmethod
@@ -664,7 +666,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         # configure the features
         self.features = dict()
         self.features["is_camera"] = True
-        self.features["has_monitor"] = True
+        self.features["has_monitor"] = getattr(camera, "has_monitor", True) # Default to True for backwards compatibility
+        self.features["has_help"] = getattr(camera, "has_help", False)
         if camera_panel_type:
             self.features["camera_panel_type"] = camera_panel_type
         if self.__camera_category.lower() == "ronchigram":
@@ -1077,6 +1080,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     @property
     def selected_profile_index(self):
         return self.__camera_settings.selected_profile_index
+
+    # used in camera control panel
+    def open_help(self, api_broker):
+        self.__camera_settings.open_help(api_broker)
 
     # used in camera control panel
     def open_configuration_interface(self, api_broker):
