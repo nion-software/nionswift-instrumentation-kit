@@ -5,6 +5,9 @@ Changelog (nionswift-instrumentation)
 -------------------
 - Fix issue starting scan record immediately after another one.
 - Fix issue with reloading scans with leftover probe/subscan graphics.
+- Enable spectrum image acquisition for MultiAcquire.
+- Removed y-shift and shifter strength from MultiAcquire.
+- Added a time estimate to MultiAcquire.
 
 0.18.3 (2019-11-26)
 -------------------
