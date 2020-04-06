@@ -1,5 +1,4 @@
 # standard libraries
-import contextlib
 import copy
 import json
 import logging
@@ -10,8 +9,9 @@ import threading
 import time
 
 # local libraries
-from nion.utils import Event
-from nion.instrumentation.scan_base import RecordTask
+from nion.utils import Event, Geometry
+from nion.data import DataAndMetadata, Calibration
+from nion.instrumentation import camera_base, scan_base, stem_controller
 
 
 class MultiEELSSettings(dict):
@@ -68,22 +68,69 @@ class MultiEELSParameters(list):
         return self.__copy__()
 
 
+class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
+    def __init__(self):
+        self.new_data_ready_event = Event.Event()
+        self.get_parameters_fn = None
+        self.get_settings_fn = None
+
+    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize,
+               dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id):
+        if callable(self.get_parameters_fn):
+            parameters = self.get_parameters_fn()
+        else:
+            parameters = dict()
+        if callable(self.get_settings_fn):
+            settings = self.get_settings_fn()
+        else:
+            settings = dict()
+        data_dict = dict()
+        start_ev = data_and_metadata.dimensional_calibrations[-1].offset
+        end_ev = start_ev + data_and_metadata.dimensional_calibrations[-1].scale * data_and_metadata.data_shape[-1]
+        parameters['start_ev'] = start_ev
+        parameters['end_ev'] = end_ev
+        if parameters.get('frames', 1) > 1 and not settings.get('sum_frames'):
+            data = data_and_metadata.data[numpy.newaxis, ...]
+            dimensional_calibrations = [Calibration.Calibration()] + list(data_and_metadata.dimensional_calibrations)
+            data_descriptor = DataAndMetadata.DataDescriptor(True,
+                                                             data_and_metadata.data_descriptor.collection_dimension_count,
+                                                             data_and_metadata.data_descriptor.datum_dimension_count)
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                      intensity_calibration=data_and_metadata.intensity_calibration,
+                                                                      dimensional_calibrations=dimensional_calibrations,
+                                                                      metadata=data_and_metadata.metadata,
+                                                                      timestamp=data_and_metadata.timestamp,
+                                                                      data_descriptor=data_descriptor,
+                                                                      timezone=data_and_metadata.timezone,
+                                                                      timezone_offset=data_and_metadata.timezone_offset)
+
+        # start_ev = data_element.get('spatial_calibrations', [{}])[-1].get('offset', 0)
+        # end_ev = start_ev + (data_element.get('spatial_calibrations', [{}])[-1].get('scale', 0) *
+        #                      data_element.get('data').shape[-1])
+        data_dict['parameters'] = parameters
+        data_dict['settings'] = settings
+        data_dict['xdata'] = data_and_metadata
+        data_dict['state'] = state
+        data_dict['dest_sub_area'] = dest_sub_area
+        data_dict['sub_area'] = sub_area
+        data_dict['view_id'] = view_id
+        self.new_data_ready_event.fire(data_dict)
+
+
 class MultiAcquireController:
     def __init__(self, **kwargs):
         self.spectrum_parameters = MultiEELSParameters(
-                                   [{'index': 0, 'offset_x': 0, 'offset_y': 0, 'exposure_ms': 1, 'frames': 1},
-                                    {'index': 1, 'offset_x': 160, 'offset_y': 0, 'exposure_ms': 8, 'frames': 1},
-                                    {'index': 2, 'offset_x': 320, 'offset_y': 0, 'exposure_ms': 16, 'frames': 1}])
+                                   [{'index': 0, 'offset_x': 0, 'exposure_ms': 1, 'frames': 1},
+                                    {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
+                                    {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}])
         self.settings = MultiEELSSettings(
-                        {'x_shifter': 'LossMagnetic', 'y_shifter': '', 'x_units_per_ev': 1,
-                         'y_units_per_px': 0.00081, 'blanker': 'C_Blank', 'x_shift_delay': 0.05, 'y_shift_delay': 0.05,
-                         'focus': '', 'focus_delay': 0, 'saturation_value': 12000, 'y_align': True,
-                         'stitch_spectra': False, 'auto_dark_subtract': False, 'bin_spectra': True,
+                        {'x_shifter': 'LossMagnetic', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
+                         'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': ''})
-        self.stem_controller = None
-        self.camera = None
-        self.superscan = None
-        self.zeros = {'x': 0, 'y': 0, 'focus': 0}
+        self.stem_controller: stem_controller.STEMController = None
+        self.camera: camera_base.CameraHardwareSource = None
+        self.superscan: scan_base.ScanHardwareSource = None
+        self.zeros = {'x': 0, 'focus': 0}
         self.scan_calibrations = [{'offset': 0, 'scale': 1, 'units': ''}, {'offset': 0, 'scale': 1, 'units': ''}]
         self.__progress_counter = 0
         self.__flyback_pixels = 0
@@ -146,17 +193,6 @@ class MultiAcquireController:
             parameters['offset_x'] = offset_x
             self.spectrum_parameters[index] = parameters
 
-    def get_offset_y(self, index):
-        assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
-        return self.spectrum_parameters[index]['offset_y']
-
-    def set_offset_y(self, index, offset_y):
-        assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
-        parameters = self.spectrum_parameters[index].copy()
-        if offset_y != parameters.get('offset_y'):
-            parameters['offset_y'] = offset_y
-            self.spectrum_parameters[index] = parameters
-
     def get_exposure_ms(self, index):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
         return self.spectrum_parameters[index]['exposure_ms']
@@ -181,23 +217,13 @@ class MultiAcquireController:
 
     def shift_x(self, eV):
         if callable(self.__active_settings['x_shifter']):
-            self.__active_settings['x_shifter'](self.zeros['x'] + eV*self.__active_settings['x_units_per_ev'])
+            self.__active_settings['x_shifter'](self.zeros['x'] + eV)
         elif self.__active_settings['x_shifter']:
             self.stem_controller.SetValAndConfirm(self.__active_settings['x_shifter'],
-                                                  self.zeros['x'] + eV*self.__active_settings['x_units_per_ev'], 1.0, 1000)
+                                                  self.zeros['x'] + eV, 1.0, 1000)
         else: # do not wait if nothing was done
             return
         time.sleep(self.__active_settings['x_shift_delay'])
-
-    def shift_y(self, px):
-        if callable(self.__active_settings['y_shifter']):
-            self.__active_settings['y_shifter'](self.zeros['y'] + px*self.__active_settings['y_units_per_px'])
-        elif self.__active_settings['y_shifter']:
-            self.stem_controller.SetValAndConfirm(self.__active_settings['y_shifter'],
-                                                  self.zeros['y'] + px*self.__active_settings['y_units_per_px'], 1.0, 1000)
-        else: # do not wait if nothing was done
-            return
-        time.sleep(self.__active_settings['y_shift_delay'])
 
     def adjust_focus(self, x_shift_ev):
         pass
@@ -217,89 +243,66 @@ class MultiAcquireController:
             return
         time.sleep(self.__active_settings['blanker_delay'])
 
-    def increment_progress_counter(self, time):
-        self.__progress_counter += time
-        maximum = 0
-        if hasattr(self, 'scan_parameters'):
-            scan_size = self.scan_parameters['size']
+    def __calculate_total_acquisition_time(self, spectrum_parameters, settings, scan_parameters=None):
+        total_time = 0
+        if scan_parameters is not None:
+            scan_size = scan_parameters['size']
         else:
             scan_size = (1, 1)
-        for parameters in self.__active_spectrum_parameters:
-            maximum += (scan_size[1] * parameters['frames'] + self.__flyback_pixels) * parameters['exposure_ms']
-        maximum *= scan_size[0]
-        if self.__active_settings['auto_dark_subtract']:
-            maximum *= 2
-        self.progress_updated_event.fire(0, maximum, self.__progress_counter)
+        for parameters in spectrum_parameters:
+            total_time += (scan_size[1] * parameters['frames'] + self.__flyback_pixels) * parameters['exposure_ms']
+        total_time *= scan_size[0]
+        if settings['auto_dark_subtract']:
+            total_time *= 2
+        return total_time
 
-    def set_progress_counter(self, minimum, maximum, value):
+    def __get_progress_maximum(self):
+        return self.__calculate_total_acquisition_time(self.__active_spectrum_parameters, self.__active_settings,
+                                                       getattr(self, 'scan_parameters', None))
+
+    def get_total_acquisition_time(self):
+        scan_parameters = self.superscan.get_current_frame_parameters() if self.superscan else None
+        acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, None) * 0.001
+        si_acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, scan_parameters) * 0.001
+        if self.settings['auto_dark_subtract']:
+            # Auto dark subtract has no effect for acquire SI, so correct the total acquisition time
+            si_acquisition_time *= 0.5
+        return acquisition_time, si_acquisition_time
+
+    def increment_progress_counter(self, time):
+        self.__progress_counter += time
+        self.progress_updated_event.fire(0, self.__get_progress_maximum(), self.__progress_counter)
+
+    def set_progress_counter(self, value, minimum=0, maximum=None):
         self.__progress_counter = value
+        if maximum is None:
+            maximum = self.__get_progress_maximum()
         self.progress_updated_event.fire(minimum, maximum, value)
 
     def reset_progress_counter(self):
-        self.set_progress_counter(0, 100, 0)
-
-    def get_stitch_ranges(self, spectra):
-        crop_ranges = []
-        y_range_0 = numpy.array((self.__active_spectrum_parameters[0]['offset_y'], self.__active_spectrum_parameters[1]['offset_y']-1))
-        x_range_target = numpy.array((0, 0))
-        for i in range(1, len(spectra)):
-            y_range = y_range_0 + self.__active_spectrum_parameters[i-1]['offset_y']
-            calibration = spectra[i-1].dimensional_calibrations[-1].write_dict()
-            calibration_next = spectra[i].dimensional_calibrations[-1].write_dict()
-            end = numpy.rint((calibration_next['offset']-calibration['offset'])/calibration['scale']).astype(numpy.int)
-            x_range_source = numpy.array((0, end))
-            x_range_target = numpy.array((x_range_target[1], x_range_target[1] + x_range_source[1]-x_range_source[0]))
-            crop_ranges.append((y_range, x_range_source, x_range_target))
-        y_range = y_range_0 + self.__active_spectrum_parameters[-1]['offset_y']
-        x_range_source = numpy.array((0, None))
-        x_range_target = numpy.array((x_range_target[1], x_range_target[1] + spectra[-1].data.shape[1]))
-        crop_ranges.append((y_range, x_range_source, x_range_target))
-
-        return crop_ranges
-
-    def stitch_spectra(self, spectra, crop_ranges):
-        result = numpy.zeros(crop_ranges[-1][2][1])
-        last_mean = None
-        last_overlap = None
-        for i in range(len(crop_ranges)):
-            data = (spectra[i].data)/self.__active_spectrum_parameters[i]['exposure_ms']
-            # check if hdr needs to be done in this interval, which is true when the overlap with the next one is 100%
-            if i > 0 and (crop_ranges[i-1][1][1] - crop_ranges[i-1][1][0]) == 0:
-                data[data>self.__active_settings['saturation_value']] = (spectra[i-1].data[[data>self.__active_settings['saturation_value']]])/self.__active_spectrum_parameters[i]['exposure_ms']
-
-            data = numpy.sum(data[crop_ranges[i][0][0]:crop_ranges[i][0][1]], axis=0)
-            if last_mean is not None:
-                data -= numpy.mean(data[crop_ranges[i][1][0]:last_overlap]) - last_mean
-                print(last_mean, last_overlap)
-            if self.__active_settings['y_align'] and i < len(crop_ranges) - 1:
-                last_overlap = data.shape[-1] - crop_ranges[i][1][1]
-                last_mean = numpy.mean(data[crop_ranges[i][1][1]:])
-            result[crop_ranges[i][2][0]:crop_ranges[i][2][1]] = data[crop_ranges[i][1][0]:crop_ranges[i][1][1]]
-
-        return result
+        self.set_progress_counter(0, 0, 100)
 
     def __acquire_multi_acquire_data(self, number_pixels, line_number=0, flyback_pixels=0):
         for parameters in self.__active_spectrum_parameters:
-            print('start preparations')
+            logging.debug('start preparations')
             starttime = time.time()
             if self.abort_event.is_set():
                 break
             self.shift_x(parameters['offset_x'])
-            self.shift_y(parameters['offset_y'])
             self.adjust_focus(parameters['offset_x'])
             frame_parameters = self.camera.get_current_frame_parameters()
             frame_parameters['exposure_ms'] =  parameters['exposure_ms']
             frame_parameters['processing'] = 'sum_project' if self.__active_settings['bin_spectra'] else None
             self.camera.set_current_frame_parameters(frame_parameters)
             self.camera.acquire_sequence_prepare(parameters['frames']*number_pixels+flyback_pixels)
-            print('finished preparations in {:g} s'.format(time.time() - starttime))
+            logging.debug('finished preparations in {:g} s'.format(time.time() - starttime))
             starttime = 0
-            print('start sequence')
+            logging.debug('start sequence')
             starttime = time.time()
             data_element = self.camera.acquire_sequence(parameters['frames']*number_pixels+flyback_pixels)
             if data_element:
                 data_element = data_element[0]
-            print('end sequence in {:g} s'.format(time.time() - starttime))
+            logging.info('end sequence in {:g} s'.format(time.time() - starttime))
             if self.abort_event.is_set():
                 break
             start_ev = data_element.get('spatial_calibrations', [{}])[-1].get('offset', 0)
@@ -318,7 +321,7 @@ class MultiAcquireController:
             self.increment_progress_counter((parameters['frames']*number_pixels+flyback_pixels)*parameters['exposure_ms'])
             del data_element
             del data_dict
-            print('finished acquisition')
+            logging.debug('finished acquisition')
 
     def __clean_up(self):
         # clear the queue to prevent deadlocks
@@ -340,6 +343,7 @@ class MultiAcquireController:
         self.abort_event.set()
         try:
             self.camera.acquire_sequence_cancel()
+            self.superscan.grab_synchronized_abort()
         except Exception as e:
             print(e)
         # give it some time to finish processing
@@ -373,8 +377,6 @@ class MultiAcquireController:
             new_data_listener = self.new_data_ready_event.listen(add_data_to_list)
             if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
                 self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
-            if not callable(self.__active_settings['y_shifter']) and self.__active_settings['y_shifter']:
-                self.zeros['y'] = self.stem_controller.GetVal(self.__active_settings['y_shifter'])
             start_frame_parameters = self.camera.get_current_frame_parameters()
             # also use flyback pixels here to make sure we get fresh images from the camera (they get removed
             # automatically by "process_and_send_data")
@@ -398,43 +400,38 @@ class MultiAcquireController:
             import traceback
             traceback.print_exc()
         finally:
-            print('finished acquisition and dark subtraction')
+            logging.debug('finished acquisition and dark subtraction')
             self.__acquisition_finished_event.set()
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'single spectrum'})
             if start_frame_parameters:
                 self.camera.set_current_frame_parameters(start_frame_parameters)
-            self.shift_y(0)
             self.shift_x(0)
             self.adjust_focus(0)
         self.__queue.join()
+        new_data_listener.close()
         del new_data_listener
-        if self.__active_settings['stitch_spectra']:
-            raise NotImplementedError
-        else:
-            data_element_list = []
-            parameter_list = []
-            settings_list = []
-            for i in range(len(data_dict_list)):
-                data_element = data_dict_list[i]['data_element']
-                # remove the collection calibration (we acquired only "one pixel")
-                data_element['spatial_calibrations'].pop(0 if self.__active_settings['sum_frames'] else 1)
-                data_element['data'] = numpy.squeeze(data_element['data'])
-                # this makes sure we do not create a length 1 sequence
-                if not self.__active_settings['sum_frames'] and data_dict_list[i]['parameters']['frames'] < 2:
-                    data_element['is_sequence'] = False
-                    # We also need to delete the sequence axis calibration
-                    data_element['spatial_calibrations'].pop(0)
-                data_element['collection_dimension_count'] = 0
-                data_element_list.append(data_element)
-                parameter_list.append(data_dict_list[i]['parameters'])
-                settings_list.append(data_dict_list[i]['settings'])
 
-            multi_eels_data = {'data_element_list' : data_element_list, 'parameter_list': parameter_list,
-                               'settings_list': settings_list, 'stitched_data': False}
-            return multi_eels_data
+        data_element_list = []
+        parameter_list = []
+        settings_list = []
+        for i in range(len(data_dict_list)):
+            data_element = data_dict_list[i]['data_element']
+            # remove the collection calibration (we acquired only "one pixel")
+            data_element['spatial_calibrations'].pop(0 if self.__active_settings['sum_frames'] else 1)
+            data_element['data'] = numpy.squeeze(data_element['data'])
+            # this makes sure we do not create a length 1 sequence
+            if not self.__active_settings['sum_frames'] and data_dict_list[i]['parameters']['frames'] < 2:
+                data_element['is_sequence'] = False
+                # We also need to delete the sequence axis calibration
+                data_element['spatial_calibrations'].pop(0)
+            data_element['collection_dimension_count'] = 0
+            data_element_list.append(data_element)
+            parameter_list.append(data_dict_list[i]['parameters'])
+            settings_list.append(data_dict_list[i]['settings'])
 
-    def acquire_multi_eels_line(self, x_pixels, line_number, flyback_pixels=2, first_line=False, last_line=False):
-        self.__acquire_multi_acquire_data(x_pixels, line_number, flyback_pixels)
+        multi_eels_data = {'data_element_list' : data_element_list, 'parameter_list': parameter_list,
+                           'settings_list': settings_list}
+        return multi_eels_data
 
     def process_and_send_data(self):
         while True:
@@ -445,81 +442,71 @@ class MultiAcquireController:
                     self.acquisition_state_changed_event.fire({'message': 'end processing'})
                     break
             else:
-                print('got data from queue')
-                if self.__active_settings['stitch_spectra']:
-                    raise NotImplementedError
-                    data_dict_list = [data_dict]
-                    while len(data_dict_list) < len(self.__active_spectrum_parameters):
-                        try:
-                            data_dict = self.__queue.get(timeout=1)
-                        except queue.Empty:
-                            continue
-                    del data_dict_list
+                logging.debug('got data from queue')
+                line_number = data_dict['parameters']['line_number']
+
+                if (self.abort_event.is_set() or hasattr(self, 'number_lines') and
+                    line_number == self.number_lines-1):
+                    data_dict['parameters']['is_last_line'] = True
+
+                if hasattr(self, 'number_lines'):
+                    data_dict['parameters']['number_lines'] = self.number_lines
+
+                data_element = data_dict['data_element']
+                data = data_element['data']
+                old_spatial_calibrations = data_element.get('spatial_calibrations', list())
+                if self.__active_settings['bin_spectra'] and len(data.shape) > 2:
+                    if len(old_spatial_calibrations) == len(data.shape):
+                        old_spatial_calibrations.pop(1)
+                    data = numpy.sum(data, axis=1)
+                # remove flyback pixels
+                flyback_pixels = data_dict['parameters']['flyback_pixels']
+                data = data[flyback_pixels:, ...]
+                # bring data to universal shape: ('pixels', 'frames', 'data', 'data')
+                number_frames = data_dict['parameters']['frames']
+                data = numpy.reshape(data, (-1, number_frames) + (data.shape[1:]))
+                # sum along frames axis
+                if self.__active_settings['sum_frames']:
+                    data = numpy.sum(data, axis=1)
+                # make frames axis the sequence axis
                 else:
-                    line_number = data_dict['parameters']['line_number']
-
-                    if (self.abort_event.is_set() or hasattr(self, 'number_lines') and
-                        line_number == self.number_lines-1):
-                        data_dict['parameters']['is_last_line'] = True
-
-                    if hasattr(self, 'number_lines'):
-                        data_dict['parameters']['number_lines'] = self.number_lines
-
-                    data_element = data_dict['data_element']
-                    data = data_element['data']
-                    old_spatial_calibrations = data_element.get('spatial_calibrations', list())
-                    if self.__active_settings['bin_spectra'] and len(data.shape) > 2:
-                        if len(old_spatial_calibrations) == len(data.shape):
-                            old_spatial_calibrations.pop(1)
-                        data = numpy.sum(data, axis=1)
-                    # remove flyback pixels
-                    flyback_pixels = data_dict['parameters']['flyback_pixels']
-                    data = data[flyback_pixels:, ...]
-                    # bring data to universal shape: ('pixels', 'frames', 'data', 'data')
-                    number_frames = data_dict['parameters']['frames']
-                    data = numpy.reshape(data, (-1, number_frames) + (data.shape[1:]))
-                    # sum along frames axis
-                    if self.__active_settings['sum_frames']:
-                        data = numpy.sum(data, axis=1)
-                    # make frames axis the sequence axis
-                    else:
-                        data = numpy.swapaxes(data, 0, 1)
-                    # put it back
-                    data_element['data'] = data
-                    # create correct data descriptors
-                    data_element['is_sequence'] = False if self.__active_settings['sum_frames'] else True
-                    data_element['collection_dimension_count'] = 1
-                    data_element['datum_dimension_count'] = 1 if self.__active_settings['bin_spectra'] else 2
-                    # update calibrations
-                    spatial_calibrations = [self.scan_calibrations[1].copy()]
-                    # check if raw data had correct number of calibrations, if not default to correct number of empty
-                    # calibrations to prevent errors
-                    if len(old_spatial_calibrations) == (len(data.shape) if self.__active_settings['sum_frames'] else
-                                                         len(data.shape)-1):
-                        spatial_calibrations.extend(old_spatial_calibrations[1:])
-                        if not self.__active_settings['sum_frames']:
-                            spatial_calibrations.insert(0, {'offset': 0, 'scale': 1, 'units': ''})
-                    else:
-                        spatial_calibrations.extend([{'offset': 0, 'scale': 1, 'units': ''}
-                                                     for i in range(len(data.shape)-1)])
-                    data_element['spatial_calibrations'] = spatial_calibrations
-                    counts_per_electron = data_element.get('properties', {}).get('counts_per_electron', 1)
-                    exposure_ms = data_element.get('properties', {}).get('exposure', 1)
-                    _number_frames = 1 if not self.__active_settings['sum_frames'] else number_frames
-                    intensity_scale = (data_element.get('intensity_calibration', {}).get('scale', 1) /
-                                       counts_per_electron /
-                                       data_element.get('spatial_calibrations', [{}])[-1].get('scale', 1) /
-                                       exposure_ms / _number_frames)
-                    data_element['intensity_calibration'] = {'offset': 0, 'scale': intensity_scale, 'units': 'e/eV/s'}
-                    self.new_data_ready_event.fire(data_dict)
-                    print('processed line {:.0f}'.format(line_number))
-                    del data
-                    del data_element
+                    data = numpy.swapaxes(data, 0, 1)
+                # put it back
+                data_element['data'] = data
+                # create correct data descriptors
+                data_element['is_sequence'] = False if self.__active_settings['sum_frames'] else True
+                data_element['collection_dimension_count'] = 1
+                data_element['datum_dimension_count'] = 1 if self.__active_settings['bin_spectra'] else 2
+                # update calibrations
+                spatial_calibrations = [self.scan_calibrations[1].copy()]
+                # check if raw data had correct number of calibrations, if not default to correct number of empty
+                # calibrations to prevent errors
+                if len(old_spatial_calibrations) == (len(data.shape) if self.__active_settings['sum_frames'] else
+                                                     len(data.shape)-1):
+                    spatial_calibrations.extend(old_spatial_calibrations[1:])
+                    if not self.__active_settings['sum_frames']:
+                        spatial_calibrations.insert(0, {'offset': 0, 'scale': 1, 'units': ''})
+                else:
+                    spatial_calibrations.extend([{'offset': 0, 'scale': 1, 'units': ''}
+                                                 for i in range(len(data.shape)-1)])
+                data_element['spatial_calibrations'] = spatial_calibrations
+                counts_per_electron = data_element.get('properties', {}).get('counts_per_electron', 1)
+                exposure_ms = data_element.get('properties', {}).get('exposure', 1)
+                _number_frames = 1 if not self.__active_settings['sum_frames'] else number_frames
+                intensity_scale = (data_element.get('intensity_calibration', {}).get('scale', 1) /
+                                   counts_per_electron /
+                                   data_element.get('spatial_calibrations', [{}])[-1].get('scale', 1) /
+                                   exposure_ms / _number_frames)
+                data_element['intensity_calibration'] = {'offset': 0, 'scale': intensity_scale, 'units': 'e/eV/s'}
+                self.new_data_ready_event.fire(data_dict)
+                logging.debug('processed line {:.0f}'.format(line_number))
+                del data
+                del data_element
                 del data_dict
-                try:
-                    self.__queue.task_done()
-                except ValueError:
-                    pass
+            try:
+                self.__queue.task_done()
+            except ValueError:
+                pass
 
     def acquire_multi_eels_spectrum_image(self):
         self.__active_settings = copy.deepcopy(self.settings)
@@ -527,46 +514,62 @@ class MultiAcquireController:
         self.abort_event.clear()
         self.reset_progress_counter()
         self.__acquisition_finished_event.clear()
-        self.__process_and_send_data_thread = threading.Thread(target=self.process_and_send_data)
+        self.__process_and_send_data_thread = threading.Thread(target=self.process_and_send_data, daemon=True)
         self.__process_and_send_data_thread.start()
         if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
             self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
-        if not callable(self.__active_settings['y_shifter']) and self.__active_settings['y_shifter']:
-            self.zeros['y'] = self.stem_controller.GetVal(self.__active_settings['y_shifter'])
+
+        def send_new_data_and_update_progress(data_dict):
+            current_time = 0
+            current_frame = data_dict['parameters']['current_frame']
+            current_index = data_dict['parameters']['index']
+            complete_shape = data_dict['parameters']['complete_shape']
+            for parameters in self.__active_spectrum_parameters:
+                if parameters['index'] >= current_index:
+                    break
+                current_time += complete_shape[0] * (complete_shape[1] + self.__flyback_pixels) * parameters['exposure_ms'] * parameters['frames']
+            dest_sub_area = data_dict['dest_sub_area']
+            current_time += complete_shape[0] * (complete_shape[1] + self.__flyback_pixels) * parameters['exposure_ms'] * current_frame
+            current_time += dest_sub_area.bottom_right[0] * (complete_shape[1] + self.__flyback_pixels) * parameters['exposure_ms']
+            self.set_progress_counter(current_time)
+            self.new_data_ready_event.fire(data_dict)
         try:
-            logging.debug("start")
             self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
-            self.superscan.abort_playing()
-            self.camera.abort_playing()
-            self.scan_parameters = self.superscan.get_record_frame_parameters()
-            scan_max_size = numpy.inf
-            self.scan_parameters["size"] = (min(scan_max_size, self.scan_parameters["size"][0]),
-                                            min(scan_max_size, self.scan_parameters["size"][1]))
-            self.scan_parameters["pixel_time_us"] = int(100) #int(1000 * eels_camera_parameters["exposure_ms"] * 0.75)
-            self.scan_parameters["external_clock_wait_time_ms"] = int(20000) #int(eels_camera_parameters["exposure_ms"]) + 100
-            self.scan_parameters["external_clock_mode"] = 1
-            self.scan_parameters["ac_frame_sync"] = False
-            self.scan_parameters["ac_line_sync"] = False
-            self.scan_calibrations = [{'offset': -self.scan_parameters['fov_size_nm'][0]/2,
-                                       'scale': self.scan_parameters['fov_size_nm'][0]/self.scan_parameters['size'][0],
-                                       'units': 'nm'},
-                                      {'offset': -self.scan_parameters['fov_size_nm'][1]/2,
-                                       'scale': self.scan_parameters['fov_size_nm'][1]/self.scan_parameters['size'][1],
-                                       'units': 'nm'}]
-            flyback_pixels = self.superscan.flyback_pixels
-            self.number_lines = self.scan_parameters["size"][0]
-            self.queue = queue.Queue()
-            self.process_and_send_data_thread = threading.Thread(target=self.process_and_send_data)
-            self.process_and_send_data_thread.start()
-            # TODO: configure line repeat
-            with contextlib.closing(RecordTask(self.superscan, self.scan_parameters)) as scan_task:
-                for line in range(self.number_lines):
+            for parameters in self.__active_spectrum_parameters:
+                if self.abort_event.is_set():
+                    break
+                self.shift_x(parameters['offset_x'])
+                self.adjust_focus(parameters['offset_x'])
+                frame_parameters = self.camera.get_current_frame_parameters()
+                frame_parameters['exposure_ms'] = parameters['exposure_ms']
+                frame_parameters['processing'] = 'sum_project' if self.__active_settings['bin_spectra'] else None
+                for n in range(parameters['frames']):
                     if self.abort_event.is_set():
                         break
-                    print(line)
-                    starttime = time.time()
-                    self.acquire_multi_eels_line(self.scan_parameters["size"][1], line, flyback_pixels=flyback_pixels, first_line=line==0)
-                    print('acquired line in {:g} s'.format(time.time() - starttime))
+                    parameters['current_frame'] = n
+                    camera_data_channel = CameraDataChannel()
+                    camera_data_channel.get_parameters_fn = lambda: parameters.copy()
+                    camera_data_channel.get_settings_fn = lambda: self.__active_settings.copy()
+                    new_data_listener = camera_data_channel.new_data_ready_event.listen(send_new_data_and_update_progress)
+                    # grab_synchronized_info = self.superscan.grab_synchronized_get_info(scan_frame_parameters=self.superscan.get_current_frame_parameters(),
+                    #                                                                    camera=self.camera,
+                    #                                                                    camera_frame_parameters=frame_parameters)
+                    self.scan_parameters = self.superscan.get_current_frame_parameters()
+                    self.__flyback_pixels = 2
+                    parameters['complete_shape'] = tuple(self.scan_parameters.size)
+                    result = self.superscan.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
+                                                              camera_data_channel=camera_data_channel, section_height=1,
+                                                              scan_frame_parameters=self.scan_parameters)
+                    if result is not None:
+                        scan_xdata_list, _ = result
+                        scan_data_dict = dict()
+                        scan_data_dict['is_scan_data'] = True
+                        scan_data_dict['xdata_list'] = scan_xdata_list
+                        scan_data_dict['parameters'] = parameters.copy()
+                        scan_data_dict['settings'] = self.__active_settings
+                        self.new_data_ready_event.fire(scan_data_dict)
+                    new_data_listener.close()
+                    new_data_listener = None
         except Exception as e:
             self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
             import traceback
@@ -577,10 +580,9 @@ class MultiAcquireController:
         finally:
             self.__acquisition_finished_event.set()
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'spectrum image'})
+            self.acquisition_state_changed_event.fire({'message': 'end processing'})
             # TODO: configure line repeat
-            self.shift_y(0)
             self.shift_x(0)
             self.adjust_focus(0)
             if hasattr(self, 'scan_parameters'):
                 delattr(self, 'scan_parameters')
-            logging.debug("end")
