@@ -70,11 +70,14 @@ Get the plug-in main window by selecting it from the "Window" menu.
 
 .. image:: resources/multi_acquire_main_window.png
 
-This plugin allows you to acquire EEL spectra with multiple energy offsets and exposure settings. The acquisitions can
+This plugin allows you to acquire series of EEL spectra with multiple energy offsets and exposure settings. The acquisitions can
 be set up with the table in the main window. Every spectrum corresponds to one line. Use the "+" and "-" buttons to add or remove
 lines. The first column shows the spectrum number, which will also be added to the titles of the result data items.
-Note that the progress bar will only update once per spectrum (i.e. if only one spectrum is defined it will jump
-straight from 0 to 100%).
+You have the option to acquire the programmed sequence of spectra as individual spectra or as spectrum images by clicking
+either on "Start Multi-Acquire" or "Start Multi-Acquire spectrum image".
+Note that for individual spectra, the progress bar will only update once per spectrum (i.e. if only one spectrum is defined it will jump
+straight from 0 to 100%). For spectrum images, the progress bar will update once per acquired line of a spectrum image.
+The times shown above the two "start" buttons are the estimated acquisition times for the two modes.
 
 
 Settings Window
@@ -89,15 +92,18 @@ is configured in the main window.
 The checkboxes in the bottom row allow you to configure how the data will be returned:
 
 * "Bin data in y-direction" will sum the images in vertical direction to obtain spectra.
-* "Auto dark subtraction" will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data. Make sure "Blanker control name" is set correctly, otherwise this mode will fail.
+* "Auto dark subtraction" will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data.
+  Make sure "Blanker control name" is set correctly, otherwise this mode will fail. Note that this settings has no effect for spectrum images as it will always be deactivated in this mode.
 * "Sum frames" will sum all frames that were acquired for each spectrum (as specified by the column "frames" in the main window). If this is off, the plug-in will return a stack for each spectrum.
 
 Output
 ++++++
 The plug-in will create one result data item per spectrum. These data items can be either single spectra, single images,
-stacks of spectra or stacks of images, depending on the settings. Additionaly the plug-in will create a data item that
-contains all acquired spectra as multiple line plots. This last data item will only be created if "Bin data in y-direction"
-is selected in the settings window.
+stacks of spectra or stacks of images, depending on the settings. When you are acquring spectrum images, the result data items
+will be either single spectrum images, single 4D images, stacks of spectrum images or stacks of 4d images.
+Additionaly the plug-in will create a data item that contains all acquired spectra as multiple line plots.
+This last data item will only be created if "Bin data in y-direction"
+is selected in the settings window and if you are not acquiring spectrum images.
 
 .. image:: resources/multi_acquire_output_stacked.png
 
