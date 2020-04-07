@@ -302,7 +302,7 @@ class MultiAcquireController:
             data_element = self.camera.acquire_sequence(parameters['frames']*number_pixels+flyback_pixels)
             if data_element:
                 data_element = data_element[0]
-            logging.info('end sequence in {:g} s'.format(time.time() - starttime))
+            logging.debug('end sequence in {:g} s'.format(time.time() - starttime))
             if self.abort_event.is_set():
                 break
             start_ev = data_element.get('spatial_calibrations', [{}])[-1].get('offset', 0)

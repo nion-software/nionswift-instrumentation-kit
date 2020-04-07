@@ -278,7 +278,7 @@ class MultiAcquirePanelDelegate:
             self.__data_processed_event.set()
 
     def __close_data_item_refs(self):
-        logging.info('Closing data item refs')
+        logging.debug('Closing data item refs')
         for item in self.result_data_items.values():
             item.exit_write_suspend_state()
 #        for item in self.result_data_items:
@@ -388,7 +388,7 @@ class MultiAcquirePanelDelegate:
                 xdata = data_dict['xdata']
                 logging.debug('got data from display queue')
                 if not self.result_data_items.get(index):
-                    logging.info('creating new data item')
+                    logging.debug('creating new data item')
                     metadata = xdata.metadata
                     metadata['MultiAcquire.parameters'] = dict(data_dict['parameters'])
                     metadata['MultiAcquire.settings'] = dict(data_dict['settings'])
