@@ -699,7 +699,7 @@ class MultiAcquirePanelDelegate:
 
         class ConfigDialog(Dialog.ActionDialog):
             def __init__(self, ui, multi_eels_panel):
-                super(ConfigDialog, self).__init__(ui)
+                super().__init__(ui, parent_window=dc)
                 def report_window_close():
                     multi_eels_panel.settings_window_open = False
                 self.multi_eels_panel = multi_eels_panel
