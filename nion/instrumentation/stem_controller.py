@@ -108,7 +108,14 @@ class STEMController:
         self.__scan_controller = None
 
     def close(self):
-        pass
+        self.__probe_position_value.close()
+        self.__probe_position_value = None
+        self.__subscan_state_value.close()
+        self.__subscan_state_value = None
+        self.__subscan_region_value.close()
+        self.__subscan_region_value = None
+        self.__subscan_rotation_value.close()
+        self.__subscan_rotation_value = None
 
     # configuration methods
 
@@ -541,6 +548,7 @@ class SubscanView:
         self.__subscan_state_model = stem_controller._subscan_state_value
         self.__subscan_region_value = stem_controller._subscan_region_value
         self.__subscan_rotation_value = stem_controller._subscan_rotation_value
+        # note: these property changed listeners can be fired from a thread.
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
         self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
         self.__scan_data_items_changed_listener = stem_controller.scan_data_item_states_changed_event.listen(self.__scan_data_item_states_changed)
@@ -549,24 +557,35 @@ class SubscanView:
         self.__update_subscan_rotation_value = 0.0
 
     def close(self):
+        for _, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
+            subscan_graphic_property_changed_listener.close()
+            remove_region_graphic_event_listener.close()
+            display_about_to_be_removed_listener.close()
+        self.__subscan_graphic_trackers = list()
+        self.__subscan_region_changed_listener.close()
+        self.__subscan_region_changed_listener = None
+        self.__subscan_rotation_changed_listener.close()
+        self.__subscan_rotation_changed_listener = None
+        self.__region_enabled_changed_listener.close()
+        self.__region_enabled_changed_listener = None
         self.__scan_data_items_changed_listener.close()
         self.__scan_data_items_changed_listener = None
         self.__scan_data_items = list()
         self.__event_loop = None
 
     def __scan_data_item_states_changed(self, data_item_states):
-        # thread safe.
+        # must be thread safe
         if self.__subscan_state_model.value == SubscanState.DISABLED:
             with self.__last_data_items_lock:
                 self.__scan_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
 
-    def __subscan_region_changed(self, name):
-        # pass the value to update subscan region via the field; that way less worry about overruns
+    def __subscan_region_changed(self, name: str) -> None:
+        # must be thread safe
         self.__update_subscan_region_value = self.__subscan_region_value.value
         self.__event_loop.create_task(self.__update_subscan_region())
 
-    def __subscan_rotation_changed(self, name):
-        # pass the value to update subscan region via the field; that way less worry about overruns
+    def __subscan_rotation_changed(self, name: str) -> None:
+        # must be thread safe
         self.__update_subscan_rotation_value = self.__subscan_rotation_value.value
         self.__event_loop.create_task(self.__update_subscan_region())
 
