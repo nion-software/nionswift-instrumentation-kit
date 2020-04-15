@@ -1,4 +1,5 @@
 # standard libraries
+import abc
 import asyncio
 import copy
 import enum
@@ -18,7 +19,13 @@ from nion.utils import Binding
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
+from nion.utils import Observable
 from nion.utils import Registry
+
+if typing.TYPE_CHECKING:
+    from nion.swift.model import DataItem
+    from nion.swift.model import DisplayItem
+    from nion.swift.model import DocumentModel
 
 
 _ = gettext.gettext
@@ -102,20 +109,23 @@ class STEMController:
         self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value = Model.PropertyModel(None)
         self.__subscan_rotation_value = Model.PropertyModel(0.0)
+        self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
         self.scan_data_item_states_changed_event = Event.Event()
+        self.scan_context_data_item_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
         self.__scan_controller = None
 
     def close(self):
-        self.__probe_position_value.close()
-        self.__probe_position_value = None
+        self.__scan_context_data_items = None
         self.__subscan_state_value.close()
         self.__subscan_state_value = None
         self.__subscan_region_value.close()
         self.__subscan_region_value = None
         self.__subscan_rotation_value.close()
         self.__subscan_rotation_value = None
+        self.__probe_position_value.close()
+        self.__probe_position_value = None
 
     # configuration methods
 
@@ -176,9 +186,17 @@ class STEMController:
         return self.__probe_position_value
 
     @property
-    def _subscan_state_value(self):
+    def _subscan_state_value(self) -> Model.PropertyModel:
         """Internal use."""
         return self.__subscan_state_value
+
+    @property
+    def subscan_state(self) -> SubscanState:
+        return self.__subscan_state_value.value
+
+    @subscan_state.setter
+    def subscan_state(self, value: SubscanState) -> None:
+        self.__subscan_state_value = value
 
     @property
     def _subscan_region_value(self):
@@ -186,16 +204,43 @@ class STEMController:
         return self.__subscan_region_value
 
     @property
+    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
+        region_tuple = self.__subscan_region_value.value
+        return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
+
+    @subscan_region.setter
+    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
+        self.__subscan_region_value = tuple(value) if value is not None else None
+
+    @property
     def _subscan_rotation_value(self):
         """Internal use."""
         return self.__subscan_rotation_value
 
+    @property
+    def subscan_rotation(self) -> float:
+        return self.__subscan_rotation_value.value
+
+    @subscan_rotation.setter
+    def subscan_rotation(self, value: float):
+        self.__subscan_rotation_value.value = value
+
     def disconnect_probe_connections(self):
+        self.__scan_context_data_items = list()
         self.scan_data_item_states_changed_event.fire(list())
+        self.scan_context_data_item_changed_event.fire()
 
     def _data_item_states_changed(self, data_item_states):
         if len(data_item_states) > 0:
+            if self.subscan_state == SubscanState.DISABLED:
+                # only update context display items when subscan is disabled
+                self.__scan_context_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
             self.scan_data_item_states_changed_event.fire(data_item_states)
+            self.scan_context_data_item_changed_event.fire()
+
+    @property
+    def scan_context_data_items(self) -> typing.Sequence["DataItem.DataItem"]:
+        return self.__scan_context_data_items
 
     @property
     def scan_context(self) -> ScanContext:
@@ -351,6 +396,162 @@ class STEMController:
     # end high level commands
 
 
+class AbstractGraphicSetHandler(abc.ABC):
+    """Handle callbacks from the graphic set controller to the model."""
+
+    @abc.abstractmethod
+    def _create_graphic(self) -> Graphics.Graphic:
+        """Called to create a new graphic for a new display item."""
+        ...
+
+    @abc.abstractmethod
+    def _update_graphic(self, graphic: Graphics.Graphic) -> None:
+        """Called to update the graphic when the model changes."""
+        ...
+
+    @abc.abstractmethod
+    def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
+        """Called to update the model when the graphic changes."""
+        ...
+
+    @abc.abstractmethod
+    def _graphic_removed(self, graphic: Graphics.Graphic) -> None:
+        """Called when one of the graphics are removed."""
+        ...
+
+
+class GraphicSetController:
+
+    def __init__(self, handler: AbstractGraphicSetHandler):
+        self.__graphic_trackers = list()
+        self.__handler = handler
+
+    def close(self):
+        for _, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
+            graphic_property_changed_listener.close()
+            remove_region_graphic_event_listener.close()
+            display_about_to_be_removed_listener.close()
+        self.__graphic_trackers = list()
+
+    def synchronize_graphics(self, display_items: typing.Sequence["DisplayItem.DisplayItem"]) -> None:
+        # create subscan graphics for each scan data item if it doesn't exist
+        if not self.__graphic_trackers:
+            for display_item in display_items:
+                graphic = self.__handler._create_graphic()
+
+                graphic_property_changed_listener = graphic.property_changed_event.listen(functools.partial(self.__handler._graphic_property_changed, graphic))
+
+                def graphic_removed(graphic: Graphics.Graphic) -> None:
+                    self.__remove_one_graphic(graphic)
+                    self.__handler._graphic_removed(graphic)
+
+                def display_removed(graphic: Graphics.Graphic) -> None:
+                    self.__remove_one_graphic(graphic)
+
+                remove_region_graphic_event_listener = graphic.about_to_be_removed_event.listen(functools.partial(graphic_removed, graphic))
+                display_about_to_be_removed_listener = display_item.about_to_be_removed_event.listen(functools.partial(display_removed, graphic))
+                self.__graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+                display_item.add_graphic(graphic)
+        # apply new value to any existing subscan graphics
+        for graphic, l1, l2, l3 in self.__graphic_trackers:
+            self.__handler._update_graphic(graphic)
+
+    def remove_all_graphics(self) -> None:
+        # remove any graphics
+        for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
+            graphic_property_changed_listener.close()
+            remove_region_graphic_event_listener.close()
+            display_about_to_be_removed_listener.close()
+            graphic.container.remove_graphic(graphic)
+        self.__graphic_trackers = list()
+
+    def __remove_one_graphic(self, graphic_to_remove) -> None:
+        graphic_trackers = list()
+        for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
+            if graphic_to_remove != graphic:
+                graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+            else:
+                graphic_property_changed_listener.close()
+                remove_region_graphic_event_listener.close()
+                display_about_to_be_removed_listener.close()
+        self.__graphic_trackers = graphic_trackers
+
+
+class DisplayItemListModel(Observable.Observable):
+    """Make an observable list model from the item source with a list as the item."""
+
+    def __init__(self, document_model: "DocumentModel.DocumentModel", item_key: str,
+                 predicate: typing.Callable[["DisplayItem.DisplayItem"], bool],
+                 change_event: typing.Optional[Event.Event] = None):
+        super().__init__()
+        self.__document_model = document_model
+        self.__item_key = item_key
+        self.__predicate = predicate
+        self.__items = list()
+
+        self.__item_inserted_listener = document_model.item_inserted_event.listen(self.__item_inserted)
+        self.__item_removed_listener = document_model.item_removed_event.listen(self.__item_removed)
+
+        for index, display_item in enumerate(document_model.display_items):
+            self.__item_inserted("display_items", display_item, index)
+
+        self.__change_event_listener = change_event.listen(self.refilter) if change_event else None
+
+    def close(self) -> None:
+        if self.__change_event_listener:
+            self.__change_event_listener.close()
+            self.__change_event_listener = None
+        self.__item_inserted_listener.close()
+        self.__item_inserted_listener = None
+        self.__item_removed_listener.close()
+        self.__item_removed_listener = None
+        self.__document_model = None
+
+    def __item_inserted(self, key: str, display_item: "DisplayItem.DisplayItem", index: int) -> None:
+        if key == "display_items" and not display_item in self.__items and self.__predicate(display_item):
+            index = len(self.__items)
+            self.__items.append(display_item)
+            self.notify_insert_item(self.__item_key, display_item, index)
+
+    def __item_removed(self, key: str, display_item: "DisplayItem.DisplayItem", index: int) -> None:
+        if key == "display_items" and display_item in self.__items:
+            index = self.__items.index(display_item)
+            self.__items.pop(index)
+            self.notify_remove_item(self.__item_key, display_item, index)
+
+    @property
+    def items(self) -> typing.Sequence:
+        return self.__items
+
+    def __getattr__(self, item):
+        if item == self.__item_key:
+            return self.items
+        raise AttributeError()
+
+    def refilter(self) -> None:
+        self.item_set = set(self.__items)
+        for display_item in self.__document_model.display_items:
+            if self.__predicate(display_item):
+                # insert item if not already inserted
+                if not display_item in self.__items:
+                    index = len(self.__items)
+                    self.__items.append(display_item)
+                    self.notify_insert_item(self.__item_key, display_item, index)
+            else:
+                # remove item if in list
+                if display_item in self.__items:
+                    index = self.__items.index(display_item)
+                    self.__items.pop(index)
+                    self.notify_remove_item(self.__item_key, display_item, index)
+
+
+def ScanContextDisplayItemListModel(document_model: "DocumentModel.DocumentModel", stem_controller: STEMController) -> DisplayItemListModel:
+    def is_scan_context_display_item(display_item: "DisplayItem.DisplayItem") -> bool:
+        return display_item.data_item in stem_controller.scan_context_data_items
+
+    return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_item_changed_event)
+
+
 class PropertyToGraphicBinding(Binding.PropertyBinding):
 
     """
@@ -489,12 +690,13 @@ class ProbeView:
         # thread safe. move actual call to main thread using the event loop.
         self.__latest_probe_state = probe_state
         self.__latest_probe_position = probe_position
-        self.__event_loop.create_task(self.__update_probe_state())
+        self.__event_loop.call_soon_threadsafe(self.__update_probe_state)
 
-    async def __update_probe_state(self):
+    def __update_probe_state(self) -> None:
         # thread unsafe. always called on main thread (via event loop).
         # don't pass arguments to this function; instead use 'latest' values.
         # this helps avoid strange cyclic updates.
+        assert threading.current_thread() == threading.main_thread()
         probe_state = self.__latest_probe_state
         probe_position = self.__latest_probe_position
         if probe_state != self.__probe_state:
@@ -535,121 +737,74 @@ class ProbeView:
             probe_graphic_connection.update_probe_state(probe_position)
 
 
-class SubscanView:
+class SubscanView(AbstractGraphicSetHandler):
     """Observes the STEM controller and updates data items and graphics."""
 
-    def __init__(self, stem_controller: STEMController, document_model, event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, stem_controller: STEMController, document_model: "DocumentModel.DocumentModel", event_loop: asyncio.AbstractEventLoop):
         assert event_loop is not None
-        self.__document_model = document_model
+        self.__stem_controller = stem_controller
         self.__event_loop = event_loop
-        self.__last_data_items_lock = threading.RLock()
-        self.__scan_data_items = list()
-        self.__subscan_connections = list()
-        self.__subscan_state_model = stem_controller._subscan_state_value
-        self.__subscan_region_value = stem_controller._subscan_region_value
-        self.__subscan_rotation_value = stem_controller._subscan_rotation_value
-        # note: these property changed listeners can be fired from a thread.
+        self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
+        self.__subscan_graphic_set = GraphicSetController(self)
+        # note: these property changed listeners can all possibly be fired from a thread.
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
         self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
-        self.__scan_data_items_changed_listener = stem_controller.scan_data_item_states_changed_event.listen(self.__scan_data_item_states_changed)
-        self.__subscan_graphic_trackers = list()
-        self.__update_subscan_region_value = None
-        self.__update_subscan_rotation_value = 0.0
 
     def close(self):
-        for _, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
-            subscan_graphic_property_changed_listener.close()
-            remove_region_graphic_event_listener.close()
-            display_about_to_be_removed_listener.close()
-        self.__subscan_graphic_trackers = list()
         self.__subscan_region_changed_listener.close()
         self.__subscan_region_changed_listener = None
         self.__subscan_rotation_changed_listener.close()
         self.__subscan_rotation_changed_listener = None
-        self.__region_enabled_changed_listener.close()
-        self.__region_enabled_changed_listener = None
-        self.__scan_data_items_changed_listener.close()
-        self.__scan_data_items_changed_listener = None
-        self.__scan_data_items = list()
+        self.__subscan_graphic_set.close()
+        self.__subscan_graphic_set = None
+        self.__scan_display_items_model.close()
+        self.__scan_display_items_model = None
         self.__event_loop = None
+        self.__stem_controller = None
 
-    def __scan_data_item_states_changed(self, data_item_states):
-        # must be thread safe
-        if self.__subscan_state_model.value == SubscanState.DISABLED:
-            with self.__last_data_items_lock:
-                self.__scan_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
+    # methods for handling changes to the subscan region
 
     def __subscan_region_changed(self, name: str) -> None:
         # must be thread safe
-        self.__update_subscan_region_value = self.__subscan_region_value.value
-        self.__event_loop.create_task(self.__update_subscan_region())
+        self.__event_loop.call_soon_threadsafe(self.__update_subscan_region)
 
     def __subscan_rotation_changed(self, name: str) -> None:
         # must be thread safe
-        self.__update_subscan_rotation_value = self.__subscan_rotation_value.value
-        self.__event_loop.create_task(self.__update_subscan_region())
+        self.__event_loop.call_soon_threadsafe(self.__update_subscan_region)
 
-    async def __update_subscan_region(self):
-        subscan_region = self.__update_subscan_region_value
-        subscan_rotation = self.__update_subscan_rotation_value
-        with self.__last_data_items_lock:
-            scan_data_items = self.__scan_data_items
-        if subscan_region:
-            # create subscan graphics for each scan data item if it doesn't exist
-            if not self.__subscan_graphic_trackers:
-                for scan_data_item in scan_data_items:
-                    display_item = self.__document_model.get_display_item_for_data_item(scan_data_item)
-                    if display_item:
-                        subscan_graphic = Graphics.RectangleGraphic()
-                        subscan_graphic.graphic_id = "subscan"
-                        subscan_graphic.label = _("Subscan")
-                        subscan_graphic.bounds = subscan_region
-                        subscan_graphic.rotation = subscan_rotation
-                        subscan_graphic.is_bounds_constrained = True
-
-                        def subscan_graphic_property_changed(subscan_graphic, name):
-                            if name == "bounds":
-                                self.__subscan_region_value.value = subscan_graphic.bounds
-                            if name == "rotation":
-                                self.__subscan_rotation_value.value = subscan_graphic.rotation
-
-                        subscan_graphic_property_changed_listener = subscan_graphic.property_changed_event.listen(functools.partial(subscan_graphic_property_changed, subscan_graphic))
-
-                        def graphic_removed(subscan_graphic):
-                            self.__remove_one_subscan_graphic(subscan_graphic)
-                            self.__subscan_state_model.value = SubscanState.DISABLED
-                            self.__subscan_region_value.value = None
-
-                        def display_removed(subscan_graphic):
-                            self.__remove_one_subscan_graphic(subscan_graphic)
-
-                        remove_region_graphic_event_listener = subscan_graphic.about_to_be_removed_event.listen(functools.partial(graphic_removed, subscan_graphic))
-                        display_about_to_be_removed_listener = display_item.about_to_be_removed_event.listen(functools.partial(display_removed, subscan_graphic))
-                        self.__subscan_graphic_trackers.append((subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
-                        display_item.add_graphic(subscan_graphic)
-            # apply new value to any existing subscan graphics
-            for subscan_graphic, l1, l2, l3 in self.__subscan_graphic_trackers:
-                subscan_graphic.bounds = subscan_region
-                subscan_graphic.rotation = subscan_rotation
+    def __update_subscan_region(self) -> None:
+        assert threading.current_thread() == threading.main_thread()
+        if self.__stem_controller.subscan_region:
+            self.__subscan_graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
-            # remove any graphics
-            for subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
-                subscan_graphic_property_changed_listener.close()
-                remove_region_graphic_event_listener.close()
-                display_about_to_be_removed_listener.close()
-                subscan_graphic.container.remove_graphic(subscan_graphic)
-            self.__subscan_graphic_trackers = list()
+            self.__subscan_graphic_set.remove_all_graphics()
 
-    def __remove_one_subscan_graphic(self, subscan_graphic_to_remove):
-        subscan_graphic_trackers = list()
-        for subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__subscan_graphic_trackers:
-            if subscan_graphic_to_remove != subscan_graphic:
-                subscan_graphic_trackers.append((subscan_graphic, subscan_graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
-            else:
-                subscan_graphic_property_changed_listener.close()
-                remove_region_graphic_event_listener.close()
-                display_about_to_be_removed_listener.close()
-        self.__subscan_graphic_trackers = subscan_graphic_trackers
+    # implement methods for the graphic set handler
+
+    def _graphic_removed(self, subscan_graphic: Graphics.Graphic) -> None:
+        # clear subscan state
+        self.__stem_controller.subscan_state = SubscanState.DISABLED
+        self.__stem_controller.subscan_region = None
+        self.__stem_controller.subscan_rotation = 0
+
+    def _create_graphic(self) -> Graphics.RectangleGraphic:
+        subscan_graphic = Graphics.RectangleGraphic()
+        subscan_graphic.graphic_id = "subscan"
+        subscan_graphic.label = _("Subscan")
+        subscan_graphic.bounds = tuple(self.__stem_controller.subscan_region)
+        subscan_graphic.rotation = self.__stem_controller.subscan_rotation
+        subscan_graphic.is_bounds_constrained = True
+        return subscan_graphic
+
+    def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
+        subscan_graphic.bounds = tuple(self.__stem_controller.subscan_region)
+        subscan_graphic.rotation = self.__stem_controller.subscan_rotation
+
+    def _graphic_property_changed(self, subscan_graphic: Graphics.Graphic, name: str) -> None:
+        if name == "bounds":
+            self.__stem_controller.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
+        if name == "rotation":
+            self.__stem_controller.subscan_rotation = subscan_graphic.rotation
 
 
 class ProbeViewController:
