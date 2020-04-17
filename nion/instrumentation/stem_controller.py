@@ -12,6 +12,7 @@ import typing
 # None
 
 # local libraries
+from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
 from nion.swift.model import HardwareSource
 from nion.utils import Event
@@ -23,7 +24,6 @@ from nion.utils import Registry
 if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
-    from nion.swift.model import DocumentModel
 
 
 _ = gettext.gettext
@@ -430,6 +430,10 @@ class GraphicSetController:
             display_about_to_be_removed_listener.close()
         self.__graphic_trackers = list()
 
+    @property
+    def graphics(self) -> typing.Sequence[Graphics.Graphic]:
+        return [t[0] for t in self.__graphic_trackers]
+
     def synchronize_graphics(self, display_items: typing.Sequence["DisplayItem.DisplayItem"]) -> None:
         # create subscan graphics for each scan data item if it doesn't exist
         if not self.__graphic_trackers:
@@ -450,7 +454,7 @@ class GraphicSetController:
                 self.__graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
                 display_item.add_graphic(graphic)
         # apply new value to any existing subscan graphics
-        for graphic, l1, l2, l3 in self.__graphic_trackers:
+        for graphic in self.graphics:
             self.__handler._update_graphic(graphic)
 
     def remove_all_graphics(self) -> None:
@@ -477,7 +481,7 @@ class GraphicSetController:
 class DisplayItemListModel(Observable.Observable):
     """Make an observable list model from the item source with a list as the item."""
 
-    def __init__(self, document_model: "DocumentModel.DocumentModel", item_key: str,
+    def __init__(self, document_model: DocumentModel.DocumentModel, item_key: str,
                  predicate: typing.Callable[["DisplayItem.DisplayItem"], bool],
                  change_event: typing.Optional[Event.Event] = None):
         super().__init__()
@@ -552,18 +556,19 @@ class DisplayItemListModel(Observable.Observable):
                     self.notify_remove_item(self.__item_key, display_item, index)
 
 
-def ScanContextDisplayItemListModel(document_model: "DocumentModel.DocumentModel", stem_controller: STEMController) -> DisplayItemListModel:
+def ScanContextDisplayItemListModel(document_model: DocumentModel.DocumentModel, stem_controller: STEMController) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: "DisplayItem.DisplayItem") -> bool:
         return display_item.data_item in stem_controller.scan_context_data_items
 
     return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_item_changed_event)
 
 
-class ProbeView(AbstractGraphicSetHandler):
+class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the probe (STEM controller) and updates data items and graphics."""
 
-    def __init__(self, stem_controller: STEMController, document_model: "DocumentModel.DocumentModel", event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
         self.__stem_controller = stem_controller
+        self.__document_model = document_model
         self.__event_loop = event_loop
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
         self.__graphic_set = GraphicSetController(self)
@@ -571,6 +576,7 @@ class ProbeView(AbstractGraphicSetHandler):
         self.__probe_state = None
         self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+        self.__document_model.register_implicit_dependency(self)
 
         # special handling when document closes
         def unlisten():
@@ -584,6 +590,7 @@ class ProbeView(AbstractGraphicSetHandler):
         if self.__probe_state_changed_listener:
             self.__probe_state_changed_listener.close()
             self.__probe_state_changed_listener = None
+        self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
         self.__graphic_set = None
         self.__scan_display_items_model.close()
@@ -591,6 +598,7 @@ class ProbeView(AbstractGraphicSetHandler):
         self.__document_close_listener.close()
         self.__document_close_listener = None
         self.__event_loop = None
+        self.__document_model = None
         self.__stem_controller = None
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
@@ -626,31 +634,40 @@ class ProbeView(AbstractGraphicSetHandler):
         if name == "position":
             self.__probe_position_value.value = Geometry.FloatPoint.make(graphic.position)
 
+    def get_dependents(self, item) -> typing.Sequence:
+        graphics = self.__graphic_set.graphics
+        if item in graphics:
+            return list(set(graphics) - {item})
+        return list()
 
-class SubscanView(AbstractGraphicSetHandler):
+class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the STEM controller and updates data items and graphics."""
 
-    def __init__(self, stem_controller: STEMController, document_model: "DocumentModel.DocumentModel", event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
         self.__stem_controller = stem_controller
+        self.__document_model = document_model
         self.__event_loop = event_loop
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
-        self.__subscan_graphic_set = GraphicSetController(self)
+        self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
         self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
         self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
+        self.__document_model.register_implicit_dependency(self)
 
     def close(self):
+        self.__document_model.unregister_implicit_dependency(self)
         self.__subscan_region_changed_listener.close()
         self.__subscan_region_changed_listener = None
         self.__subscan_rotation_changed_listener.close()
         self.__subscan_rotation_changed_listener = None
-        self.__subscan_graphic_set.close()
-        self.__subscan_graphic_set = None
+        self.__graphic_set.close()
+        self.__graphic_set = None
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = None
         self.__document_close_listener.close()
         self.__document_close_listener = None
         self.__event_loop = None
+        self.__document_model = None
         self.__stem_controller = None
 
     # methods for handling changes to the subscan region
@@ -666,9 +683,9 @@ class SubscanView(AbstractGraphicSetHandler):
     def __update_subscan_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
         if self.__stem_controller.subscan_region:
-            self.__subscan_graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
+            self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
-            self.__subscan_graphic_set.remove_all_graphics()
+            self.__graphic_set.remove_all_graphics()
 
     # implement methods for the graphic set handler
 
@@ -696,6 +713,12 @@ class SubscanView(AbstractGraphicSetHandler):
             self.__stem_controller.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
         if name == "rotation":
             self.__stem_controller.subscan_rotation = subscan_graphic.rotation
+
+    def get_dependents(self, item) -> typing.Sequence:
+        graphics = self.__graphic_set.graphics
+        if item in graphics:
+            return list(set(graphics) - {item})
+        return list()
 
 
 class ProbeViewController:
