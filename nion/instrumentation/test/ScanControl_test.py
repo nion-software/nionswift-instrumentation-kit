@@ -129,13 +129,13 @@ class TestScanControlClass(unittest.TestCase):
                 self.instrument = instrument
                 self.hardware_source = hardware_source
                 self.scan_state_controller = scan_state_controller
-                self.probe_view_controller = stem_controller.ProbeViewController(self.document_model, self.document_controller.event_loop)
+                self.scan_context_controller = stem_controller.ScanContextController(self.document_model, self.document_controller.event_loop)
 
                 return self
 
             def __exit__(self, *exc_details):
-                self.probe_view_controller.close()
-                self.probe_view_controller = None
+                self.scan_context_controller.close()
+                self.scan_context_controller = None
                 self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.instrument, self.hardware_source, self.scan_state_controller)
 
             @property

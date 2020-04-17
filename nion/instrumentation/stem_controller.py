@@ -721,8 +721,8 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
         return list()
 
 
-class ProbeViewController:
-    """Manage a ProbeView for each instrument (STEMController) that gets registered."""
+class ScanContextController:
+    """Manage probe view, subscan, and drift area for each instrument (STEMController) that gets registered."""
 
     def __init__(self, document_model, event_loop):
         assert event_loop is not None
