@@ -104,7 +104,7 @@ class STEMController:
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext()
         self.probe_state_changed_event = Event.Event()
-        self.__subscan_state_value = Model.PropertyModel(SubscanState.INVALID)
+        self.__subscan_state_value : Model.PropertyModel[SubscanState] = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value = Model.PropertyModel(None)
         self.__subscan_rotation_value = Model.PropertyModel(0.0)
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
@@ -184,7 +184,7 @@ class STEMController:
         return self.__probe_position_value
 
     @property
-    def _subscan_state_value(self) -> Model.PropertyModel:
+    def _subscan_state_value(self) -> Model.PropertyModel[SubscanState]:
         """Internal use."""
         return self.__subscan_state_value
 
@@ -194,7 +194,7 @@ class STEMController:
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
-        self.__subscan_state_value = value
+        self.__subscan_state_value.value = value
 
     @property
     def _subscan_region_value(self):
@@ -208,7 +208,7 @@ class STEMController:
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__subscan_region_value = tuple(value) if value is not None else None
+        self.__subscan_region_value.value = tuple(value) if value is not None else None
 
     @property
     def _subscan_rotation_value(self):

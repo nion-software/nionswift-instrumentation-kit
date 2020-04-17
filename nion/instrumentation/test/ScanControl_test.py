@@ -884,6 +884,18 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.stop_playing()
             self.assertFalse(hardware_source.subscan_enabled)
 
+    def test_removing_subscan_graphic_disables_subscan(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            scan_state_controller.handle_subscan_enabled(True)
+            document_controller.periodic()
+            self.assertTrue(hardware_source.subscan_enabled)
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item.remove_graphic(display_item.graphics[0])
+            document_controller.periodic()
+            self.assertFalse(hardware_source.subscan_enabled)
+
     def test_scan_context_updated_when_starting_playing(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
