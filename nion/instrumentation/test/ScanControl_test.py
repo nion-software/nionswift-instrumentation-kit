@@ -103,12 +103,16 @@ class TestScanControlClass(unittest.TestCase):
         HardwareSource.HardwareSourceManager().unregister_instrument("usim_stem_controller")
 
     def _close_scan_hardware_source(self, document_controller, document_model, instrument, hardware_source, scan_state_controller):
+        # this would be closed with document controller if it were added to a panel. close it first.
         scan_state_controller.close()
+        # document window gets closed next. this also closes document model.
+        document_controller.close()
+        # hardware source gets shut down with app.
         hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(hardware_source)
+        # optional clean-up.
         self._close_hardware_source()
         self._close_instrument(instrument)
-        document_controller.close()
 
     def _make_scan_context(self, channel_id=None):
 

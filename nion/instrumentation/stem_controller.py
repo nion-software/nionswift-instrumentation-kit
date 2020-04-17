@@ -495,6 +495,14 @@ class DisplayItemListModel(Observable.Observable):
 
         self.__change_event_listener = change_event.listen(self.refilter) if change_event else None
 
+        # special handling when document closes
+        def unlisten():
+            if self.__change_event_listener:
+                self.__change_event_listener.close()
+                self.__change_event_listener = None
+
+        self.__document_close_listener = document_model.about_to_close_event.listen(unlisten)
+
     def close(self) -> None:
         if self.__change_event_listener:
             self.__change_event_listener.close()
@@ -503,6 +511,8 @@ class DisplayItemListModel(Observable.Observable):
         self.__item_inserted_listener = None
         self.__item_removed_listener.close()
         self.__item_removed_listener = None
+        self.__document_close_listener.close()
+        self.__document_close_listener = None
         self.__document_model = None
 
     def __item_inserted(self, key: str, display_item: "DisplayItem.DisplayItem", index: int) -> None:
@@ -553,7 +563,7 @@ def ScanContextDisplayItemListModel(document_model: "DocumentModel.DocumentModel
 class ProbeView(AbstractGraphicSetHandler):
     """Observes the probe (STEM controller) and updates data items and graphics."""
 
-    def __init__(self, stem_controller: STEMController, document_model, event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, stem_controller: STEMController, document_model: "DocumentModel.DocumentModel", event_loop: asyncio.AbstractEventLoop):
         self.__stem_controller = stem_controller
         self.__event_loop = event_loop
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
@@ -563,13 +573,24 @@ class ProbeView(AbstractGraphicSetHandler):
         self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
 
+        # special handling when document closes
+        def unlisten():
+            if self.__probe_state_changed_listener:
+                self.__probe_state_changed_listener.close()
+                self.__probe_state_changed_listener = None
+
+        self.__document_close_listener = document_model.about_to_close_event.listen(unlisten)
+
     def close(self):
-        self.__probe_state_changed_listener.close()
-        self.__probe_state_changed_listener = None
+        if self.__probe_state_changed_listener:
+            self.__probe_state_changed_listener.close()
+            self.__probe_state_changed_listener = None
         self.__graphic_set.close()
         self.__graphic_set = None
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = None
+        self.__document_close_listener.close()
+        self.__document_close_listener = None
         self.__event_loop = None
         self.__stem_controller = None
 
@@ -628,6 +649,8 @@ class SubscanView(AbstractGraphicSetHandler):
         self.__subscan_graphic_set = None
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = None
+        self.__document_close_listener.close()
+        self.__document_close_listener = None
         self.__event_loop = None
         self.__stem_controller = None
 
