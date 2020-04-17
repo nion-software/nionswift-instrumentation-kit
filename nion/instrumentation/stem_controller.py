@@ -98,7 +98,7 @@ class STEMController:
     """
 
     def __init__(self):
-        self.__probe_position_value = Model.PropertyModel()
+        self.__probe_position_value : Model.PropertyModel[Geometry.FloatPoint] = Model.PropertyModel()
         self.__probe_position_value.on_value_changed = self.set_probe_position
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
@@ -179,7 +179,7 @@ class STEMController:
         pass
 
     @property
-    def _probe_position_value(self):
+    def _probe_position_value(self) -> Model.PropertyModel[Geometry.FloatPoint]:
         """Internal use."""
         return self.__probe_position_value
 
@@ -251,19 +251,18 @@ class STEMController:
         self.__scan_context.clear()
 
     @property
-    def probe_position(self):
+    def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
         """ Return the probe position, in normalized coordinates with origin at top left. Only valid if probe_state is 'parked'."""
         return self.__probe_position_value.value
 
     @probe_position.setter
-    def probe_position(self, value):
+    def probe_position(self, value: typing.Optional[Geometry.FloatPoint]) -> None:
         self.set_probe_position(value)
 
-    def set_probe_position(self, new_probe_position):
+    def set_probe_position(self, new_probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         """ Set the probe position, in normalized coordinates with origin at top left. """
         if new_probe_position is not None:
             # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
-            new_probe_position = Geometry.FloatPoint.make(new_probe_position)
             new_probe_position = Geometry.FloatPoint(y=max(min(new_probe_position.y, 1.0), 0.0),
                                                      x=max(min(new_probe_position.x, 1.0), 0.0))
         old_probe_position = self.__probe_position_value.value
@@ -594,11 +593,11 @@ class ProbeView(AbstractGraphicSetHandler):
         self.__event_loop = None
         self.__stem_controller = None
 
-    def __probe_state_changed(self, probe_state, probe_position):
+    def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # thread safe. move actual call to main thread using the event loop.
         self.__event_loop.call_soon_threadsafe(self.__update_probe_state, probe_state, probe_position)
 
-    def __update_probe_state(self, probe_state, probe_position) -> None:
+    def __update_probe_state(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         assert threading.current_thread() == threading.main_thread()
         if probe_state != "scanning" and probe_position is not None:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
@@ -625,7 +624,7 @@ class ProbeView(AbstractGraphicSetHandler):
 
     def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
         if name == "position":
-            self.__probe_position_value.value = graphic.position
+            self.__probe_position_value.value = Geometry.FloatPoint.make(graphic.position)
 
 
 class SubscanView(AbstractGraphicSetHandler):

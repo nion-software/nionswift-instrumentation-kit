@@ -1129,7 +1129,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         return None
 
-    def __probe_state_changed(self, probe_state, probe_position):
+    def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
         # probe_state can be 'parked', or 'scanning'
         self._set_probe_position(probe_position)
@@ -1145,10 +1145,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller._exit_scanning_state()
 
     @property
-    def probe_state(self):
+    def probe_state(self) -> str:
         return self.__stem_controller.probe_state
 
-    def _set_probe_position(self, probe_position):
+    def _set_probe_position(self, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         if probe_position is not None:
             if hasattr(self.__device, "set_scan_context_probe_position"):
                 self.__device.set_scan_context_probe_position(self.__stem_controller.scan_context, probe_position)
@@ -1167,14 +1167,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__last_idle_position
 
     @property
-    def probe_position(self):
+    def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
         return self.__stem_controller.probe_position
 
     @probe_position.setter
-    def probe_position(self, probe_position):
+    def probe_position(self, probe_position: typing.Optional[typing.Union[Geometry.FloatPoint, typing.Tuple]]):
+        probe_position = Geometry.FloatPoint.make(probe_position) if probe_position else None
         self.__stem_controller.set_probe_position(probe_position)
 
-    def validate_probe_position(self):
+    def validate_probe_position(self) -> None:
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.

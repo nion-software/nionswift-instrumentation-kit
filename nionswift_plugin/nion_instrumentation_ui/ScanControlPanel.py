@@ -4,6 +4,7 @@ import functools
 import gettext
 import pkgutil
 import sys
+import typing
 
 # third party libraries
 import math
@@ -532,7 +533,7 @@ class ScanControlStateController:
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(data_item_states)
 
-    def __probe_state_changed(self, probe_state, probe_position):
+    def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         if self.on_probe_state_changed:
             self.on_probe_state_changed(probe_state, probe_position)
         if self.on_positioned_check_box_changed:
