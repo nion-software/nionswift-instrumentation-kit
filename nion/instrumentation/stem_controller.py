@@ -564,7 +564,7 @@ class EventLoopMonitor:
     """Utility base class to monitor availability of event loop."""
 
     def __init__(self, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        self.__event_loop = event_loop
+        self.__event_loop : typing.Optional[asyncio.AbstractEventLoop] = event_loop
         self.__document_close_listener = document_model.about_to_close_event.listen(self._unlisten)
         self.__closed = False
 
@@ -583,6 +583,7 @@ class EventLoopMonitor:
                 if not self.__closed:
                     fn(*args)
 
+            assert self.__event_loop
             self.__event_loop.call_soon_threadsafe(safe_fn)
 
 
