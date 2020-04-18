@@ -107,7 +107,11 @@ class STEMController:
         self.__subscan_state_value : Model.PropertyModel[SubscanState] = Model.PropertyModel(SubscanState.INVALID)
         self.__subscan_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
         self.__subscan_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
+        self.__drift_channel_id_value : Model.PropertyModel[str] = Model.PropertyModel()
+        self.__drift_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
+        self.__drift_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
+        self.__scan_context_channel_map : typing.Dict[str, "DataItem.DataItem"] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
@@ -115,12 +119,19 @@ class STEMController:
 
     def close(self):
         self.__scan_context_data_items = None
+        self.__scan_context_channel_map = None
         self.__subscan_state_value.close()
         self.__subscan_state_value = None
         self.__subscan_region_value.close()
         self.__subscan_region_value = None
         self.__subscan_rotation_value.close()
         self.__subscan_rotation_value = None
+        self.__drift_channel_id_value.close()
+        self.__drift_channel_id_value = None
+        self.__drift_region_value.close()
+        self.__drift_region_value = None
+        self.__drift_rotation_value.close()
+        self.__drift_rotation_value = None
         self.__probe_position_value.close()
         self.__probe_position_value = None
 
@@ -134,6 +145,9 @@ class STEMController:
         self.__subscan_state_value.value = SubscanState.INVALID
         self.__subscan_region_value.value = None
         self.__subscan_rotation_value.value = 0
+        self.__drift_channel_id_value.value = None
+        self.__drift_region_value.value = None
+        self.__drift_rotation_value.value = 0
         self.__scan_context_data_items.clear()
 
     # configuration methods
@@ -234,8 +248,49 @@ class STEMController:
     def subscan_rotation(self, value: float):
         self.__subscan_rotation_value.value = value
 
+    @property
+    def _drift_channel_value(self) -> Model.PropertyModel[str]:
+        """Internal use."""
+        return self.__drift_channel_id_value
+
+    @property
+    def drift_channel_id(self) -> typing.Optional[str]:
+        return self.__drift_channel_id_value.value
+
+    @drift_channel_id.setter
+    def drift_channel_id(self, value: typing.Optional[str]) -> None:
+        self.__drift_channel_id_value.value = value
+
+    @property
+    def _drift_region_value(self) -> Model.PropertyModel[Geometry.FloatRect]:
+        """Internal use."""
+        return self.__drift_region_value
+
+    @property
+    def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
+        region_tuple = self.__drift_region_value.value
+        return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
+
+    @drift_region.setter
+    def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
+        self.__drift_region_value.value = tuple(value) if value is not None else None
+
+    @property
+    def _drift_rotation_value(self) -> Model.PropertyModel[float]:
+        """Internal use."""
+        return self.__drift_rotation_value
+
+    @property
+    def drift_rotation(self) -> float:
+        return typing.cast(float, self.__drift_rotation_value.value)
+
+    @drift_rotation.setter
+    def drift_rotation(self, value: float):
+        self.__drift_rotation_value.value = value
+
     def disconnect_probe_connections(self):
         self.__scan_context_data_items = list()
+        self.__scan_context_channel_map = dict()
         self.scan_context_data_items_changed_event.fire()
 
     def _data_item_states_changed(self, data_item_states):
@@ -243,11 +298,16 @@ class STEMController:
             if self.subscan_state == SubscanState.DISABLED:
                 # only update context display items when subscan is disabled
                 self.__scan_context_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
+                self.__scan_context_channel_map = {data_item_state.get("channel_id"): data_item_state.get("data_item") for data_item_state in data_item_states}
             self.scan_context_data_items_changed_event.fire()
 
     @property
     def scan_context_data_items(self) -> typing.Sequence["DataItem.DataItem"]:
         return self.__scan_context_data_items
+
+    @property
+    def scan_context_channel_map(self) -> typing.Mapping[str, "DataItem.DataItem"]:
+        return self.__scan_context_channel_map
 
     @property
     def scan_context(self) -> ScanContext:
@@ -697,6 +757,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__stem_controller = None
 
     def _unlisten(self) -> None:
+        # unlisten to the event loop dependent listeners
         self.__subscan_region_changed_listener.close()
         self.__subscan_region_changed_listener = None
         self.__subscan_rotation_changed_listener.close()
@@ -753,6 +814,124 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         return list()
 
 
+class DriftView(EventLoopMonitor):
+    """Observes the STEM controller and updates drift data item and graphic."""
+
+    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        super().__init__(document_model, event_loop)
+        self.__stem_controller = stem_controller
+        self.__document_model = document_model
+        self.__graphic_display_item : typing.Optional["DisplayItem.DisplayItem"] = None
+        self.__graphic : typing.Optional[Graphics.RectangleGraphic] = None
+        self.__graphic_property_changed_listener = None
+        self.__graphic_about_to_be_removed_listener = None
+        # note: these property changed listeners can all possibly be fired from a thread.
+        self.__scan_context_data_items_changed_listener = stem_controller.scan_context_data_items_changed_event.listen(self.__scan_context_data_items_changed)
+        self.__drift_channel_id_changed_listener = stem_controller._drift_region_value.property_changed_event.listen(self.__drift_channel_id_changed)
+        self.__drift_region_changed_listener = stem_controller._drift_region_value.property_changed_event.listen(self.__drift_region_changed)
+        self.__drift_rotation_changed_listener = stem_controller._drift_rotation_value.property_changed_event.listen(self.__drift_rotation_changed)
+
+    def close(self):
+        self._mark_closed()
+        if self.__graphic_property_changed_listener:
+            self.__graphic_property_changed_listener.close()
+            self.__graphic_property_changed_listener = None
+        if self.__graphic_about_to_be_removed_listener:
+            self.__graphic_about_to_be_removed_listener.close()
+            self.__graphic_about_to_be_removed_listener = None
+        self.__graphic_display_item = None
+        self.__graphic = None
+        self.__document_model = None
+        self.__stem_controller = None
+
+    def _unlisten(self) -> None:
+        # unlisten to the event loop dependent listeners
+        self.__drift_region_changed_listener.close()
+        self.__drift_region_changed_listener = None
+        self.__drift_rotation_changed_listener.close()
+        self.__drift_rotation_changed_listener = None
+        self.__drift_channel_id_changed_listener.close()
+        self.__drift_channel_id_changed_listener = None
+        self.__scan_context_data_items_changed_listener.close()
+        self.__scan_context_data_items_changed_listener = None
+
+    def __scan_context_data_items_changed(self) -> None:
+        # must be thread safe
+        self._call_soon_threadsafe(self.__update_drift_region)
+
+    # methods for handling changes to the drift region
+
+    def __drift_channel_id_changed(self, name: str) -> None:
+        # must be thread safe
+        self._call_soon_threadsafe(self.__update_drift_region)
+
+    def __drift_region_changed(self, name: str) -> None:
+        # must be thread safe
+        self._call_soon_threadsafe(self.__update_drift_region)
+
+    def __drift_rotation_changed(self, name: str) -> None:
+        # must be thread safe
+        self._call_soon_threadsafe(self.__update_drift_region)
+
+    def __update_drift_region(self) -> None:
+        assert threading.current_thread() == threading.main_thread()
+        if self.__stem_controller.drift_channel_id:
+            drift_data_item = self.__stem_controller.scan_context_channel_map.get(self.__stem_controller.drift_channel_id)
+        else:
+            drift_data_item = None
+        # determine if a new graphic should exist and if it exists already
+        if self.__stem_controller.drift_channel_id and self.__stem_controller.drift_region and drift_data_item:
+            drift_display_item = self.__document_model.get_display_item_for_data_item(drift_data_item)
+            # remove the graphic if it already exists on the wrong display item
+            if self.__graphic and (not drift_display_item or not self.__graphic in drift_display_item.graphics):
+                self.__remove_graphic()
+            # it already exists on the correct display item, update it.
+            if self.__graphic:
+                self.__graphic.bounds = tuple(self.__stem_controller.drift_region)
+                self.__graphic.rotation = self.__stem_controller.drift_rotation
+            # otherwise create it if there is a display item for it
+            elif drift_display_item:
+                drift_graphic = Graphics.RectangleGraphic()
+                drift_graphic.graphic_id = "drift"
+                drift_graphic.label = _("Drift")
+                drift_graphic.bounds = tuple(self.__stem_controller.drift_region)
+                drift_graphic.rotation = self.__stem_controller.drift_rotation
+                drift_graphic.is_bounds_constrained = True
+                drift_graphic.color = "#808"  # purple
+                drift_display_item.add_graphic(drift_graphic)
+                self.__graphic_display_item = drift_display_item
+                self.__graphic = drift_graphic
+                self.__graphic_property_changed_listener = self.__graphic.property_changed_event.listen(self.__graphic_property_changed)
+                self.__graphic_about_to_be_removed_listener = self.__graphic.about_to_be_removed_event.listen(self.__graphic_about_to_be_removed)
+            # otherwise do nothing, graphic is removed and not tracked.
+        else:
+            # either no drift channel_id or drift region - so remove the graphic
+            if self.__graphic:
+                self.__remove_graphic()
+
+    def __remove_graphic(self):
+        self.__graphic_property_changed_listener.close()
+        self.__graphic_property_changed_listener = None
+        self.__graphic_about_to_be_removed_listener.close()
+        self.__graphic_about_to_be_removed_listener = None
+        self.__graphic_display_item.remove_graphic(self.__graphic)
+        self.__graphic_display_item = None
+        self.__graphic = None
+
+    def __graphic_about_to_be_removed(self) -> None:
+        # clear drift state
+        self.__stem_controller.drift_channel_id = None
+        self.__stem_controller.drift_region = None
+        self.__stem_controller.drift_rotation = 0
+
+    def __graphic_property_changed(self, key: str) -> None:
+        assert self.__graphic
+        if key == "bounds":
+            self.__stem_controller.drift_region = Geometry.FloatRect.make(self.__graphic.bounds)
+        if key == "rotation":
+            self.__stem_controller.drift_rotation = self.__graphic.rotation
+
+
 class ScanContextController:
     """Manage probe view, subscan, and drift area for each instrument (STEMController) that gets registered."""
 
@@ -784,6 +963,8 @@ class ScanContextController:
             instrument._probe_view = ProbeView(instrument, self.__document_model, self.__event_loop)
         if hasattr(instrument, "_subscan_region_value"):
             instrument._subscan_view = SubscanView(instrument, self.__document_model, self.__event_loop)
+        if hasattr(instrument, "_drift_region_value"):
+            instrument._drift_view = DriftView(instrument, self.__document_model, self.__event_loop)
 
     def unregister_instrument(self, instrument):
         if hasattr(instrument, "_probe_view"):
@@ -792,6 +973,9 @@ class ScanContextController:
         if hasattr(instrument, "_subscan_view"):
             instrument._subscan_view.close()
             instrument._subscan_view = None
+        if hasattr(instrument, "_drift_view"):
+            instrument._drift_view.close()
+            instrument._drift_view = None
 
 
 # the plan is to migrate away from the hardware manager as a registration system.

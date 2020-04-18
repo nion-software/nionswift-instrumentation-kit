@@ -2,6 +2,7 @@ import contextlib
 import copy
 import threading
 import time
+import typing
 import unittest
 
 import numpy
@@ -1112,6 +1113,34 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertLess(modified, data_item.modified)
             self.assertEqual(modified2, data_item2.modified)
+
+    def test_drift_rectangle_appears_when_setting_drift_region(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            data_item = document_model.data_items[0]
+            display_item = document_model.get_display_item_for_data_item(data_item)
+            stem_controller_ = typing.cast(stem_controller.STEMController, scan_context.instrument)
+            stem_controller_.drift_channel_id = hardware_source.get_channel_state(0).channel_id
+            document_controller.periodic()
+            self.assertEqual(0, len(display_item.graphics))
+            stem_controller_.drift_region = Geometry.FloatRect.from_tlhw(0.2, 0.2, 0.4, 0.4)
+            document_controller.periodic()
+            self.assertEqual(1, len(display_item.graphics))
+
+    def test_removing_drift_rectangle_disables_drift_correction(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            data_item = document_model.data_items[0]
+            display_item = document_model.get_display_item_for_data_item(data_item)
+            stem_controller_ = typing.cast(stem_controller.STEMController, scan_context.instrument)
+            stem_controller_.drift_channel_id = hardware_source.get_channel_state(0).channel_id
+            stem_controller_.drift_region = Geometry.FloatRect.from_tlhw(0.2, 0.2, 0.4, 0.4)
+            document_controller.periodic()
+            display_item.remove_graphic(display_item.graphics[0])
+            self.assertIsNone(stem_controller_.drift_channel_id)
+            self.assertIsNone(stem_controller_.drift_region)
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

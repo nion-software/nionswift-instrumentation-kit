@@ -858,6 +858,30 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __subscan_rotation_changed(self, name):
         self.__set_current_frame_parameters(self.__frame_parameters, False)
 
+    @property
+    def drift_channel_id(self) -> typing.Optional[str]:
+        return self.__stem_controller._drift_channel_value.value
+
+    @drift_channel_id.setter
+    def drift_channel_id(self, value: typing.Optional[str]) -> None:
+        self.__stem_controller._drift_channel_value.value = value
+
+    @property
+    def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
+        return self.__stem_controller._drift_region_value.value
+
+    @drift_region.setter
+    def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
+        self.__stem_controller._drift_region_value.value = value
+
+    @property
+    def drift_rotation(self) -> float:
+        return self.__stem_controller._drift_rotation_value.value
+
+    @drift_rotation.setter
+    def drift_rotation(self, value: float) -> None:
+        self.__stem_controller._drift_rotation_value.value = value
+
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
@@ -1099,6 +1123,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 if graphic_id == "probe":
                     display_item.remove_graphic(graphic)
                 elif graphic_id == "subscan":
+                    display_item.remove_graphic(graphic)
+                elif graphic_id == "drift":
                     display_item.remove_graphic(graphic)
 
     def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[typing.Dict]]]:
