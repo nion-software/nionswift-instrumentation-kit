@@ -7,4 +7,4 @@
 -e git://github.com/nion-software/nionui.git#egg=nionui
 -e git://github.com/nion-software/niondata.git#egg=niondata
 -e git://github.com/nion-software/nionswift.git#egg=nionswift
--e git://github.com/nion-software/nionswift-usim.git#egg=nionswift
+-e git://github.com/nion-software/nionswift-usim.git#egg=nionswift-usim

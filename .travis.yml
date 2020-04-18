@@ -1,17 +1,16 @@
 # commands to specify testing environments
 language: python
-matrix:
+dist: xenial
+os: linux
+jobs:
   include:
     - python: 3.6
     - python: 3.7
       dist: xenial
-      sudo: true
     - python: 3.8
       dist: xenial
-      sudo: true
     - python: nightly
       dist: xenial
-      sudo: true
   allow_failures:
     - python: nightly
 
@@ -34,7 +33,7 @@ script:
 # command to deploy to pypi on tags
 deploy:
   provider: pypi
-  user: "cmeyer"
+  username: "cmeyer"
   password:
     secure: "SsL35ntn84DNAUrMSGxvkGdU6DNaCtYvRJHrg7zYb+IIQYOYdIs92QFKpwPlEH0q6i2ujtZ2Al1wqNUABfrN4dj1xDIEvnnOW3aAlgLfO2bVlWsILvs1jnJVGvEBzWBRNTdllVp8KJLPniO7cQ6L25pKhme6k0JcJ4ff6v2RLQzPtrVo2WIfi9TojQXCMGkjMXuy9QSvIfljx1e6a3Tx/AWpVLXYCLlOFWd1oAzkeRbI9gNdzXn8qLxkx9pUydiXp905+K9Bmiy6JKEtYN7guhMzuj5+txVaQiOrWgZefL4NB2zZD1TnAspqjZLDm3xjuGqLEEGv2Evu7mo2vsm0T5q9MBmLQqDdO0aQES5b5BPEso+xFpa7fg9IPc8hIYsvIVDmbsIax1Ill0RKCTdCvqMLeBNopcv22cyMlDzqXgBhQWweI7Adr/cIcoyDowJXighS9F+zjF4GnZvK8Pj8Ye7X3u/mSH08Oap3217NVQLSGzfA3ALz1hrPGEVy3VEGc1tgWKN2wYpc5hzteVNELEG6z6Y0tCfGz33e/m/ZF9olXcgEQtLd5UsGMMCovXzS48Cf1pdzAbY5UrT93rhTG3A1vebxxELCh3kDak4cyfpeY5yVQC/wdPWycRQq6aoKtCBQSglps/iNKu7wf7eR4ecEOXC6Rt2NFlOuiPbFjyo="
   on:
