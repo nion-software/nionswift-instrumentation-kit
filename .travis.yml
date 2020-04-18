@@ -23,10 +23,12 @@ branches:
 # command to install dependencies
 install:
   - pip install -r test-requirements.txt
+  - python -m pip install mypy
 
 # command to run tests. disabled in this project since these tests are meant to be used from specific instances.
 script:
-  python -m unittest discover nionswift_plugin
+  - python -m unittest discover nionswift_plugin
+  - mypy --namespace-packages --ignore-missing-imports nion/instrumentation/stem_controller.py
 
 # command to deploy to pypi on tags
 deploy:

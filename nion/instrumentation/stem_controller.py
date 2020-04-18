@@ -108,8 +108,7 @@ class STEMController:
         self.__subscan_region_value = Model.PropertyModel(None)
         self.__subscan_rotation_value = Model.PropertyModel(0.0)
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
-        self.scan_data_item_states_changed_event = Event.Event()
-        self.scan_context_data_item_changed_event = Event.Event()
+        self.scan_context_data_items_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
         self.__scan_controller = None
@@ -190,7 +189,7 @@ class STEMController:
 
     @property
     def subscan_state(self) -> SubscanState:
-        return self.__subscan_state_value.value
+        return typing.cast(SubscanState, self.__subscan_state_value.value)
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
@@ -225,16 +224,14 @@ class STEMController:
 
     def disconnect_probe_connections(self):
         self.__scan_context_data_items = list()
-        self.scan_data_item_states_changed_event.fire(list())
-        self.scan_context_data_item_changed_event.fire()
+        self.scan_context_data_items_changed_event.fire()
 
     def _data_item_states_changed(self, data_item_states):
         if len(data_item_states) > 0:
             if self.subscan_state == SubscanState.DISABLED:
                 # only update context display items when subscan is disabled
                 self.__scan_context_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
-            self.scan_data_item_states_changed_event.fire(data_item_states)
-            self.scan_context_data_item_changed_event.fire()
+            self.scan_context_data_items_changed_event.fire()
 
     @property
     def scan_context_data_items(self) -> typing.Sequence["DataItem.DataItem"]:
@@ -336,7 +333,7 @@ class STEMController:
 
     # required functions (templates). subclasses should override.
 
-    def TryGetVal(self, s: str) -> (bool, float):
+    def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         return False, None
 
     def GetVal(self, s: str, default_value: float=None) -> float:
@@ -420,7 +417,7 @@ class AbstractGraphicSetHandler(abc.ABC):
 class GraphicSetController:
 
     def __init__(self, handler: AbstractGraphicSetHandler):
-        self.__graphic_trackers = list()
+        self.__graphic_trackers : typing.List[typing.Tuple[Graphics.Graphic, Event.EventListener, Event.EventListener, Event.EventListener]] = list()
         self.__handler = handler
 
     def close(self):
@@ -435,7 +432,7 @@ class GraphicSetController:
         return [t[0] for t in self.__graphic_trackers]
 
     def synchronize_graphics(self, display_items: typing.Sequence["DisplayItem.DisplayItem"]) -> None:
-        # create subscan graphics for each scan data item if it doesn't exist
+        # create graphics for each scan data item if it doesn't exist
         if not self.__graphic_trackers:
             for display_item in display_items:
                 graphic = self.__handler._create_graphic()
@@ -453,7 +450,7 @@ class GraphicSetController:
                 display_about_to_be_removed_listener = display_item.about_to_be_removed_event.listen(functools.partial(display_removed, graphic))
                 self.__graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
                 display_item.add_graphic(graphic)
-        # apply new value to any existing subscan graphics
+        # apply new value to any existing graphics
         for graphic in self.graphics:
             self.__handler._update_graphic(graphic)
 
@@ -488,7 +485,7 @@ class DisplayItemListModel(Observable.Observable):
         self.__document_model = document_model
         self.__item_key = item_key
         self.__predicate = predicate
-        self.__items = list()
+        self.__items : typing.List["DisplayItem.DisplayItem"] = list()
 
         self.__item_inserted_listener = document_model.item_inserted_event.listen(self.__item_inserted)
         self.__item_removed_listener = document_model.item_removed_event.listen(self.__item_removed)
@@ -531,7 +528,7 @@ class DisplayItemListModel(Observable.Observable):
             self.notify_remove_item(self.__item_key, display_item, index)
 
     @property
-    def items(self) -> typing.Sequence:
+    def items(self) -> typing.Sequence["DisplayItem.DisplayItem"]:
         return self.__items
 
     def __getattr__(self, item):
@@ -560,7 +557,7 @@ def ScanContextDisplayItemListModel(document_model: DocumentModel.DocumentModel,
     def is_scan_context_display_item(display_item: "DisplayItem.DisplayItem") -> bool:
         return display_item.data_item in stem_controller.scan_context_data_items
 
-    return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_item_changed_event)
+    return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
 
 
 class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
@@ -640,6 +637,7 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
             return list(set(graphics) - {item})
         return list()
 
+
 class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the STEM controller and updates data items and graphics."""
 
@@ -699,13 +697,13 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
         subscan_graphic = Graphics.RectangleGraphic()
         subscan_graphic.graphic_id = "subscan"
         subscan_graphic.label = _("Subscan")
-        subscan_graphic.bounds = tuple(self.__stem_controller.subscan_region)
+        subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
         subscan_graphic.rotation = self.__stem_controller.subscan_rotation
         subscan_graphic.is_bounds_constrained = True
         return subscan_graphic
 
     def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
-        subscan_graphic.bounds = tuple(self.__stem_controller.subscan_region)
+        subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
         subscan_graphic.rotation = self.__stem_controller.subscan_rotation
 
     def _graphic_property_changed(self, subscan_graphic: Graphics.Graphic, name: str) -> None:
@@ -776,10 +774,3 @@ component_unregistered_listener = Registry.listen_component_unregistered_event(c
 
 for component in Registry.get_components_by_type("stem_controller"):
     component_registered(component, {"stem_controller"})
-
-
-"""
-from nion.swift.model import HardwareSource
-s = HardwareSource.HardwareSourceManager().get_instrument_by_id('usim_stem_controller')
-s._subscan_region_value.value = ((0.1, 0.1), (0.2, 0.3))
-"""
