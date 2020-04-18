@@ -560,13 +560,39 @@ def ScanContextDisplayItemListModel(document_model: DocumentModel.DocumentModel,
     return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
 
 
-class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+class EventLoopMonitor:
+    """Utility base class to monitor availability of event loop."""
+
+    def __init__(self, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        self.__event_loop = event_loop
+        self.__document_close_listener = document_model.about_to_close_event.listen(self._unlisten)
+        self.__closed = False
+
+    def _unlisten(self) -> None:
+        pass
+
+    def _mark_closed(self) -> None:
+        self.__closed = True
+        self.__document_close_listener.close()
+        self.__document_close_listener = None
+        self.__event_loop = None
+
+    def _call_soon_threadsafe(self, fn: typing.Callable, *args) -> None:
+        if not self.__closed:
+            def safe_fn() -> None:
+                if not self.__closed:
+                    fn(*args)
+
+            self.__event_loop.call_soon_threadsafe(safe_fn)
+
+
+class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the probe (STEM controller) and updates data items and graphics."""
 
     def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        super().__init__(document_model, event_loop)
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__event_loop = event_loop
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -575,15 +601,8 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__document_model.register_implicit_dependency(self)
 
-        # special handling when document closes
-        def unlisten():
-            if self.__probe_state_changed_listener:
-                self.__probe_state_changed_listener.close()
-                self.__probe_state_changed_listener = None
-
-        self.__document_close_listener = document_model.about_to_close_event.listen(unlisten)
-
     def close(self):
+        self._mark_closed()
         if self.__probe_state_changed_listener:
             self.__probe_state_changed_listener.close()
             self.__probe_state_changed_listener = None
@@ -592,15 +611,17 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
         self.__graphic_set = None
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = None
-        self.__document_close_listener.close()
-        self.__document_close_listener = None
-        self.__event_loop = None
         self.__document_model = None
         self.__stem_controller = None
 
+    def _unlisten(self) -> None:
+        if self.__probe_state_changed_listener:
+            self.__probe_state_changed_listener.close()
+            self.__probe_state_changed_listener = None
+
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # thread safe. move actual call to main thread using the event loop.
-        self.__event_loop.call_soon_threadsafe(self.__update_probe_state, probe_state, probe_position)
+        self._call_soon_threadsafe(self.__update_probe_state, probe_state, probe_position)
 
     def __update_probe_state(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         assert threading.current_thread() == threading.main_thread()
@@ -638,13 +659,13 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
         return list()
 
 
-class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the STEM controller and updates data items and graphics."""
 
     def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        super().__init__(document_model, event_loop)
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__event_loop = event_loop
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -653,30 +674,30 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
         self.__document_model.register_implicit_dependency(self)
 
     def close(self):
+        self._mark_closed()
         self.__document_model.unregister_implicit_dependency(self)
-        self.__subscan_region_changed_listener.close()
-        self.__subscan_region_changed_listener = None
-        self.__subscan_rotation_changed_listener.close()
-        self.__subscan_rotation_changed_listener = None
         self.__graphic_set.close()
         self.__graphic_set = None
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = None
-        self.__document_close_listener.close()
-        self.__document_close_listener = None
-        self.__event_loop = None
         self.__document_model = None
         self.__stem_controller = None
+
+    def _unlisten(self) -> None:
+        self.__subscan_region_changed_listener.close()
+        self.__subscan_region_changed_listener = None
+        self.__subscan_rotation_changed_listener.close()
+        self.__subscan_rotation_changed_listener = None
 
     # methods for handling changes to the subscan region
 
     def __subscan_region_changed(self, name: str) -> None:
         # must be thread safe
-        self.__event_loop.call_soon_threadsafe(self.__update_subscan_region)
+        self._call_soon_threadsafe(self.__update_subscan_region)
 
     def __subscan_rotation_changed(self, name: str) -> None:
         # must be thread safe
-        self.__event_loop.call_soon_threadsafe(self.__update_subscan_region)
+        self._call_soon_threadsafe(self.__update_subscan_region)
 
     def __update_subscan_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
@@ -737,6 +758,8 @@ class ScanContextController:
     def close(self):
         # close will be called when the extension is unloaded. in turn, close any references so they get closed. this
         # is not strictly necessary since the references will be deleted naturally when this object is deleted.
+        for instrument in HardwareSource.HardwareSourceManager().instruments:
+            self.unregister_instrument(instrument)
         self.__instrument_added_event_listener.close()
         self.__instrument_added_event_listener = None
         self.__instrument_removed_event_listener.close()

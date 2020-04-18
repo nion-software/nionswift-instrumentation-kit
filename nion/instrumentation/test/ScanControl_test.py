@@ -134,6 +134,7 @@ class TestScanControlClass(unittest.TestCase):
                 return self
 
             def __exit__(self, *exc_details):
+                self.document_controller.periodic()
                 self.scan_context_controller.close()
                 self.scan_context_controller = None
                 self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.instrument, self.hardware_source, self.scan_state_controller)
