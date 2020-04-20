@@ -613,7 +613,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str]):
+    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str]):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
@@ -661,12 +661,16 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
         self.processor = None
 
-        # configure the features
+        # configure the features. putting the features into this object is for convenience of access. the features
+        # should not be considered as part of this class. instead, the features should be thought of as being stored
+        # here as a convenient location where the UI has access to them.
         self.features = dict()
         self.features["is_camera"] = True
         self.features["has_monitor"] = True
         if camera_panel_type:
             self.features["camera_panel_type"] = camera_panel_type
+        if camera_panel_delegate_type:
+            self.features["camera_panel_delegate_type"] = camera_panel_delegate_type
         if self.__camera_category.lower() == "ronchigram":
             self.features["is_ronchigram_camera"] = True
         if self.__camera_category.lower() == "eels":
@@ -1230,11 +1234,13 @@ def run(configuration_location: pathlib.Path):
             instrument_controller_id = getattr(camera_module, "instrument_controller_id", None)
             # TODO: remove next line when backwards compatibility no longer needed
             instrument_controller_id = instrument_controller_id or getattr(camera_module, "stem_controller_id", None)
+            # grab the settings and camera panel info from the camera module
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device
-            camera_panel_type = getattr(camera_module, "camera_panel_type", None)
+            camera_panel_type = getattr(camera_module, "camera_panel_type", None)  # a replacement camera panel
+            camera_panel_delegate_type = getattr(camera_module, "camera_panel_delegate_type", None)  # a delegate for the default camera panel
             try:
-                camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type)
+                camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type, camera_panel_delegate_type)
                 if hasattr(camera_module, "priority"):
                     camera_hardware_source.priority = camera_module.priority
                 component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})

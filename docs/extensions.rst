@@ -47,13 +47,13 @@ The standard scan control bar provides scan/abort/stop buttons, integrated PMT c
 
 Cameras
 -------
-The camera control panels and camera control bars provide a UI for each camera instance. A standard basic UI is provided but additional custom UI's can be provided in plug-in packages.
+The camera control panels and camera control bars provide a UI for each camera instance. A standard basic UI is provided and can be slightly customized but additional custom UI's can be provided in plug-in packages.
 
-The standard camera control panel provides play/pause/abort buttons, basic mode selection, access to settings dialog, access to a monitor view, binning and exposure controls, and a live data preview.
+The standard camera control panel provides play/pause/abort buttons, basic mode selection, access to configuration dialog, access to a monitor view, binning and exposure controls, and a live data preview.
 
 The standard camera control bar provides play/pause button and a checkbox to display the processing channel if there is one.
 
-A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, and optional camera panel type. If the camera panel type is not defined, the standard camera panel is used.
+A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, an optional camera panel delegate, or an optional camera panel. If the camera panel is not defined, the standard camera panel is used. The standard camera panel can utilize a delegate to provide configuration and monitor dialogs.
 
 A camera device uses several methods and properties to define its behavior. As part of this behavior, the camera device acquires images and returns data in a data element. Some properties can be specified by the camera object, while others can be or need to be specified in the data element returned from the acquisition methods. When both options are available, the data element version takes precedence.
 
@@ -66,6 +66,64 @@ If the camera device may also define a `has_processed_channel` property. If this
 The data element can directly specify calibrations (using the `intensity_calibration` and `spatial_calibrations` keys in the data element), or it can directly specify how to read the calibrations from the instrument (using the `calibration_controls` key in the data element), or it can indirectly specify how to read the calibrations from the instrument (using the `calibration_controls` camera device property).
 
 The `calibration_controls` data element key or camera device propery returns a `dict` describing how to read the calibrations from the instrument controller. If the calibrations are dependent on the camera device state, the `calibration_controls` should be provided as a key in the data element; otherwise the `calibration_controls` can be specified as a property of the camera device.
+
+Providing a Camera Panel Delegate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The standard camera control panel provides buttons to open a configuration dialog and a monitor dialog. The camera module can define a delegate to handle these buttons for a camera.
+
+1. Define ``camera_panel_delegate_type`` in the camera module by putting a line similar to this in the ``__init__`` function::
+
+    self.camera_panel_delegate_type = "my_camera_panel_delegate"
+
+2. Register a delegate factory in the registry with a type of ``camera_panel_delegate``. This can be done by calling a function from the ``__init__.py`` file of your package::
+
+    camera_panel_delegate = CameraPanelDelegate()
+    Registry.register_component(camera_panel_delegate, {"camera_panel_delegate"})
+
+3. Define a class factory, derived from ``CameraControlPanel.CameraPanelDelegate``, to handle camera panel requests. The class factory must define ``camera_panel_delegate_type`` to match the factory type in step 1::
+
+    class CameraPanelDelegate(CameraControlPanel.CameraPanelDelegate):
+        camera_panel_delegate_type = "my_camera_panel_delegate"
+        def get_configuration_ui_handler(self, *, api_broker: PlugInManager.APIBroker = None,
+                                         event_loop: asyncio.AbstractEventLoop = None,
+                                         hardware_source_id: str = None,
+                                         camera_device: camera_base.CameraDevice = None,
+                                         camera_settings: camera_base.CameraSettings = None,
+                                         **kwargs):
+            dclui = api_broker.get_ui("~1.0")
+            class Handler:
+                ui_view = dclui.create_row(dclui.create_label(text="LABEL2"), dclui.create_push_button(text="Push", on_clicked="cancel_clicked"))
+                def cancel_clicked(self, widget):
+                    print("CLICK")
+            return Handler()
+
+Providing a Custom Camera Panel
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The camera module can define a custom panel to replace the standard camera panel.
+
+1. Define ``camera_panel_type`` in the camera module by putting a line similar to this in the ``__init__`` function::
+
+        self.camera_panel_type = "my_camera_panel"
+
+2. Register a delegate factory in the registry with a type of ``camera_panel``. This can be done by calling a function from the ``__init__.py`` file of your package::
+
+    camera_panel_factory = CameraPanelFactory()
+    Registry.register_component(camera_panel_factory, {"camera_panel"})
+
+3. Define a camera panel factory to create the delegate. The class factory must define ``camera_panel_type`` to match the factory type in step 1::
+
+    class CameraPanelFactory:
+        camera_panel_type = "my_camera_panel"
+        def get_ui_handler(self, api_broker=None,
+                           event_loop=None, hardware_source_id=None,
+                           camera_device=None, camera_settings=None,
+                           **kwargs):
+            dclui = api_broker.get_ui("~1.0")
+            class Handler:
+                ui_view = dclui.create_row(dclui.create_label(text="Camera X"), dclui.create_push_button(text="Push", on_clicked="button_clicked"))
+                def button_clicked(self, widget):
+                    print("CLICK")
+            return Handler()
 
 .. TODO: dark subtraction, gain normalization, blemish removal
 .. TODO: dark reference collection, gain image collection, blemish configuration

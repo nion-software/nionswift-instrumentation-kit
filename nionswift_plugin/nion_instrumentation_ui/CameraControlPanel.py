@@ -1,4 +1,6 @@
 # standard libraries
+import abc
+import asyncio
 import functools
 import gettext
 import logging
@@ -10,6 +12,7 @@ import time
 import typing
 
 # local libraries
+from nion.instrumentation import camera_base
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
@@ -19,6 +22,7 @@ from nion.swift.model import HardwareSource
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import Declarative
+from nion.ui import Dialog
 from nion.ui import Widgets
 from nion.utils import Geometry
 from nion.utils import Registry
@@ -538,6 +542,37 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
             drawing_context.fill_text(self.__char, center_x, center_y + text_base)
 
 
+class CameraPanelDelegate:
+
+    def get_configuration_ui_handler(self, *, api_broker: PlugInManager.APIBroker = None,
+                                     event_loop: asyncio.AbstractEventLoop = None,
+                                     hardware_source_id: str = None,
+                                     camera_device: camera_base.CameraDevice = None,
+                                     camera_settings: camera_base.CameraSettings = None,
+                                     **kwargs):
+        return None
+
+    def open_configuration(self, *, api_broker: PlugInManager.APIBroker,
+                           hardware_source_id: str = None,
+                           camera_device: camera_base.CameraDevice = None,
+                           camera_settings: camera_base.CameraSettings = None) -> bool:
+        return False
+
+    def get_monitor_ui_handler(self, *, api_broker: PlugInManager.APIBroker = None,
+                               event_loop: asyncio.AbstractEventLoop = None,
+                               hardware_source_id: str = None,
+                               camera_device: camera_base.CameraDevice = None,
+                               camera_settings: camera_base.CameraSettings = None,
+                               **kwargs):
+        return None
+
+    def open_monitor(self, *, api_broker: PlugInManager.APIBroker,
+                     hardware_source_id: str = None,
+                     camera_device: camera_base.CameraDevice = None,
+                     camera_settings: camera_base.CameraSettings = None) -> bool:
+        return False
+
+
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def __init__(self, document_controller, camera_controller):
@@ -546,6 +581,13 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.document_controller = document_controller
 
         self.__state_controller = CameraControlStateController(camera_controller, document_controller.queue_task, document_controller.document_model)
+
+        self.__delegate : typing.Optional[CameraPanelDelegate] = None
+
+        camera_panel_delegate_type = camera_controller.features.get("camera_panel_delegate_type")
+        for component in Registry.get_components_by_type("camera_panel_delegate"):
+            if component.camera_panel_delegate_type == camera_panel_delegate_type:
+                self.__delegate = component
 
         self.__shift_click_state = None
 
@@ -689,8 +731,68 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 self.__state_controller.handle_change_profile(text)
                 profile_combo.request_refocus()
 
-        open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
-        monitor_button.on_clicked = self.__state_controller.handle_monitor_button_clicked
+        self.__configuration_dialog_close_listener = None
+
+        def configuration_button_clicked():
+            api_broker = PlugInManager.APIBroker()
+            if self.__delegate:
+                if self.__configuration_dialog_close_listener:
+                    return
+                # if not already open, see if delegate wants to open it via a ui handler.
+                ui_handler = self.__delegate.get_configuration_ui_handler(api_broker=api_broker,
+                                                                          event_loop=document_controller.event_loop,
+                                                                          hardware_source_id = camera_controller.hardware_source_id,
+                                                                          camera_device = camera_controller.camera,
+                                                                          camera_settings = camera_controller.camera_settings)
+                if ui_handler:
+                    dialog = Dialog.ActionDialog(ui, document_controller)
+                    dialog.content.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler))
+                    def wc(w): self.__configuration_dialog_close_listener = None
+                    self.__configuration_dialog_close_listener = dialog._window_close_event.listen(wc)
+                    dialog.show()
+                    return
+                # fall through means there is no declarative configuration dialog
+                if self.__delegate.open_configuration(api_broker=api_broker,
+                                                      hardware_source_id=camera_controller.hardware_source_id,
+                                                      camera_device=camera_controller.camera,
+                                                      camera_settings=camera_controller.camera_settings):
+                    return
+            # fall through: no ui handler or direct handler
+            self.__state_controller.handle_settings_button_clicked(api_broker)
+
+        open_controls_button.on_button_clicked = configuration_button_clicked
+
+        self.__monitor_dialog_close_listener = None
+
+        def monitor_button_clicked():
+            api_broker = PlugInManager.APIBroker()
+            if self.__delegate:
+                if self.__monitor_dialog_close_listener:
+                    return
+                # if not already open, see if delegate wants to open it via a ui handler.
+                ui_handler = self.__delegate.get_monitor_ui_handler(api_broker=api_broker,
+                                                                    event_loop=document_controller.event_loop,
+                                                                    hardware_source_id=camera_controller.hardware_source_id,
+                                                                    camera_device=camera_controller.camera,
+                                                                    camera_settings=camera_controller.camera_settings)
+                if ui_handler:
+                    dialog = Dialog.ActionDialog(ui, document_controller)
+                    dialog.content.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler))
+                    def wc(w): self.__monitor_dialog_close_listener = None
+                    self.__monitor_dialog_close_listener = dialog._window_close_event.listen(wc)
+                    dialog.show()
+                    return
+                # fall through means there is no declarative monitor dialog
+                if self.__delegate.open_monitor(api_broker=api_broker,
+                                                hardware_source_id=camera_controller.hardware_source_id,
+                                                camera_device=camera_controller.camera,
+                                                camera_settings=camera_controller.camera_settings):
+                    return
+            # fall through: no ui handler or direct handler
+            self.__state_controller.handle_monitor_button_clicked()
+
+        monitor_button.on_clicked = monitor_button_clicked
+
         profile_combo.on_current_text_changed = profile_combo_text_changed
 
         def binning_values_changed(binning_values):
@@ -779,6 +881,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         super().periodic()
 
     def close(self):
+        self.__configuration_dialog_close_listener = None
+        self.__monitor_dialog_close_listener = None
         self.__key_pressed_event_listener.close()
         self.__key_pressed_event_listener = None
         self.__key_released_event_listener.close()
