@@ -84,6 +84,8 @@ The standard camera control panel provides buttons to open a configuration dialo
 
     class CameraPanelDelegate(CameraControlPanel.CameraPanelDelegate):
         camera_panel_delegate_type = "my_camera_panel_delegate"
+        def has_feature(self, feature_str: str) -> bool:
+            return feature_str in ("configuration", "help")
         def get_configuration_ui_handler(self, *, api_broker: PlugInManager.APIBroker = None,
                                          event_loop: asyncio.AbstractEventLoop = None,
                                          hardware_source_id: str = None,
@@ -96,6 +98,9 @@ The standard camera control panel provides buttons to open a configuration dialo
                 def cancel_clicked(self, widget):
                     print("CLICK")
             return Handler()
+        def open_help(self, *, api_broker: PlugInManager.APIBroker = None) -> bool:
+            print("Help!")
+            return True
 
 Providing a Custom Camera Panel
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
