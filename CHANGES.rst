@@ -3,6 +3,8 @@ Changelog (nionswift-instrumentation)
 
 0.18.4 (UNRELEASED)
 -------------------
+- Add optional help button and ability to register delegate for camera panel to handle.
+- Fix numerous issues handling the subscan and beam position graphics.
 - Fix issue starting scan record immediately after another one.
 - Fix issue with reloading scans with leftover probe/subscan graphics.
 - Enable spectrum image acquisition for MultiAcquire.
