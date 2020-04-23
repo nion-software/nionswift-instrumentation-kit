@@ -180,7 +180,10 @@ class SynchronizedDataChannelInterface:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_states: typing.List[typing.Any], display_name: str):
+    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_ids: typing.List[str], display_name: str):
+        # channel_ids is the channel id for each acquired channel
+        # for instance, there may be 4 possible channels (0-3, a-d) and acquisition from channels 1,2
+        # in that case channel_ids would be [b, c]
         super().__init__(is_continuous)
         self.__stem_controller = stem_controller_
         self.hardware_source_id = hardware_source_id
@@ -195,7 +198,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__last_scan_id = None
         self.__fixed_scan_id = uuid.UUID(frame_parameters["scan_id"]) if "scan_id" in frame_parameters else None
         self.__pixels_to_skip = 0
-        self.__channel_states = channel_states
+        self.__channel_ids = channel_ids
         self.__last_read_time = 0
         self.__subscan_enabled = False
 
@@ -292,7 +295,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             data_element = {"properties": dict()}
             channel_name = self.__device.get_channel_name(channel_index)
             channel_modifier = self.__frame_parameters.channel_modifier
-            channel_id = self.__channel_states[channel_index].channel_id + (("_" + channel_modifier) if channel_modifier else "")
+            channel_id = self.__channel_ids[channel_index] + (("_" + channel_modifier) if channel_modifier else "")
             update_instrument_properties(_data_element, self.__stem_controller, self.__device)
             update_scan_data_element(data_element, self.__frame_parameters, _data.shape, self.__scan_id, self.__frame_number, channel_name, channel_id, _scan_properties)
             update_data_element(data_element, complete, sub_area, _data)
@@ -863,7 +866,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
             self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
         frame_parameters = copy.deepcopy(self.__frame_parameters)
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, channel_states, self.display_name)
+        channel_ids = [channel_state.channel_id for channel_state in channel_states]
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, channel_ids, self.display_name)
 
     def _view_task_updated(self, view_task):
         self.__acquisition_task = view_task
@@ -873,7 +877,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
         frame_parameters = copy.deepcopy(self.__record_parameters)
-        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_states, self.display_name)
+        channel_ids = [channel_state.channel_id for channel_state in channel_states]
+        return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
 
     def set_frame_parameters(self, profile_index, frame_parameters):
         frame_parameters = ScanFrameParameters(frame_parameters)
@@ -1039,12 +1044,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.stop_playing()
         self.__task_queue.put(channel_states_changed)
 
+    ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
+
     def __make_channel_id(self, channel_index) -> str:
         return "abcdefgh"[channel_index]
 
     def __make_channel_state(self, channel_index, channel_name, channel_enabled):
-        ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
-        return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
+        return ScanHardwareSource.ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
     def __device_state_changed(self, profile_frame_parameters_list, device_channel_states) -> None:
         for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
