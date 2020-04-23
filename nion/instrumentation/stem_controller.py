@@ -105,8 +105,8 @@ class STEMController:
         self.__scan_context = ScanContext()
         self.probe_state_changed_event = Event.Event()
         self.__subscan_state_value : Model.PropertyModel[SubscanState] = Model.PropertyModel(SubscanState.INVALID)
-        self.__subscan_region_value = Model.PropertyModel(None)
-        self.__subscan_rotation_value = Model.PropertyModel(0.0)
+        self.__subscan_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
+        self.__subscan_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
         self.scan_context_data_items_changed_event = Event.Event()
         self.__ronchigram_camera = None
@@ -208,7 +208,7 @@ class STEMController:
         self.__subscan_state_value.value = value
 
     @property
-    def _subscan_region_value(self):
+    def _subscan_region_value(self) -> Model.PropertyModel[Geometry.FloatRect]:
         """Internal use."""
         return self.__subscan_region_value
 
@@ -222,13 +222,13 @@ class STEMController:
         self.__subscan_region_value.value = tuple(value) if value is not None else None
 
     @property
-    def _subscan_rotation_value(self):
+    def _subscan_rotation_value(self) -> Model.PropertyModel[float]:
         """Internal use."""
         return self.__subscan_rotation_value
 
     @property
     def subscan_rotation(self) -> float:
-        return self.__subscan_rotation_value.value
+        return typing.cast(float, self.__subscan_rotation_value.value)
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float):

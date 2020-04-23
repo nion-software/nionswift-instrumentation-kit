@@ -810,19 +810,19 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
 
     @property
-    def subscan_region(self):
+    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
         return self.__stem_controller._subscan_region_value.value
 
     @subscan_region.setter
-    def subscan_region(self, value):
+    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
         self.__stem_controller._subscan_region_value.value = value
 
     @property
-    def subscan_rotation(self):
+    def subscan_rotation(self) -> float:
         return self.__stem_controller._subscan_rotation_value.value
 
     @subscan_rotation.setter
-    def subscan_rotation(self, value):
+    def subscan_rotation(self, value: float) -> None:
         self.__stem_controller._subscan_rotation_value.value = value
 
     def apply_subscan(self, frame_parameters):
