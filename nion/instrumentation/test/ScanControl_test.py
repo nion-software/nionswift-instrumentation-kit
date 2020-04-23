@@ -20,8 +20,6 @@ from nion.utils import Registry
 from nion.instrumentation import stem_controller
 from nion.instrumentation import scan_base
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
-from nionswift_plugin.usim import InstrumentDevice
-from nionswift_plugin.usim import ScanDevice
 
 """
 # running in Swift
@@ -42,6 +40,9 @@ class TestScanControlClass(unittest.TestCase):
 
     def tearDown(self):
         HardwareSource.HardwareSourceManager()._close_hardware_sources()
+        self._close_instruments()
+
+    def _close_instruments(self):
         HardwareSource.HardwareSourceManager()._close_instruments()
 
     def _acquire_one(self, document_controller, hardware_source):
@@ -87,6 +88,7 @@ class TestScanControlClass(unittest.TestCase):
         return document_controller, document_model, instrument, hardware_source, scan_state_controller
 
     def _setup_hardware_source(self, instrument) -> HardwareSource.HardwareSource:
+        from nionswift_plugin.usim import ScanDevice  # here so that this method can be overridden
         stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
         scan_hardware_source = scan_base.ScanHardwareSource(stem_controller, ScanDevice.Device(instrument), "usim_scan_device", "uSim Scan")
         return scan_hardware_source
@@ -95,6 +97,7 @@ class TestScanControlClass(unittest.TestCase):
         pass
 
     def _setup_instrument(self):
+        from nionswift_plugin.usim import InstrumentDevice  # here so that this method can be overridden
         instrument = InstrumentDevice.Instrument("usim_stem_controller")
         Registry.register_component(instrument, {"stem_controller"})
         return instrument

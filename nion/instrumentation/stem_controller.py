@@ -124,6 +124,18 @@ class STEMController:
         self.__probe_position_value.close()
         self.__probe_position_value = None
 
+    def reset(self) -> None:
+        self.__probe_position_value.value = None
+        self.__probe_state_stack.clear()
+        self.__probe_state_stack.append("parked")
+        self.__scan_context.center_nm = None
+        self.__scan_context.fov_size_nm = None
+        self.__scan_context.rotation_rad = None
+        self.__subscan_state_value.value = SubscanState.INVALID
+        self.__subscan_region_value.value = None
+        self.__subscan_rotation_value.value = 0
+        self.__scan_context_data_items.clear()
+
     # configuration methods
 
     @property
