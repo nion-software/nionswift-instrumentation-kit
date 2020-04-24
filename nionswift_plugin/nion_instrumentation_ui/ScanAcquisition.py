@@ -146,7 +146,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_fractional_size = None
         self.__scan_frame_parameters.subscan_fractional_center = None
         self.__scan_frame_parameters.subscan_rotation = 0.0
-        self.__scan_frame_parameters.channel_modifier = "drift"
+        self.__scan_frame_parameters.channel_override = "drift"
 
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
         # this method must be thread safe

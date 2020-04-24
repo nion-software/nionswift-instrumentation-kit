@@ -48,6 +48,7 @@ class ScanFrameParameters(dict):
         self.subscan_fractional_center = self.get("subscan_fractional_center", None)
         self.subscan_rotation = self.get("subscan_rotation", 0.0)
         self.channel_modifier = self.get("channel_modifier")
+        self.channel_override = self.get("channel_override")
         self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
         self.ac_line_sync = self.get("ac_line_sync", False)
@@ -86,6 +87,8 @@ class ScanFrameParameters(dict):
             d["subscan_rotation"] = self.subscan_rotation
         if self.channel_modifier:  # don't store None or 0.0
             d["channel_modifier"] = self.channel_modifier
+        if self.channel_override:  # don't store None or 0.0
+            d["channel_override"] = self.channel_override
         return d
 
     def __repr__(self):
@@ -104,7 +107,8 @@ class ScanFrameParameters(dict):
                ("\nsubscan fractional size: " + str(self.subscan_fractional_size) if self.subscan_fractional_size is not None else "") +\
                ("\nsubscan fractional center: " + str(self.subscan_fractional_center) if self.subscan_fractional_center is not None else "") +\
                ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_rotation is not None else "") +\
-               ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "")
+               ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "") +\
+               ("\nchannel override: " + str(self.channel_override) if self.channel_override is not None else "")
 
 
 def update_scan_properties(properties: typing.MutableMapping, scan_frame_parameters: ScanFrameParameters, scan_id_str: str) -> None:
@@ -187,7 +191,9 @@ class SynchronizedScanBehaviorInterface:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters, channel_ids: typing.List[str], display_name: str):
+    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device,
+                 hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
+                 channel_ids: typing.List[str], display_name: str):
         # channel_ids is the channel id for each acquired channel
         # for instance, there may be 4 possible channels (0-3, a-d) and acquisition from channels 1,2
         # in that case channel_ids would be [b, c]
@@ -301,8 +307,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # '_data_element' is the format returned from the Device.
             data_element = {"properties": dict()}
             channel_name = self.__device.get_channel_name(channel_index)
+            channel_override = self.__frame_parameters.channel_override
             channel_modifier = self.__frame_parameters.channel_modifier
-            channel_id = self.__channel_ids[channel_index] + (("_" + channel_modifier) if channel_modifier else "")
+            channel_id = channel_override or (self.__channel_ids[channel_index] + (("_" + channel_modifier) if channel_modifier else ""))
             update_instrument_properties(_data_element, self.__stem_controller, self.__device)
             update_scan_data_element(data_element, self.__frame_parameters, _data.shape, self.__scan_id, self.__frame_number, channel_name, channel_id, _scan_properties)
             update_data_element(data_element, complete, sub_area, _data)
@@ -436,6 +443,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         for channel_index, channel_info in enumerate(channel_info_list):
             subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
             self.add_data_channel(subscan_channel_id, subscan_channel_name)
+        self.add_data_channel("drift", _("Drift"))
 
         self.__last_idle_position = None  # used for testing
 
@@ -1030,15 +1038,17 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
         return channel_index + self.channel_count, channel_id + "_subscan", " ".join((channel_name, _("SubScan")))
 
-    def get_data_channel_state(self, channel_index):
+    def get_data_channel_state(self, channel_index) -> typing.Tuple[str, str, bool]:
         # channel indexes larger than then the channel count will be subscan channels
         if channel_index < self.channel_count:
             channel_id, name, enabled = self.get_channel_state(channel_index)
             return channel_id, name, enabled if not self.subscan_enabled else False
-        else:
+        elif channel_index < self.channel_count * 2:
             channel_id, name, enabled = self.get_channel_state(channel_index - self.channel_count)
             subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_id, name)
             return subscan_channel_id, subscan_channel_name, enabled if self.subscan_enabled else False
+        else:
+            return self.data_channels[channel_index].channel_id, self.data_channels[channel_index].name, False
 
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
