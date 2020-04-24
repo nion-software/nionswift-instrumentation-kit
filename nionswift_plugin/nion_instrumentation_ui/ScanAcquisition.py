@@ -136,6 +136,37 @@ class CameraDataChannel:
             self.__data_item.decrement_data_ref_count()
 
 
+class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+        # init with the frame parameters from the synchronized grab
+        self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        # here we convert those frame parameters to the context
+        self.__scan_frame_parameters.subscan_pixel_size = None
+        self.__scan_frame_parameters.subscan_fractional_size = None
+        self.__scan_frame_parameters.subscan_fractional_center = None
+        self.__scan_frame_parameters.subscan_rotation = 0.0
+        self.__scan_frame_parameters.channel_modifier = "drift"
+
+    def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
+        # this method must be thread safe
+        # start with the context frame parameters and adjust for the drift region
+        frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
+        context_size = Geometry.FloatSize.make(frame_parameters.size)
+        # drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
+        # frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height), int(context_size.width * drift_region.width)
+        # frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
+        # frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
+        # frame_parameters.subscan_rotation = self.__scan_hardware_source.drift_rotation
+        # xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [self.__scan_hardware_source.drift_channel_id])
+        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, ["a"])
+        print(f"{len(xdatas)} {xdatas[0].data_shape} {xdatas[0].dimensional_calibrations}")
+        adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
+        adjustments.offset_nm = Geometry.FloatSize(h=0*xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(context_size.height / 20),
+                                                   w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(context_size.width / 50))
+        return adjustments
+
+
 class ScanAcquisitionController:
 
     def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
@@ -224,13 +255,18 @@ class ScanAcquisitionController:
 
         camera_data_channel.start()
 
+        drift_correction_behavior = None  # DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+        section_height = None  # 5
+
         def grab_synchronized():
             self.acquisition_state_changed_event.fire(SequenceState.scanning)
             try:
                 combined_data = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                        camera=camera_hardware_source,
                                                                        camera_frame_parameters=camera_frame_parameters,
-                                                                       camera_data_channel=camera_data_channel)
+                                                                       camera_data_channel=camera_data_channel,
+                                                                       scan_behavior=drift_correction_behavior,
+                                                                       section_height=section_height)
                 if combined_data is not None:
                     scan_data_list, camera_data_list = combined_data
 

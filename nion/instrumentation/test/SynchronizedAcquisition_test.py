@@ -7,7 +7,6 @@ import uuid
 from nion.data import DataAndMetadata
 from nion.swift import Application
 from nion.swift import DocumentController
-from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.ui import TestUI
@@ -72,7 +71,7 @@ class TestScanControlClass(unittest.TestCase):
     def _close_instrument(self, instrument) -> None:
         HardwareSource.HardwareSourceManager().unregister_instrument("usim_stem_controller")
 
-    def _setup_scan_hardware_source(self, instrument) -> HardwareSource.HardwareSource:
+    def _setup_scan_hardware_source(self, instrument) -> scan_base.ScanHardwareSource:
         stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
         scan_hardware_source = scan_base.ScanHardwareSource(stem_controller, ScanDevice.Device(instrument), "usim_scan_device", "uSim Scan")
         return scan_hardware_source
@@ -129,6 +128,11 @@ class TestScanControlClass(unittest.TestCase):
                 return self.document_controller, self.document_model, self.scan_hardware_source, self.camera_hardware_source
 
         return ScanContext(self)
+
+    def _acquire_one(self, document_controller, hardware_source):
+        hardware_source.start_playing(sync_timeout=3.0)
+        hardware_source.stop_playing(sync_timeout=3.0)
+        document_controller.periodic()
 
     def test_grab_synchronized_basic_eels(self):
         with self._make_acquisition_context() as context:
@@ -318,6 +322,27 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertIn("fov_nm", scan_metadata)
                 self.assertIn("rotation", scan_metadata)
                 self.assertIn("scan_id", scan_metadata)
+
+    def test_grab_synchronized_basic_eels_with_drift_correction(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            document_controller.periodic()
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (8, 8)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            camera_data_channel = None
+            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+                                                                            camera=camera_hardware_source,
+                                                                            camera_frame_parameters=camera_frame_parameters,
+                                                                            camera_data_channel=camera_data_channel,
+                                                                            section_height=2,
+                                                                            scan_behavior=drift_correction_behavior)
 
     # TODO: check for counts per electron
 

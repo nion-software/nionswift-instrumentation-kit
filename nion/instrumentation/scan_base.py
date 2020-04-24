@@ -173,9 +173,16 @@ def update_scan_data_element(data_element, scan_frame_parameters, data_shape, sc
 
 
 class SynchronizedDataChannelInterface:
-    def start(self) -> None: ...
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None: ...
-    def stop(self) -> None: ...
+
+
+class SynchronizedScanBehaviorAdjustments:
+    def __init__(self):
+        self.offset_nm : typing.Optional[Geometry.FloatSize] = None
+
+
+class SynchronizedScanBehaviorInterface:
+    def prepare_section(self) -> SynchronizedScanBehaviorAdjustments: ...
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
@@ -626,7 +633,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_synchronized(self, *, scan_frame_parameters: dict = None, camera=None,
                           camera_frame_parameters: dict = None,
                           camera_data_channel: SynchronizedDataChannelInterface = None,
-                          section_height: int = None) -> typing.Optional[typing.Tuple[
+                          section_height: int = None,
+                          scan_behavior: SynchronizedScanBehaviorInterface = None) -> typing.Optional[typing.Tuple[
         typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]:
         self.__camera_hardware_source = camera
         try:
@@ -663,11 +671,19 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 for section in range(section_count):
                     # print(f"************ {section}/{section_count}")
                     section_rect = Geometry.IntRect.from_tlhw(section * section_height, 0, min(section_height, scan_height - section * section_height), scan_param_width)
+                    if scan_behavior:
+                        adjustments = scan_behavior.prepare_section()
+                        if adjustments.offset_nm:
+                            print(f"{adjustments.offset_nm=}")
+                            scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(scan_frame_parameters.center_nm) + adjustments.offset_nm)
                     scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
                     self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
                     self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
 
                     section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size, scan_info.fractional_area, scan_info.channel_modifier)
+                    # print(section_rect)
+                    # import pprint
+                    # print(pprint.pformat(section_frame_parameters))
 
                     with contextlib.closing(RecordTask(self, section_frame_parameters)) as scan_task:
                         is_last_section = section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1]
@@ -903,6 +919,44 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         frame_parameters = copy.deepcopy(self.__record_parameters)
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
+
+    def record_immediate(self, frame_parameters: ScanFrameParameters, channel_ids: typing.Sequence[str],
+                         sync_timeout: float = None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+        assert not self.is_recording
+        frame_parameters = copy.deepcopy(frame_parameters)
+        old_enabled_channels = self.get_enabled_channels()
+        enabled_channels = list()
+        ordered_channel_ids = list()
+        for i in range(self.__device.channel_count):
+            channel_id = self.get_channel_state(i).channel_id
+            if channel_id in channel_ids:
+                enabled_channels.append(i)
+                ordered_channel_ids.append(channel_id)
+        self.set_enabled_channels(enabled_channels)
+        record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, ordered_channel_ids, self.display_name)
+        finished_event = threading.Event()
+        xdatas = list()
+        def finished(xdatas_: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
+            nonlocal xdatas
+            xdatas = xdatas_
+            self.set_enabled_channels(old_enabled_channels)
+            finished_event.set()
+        record_task.finished_callback_fn = finished
+        self._record_task_updated(record_task)
+        self.start_task('record', record_task)
+        # loop will break on finished or error (not recording). maybe a race condition?
+        while self.is_recording:
+            if finished_event.wait(0.01):  # 10 msec
+                break
+        print(self.is_recording)
+        # self.stop_task('record')
+        self._record_task_updated(None)
+        sync_timeout = sync_timeout or 3.0
+        start = time.time()
+        while self.is_recording:
+            time.sleep(0.01)  # 10 msec
+            assert time.time() - start < float(sync_timeout)
+        return xdatas
 
     def set_frame_parameters(self, profile_index, frame_parameters):
         frame_parameters = ScanFrameParameters(frame_parameters)
