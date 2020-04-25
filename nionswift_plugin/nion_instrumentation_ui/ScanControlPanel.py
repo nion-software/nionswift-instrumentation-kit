@@ -10,6 +10,7 @@ import typing
 import math
 
 # local libraries
+from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
@@ -109,7 +110,6 @@ class ScanControlStateController:
         on_profile_changed(profile_label)
         on_frame_parameters_changed(frame_parameters)
         on_linked_changed(linked)
-        on_channel_count_changed(channel_count)
         on_scan_button_state_changed(enabled, play_button_state)  scan, stop
         on_abort_button_state_changed(visible, enabled)
         on_record_button_state_changed(visible, enabled)
@@ -131,7 +131,7 @@ class ScanControlStateController:
 
     profiles = { _("Puma"): 0, _("Rabbit"): 1, _("Frame"): 2 }
 
-    def __init__(self, scan_hardware_source, queue_task, document_model, channel_id):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, queue_task, document_model, channel_id: typing.Optional[str]):
         self.__scan_hardware_source = scan_hardware_source
         self.queue_task = queue_task
         self.__document_model = document_model
@@ -144,26 +144,25 @@ class ScanControlStateController:
         self.__probe_state_changed_event_listener = None
         self.__channel_state_changed_event_listener = None
         self.__subscan_state_changed_listener = None
-        self.on_display_name_changed = None
-        self.on_subscan_state_changed = None
-        self.on_profiles_changed = None
-        self.on_profile_changed = None
-        self.on_frame_parameters_changed = None
-        self.on_linked_changed = None
-        self.on_channel_count_changed = None
-        self.on_channel_state_changed = None
-        self.on_data_channel_state_changed = None
-        self.on_scan_button_state_changed = None
-        self.on_abort_button_state_changed = None
-        self.on_record_button_state_changed = None
-        self.on_record_abort_button_state_changed = None
-        self.on_data_item_states_changed = None
-        self.on_simulate_button_state_changed = None
-        self.on_probe_state_changed = None
-        self.on_positioned_check_box_changed = None
-        self.on_ac_line_sync_check_box_changed = None
-        self.on_capture_button_state_changed = None
-        self.on_display_new_data_item = None
+        self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
+        self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState], None]] = None
+        self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
+        self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
+        self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
+        self.on_linked_changed : typing.Optional[typing.Callable[[bool], None]] = None
+        self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, stem_controller.SubscanState], None]] = None
+        self.on_data_channel_state_changed : typing.Optional[typing.Callable[[int, str, str, bool], None]] = None
+        self.on_scan_button_state_changed : typing.Optional[typing.Callable[[bool, str], None]] = None
+        self.on_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_record_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_record_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_data_item_states_changed : typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping]], None]] = None
+        self.on_simulate_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_probe_state_changed : typing.Optional[typing.Callable[[str, typing.Optional[Geometry.FloatPoint]], None]] = None
+        self.on_positioned_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
+        self.on_ac_line_sync_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
+        self.on_capture_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_display_new_data_item : typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
 
         self.__captured_xdatas_available_event = None
 
@@ -200,7 +199,6 @@ class ScanControlStateController:
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
         self.on_linked_changed = None
-        self.on_channel_count_changed = None
         self.on_channel_state_changed = None
         self.on_data_channel_state_changed = None
         self.on_scan_button_state_changed = None
@@ -237,12 +235,12 @@ class ScanControlStateController:
         if self.on_record_abort_button_state_changed:
             self.on_record_abort_button_state_changed(self.is_recording, self.is_recording)
 
-    def __update_profile_state(self, profile_label):
-        if self.on_profile_changed:
+    def __update_profile_state(self, profile_label: str) -> None:
+        if callable(self.on_profile_changed):
             self.on_profile_changed(profile_label)
 
-    def __update_frame_parameters(self, profile_index, frame_parameters):
-        if self.on_frame_parameters_changed:
+    def __update_frame_parameters(self, profile_index: int, frame_parameters: scan_base.ScanFrameParameters) -> None:
+        if callable(self.on_frame_parameters_changed):
             if profile_index == self.__scan_hardware_source.selected_profile_index:
                 self.on_frame_parameters_changed(frame_parameters)
 
@@ -282,8 +280,6 @@ class ScanControlStateController:
         if self.on_subscan_state_changed:
             self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
         channel_count = self.__scan_hardware_source.channel_count
-        if self.on_channel_count_changed:
-            self.on_channel_count_changed(channel_count)
         self.__channel_enabled = [False] * channel_count
         for channel_index in range(channel_count):
             channel_id, name, enabled = self.__scan_hardware_source.get_channel_state(channel_index)
@@ -293,7 +289,7 @@ class ScanControlStateController:
         if self.on_profiles_changed:
             profile_items = list(ScanControlStateController.profiles.items())
             profile_items.sort(key=lambda k_v: k_v[1])
-            profiles = map(lambda k_v: k_v[0], profile_items)
+            profiles = list(map(lambda k_v: k_v[0], profile_items))
             self.on_profiles_changed(profiles)
             self.__update_profile_index(self.__scan_hardware_source.selected_profile_index)
         if self.on_linked_changed:
@@ -521,6 +517,13 @@ class ScanControlStateController:
         """ Returns the display name for the hardware source. """
         return self.__scan_hardware_source.display_name if self.__scan_hardware_source else _("N/A")
 
+    @property
+    def data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
+        return self.__scan_hardware_source.data_channels
+
+    def get_channel_enabled(self, channel_index: int) -> bool:
+        return self.__scan_hardware_source.get_channel_enabled(channel_index)
+
     # this message comes from the data buffer. it will always be invoked on a thread.
     def __acquisition_state_changed(self, is_playing):
         if self.__captured_xdatas_available_event:
@@ -539,15 +542,14 @@ class ScanControlStateController:
         if self.on_positioned_check_box_changed:
             self.on_positioned_check_box_changed(probe_position is not None)
 
-    def __channel_state_changed(self, channel_index, channel_id, name, enabled):
+    def __channel_state_changed(self, channel_index: int, channel_id: str, name: str, enabled: bool) -> None:
         if self.on_channel_state_changed:
-            if not name:
-                name = "Channel " + str(channel_id)
-            self.on_channel_state_changed(channel_index, channel_id, name, enabled)
-        if callable(self.on_data_channel_state_changed):
-            self.on_data_channel_state_changed(channel_index, channel_id, name, enabled)
+            self.on_channel_state_changed(channel_index, enabled, self.__scan_hardware_source.subscan_state)
+        data_channel_state_changed = self.on_data_channel_state_changed
+        if callable(data_channel_state_changed):
+            data_channel_state_changed(channel_index, channel_id, name, enabled)
             subscan_channel_index, subscan_channel_id, subscan_channel_name = self.__scan_hardware_source.get_subscan_channel_info(channel_index, channel_id, name)
-            self.on_data_channel_state_changed(subscan_channel_index, subscan_channel_id, subscan_channel_name, enabled)
+            data_channel_state_changed(subscan_channel_index, subscan_channel_id, subscan_channel_name, enabled)
         was_any_channel_enabled = any(self.__channel_enabled)
         self.__channel_enabled[channel_index] = enabled
         is_any_channel_enabled = any(self.__channel_enabled)
@@ -678,7 +680,7 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.border_style_disabled = "rgb(192, 192, 192)"
         self.stroke_style = "#000"
         self.border_enabled = False
-        self.on_button_clicked = None
+        self.on_button_clicked : typing.Optional[typing.Callable[[], None]] = None
 
     def close(self):
         self.on_button_clicked = None
@@ -763,12 +765,14 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
         self.border_enabled = False
         self.enabled = True
         self.__tracking_canvas_item = None
-        self.on_mouse_delta = None  # typing.Callable[[Geometry.IntPoint], None]
+        self.on_mouse_delta : typing.Optional[typing.Callable[[Geometry.IntPoint], None]] = None
         self.__label_canvas_item = None
 
     @property
     def text(self) -> str:
-        return self.__label_canvas_item.text if self.__label_canvas_item else str()
+        if self.__label_canvas_item:
+            return self.__label_canvas_item.text
+        return str()
 
     @text.setter
     def text(self, value: str) -> None:
@@ -898,7 +902,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     controller.
     """
 
-    def __init__(self, document_controller, scan_controller):
+    def __init__(self, document_controller, scan_controller: scan_base.ScanHardwareSource):
         super().__init__(document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2}))
 
         self.document_controller = document_controller
@@ -906,11 +910,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller = ScanControlStateController(scan_controller, document_controller.queue_task, document_controller.document_model, None)
 
         self.__shift_click_state = None
-
-        self.__subscan_state = None
-        self.__subscan_enabled = False
-
-        self.__channel_states = dict()
 
         ui = document_controller.ui
 
@@ -1122,7 +1121,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         rotation_group.add_spacing(18)
         rotation_row.add(rotation_group)
 
-        def rotation_tracker_mouse_delta(mouse_delta: Geometry.IntPoint):
+        def rotation_tracker_mouse_delta(mouse_delta: Geometry.IntPoint) -> None:
             text = str(float(rotation_field.text) + mouse_delta.x / 20)
             self.__state_controller.handle_rotation_changed(text)
 
@@ -1211,23 +1210,23 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         column.add(row7)
         column.add_stretch()
 
-        def positioned_check_box_changed(check_state):
+        def positioned_check_state_changed(check_state: str) -> None:
             self.__state_controller.handle_positioned_check_box(check_state == "checked")
 
-        def ac_line_sync_check_box_changed(check_state):
+        def ac_line_sync_check_state_changed(check_state: str) -> None:
             self.__state_controller.handle_ac_line_sync_check_box(check_state == "checked")
 
         simulate_button.on_clicked = self.__state_controller.handle_simulate_clicked
         open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
-        positioned_check_box.on_check_state_changed = positioned_check_box_changed
-        ac_line_sync_check_box.on_check_state_changed = ac_line_sync_check_box_changed
+        positioned_check_box.on_check_state_changed = positioned_check_state_changed
+        ac_line_sync_check_box.on_check_state_changed = ac_line_sync_check_state_changed
 
         def profiles_changed(items):
             profile_combo.items = items
 
         # thread safe
-        def profile_changed(profile_label):
+        def profile_changed(profile_label: str) -> None:
             # the current_text must be set on ui thread
             self.document_controller.queue_task(lambda: setattr(profile_combo, "current_text", profile_label))
 
@@ -1250,15 +1249,15 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             if rotation_field.focused:
                 rotation_field.request_refocus()
 
-        def linked_changed(linked):
+        def linked_changed(linked: bool) -> None:
             link_checkbox.checked = linked
 
-        def scan_button_state_changed(enabled, play_button_state):
+        def scan_button_state_changed(enabled: bool, play_button_state: str) -> None:
             play_button_text = {"scan": _("Scan"), "stop": _("Stop")}
             play_button.enabled = enabled
             play_button.text = play_button_text[play_button_state]
 
-        def abort_button_state_changed(visible, enabled):
+        def abort_button_state_changed(visible: bool, enabled: bool) -> None:
             # abort_button.visible = visible
             abort_button.enabled = enabled
 
@@ -1308,24 +1307,23 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def ac_line_sync_check_box_changed(checked):
             ac_line_sync_check_box.check_state = "checked" if checked else "unchecked"
 
-        def channel_count_changed(count):
-            thumbnail_group.remove_all()
-            for _ in range(count):
-                thumbnail_group.add(ui.create_column_widget())
-            self.__channel_states.clear()
+        def channel_state_changed(channel_index: int, enabled: bool, subscan_state: stem_controller.SubscanState) -> None:
+            # then rebuild thumbnail for the channel_index, setting up the thumbnail widget, a drag
+            # handler, and checkbox handler.
 
-        def channel_state_changed(channel_index, channel_id, name, enabled):
+            data_channel = self.__state_controller.data_channels[channel_index]
+            channel_id = data_channel.channel_id
+            name = data_channel.name
+
             thumbnail_column = thumbnail_group.children[channel_index]
             thumbnail_column.remove_all()
 
-            actual_channel_id = channel_id if not self.__subscan_enabled else channel_id + "_subscan"
+            actual_channel_id = channel_id if subscan_state != stem_controller.SubscanState.ENABLED else channel_id + "_subscan"
 
             document_model = document_controller.document_model
             data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, actual_channel_id))
             data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, document_model, data_item_reference)
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
-
-            self.__channel_states[channel_index] = channel_id, name, enabled
 
             def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
                 column.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
@@ -1335,21 +1333,22 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_column.add(thumbnail_widget)
             channel_enabled_check_box_widget = ui.create_check_box_widget(name)
             channel_enabled_check_box_widget.checked = enabled
+
             def checked_changed(checked):
                 self.__state_controller.handle_enable_channel(channel_index, checked)
+
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
             thumbnail_column.add(channel_enabled_check_box_widget)
 
-        async def update_subscan_state():
-            for channel_index, (channel_id, name, channel_enabled) in self.__channel_states.items():
-                channel_state_changed(channel_index, channel_id, name, channel_enabled)
-            subscan_checkbox.enabled = self.__subscan_state != stem_controller.SubscanState.INVALID
-            subscan_checkbox.checked = self.__subscan_enabled
+        async def update_subscan_state(subscan_state: stem_controller.SubscanState) -> None:
+            for channel_index in range(scan_controller.channel_count):
+                channel_state_changed(channel_index, self.__state_controller.get_channel_enabled(channel_index), subscan_state)
+            subscan_checkbox.enabled = subscan_state != stem_controller.SubscanState.INVALID
+            subscan_checkbox.checked = subscan_state == stem_controller.SubscanState.ENABLED
 
-        def subscan_state_changed(subscan_state):
-            self.__subscan_state = subscan_state
-            self.__subscan_enabled = subscan_state == stem_controller.SubscanState.ENABLED
-            self.document_controller.event_loop.create_task(update_subscan_state())
+        def subscan_state_changed(subscan_state: stem_controller.SubscanState) -> None:
+            # handle subscan state changes from the low level
+            self.document_controller.event_loop.create_task(update_subscan_state(subscan_state))
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -1365,9 +1364,12 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_probe_state_changed = lambda a, b: self.document_controller.queue_task(lambda: probe_state_changed(a, b))
         self.__state_controller.on_positioned_check_box_changed = lambda a: self.document_controller.queue_task(lambda: positioned_check_box_changed(a))
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
-        self.__state_controller.on_channel_count_changed = channel_count_changed
         self.__state_controller.on_channel_state_changed = channel_state_changed
         self.__state_controller.on_subscan_state_changed = subscan_state_changed
+
+        # before state controller gets initialized
+        for i in range(scan_controller.channel_count):
+            thumbnail_group.add(ui.create_column_widget())
 
         self.__state_controller.initialize_state()
 
@@ -1593,7 +1595,7 @@ class ScanDisplayPanelController:
             self.__data_item_states = data_item_states
             display_panel.document_controller.queue_task(update_status_text)
 
-        def data_channel_state_changed(data_channel_index, data_channel_id, channel_name, enabled):
+        def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
                 self.__channel_index = hardware_source.get_channel_index_for_data_channel_index(data_channel_index)
                 self.__channel_name = channel_name
@@ -1719,7 +1721,7 @@ def run():
                         return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
                     return None
 
-                def match(self, document_model, data_item: DataItem.DataItem) -> dict:
+                def match(self, document_model, data_item: DataItem.DataItem) -> typing.Optional[typing.Mapping]:
                     for channel_index in range(hardware_source.data_channel_count):
                         channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
                         if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):

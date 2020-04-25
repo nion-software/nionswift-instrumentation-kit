@@ -940,10 +940,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         name = self.__device.get_channel_name(channel_index)
         return self.__make_channel_state(channel_index, name, channels_enabled[channel_index])
 
+    def get_channel_enabled(self, channel_index: int) -> bool:
+        assert 0 <= channel_index < self.__device.channel_count
+        return self.__device.channels_enabled[channel_index]
+
     def set_channel_enabled(self, channel_index, enabled):
         changed = self.__device.set_channel_enabled(channel_index, enabled)
         if changed:
-            self.__channel_states_changed([self.get_channel_state(i_channel_index) for i_channel_index in range(self.channel_count)])
+            self.__channel_states_changed([self.get_channel_state(i) for i in range(self.channel_count)])
 
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
         return channel_index + self.channel_count, channel_id + "_subscan", " ".join((channel_name, _("SubScan")))
@@ -1049,7 +1053,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __make_channel_id(self, channel_index) -> str:
         return "abcdefgh"[channel_index]
 
-    def __make_channel_state(self, channel_index, channel_name, channel_enabled):
+    def __make_channel_state(self, channel_index, channel_name, channel_enabled) -> ChannelState:
         return ScanHardwareSource.ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
     def __device_state_changed(self, profile_frame_parameters_list, device_channel_states) -> None:

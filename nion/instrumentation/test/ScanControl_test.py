@@ -360,21 +360,6 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_id00, scan_id01)
             self.assertEqual(scan_id10, scan_id11)
 
-    def test_ui_generates_default_channel_names_when_none_are_provided(self):
-        with self._make_scan_context() as scan_context:
-            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
-            scan_state_controller = ScanControlPanel.ScanControlStateController(hardware_source, document_controller.queue_task, document_controller.document_model, None)
-            names = {}
-
-            def channel_state_changed(channel_index, channel_id, name, enabled):
-                names[channel_index] = name
-
-            scan_state_controller.on_channel_state_changed = channel_state_changed
-            scan_state_controller.initialize_state()
-            hardware_source.channel_state_changed_event.fire(0, "a", str(), True)
-            self.assertNotEqual(names[0], str())
-            self.assertIsNotNone(names[0])
-
     def test_start_playing_with_no_channels_enabled_does_nothing(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects

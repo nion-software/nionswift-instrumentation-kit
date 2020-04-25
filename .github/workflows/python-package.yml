@@ -36,3 +36,4 @@ jobs:
         python -m unittest discover nionswift_plugin
         python -m unittest discover -s nion/instrumentation/test -p "*_test.py"
         mypy --namespace-packages --ignore-missing-imports nion/instrumentation/stem_controller.py
+        mypy --namespace-packages --ignore-missing-imports nionswift_plugin/nion_instrumentation_ui/ScanControlPanel.py
