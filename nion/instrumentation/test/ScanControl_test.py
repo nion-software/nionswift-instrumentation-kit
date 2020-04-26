@@ -144,7 +144,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.__scan_test._close_scan_hardware_source(self.document_controller, self.document_model, self.instrument, self.hardware_source, self.scan_state_controller)
 
             @property
-            def objects(self):
+            def objects(self) -> typing.Tuple[DocumentController.DocumentController, DocumentModel.DocumentModel, scan_base.ScanHardwareSource, ScanControlPanel.ScanControlStateController]:
                 return self.document_controller, self.document_model, self.hardware_source, self.scan_state_controller
 
         return ScanContext(self)
@@ -1139,6 +1139,22 @@ class TestScanControlClass(unittest.TestCase):
             stem_controller_.drift_region = Geometry.FloatRect.from_tlhw(0.2, 0.2, 0.4, 0.4)
             document_controller.periodic()
             display_item.remove_graphic(display_item.graphics[0])
+            self.assertIsNone(stem_controller_.drift_channel_id)
+            self.assertIsNone(stem_controller_.drift_region)
+
+    def test_drift_enabled_when_clicking_checkbox(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            stem_controller_ = typing.cast(stem_controller.STEMController, scan_context.instrument)
+            self.assertIsNone(stem_controller_.drift_channel_id)
+            self.assertIsNone(stem_controller_.drift_region)
+            scan_state_controller.handle_drift_enabled(True)
+            document_controller.periodic()
+            self.assertIsNotNone(stem_controller_.drift_channel_id)
+            self.assertIsNotNone(stem_controller_.drift_region)
+            scan_state_controller.handle_drift_enabled(False)
+            document_controller.periodic()
             self.assertIsNone(stem_controller_.drift_channel_id)
             self.assertIsNone(stem_controller_.drift_region)
 

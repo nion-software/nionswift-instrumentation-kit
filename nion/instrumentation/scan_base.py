@@ -828,8 +828,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__stem_controller._subscan_state_value.value == stem_controller.SubscanState.ENABLED
 
     @subscan_enabled.setter
-    def subscan_enabled(self, value: bool) -> None:
-        if value:
+    def subscan_enabled(self, enabled: bool) -> None:
+        if enabled:
             self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.ENABLED
         else:
             self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.DISABLED
@@ -883,6 +883,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     @property
+    def drift_channel_id_model(self) -> Model.PropertyModel:
+        return self.__stem_controller._drift_channel_value
+
+    @property
+    def drift_region_model(self) -> Model.PropertyModel:
+        return self.__stem_controller._drift_region_value
+
+    @property
     def drift_channel_id(self) -> typing.Optional[str]:
         return self.__stem_controller._drift_channel_value.value
 
@@ -905,6 +913,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     @drift_rotation.setter
     def drift_rotation(self, value: float) -> None:
         self.__stem_controller._drift_rotation_value.value = value
+
+    @property
+    def drift_enabled(self) -> bool:
+        return self.drift_channel_id is not None and self.drift_region is not None
+
+    @drift_enabled.setter
+    def drift_enabled(self, enabled: bool) -> None:
+        if enabled:
+            if not self.drift_channel_id:
+                self.drift_channel_id = self.data_channels[0].channel_id
+            if not self.drift_region:
+                self.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.25, x=0.75), Geometry.FloatSize(h=0.25, w=0.25))
+        else:
+            self.drift_channel_id = None
+            self.drift_region = None
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None

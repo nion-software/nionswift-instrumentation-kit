@@ -897,7 +897,7 @@ class DriftView(EventLoopMonitor):
                 drift_graphic.bounds = tuple(self.__stem_controller.drift_region)
                 drift_graphic.rotation = self.__stem_controller.drift_rotation
                 drift_graphic.is_bounds_constrained = True
-                drift_graphic.color = "#808"  # purple
+                drift_graphic.color = "#F0F"  # purple
                 drift_display_item.add_graphic(drift_graphic)
                 self.__graphic_display_item = drift_display_item
                 self.__graphic = drift_graphic

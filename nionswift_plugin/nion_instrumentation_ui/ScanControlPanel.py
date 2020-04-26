@@ -144,8 +144,11 @@ class ScanControlStateController:
         self.__probe_state_changed_event_listener = None
         self.__channel_state_changed_event_listener = None
         self.__subscan_state_changed_listener = None
+        self.__drift_channel_id_listener = None
+        self.__drift_region_listener = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState], None]] = None
+        self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
@@ -193,8 +196,15 @@ class ScanControlStateController:
         if self.__subscan_state_changed_listener:
             self.__subscan_state_changed_listener.close()
             self.__subscan_state_changed_listener = None
+        if self.__drift_channel_id_listener:
+            self.__drift_channel_id_listener.close()
+            self.__drift_channel_id_listener = None
+        if self.__drift_region_listener:
+            self.__drift_region_listener.close()
+            self.__drift_region_listener = None
         self.on_display_name_changed = None
         self.on_subscan_state_changed = None
+        self.on_drift_state_changed = None
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
@@ -267,18 +277,31 @@ class ScanControlStateController:
             self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__probe_state_changed_event_listener = self.__scan_hardware_source.probe_state_changed_event.listen(self.__probe_state_changed)
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
-            subscan_state_model = self.__scan_hardware_source.subscan_state_model
 
-            def subscan_state_changed(name):
+            def drift_state_changed(name: str) -> None:
+                if callable(self.on_drift_state_changed):
+                    self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id,
+                                                self.__scan_hardware_source.drift_region,
+                                                self.__scan_hardware_source.subscan_state)
+
+            def subscan_state_changed(name: str) -> None:
                 if callable(self.on_subscan_state_changed):
-                    self.on_subscan_state_changed(subscan_state_model.value)
+                    self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
+                drift_state_changed(name)
 
-            self.__subscan_state_changed_listener = subscan_state_model.property_changed_event.listen(subscan_state_changed)
+            self.__subscan_state_changed_listener = self.__scan_hardware_source.subscan_state_model.property_changed_event.listen(subscan_state_changed)
             subscan_state_changed("value")
+
+            self.__drift_channel_id_listener = self.__scan_hardware_source.drift_channel_id_model.property_changed_event.listen(drift_state_changed)
+            self.__drift_region_listener = self.__scan_hardware_source.drift_region_model.property_changed_event.listen(drift_state_changed)
+            drift_state_changed("value")
+
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
         if self.on_subscan_state_changed:
             self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
+        if callable(self.on_drift_state_changed):
+            self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id, self.__scan_hardware_source.drift_region, self.__scan_hardware_source.subscan_state)
         channel_count = self.__scan_hardware_source.channel_count
         self.__channel_enabled = [False] * channel_count
         for channel_index in range(channel_count):
@@ -358,8 +381,12 @@ class ScanControlStateController:
         self.__scan_hardware_source.start_simulator()
 
     # must be called on ui thread
-    def handle_subscan_enabled(self, enabled):
+    def handle_subscan_enabled(self, enabled: bool) -> None:
         self.__scan_hardware_source.subscan_enabled = enabled
+
+    # must be called on ui thread
+    def handle_drift_enabled(self, enabled: bool) -> None:
+        self.__scan_hardware_source.drift_enabled = enabled
 
     # must be called on ui thread
     def handle_enable_channel(self, channel_index, enabled):
@@ -1127,9 +1154,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         rotation_tracker.on_mouse_delta = rotation_tracker_mouse_delta
 
-        subscan_checkbox = ui.create_check_box_widget(_("Subscan Enabled"))
-
+        subscan_checkbox = ui.create_check_box_widget(_("Subscan"))
         subscan_checkbox.on_checked_changed = self.__state_controller.handle_subscan_enabled
+
+        drift_checkbox = ui.create_check_box_widget(_("Drift Correction"))
+        drift_checkbox.on_checked_changed = self.__state_controller.handle_drift_enabled
 
         time_column = ui.create_column_widget()
         time_column.add(time_row)
@@ -1154,6 +1183,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         sizes_row_column = ui.create_column_widget()
         sizes_row_column.add(sizes_row)
         sizes_row_column.add(subscan_checkbox)
+        sizes_row_column.add_spacing(4)
+        sizes_row_column.add(drift_checkbox)
         sizes_row_column.add_stretch()
 
         parameters_group1 = ui.create_row_widget()
@@ -1350,6 +1381,13 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # handle subscan state changes from the low level
             self.document_controller.event_loop.create_task(update_subscan_state(subscan_state))
 
+        async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], subscan_state: stem_controller.SubscanState) -> None:
+            drift_checkbox.enabled = subscan_state != stem_controller.SubscanState.INVALID
+            drift_checkbox.checked = drift_channel_id is not None and drift_region is not None
+
+        def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], subscan_state: stem_controller.SubscanState) -> None:
+            self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, subscan_state))
+
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
         self.__state_controller.on_profile_changed = profile_changed
@@ -1366,6 +1404,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
         self.__state_controller.on_channel_state_changed = channel_state_changed
         self.__state_controller.on_subscan_state_changed = subscan_state_changed
+        self.__state_controller.on_drift_state_changed = drift_state_changed
 
         # before state controller gets initialized
         for i in range(scan_controller.channel_count):
