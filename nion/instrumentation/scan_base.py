@@ -883,12 +883,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     @property
-    def drift_channel_id_model(self) -> Model.PropertyModel:
+    def drift_channel_id_model(self) -> Model.PropertyModel[str]:
         return self.__stem_controller._drift_channel_value
 
     @property
-    def drift_region_model(self) -> Model.PropertyModel:
+    def drift_region_model(self) -> Model.PropertyModel[Geometry.FloatRect]:
         return self.__stem_controller._drift_region_value
+
+    @property
+    def drift_settings_model(self) -> Model.PropertyModel[stem_controller.DriftCorrectionSettings]:
+        return self.__stem_controller._drift_settings_value
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
@@ -900,19 +904,27 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
-        return self.__stem_controller._drift_region_value.value
+        return self.__stem_controller.drift_region
 
     @drift_region.setter
     def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__stem_controller._drift_region_value.value = value
+        self.__stem_controller.drift_region = value
 
     @property
     def drift_rotation(self) -> float:
-        return self.__stem_controller._drift_rotation_value.value
+        return self.__stem_controller.drift_rotation
 
     @drift_rotation.setter
     def drift_rotation(self, value: float) -> None:
-        self.__stem_controller._drift_rotation_value.value = value
+        self.__stem_controller.drift_rotation = value
+
+    @property
+    def drift_settings(self) -> stem_controller.DriftCorrectionSettings:
+        return self.__stem_controller.drift_settings
+
+    @drift_settings.setter
+    def drift_settings(self, value: stem_controller.DriftCorrectionSettings) -> None:
+        self.__stem_controller.drift_settings = value
 
     @property
     def drift_enabled(self) -> bool:

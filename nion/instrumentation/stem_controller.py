@@ -40,6 +40,18 @@ class SubscanState(enum.Enum):
     ENABLED = 1
 
 
+class DriftIntervalUnit(enum.Enum):
+    FRAME = 0
+    TIME = 1
+    LINE = 2
+
+
+class DriftCorrectionSettings:
+    def __init__(self):
+        self.interval = 0
+        self.interval_units = DriftIntervalUnit.FRAME
+
+
 AxisType = typing.Tuple[str, str]
 
 
@@ -110,6 +122,7 @@ class STEMController:
         self.__drift_channel_id_value : Model.PropertyModel[str] = Model.PropertyModel()
         self.__drift_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
         self.__drift_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
+        self.__drift_settings_value : Model.PropertyModel[DriftCorrectionSettings] = Model.PropertyModel(DriftCorrectionSettings())
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
         self.__scan_context_channel_map : typing.Dict[str, "DataItem.DataItem"] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
@@ -132,6 +145,8 @@ class STEMController:
         self.__drift_region_value = None
         self.__drift_rotation_value.close()
         self.__drift_rotation_value = None
+        self.__drift_settings_value.close()
+        self.__drift_settings_value = None
         self.__probe_position_value.close()
         self.__probe_position_value = None
 
@@ -148,6 +163,7 @@ class STEMController:
         self.__drift_channel_id_value.value = None
         self.__drift_region_value.value = None
         self.__drift_rotation_value.value = 0
+        self.__drift_settings_value.value = DriftCorrectionSettings()
         self.__scan_context_data_items.clear()
 
     # configuration methods
@@ -267,6 +283,11 @@ class STEMController:
         return self.__drift_region_value
 
     @property
+    def _drift_settings_value(self) -> Model.PropertyModel[DriftCorrectionSettings]:
+        """Internal use."""
+        return self.__drift_settings_value
+
+    @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
         region_tuple = self.__drift_region_value.value
         return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
@@ -287,6 +308,14 @@ class STEMController:
     @drift_rotation.setter
     def drift_rotation(self, value: float):
         self.__drift_rotation_value.value = value
+
+    @property
+    def drift_settings(self) -> DriftCorrectionSettings:
+        return typing.cast(DriftCorrectionSettings, self.__drift_settings_value.value)
+
+    @drift_settings.setter
+    def drift_settings(self, value: DriftCorrectionSettings) -> None:
+        self.__drift_settings_value.value = value
 
     def disconnect_probe_connections(self):
         self.__scan_context_data_items = list()

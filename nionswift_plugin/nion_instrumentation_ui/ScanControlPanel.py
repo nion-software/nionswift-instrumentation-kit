@@ -22,7 +22,11 @@ from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
 from nion.ui import Widgets
+from nion.utils import Converter
 from nion.utils import Geometry
+
+if typing.TYPE_CHECKING:
+    from nion.swift import DocumentController
 
 
 _ = gettext.gettext
@@ -146,9 +150,10 @@ class ScanControlStateController:
         self.__subscan_state_changed_listener = None
         self.__drift_channel_id_listener = None
         self.__drift_region_listener = None
+        self.__drift_settings_listener = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState], None]] = None
-        self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.SubscanState], None]] = None
+        self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
@@ -202,6 +207,9 @@ class ScanControlStateController:
         if self.__drift_region_listener:
             self.__drift_region_listener.close()
             self.__drift_region_listener = None
+        if self.__drift_settings_listener:
+            self.__drift_settings_listener.close()
+            self.__drift_settings_listener = None
         self.on_display_name_changed = None
         self.on_subscan_state_changed = None
         self.on_drift_state_changed = None
@@ -282,6 +290,7 @@ class ScanControlStateController:
                 if callable(self.on_drift_state_changed):
                     self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id,
                                                 self.__scan_hardware_source.drift_region,
+                                                self.__scan_hardware_source.drift_settings,
                                                 self.__scan_hardware_source.subscan_state)
 
             def subscan_state_changed(name: str) -> None:
@@ -294,6 +303,7 @@ class ScanControlStateController:
 
             self.__drift_channel_id_listener = self.__scan_hardware_source.drift_channel_id_model.property_changed_event.listen(drift_state_changed)
             self.__drift_region_listener = self.__scan_hardware_source.drift_region_model.property_changed_event.listen(drift_state_changed)
+            self.__drift_settings_listener = self.__scan_hardware_source.drift_settings_model.property_changed_event.listen(drift_state_changed)
             drift_state_changed("value")
 
         if self.on_display_name_changed:
@@ -301,7 +311,7 @@ class ScanControlStateController:
         if self.on_subscan_state_changed:
             self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
         if callable(self.on_drift_state_changed):
-            self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id, self.__scan_hardware_source.drift_region, self.__scan_hardware_source.subscan_state)
+            self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id, self.__scan_hardware_source.drift_region, self.__scan_hardware_source.drift_settings, self.__scan_hardware_source.subscan_state)
         channel_count = self.__scan_hardware_source.channel_count
         self.__channel_enabled = [False] * channel_count
         for channel_index in range(channel_count):
@@ -929,7 +939,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     controller.
     """
 
-    def __init__(self, document_controller, scan_controller: scan_base.ScanHardwareSource):
+    def __init__(self, document_controller: "DocumentController.DocumentController", scan_controller: scan_base.ScanHardwareSource):
         super().__init__(document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2}))
 
         self.document_controller = document_controller
@@ -1160,6 +1170,30 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         drift_checkbox = ui.create_check_box_widget(_("Drift Correction"))
         drift_checkbox.on_checked_changed = self.__state_controller.handle_drift_enabled
 
+        drift_settings_value = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})
+        drift_settings_unit = ui.create_combo_box_widget([_("Frames"), _("Seconds"), _("Lines")])
+
+        def drift_value_edited(text: str) -> None:
+            drift_settings = scan_controller.drift_settings
+            drift_settings.interval = Converter.IntegerToStringConverter().convert_back(text)
+            scan_controller.drift_settings = drift_settings
+
+        def drift_unit_changed(index: int) -> None:
+            drift_settings = scan_controller.drift_settings
+            drift_settings.interval = typing.cast(stem_controller.DriftIntervalUnit, index)
+            scan_controller.drift_settings = drift_settings
+
+        drift_settings_value.on_editing_finished = drift_value_edited
+        drift_settings_unit.on_current_index_changed = drift_unit_changed
+
+        drift_row = ui.create_row_widget()
+        drift_row.add(drift_checkbox)
+        drift_row.add_spacing(12)
+        drift_row.add(drift_settings_value)
+        drift_row.add_spacing(4)
+        drift_row.add(drift_settings_unit)
+        drift_row.add_stretch()
+
         time_column = ui.create_column_widget()
         time_column.add(time_row)
         time_column.add(fov_row)
@@ -1183,8 +1217,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         sizes_row_column = ui.create_column_widget()
         sizes_row_column.add(sizes_row)
         sizes_row_column.add(subscan_checkbox)
-        sizes_row_column.add_spacing(4)
-        sizes_row_column.add(drift_checkbox)
         sizes_row_column.add_stretch()
 
         parameters_group1 = ui.create_row_widget()
@@ -1233,6 +1265,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         column.add(button_row1)
         column.add(parameters_group1)
         column.add(parameters_group2)
+        column.add(drift_row)
         column.add(scan_row)
         column.add(record_row)
         column.add(simulatate_row)
@@ -1381,12 +1414,17 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # handle subscan state changes from the low level
             self.document_controller.event_loop.create_task(update_subscan_state(subscan_state))
 
-        async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], subscan_state: stem_controller.SubscanState) -> None:
-            drift_checkbox.enabled = subscan_state != stem_controller.SubscanState.INVALID
+        async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
+            enabled = subscan_state != stem_controller.SubscanState.INVALID
+            drift_checkbox.enabled = enabled
+            drift_settings_value.enabled = enabled
+            drift_settings_unit.enabled = enabled
             drift_checkbox.checked = drift_channel_id is not None and drift_region is not None
+            drift_settings_value.text = Converter.IntegerToStringConverter().convert(drift_settings.interval)
+            drift_settings_unit.current_item = drift_settings.interval_units
 
-        def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], subscan_state: stem_controller.SubscanState) -> None:
-            self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, subscan_state))
+        def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
+            self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, drift_settings, subscan_state))
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
