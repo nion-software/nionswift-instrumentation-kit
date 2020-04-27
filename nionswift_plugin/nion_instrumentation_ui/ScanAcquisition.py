@@ -281,9 +281,9 @@ def calculate_time_size(camera_hardware_source, scan_pixels, camera_width, camer
     acquisition_memory = acquire_sequence_metrics.get("acquisition_memory", acquire_pixel_count * camera_width * camera_height * 4)  # in bytes
     storage_memory = acquire_sequence_metrics.get("storage_memory", storage_memory)  # in bytes
     if acquisition_time > 3600:
-        time_str = "{0:.1f} hours".format((int(acquisition_time) + 3599) / 3600)
+        time_str = "{0:.1f} hours".format(int(acquisition_time) / 3600)
     elif acquisition_time > 90:
-        time_str = "{0:.1f} minutes".format((int(acquisition_time) + 59) / 60)
+        time_str = "{0:.1f} minutes".format(int(acquisition_time) / 60)
     else:
         time_str = "{} seconds".format(int(acquisition_time))
     if acquisition_memory != 0 and abs(storage_memory / acquisition_memory - 1) > 0.1:
