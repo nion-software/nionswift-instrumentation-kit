@@ -111,8 +111,7 @@ class STEMController(Observable.Observable):
 
     def __init__(self):
         super().__init__()
-        self.__probe_position_value : Model.PropertyModel[Geometry.FloatPoint] = Model.PropertyModel()
-        self.__probe_position_value.on_value_changed = self.set_probe_position
+        self.__probe_position = None
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext()
@@ -134,11 +133,9 @@ class STEMController(Observable.Observable):
     def close(self):
         self.__scan_context_data_items = None
         self.__scan_context_channel_map = None
-        self.__probe_position_value.close()
-        self.__probe_position_value = None
 
     def reset(self) -> None:
-        self.__probe_position_value.value = None
+        self.__probe_position = None
         self.__probe_state_stack.clear()
         self.__probe_state_stack.append("parked")
         self.__scan_context.center_nm = None
@@ -204,11 +201,6 @@ class STEMController(Observable.Observable):
 
     def _exit_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: HardwareSource.HardwareSource=None) -> None:
         pass
-
-    @property
-    def _probe_position_value(self) -> Model.PropertyModel[Geometry.FloatPoint]:
-        """Internal use."""
-        return self.__probe_position_value
 
     @property
     def subscan_state(self) -> SubscanState:
@@ -309,25 +301,20 @@ class STEMController(Observable.Observable):
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
         """ Return the probe position, in normalized coordinates with origin at top left. Only valid if probe_state is 'parked'."""
-        return self.__probe_position_value.value
+        return self.__probe_position
 
     @probe_position.setter
     def probe_position(self, value: typing.Optional[Geometry.FloatPoint]) -> None:
-        self.set_probe_position(value)
+        if value is not None:
+            # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
+            value = Geometry.FloatPoint(y=max(min(value.y, 1.0), 0.0), x=max(min(value.x, 1.0), 0.0))
+        if self.probe_position != value:
+            self.__probe_position = value
+            # update the probe position for listeners and also explicitly update for probe_graphic_connections.
+            self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
     def set_probe_position(self, new_probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
-        """ Set the probe position, in normalized coordinates with origin at top left. """
-        if new_probe_position is not None:
-            # convert the probe position to a FloatPoint and limit it to the 0.0 to 1.0 range in both axes.
-            new_probe_position = Geometry.FloatPoint(y=max(min(new_probe_position.y, 1.0), 0.0),
-                                                     x=max(min(new_probe_position.x, 1.0), 0.0))
-        old_probe_position = self.__probe_position_value.value
-        if ((old_probe_position is None) != (new_probe_position is None)) or (old_probe_position != new_probe_position):
-            # this path is only taken if set_probe_position is not called as a result of the probe_position model
-            # value changing.
-            self.__probe_position_value.value = new_probe_position
-        # update the probe position for listeners and also explicitly update for probe_graphic_connections.
-        self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
+        self.probe_position = new_probe_position
 
     def validate_probe_position(self):
         """Validate the probe position.
@@ -657,7 +644,6 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
         self.__probe_state = None
-        self.__probe_position_value = stem_controller._probe_position_value
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__document_model.register_implicit_dependency(self)
 
@@ -694,23 +680,23 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
 
     def _graphic_removed(self, subscan_graphic: Graphics.Graphic) -> None:
         # clear probe state
-        self.__probe_position_value.value = None
+        self.__stem_controller.probe_position = None
 
     def _create_graphic(self) -> Graphics.PointGraphic:
         graphic = Graphics.PointGraphic()
         graphic.graphic_id = "probe"
         graphic.label = _("Probe")
-        graphic.position = self.__probe_position_value.value
+        graphic.position = self.__stem_controller.probe_position
         graphic.is_bounds_constrained = True
         graphic.color = "#F80"
         return graphic
 
     def _update_graphic(self, graphic: Graphics.Graphic) -> None:
-        graphic.position = self.__probe_position_value.value
+        graphic.position = self.__stem_controller.probe_position
 
     def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
         if name == "position":
-            self.__probe_position_value.value = Geometry.FloatPoint.make(graphic.position)
+            self.__stem_controller.probe_position = Geometry.FloatPoint.make(graphic.position)
 
     def get_dependents(self, item) -> typing.Sequence:
         graphics = self.__graphic_set.graphics
@@ -951,7 +937,7 @@ class ScanContextController:
 
     def register_instrument(self, instrument):
         # if this is a stem controller, add a probe view
-        if hasattr(instrument, "_probe_position_value"):
+        if hasattr(instrument, "probe_position"):
             instrument._probe_view = ProbeView(instrument, self.__document_model, self.__event_loop)
         if hasattr(instrument, "subscan_region"):
             instrument._subscan_view = SubscanView(instrument, self.__document_model, self.__event_loop)
