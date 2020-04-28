@@ -1,5 +1,6 @@
 # standard libraries
 import asyncio
+import copy
 import functools
 import gettext
 import pkgutil

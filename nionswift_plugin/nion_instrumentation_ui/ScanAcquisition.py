@@ -12,6 +12,7 @@ import uuid
 # local libraries
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
+from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.swift import Facade
 from nion.swift import HistogramPanel
@@ -25,6 +26,8 @@ from nion.utils import Converter
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
+from nion.utils import Registry
+from nion.utils import Stream
 from . import HardwareSourceChoice
 
 _ = gettext.gettext
@@ -72,6 +75,7 @@ class ScanSpecifier:
         self.rect_rotation = None
         self.spacing_px = None
         self.spacing_calibrated = None
+        self.drift_interval_lines = 0
 
 
 class CameraDataChannel:
@@ -112,7 +116,8 @@ class CameraDataChannel:
         self.__document_model.begin_data_item_live(self.__data_item)
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-        if hasattr(self.__document_model, "update_data_item_partial"):
+        update_data_item_partial = getattr(self.__document_model, "update_data_item_partial", None)
+        if callable(update_data_item_partial):
             collection_rank = len(tuple(scan_shape))
             data_metadata = DataAndMetadata.DataMetadata(
                 (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
@@ -121,7 +126,7 @@ class CameraDataChannel:
                 data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
             src_slice = sub_area.slice + (Ellipsis,)
             dst_slice = dest_sub_area.slice + (Ellipsis,)
-            self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+            update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
         elif state == "complete":
             # hack for Swift 0.14
             def update_data_item():
@@ -151,19 +156,22 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
         # this method must be thread safe
         # start with the context frame parameters and adjust for the drift region
+        adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
         context_size = Geometry.FloatSize.make(frame_parameters.size)
-        # drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
-        # frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height), int(context_size.width * drift_region.width)
-        # frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
-        # frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
-        # frame_parameters.subscan_rotation = self.__scan_hardware_source.drift_rotation
-        # xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [self.__scan_hardware_source.drift_channel_id])
-        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, ["a"])
-        print(f"{len(xdatas)} {xdatas[0].data_shape} {xdatas[0].dimensional_calibrations}")
-        adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
-        adjustments.offset_nm = Geometry.FloatSize(h=0*xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(context_size.height / 20),
-                                                   w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(context_size.width / 50))
+        drift_channel_id = self.__scan_hardware_source.drift_channel_id
+        drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
+        drift_rotation = self.__scan_hardware_source.drift_rotation
+        if drift_channel_id is not None and drift_region is not None:
+            frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height), int(context_size.width * drift_region.width)
+            if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
+                frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
+                frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
+                frame_parameters.subscan_rotation = drift_rotation
+                xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
+                print(f"{len(xdatas)} {xdatas[0].data_shape} {xdatas[0].dimensional_calibrations}")
+                adjustments.offset_nm = Geometry.FloatSize(h=0*xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(context_size.height / 20),
+                                                           w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(context_size.width / 50))
         return adjustments
 
 
@@ -255,8 +263,12 @@ class ScanAcquisitionController:
 
         camera_data_channel.start()
 
-        drift_correction_behavior = None  # DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
-        section_height = None  # 5
+        if self.__scan_specifier.drift_interval_lines > 0:
+            drift_correction_behavior = DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            section_height = self.__scan_specifier.drift_interval_lines
+        else:
+            drift_correction_behavior = None
+            section_height = None
 
         def grab_synchronized():
             self.acquisition_state_changed_event.fire(SequenceState.scanning)
@@ -366,17 +378,29 @@ class PanelDelegate:
         self.__target_display_item_stream_listener = None
         self.__target_region_stream_listener = None
 
-    def create_panel_widget(self, ui, document_controller):
+    def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
+        stem_controller = Registry.get_component("stem_controller")
 
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_camera"))
         self.__scan_acquisition_preference_panel = ScanAcquisitionPreferencePanel(self.__scan_hardware_source_choice, self.__camera_hardware_source_choice)
         # PreferencesDialog.PreferencesManager().register_preference_pane(self.__scan_acquisition_preference_panel)
 
+        scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice.hardware_source)
+        camera_hardware_source = typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.__camera_hardware_source_choice.hardware_source)
+
         # need the target graphic where the graphic sits on a scan or subscan
 
         self.__target_display_item_stream = HistogramPanel.TargetDisplayItemStream(document_controller._document_window).add_ref()
         self.__target_region_stream = HistogramPanel.TargetRegionStream(self.__target_display_item_stream).add_ref()
+
+        self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
+        self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
+        self.__drift_tuple_stream = Stream.CombineLatestStream([
+            Stream.PropertyChangedEventStream(stem_controller, "drift_channel_id"),
+            Stream.PropertyChangedEventStream(stem_controller, "drift_region"),
+            Stream.PropertyChangedEventStream(stem_controller, "drift_settings")
+        ]).add_ref()
 
         def match_scan_display_item(display_item: DisplayItem.DisplayItem) -> typing.Optional[DataItem.DataItem]:
             scan_hardware_source = self.__scan_hardware_source_choice.hardware_source
@@ -428,6 +452,7 @@ class PanelDelegate:
                 self.__scan_specifier.rect = None
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.drift_interval_lines = 0
                 self.__acquire_button._widget.enabled = True
                 self.__graphic_width = length
             elif isinstance(graphic, Graphics.RectangleGraphic):
@@ -442,18 +467,21 @@ class PanelDelegate:
                 self.__calibration_len = display_data_shape[-1]
                 scan_str = _("Scan (2D)")
                 if self.__scan_spacing_px is not None:
-                    scan_width = round(width / self.__scan_spacing_px)
-                    scan_height = round(height / self.__scan_spacing_px)
+                    scan_width = int(round(width / self.__scan_spacing_px))
+                    scan_height = int(round(height / self.__scan_spacing_px))
                 else:
                     scan_width = 0
                     scan_height = 0
-                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000)
+                drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.context_data_item = context_data_item
                 self.__scan_specifier.line = None
                 self.__scan_specifier.rect = graphic.bounds
                 self.__scan_specifier.rect_rotation = graphic.rotation
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.drift_interval_lines = drift_lines
                 self.__acquire_button._widget.enabled = True
                 self.__graphic_width = int(width)
             elif display_item and display_data_shape is not None:
@@ -472,13 +500,16 @@ class PanelDelegate:
                 else:
                     scan_width = 0
                     scan_height = 0
-                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px"
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000)
+                drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.context_data_item = context_data_item
                 self.__scan_specifier.line = None
                 self.__scan_specifier.rect = None
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = self.__scan_spacing_px
+                self.__scan_specifier.drift_interval_lines = drift_lines
                 self.__acquire_button._widget.enabled = True
                 self.__graphic_width = width
             else:
@@ -492,6 +523,7 @@ class PanelDelegate:
                 self.__scan_specifier.rect_rotation = 0
                 self.__scan_specifier.spacing_px = None
                 self.__scan_specifier.spacing_calibrated = None
+                self.__scan_specifier.drift_interval_lines = 0
                 self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
                 self.__graphic_width = None
                 self.__scan_pixels = 0
@@ -509,8 +541,12 @@ class PanelDelegate:
         def new_display_item(display_item: DisplayItem.DisplayItem) -> None:
             update_context()
 
+        def new_drift_tuple(drift_tuple: typing.Tuple) -> None:
+            document_controller._document_controller.event_loop.call_soon_threadsafe(update_context)
+
         self.__target_display_item_stream_listener = self.__target_display_item_stream.value_stream.listen(new_display_item)
         self.__target_region_stream_listener = self.__target_region_stream.value_stream.listen(new_region)
+        self.__drift_tuple_stream_listener = self.__drift_tuple_stream.value_stream.listen(new_drift_tuple)
 
         column = ui.create_column_widget()
 
@@ -627,9 +663,9 @@ class PanelDelegate:
                 if self.__scan_spacing_px != spacing:
                     self.__scan_spacing_px = spacing
                     update_context()
-                self.__scan_width_widget.select_all()
             else:
                 self.__scan_spacing_px = None
+            self.__scan_width_widget.request_refocus()
 
         self.__scan_width_widget.on_editing_finished = scan_width_changed
 
@@ -751,10 +787,17 @@ class PanelDelegate:
         if self.__target_region_stream_listener:
             self.__target_region_stream_listener.close()
             self.__target_region_stream_listener = None
+        if self.__drift_tuple_stream_listener:
+            self.__drift_tuple_stream_listener.close()
+            self.__drift_tuple_stream_listener = None
         if self.__target_region_stream:
             self.__target_region_stream.remove_ref()
         if self.__target_display_item_stream:
             self.__target_display_item_stream.remove_ref()
+        if self.__scan_hardware_source_stream:
+            self.__scan_hardware_source_stream.remove_ref()
+        if self.__camera_hardware_source_stream:
+            self.__camera_hardware_source_stream.remove_ref()
 
 
 class ScanAcquisitionPreferencePanel:

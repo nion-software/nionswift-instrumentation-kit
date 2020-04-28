@@ -1,11 +1,13 @@
 # system imports
 import operator
+import typing
 
 # local libraries
 from nion.swift.model import HardwareSource as HardwareSourceModule
 from nion.utils import Binding
 from nion.utils import Event
 from nion.utils import Model
+from nion.utils import Stream
 
 
 class HardwareSourceChoice:
@@ -83,3 +85,33 @@ class HardwareSourceChoice:
         combo_box.bind_items(Binding.PropertyBinding(self.hardware_sources_model, "value"))
         combo_box.bind_current_index(Binding.PropertyBinding(self.hardware_source_index_model, "value"))
         return combo_box
+
+
+class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.HardwareSource]):
+
+    def __init__(self, hardware_source_choice: HardwareSourceChoice):
+        super().__init__()
+        # outgoing messages
+        self.value_stream = Event.Event()
+        # references
+        self.__hardware_source_choice = hardware_source_choice
+        # initialize
+        self.__value = None
+        # listen for display changes
+        self.__hardware_source_changed_listener = hardware_source_choice.hardware_source_changed_event.listen(self.__hardware_source_changed)
+        self.__hardware_source_changed(hardware_source_choice.hardware_source)
+
+    def close(self) -> None:
+        self.__hardware_source_changed_listener.close()
+        self.__hardware_source_changed_listener = None
+        self.__hardware_source_choice = None
+        super().close()
+
+    @property
+    def value(self) -> HardwareSourceModule.HardwareSource:
+        return self.__value
+
+    def __hardware_source_changed(self, hardware_source: typing.Optional[HardwareSourceModule.HardwareSource]) -> None:
+        if hardware_source != self.__value:
+            self.__value = hardware_source
+            self.value_stream.fire(self.__value)

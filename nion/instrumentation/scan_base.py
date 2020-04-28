@@ -929,6 +929,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.drift_channel_id = None
             self.drift_region = None
 
+    @property
+    def drift_valid(self) -> bool:
+        return self.drift_enabled and self.drift_settings.interval > 0
+
+    def calculate_drift_lines(self, width: int, frame_time: float) -> int:
+        if self.drift_valid:
+            assert isinstance(self.drift_settings.interval_units, stem_controller.DriftIntervalUnit)
+            if self.drift_settings.interval_units == stem_controller.DriftIntervalUnit.FRAME:
+                lines = max(1, math.ceil(self.drift_settings.interval / width))
+            elif self.drift_settings.interval_units == stem_controller.DriftIntervalUnit.TIME:
+                lines = max(1, math.ceil(self.drift_settings.interval / frame_time / width))
+            else:
+                lines = self.drift_settings.interval
+            return int(lines)
+        return 0
+
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count

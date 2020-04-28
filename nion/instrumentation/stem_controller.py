@@ -39,7 +39,7 @@ class SubscanState(enum.Enum):
     ENABLED = 1
 
 
-class DriftIntervalUnit(enum.Enum):
+class DriftIntervalUnit(enum.IntEnum):
     FRAME = 0
     TIME = 1
     LINE = 2
