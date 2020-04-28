@@ -91,7 +91,7 @@ class ScanContext:
         self.rotation_rad = rotation_rad
 
 
-class STEMController:
+class STEMController(Observable.Observable):
     """An interface to a STEM microscope.
 
     Methods and properties starting with a single underscore are called internally and shouldn't be called by general
@@ -110,19 +110,20 @@ class STEMController:
     """
 
     def __init__(self):
+        super().__init__()
         self.__probe_position_value : Model.PropertyModel[Geometry.FloatPoint] = Model.PropertyModel()
         self.__probe_position_value.on_value_changed = self.set_probe_position
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext()
         self.probe_state_changed_event = Event.Event()
-        self.__subscan_state_value : Model.PropertyModel[SubscanState] = Model.PropertyModel(SubscanState.INVALID)
-        self.__subscan_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
-        self.__subscan_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
-        self.__drift_channel_id_value : Model.PropertyModel[str] = Model.PropertyModel()
-        self.__drift_region_value : Model.PropertyModel[Geometry.FloatRect] = Model.PropertyModel()
-        self.__drift_rotation_value : Model.PropertyModel[float] = Model.PropertyModel(0.0)
-        self.__drift_settings_value : Model.PropertyModel[DriftCorrectionSettings] = Model.PropertyModel(DriftCorrectionSettings())
+        self.__subscan_state = SubscanState.INVALID
+        self.__subscan_region = None
+        self.__subscan_rotation = 0.0
+        self.__drift_channel_id = None
+        self.__drift_region = None
+        self.__drift_rotation = 0.0
+        self.__drift_settings = DriftCorrectionSettings()
         self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
         self.__scan_context_channel_map : typing.Dict[str, "DataItem.DataItem"] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
@@ -133,20 +134,6 @@ class STEMController:
     def close(self):
         self.__scan_context_data_items = None
         self.__scan_context_channel_map = None
-        self.__subscan_state_value.close()
-        self.__subscan_state_value = None
-        self.__subscan_region_value.close()
-        self.__subscan_region_value = None
-        self.__subscan_rotation_value.close()
-        self.__subscan_rotation_value = None
-        self.__drift_channel_id_value.close()
-        self.__drift_channel_id_value = None
-        self.__drift_region_value.close()
-        self.__drift_region_value = None
-        self.__drift_rotation_value.close()
-        self.__drift_rotation_value = None
-        self.__drift_settings_value.close()
-        self.__drift_settings_value = None
         self.__probe_position_value.close()
         self.__probe_position_value = None
 
@@ -157,13 +144,12 @@ class STEMController:
         self.__scan_context.center_nm = None
         self.__scan_context.fov_size_nm = None
         self.__scan_context.rotation_rad = None
-        self.__subscan_state_value.value = SubscanState.INVALID
-        self.__subscan_region_value.value = None
-        self.__subscan_rotation_value.value = 0
-        self.__drift_channel_id_value.value = None
-        self.__drift_region_value.value = None
-        self.__drift_rotation_value.value = 0
-        self.__drift_settings_value.value = DriftCorrectionSettings()
+        self.__subscan_state = SubscanState.INVALID
+        self.__subscan_rotation = 0.0
+        self.__drift_channel_id = None
+        self.__drift_region = None
+        self.__drift_rotation = 0.0
+        self.__drift_settings = DriftCorrectionSettings()
         self.__scan_context_data_items.clear()
 
     # configuration methods
@@ -205,8 +191,8 @@ class STEMController:
         # fire off the probe state changed event.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
         # ensure that SubscanState is valid (ENABLED or DISABLED, not INVALID)
-        if self._subscan_state_value.value == SubscanState.INVALID:
-            self._subscan_state_value.value = SubscanState.DISABLED
+        if self.__subscan_state == SubscanState.INVALID:
+            self.__subscan_state = SubscanState.DISABLED
 
     def _exit_scanning_state(self) -> None:
         # pop the 'scanning' probe state and fire off the probe state changed event.
@@ -225,97 +211,69 @@ class STEMController:
         return self.__probe_position_value
 
     @property
-    def _subscan_state_value(self) -> Model.PropertyModel[SubscanState]:
-        """Internal use."""
-        return self.__subscan_state_value
-
-    @property
     def subscan_state(self) -> SubscanState:
-        return typing.cast(SubscanState, self.__subscan_state_value.value)
+        return self.__subscan_state
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
-        self.__subscan_state_value.value = value
-
-    @property
-    def _subscan_region_value(self) -> Model.PropertyModel[Geometry.FloatRect]:
-        """Internal use."""
-        return self.__subscan_region_value
+        self.__subscan_state = value
+        self.notify_property_changed("subscan_state")
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
-        region_tuple = self.__subscan_region_value.value
+        region_tuple = self.__subscan_region
         return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__subscan_region_value.value = tuple(value) if value is not None else None
-
-    @property
-    def _subscan_rotation_value(self) -> Model.PropertyModel[float]:
-        """Internal use."""
-        return self.__subscan_rotation_value
+        self.__subscan_region = tuple(value) if value is not None else None
+        self.notify_property_changed("subscan_region")
 
     @property
     def subscan_rotation(self) -> float:
-        return typing.cast(float, self.__subscan_rotation_value.value)
+        return self.__subscan_rotation
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float):
-        self.__subscan_rotation_value.value = value
-
-    @property
-    def _drift_channel_value(self) -> Model.PropertyModel[str]:
-        """Internal use."""
-        return self.__drift_channel_id_value
+        self.__subscan_rotation = value
+        self.notify_property_changed("subscan_rotation")
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
-        return self.__drift_channel_id_value.value
+        return self.__drift_channel_id
 
     @drift_channel_id.setter
     def drift_channel_id(self, value: typing.Optional[str]) -> None:
-        self.__drift_channel_id_value.value = value
-
-    @property
-    def _drift_region_value(self) -> Model.PropertyModel[Geometry.FloatRect]:
-        """Internal use."""
-        return self.__drift_region_value
-
-    @property
-    def _drift_settings_value(self) -> Model.PropertyModel[DriftCorrectionSettings]:
-        """Internal use."""
-        return self.__drift_settings_value
+        self.__drift_channel_id = value
+        self.notify_property_changed("drift_channel_id")
 
     @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
-        region_tuple = self.__drift_region_value.value
+        region_tuple = self.__drift_region
         return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
 
     @drift_region.setter
     def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__drift_region_value.value = tuple(value) if value is not None else None
-
-    @property
-    def _drift_rotation_value(self) -> Model.PropertyModel[float]:
-        """Internal use."""
-        return self.__drift_rotation_value
+        self.__drift_region = tuple(value) if value is not None else None
+        self.notify_property_changed("drift_region")
 
     @property
     def drift_rotation(self) -> float:
-        return typing.cast(float, self.__drift_rotation_value.value)
+        return typing.cast(float, self.__drift_rotation)
 
     @drift_rotation.setter
     def drift_rotation(self, value: float):
-        self.__drift_rotation_value.value = value
+        self.__drift_rotation = value
+        self.notify_property_changed("drift_rotation")
 
     @property
     def drift_settings(self) -> DriftCorrectionSettings:
-        return typing.cast(DriftCorrectionSettings, self.__drift_settings_value.value)
+        return self.__drift_settings
 
     @drift_settings.setter
     def drift_settings(self, value: DriftCorrectionSettings) -> None:
-        self.__drift_settings_value.value = value
+        self.__drift_settings = value
+        self.notify_property_changed("drift_settings")
 
     def disconnect_probe_connections(self):
         self.__scan_context_data_items = list()
@@ -771,8 +729,8 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
-        self.__subscan_region_changed_listener = stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
-        self.__subscan_rotation_changed_listener = stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
+        self.__subscan_region_changed_listener = stem_controller.property_changed_event.listen(self.__subscan_region_changed)
+        self.__subscan_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
         self.__document_model.register_implicit_dependency(self)
 
     def close(self):
@@ -796,11 +754,13 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
 
     def __subscan_region_changed(self, name: str) -> None:
         # must be thread safe
-        self._call_soon_threadsafe(self.__update_subscan_region)
+        if name == "subscan_region":
+            self._call_soon_threadsafe(self.__update_subscan_region)
 
     def __subscan_rotation_changed(self, name: str) -> None:
         # must be thread safe
-        self._call_soon_threadsafe(self.__update_subscan_region)
+        if name == "subscan_rotation":
+            self._call_soon_threadsafe(self.__update_subscan_region)
 
     def __update_subscan_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
@@ -856,9 +816,9 @@ class DriftView(EventLoopMonitor):
         self.__graphic_about_to_be_removed_listener = None
         # note: these property changed listeners can all possibly be fired from a thread.
         self.__scan_context_data_items_changed_listener = stem_controller.scan_context_data_items_changed_event.listen(self.__scan_context_data_items_changed)
-        self.__drift_channel_id_changed_listener = stem_controller._drift_region_value.property_changed_event.listen(self.__drift_channel_id_changed)
-        self.__drift_region_changed_listener = stem_controller._drift_region_value.property_changed_event.listen(self.__drift_region_changed)
-        self.__drift_rotation_changed_listener = stem_controller._drift_rotation_value.property_changed_event.listen(self.__drift_rotation_changed)
+        self.__drift_channel_id_changed_listener = stem_controller.property_changed_event.listen(self.__drift_channel_id_changed)
+        self.__drift_region_changed_listener = stem_controller.property_changed_event.listen(self.__drift_region_changed)
+        self.__drift_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__drift_rotation_changed)
 
     def close(self):
         self._mark_closed()
@@ -892,15 +852,18 @@ class DriftView(EventLoopMonitor):
 
     def __drift_channel_id_changed(self, name: str) -> None:
         # must be thread safe
-        self._call_soon_threadsafe(self.__update_drift_region)
+        if name == "drift_channel_id":
+            self._call_soon_threadsafe(self.__update_drift_region)
 
     def __drift_region_changed(self, name: str) -> None:
         # must be thread safe
-        self._call_soon_threadsafe(self.__update_drift_region)
+        if name == "drift_region":
+            self._call_soon_threadsafe(self.__update_drift_region)
 
     def __drift_rotation_changed(self, name: str) -> None:
         # must be thread safe
-        self._call_soon_threadsafe(self.__update_drift_region)
+        if name == "drift_rotation":
+            self._call_soon_threadsafe(self.__update_drift_region)
 
     def __update_drift_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
@@ -990,9 +953,9 @@ class ScanContextController:
         # if this is a stem controller, add a probe view
         if hasattr(instrument, "_probe_position_value"):
             instrument._probe_view = ProbeView(instrument, self.__document_model, self.__event_loop)
-        if hasattr(instrument, "_subscan_region_value"):
+        if hasattr(instrument, "subscan_region"):
             instrument._subscan_view = SubscanView(instrument, self.__document_model, self.__event_loop)
-        if hasattr(instrument, "_drift_region_value"):
+        if hasattr(instrument, "drift_region"):
             instrument._drift_view = DriftView(instrument, self.__document_model, self.__event_loop)
 
     def unregister_instrument(self, instrument):

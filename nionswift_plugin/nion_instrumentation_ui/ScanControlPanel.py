@@ -279,6 +279,8 @@ class ScanControlStateController:
     def initialize_state(self):
         """ Call this to initialize the state of the UI after everything has been connected. """
         if self.__scan_hardware_source:
+            stem_controller = self.__scan_hardware_source.stem_controller
+
             self.__profile_changed_event_listener = self.__scan_hardware_source.profile_changed_event.listen(self.__update_profile_index)
             self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
             self.__data_item_states_changed_event_listener = self.__scan_hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
@@ -287,23 +289,29 @@ class ScanControlStateController:
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
 
             def drift_state_changed(name: str) -> None:
-                if callable(self.on_drift_state_changed):
-                    self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id,
-                                                self.__scan_hardware_source.drift_region,
-                                                self.__scan_hardware_source.drift_settings,
-                                                self.__scan_hardware_source.subscan_state)
+                if name in ("drift_channel_id", "drift_region", "drift_settings"):
+                    if callable(self.on_drift_state_changed):
+                        self.on_drift_state_changed(stem_controller.drift_channel_id,
+                                                    stem_controller.drift_region,
+                                                    stem_controller.drift_settings,
+                                                    stem_controller.subscan_state)
 
             def subscan_state_changed(name: str) -> None:
-                if callable(self.on_subscan_state_changed):
-                    self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
-                drift_state_changed(name)
+                if name == "subscan_state":
+                    if callable(self.on_subscan_state_changed):
+                        self.on_subscan_state_changed(stem_controller.subscan_state)
+                    if callable(self.on_drift_state_changed):
+                        self.on_drift_state_changed(stem_controller.drift_channel_id,
+                                                    stem_controller.drift_region,
+                                                    stem_controller.drift_settings,
+                                                    stem_controller.subscan_state)
 
-            self.__subscan_state_changed_listener = self.__scan_hardware_source.subscan_state_model.property_changed_event.listen(subscan_state_changed)
-            subscan_state_changed("value")
+            self.__subscan_state_changed_listener = stem_controller.property_changed_event.listen(subscan_state_changed)
+            subscan_state_changed("subscan_state")
 
-            self.__drift_channel_id_listener = self.__scan_hardware_source.drift_channel_id_model.property_changed_event.listen(drift_state_changed)
-            self.__drift_region_listener = self.__scan_hardware_source.drift_region_model.property_changed_event.listen(drift_state_changed)
-            self.__drift_settings_listener = self.__scan_hardware_source.drift_settings_model.property_changed_event.listen(drift_state_changed)
+            self.__drift_channel_id_listener = stem_controller.property_changed_event.listen(drift_state_changed)
+            self.__drift_region_listener = stem_controller.property_changed_event.listen(drift_state_changed)
+            self.__drift_settings_listener = stem_controller.property_changed_event.listen(drift_state_changed)
             drift_state_changed("value")
 
         if self.on_display_name_changed:

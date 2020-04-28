@@ -26,12 +26,13 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
-from nion.utils import Model
 from nion.utils import Registry
 
 
 _ = gettext.gettext
 
+SubscanState = stem_controller.SubscanState
+DriftCorrectionSettings = stem_controller.DriftCorrectionSettings
 
 class ScanFrameParameters(dict):
     def __init__(self, *args, **kwargs):
@@ -427,9 +428,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller = stem_controller_
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
-        self.__subscan_state_changed_event_listener = self.__stem_controller._subscan_state_value.property_changed_event.listen(self.__subscan_state_changed)
-        self.__subscan_region_changed_event_listener = self.__stem_controller._subscan_region_value.property_changed_event.listen(self.__subscan_region_changed)
-        self.__subscan_rotation_changed_event_listener = self.__stem_controller._subscan_rotation_value.property_changed_event.listen(self.__subscan_rotation_changed)
+        self.__subscan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_state_changed)
+        self.__subscan_region_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_region_changed)
+        self.__subscan_rotation_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
@@ -510,6 +511,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 import traceback
                 traceback.print_exc()
                 traceback.print_stack()
+
+    @property
+    def stem_controller(self) -> stem_controller.STEMController:
+        return self.__stem_controller
 
     @property
     def scan_device(self):
@@ -816,91 +821,74 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__device.flyback_pixels
 
     @property
-    def subscan_state(self) -> stem_controller.SubscanState:
-        return self.__stem_controller._subscan_state_value.value
-
-    @property
-    def subscan_state_model(self) -> Model.PropertyModel:
-        return self.__stem_controller._subscan_state_value
+    def subscan_state(self) -> SubscanState:
+        return self.__stem_controller.subscan_state
 
     @property
     def subscan_enabled(self) -> bool:
-        return self.__stem_controller._subscan_state_value.value == stem_controller.SubscanState.ENABLED
+        return self.__stem_controller.subscan_state == stem_controller.SubscanState.ENABLED
 
     @subscan_enabled.setter
     def subscan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.ENABLED
+            self.__stem_controller.subscan_state = stem_controller.SubscanState.ENABLED
         else:
-            self.__stem_controller._subscan_state_value.value = stem_controller.SubscanState.DISABLED
+            self.__stem_controller.subscan_state = stem_controller.SubscanState.DISABLED
             fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
             self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
-        return self.__stem_controller._subscan_region_value.value
+        return self.__stem_controller.subscan_region
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__stem_controller._subscan_region_value.value = value
+        self.__stem_controller.subscan_region = value
 
     @property
     def subscan_rotation(self) -> float:
-        return self.__stem_controller._subscan_rotation_value.value
+        return self.__stem_controller.subscan_rotation
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float) -> None:
-        self.__stem_controller._subscan_rotation_value.value = value
+        self.__stem_controller.subscan_rotation = value
 
     def apply_subscan(self, frame_parameters):
         context_size = Geometry.FloatSize.make(frame_parameters["size"])
         if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
             pass  # let the parameters speak for themselves
         elif self.subscan_enabled and self.subscan_region:
-            subscan_region = Geometry.FloatRect.make(self.subscan_region)
+            subscan_region = self.subscan_region
             frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
             frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
             frame_parameters.subscan_rotation = self.subscan_rotation
 
-    def __subscan_state_changed(self, name):
-        subscan_state = self.__stem_controller._subscan_state_value.value
-        subscan_enabled = subscan_state == stem_controller.SubscanState.ENABLED
-        subscan_region_value = self.__stem_controller._subscan_region_value
-        subscan_rotation_value = self.__stem_controller._subscan_rotation_value
-        if subscan_enabled and not subscan_region_value.value:
-            subscan_region_value.value = ((0.25, 0.25), (0.5, 0.5))
-            subscan_rotation_value.value = 0.0
-        self.__set_current_frame_parameters(self.__frame_parameters, False)
+    def __subscan_state_changed(self, name: str) -> None:
+        if name == "subscan_state":
+            if self.__stem_controller.subscan_state == stem_controller.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
+                self.__stem_controller.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+                self.__stem_controller.subscan_rotation = 0.0
+            self.__set_current_frame_parameters(self.__frame_parameters, False)
 
-    def __subscan_region_changed(self, name):
-        subscan_region = self.subscan_region
-        if not subscan_region:
-            self.subscan_enabled = False
-        self.__set_current_frame_parameters(self.__frame_parameters, False)
+    def __subscan_region_changed(self, name: str) -> None:
+        if name == "subscan_region":
+            subscan_region = self.subscan_region
+            if not subscan_region:
+                self.subscan_enabled = False
+            self.__set_current_frame_parameters(self.__frame_parameters, False)
 
-    def __subscan_rotation_changed(self, name):
-        self.__set_current_frame_parameters(self.__frame_parameters, False)
-
-    @property
-    def drift_channel_id_model(self) -> Model.PropertyModel[str]:
-        return self.__stem_controller._drift_channel_value
-
-    @property
-    def drift_region_model(self) -> Model.PropertyModel[Geometry.FloatRect]:
-        return self.__stem_controller._drift_region_value
-
-    @property
-    def drift_settings_model(self) -> Model.PropertyModel[stem_controller.DriftCorrectionSettings]:
-        return self.__stem_controller._drift_settings_value
+    def __subscan_rotation_changed(self, name: str) -> None:
+        if name == "subscan_rotation":
+            self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
-        return self.__stem_controller._drift_channel_value.value
+        return self.__stem_controller.drift_channel_id
 
     @drift_channel_id.setter
     def drift_channel_id(self, value: typing.Optional[str]) -> None:
-        self.__stem_controller._drift_channel_value.value = value
+        self.__stem_controller.drift_channel_id = value
 
     @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
@@ -919,11 +907,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller.drift_rotation = value
 
     @property
-    def drift_settings(self) -> stem_controller.DriftCorrectionSettings:
+    def drift_settings(self) -> DriftCorrectionSettings:
         return self.__stem_controller.drift_settings
 
     @drift_settings.setter
-    def drift_settings(self, value: stem_controller.DriftCorrectionSettings) -> None:
+    def drift_settings(self, value: DriftCorrectionSettings) -> None:
         self.__stem_controller.drift_settings = value
 
     @property
