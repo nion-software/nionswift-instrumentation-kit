@@ -17,7 +17,6 @@ from nion.swift.model import Graphics
 from nion.swift.model import HardwareSource
 from nion.utils import Event
 from nion.utils import Geometry
-from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import Registry
 
@@ -188,8 +187,8 @@ class STEMController(Observable.Observable):
         # fire off the probe state changed event.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
         # ensure that SubscanState is valid (ENABLED or DISABLED, not INVALID)
-        if self.__subscan_state == SubscanState.INVALID:
-            self.__subscan_state = SubscanState.DISABLED
+        if self.subscan_state == SubscanState.INVALID:
+            self.subscan_state = SubscanState.DISABLED
 
     def _exit_scanning_state(self) -> None:
         # pop the 'scanning' probe state and fire off the probe state changed event.
@@ -208,8 +207,9 @@ class STEMController(Observable.Observable):
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
-        self.__subscan_state = value
-        self.notify_property_changed("subscan_state")
+        if self.__subscan_state != value:
+            self.__subscan_state = value
+            self.notify_property_changed("subscan_state")
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
@@ -218,8 +218,9 @@ class STEMController(Observable.Observable):
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__subscan_region = tuple(value) if value is not None else None
-        self.notify_property_changed("subscan_region")
+        if self.__subscan_region != value:
+            self.__subscan_region = value
+            self.notify_property_changed("subscan_region")
 
     @property
     def subscan_rotation(self) -> float:
@@ -227,8 +228,9 @@ class STEMController(Observable.Observable):
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float):
-        self.__subscan_rotation = value
-        self.notify_property_changed("subscan_rotation")
+        if self.__subscan_rotation != value:
+            self.__subscan_rotation = value
+            self.notify_property_changed("subscan_rotation")
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
@@ -236,8 +238,9 @@ class STEMController(Observable.Observable):
 
     @drift_channel_id.setter
     def drift_channel_id(self, value: typing.Optional[str]) -> None:
-        self.__drift_channel_id = value
-        self.notify_property_changed("drift_channel_id")
+        if self.__drift_channel_id != value:
+            self.__drift_channel_id = value
+            self.notify_property_changed("drift_channel_id")
 
     @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
@@ -246,8 +249,9 @@ class STEMController(Observable.Observable):
 
     @drift_region.setter
     def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__drift_region = tuple(value) if value is not None else None
-        self.notify_property_changed("drift_region")
+        if self.__drift_region != value:
+            self.__drift_region = value
+            self.notify_property_changed("drift_region")
 
     @property
     def drift_rotation(self) -> float:
@@ -255,8 +259,9 @@ class STEMController(Observable.Observable):
 
     @drift_rotation.setter
     def drift_rotation(self, value: float):
-        self.__drift_rotation = value
-        self.notify_property_changed("drift_rotation")
+        if self.__drift_rotation != value:
+            self.__drift_rotation = value
+            self.notify_property_changed("drift_rotation")
 
     @property
     def drift_settings(self) -> DriftCorrectionSettings:
@@ -264,8 +269,9 @@ class STEMController(Observable.Observable):
 
     @drift_settings.setter
     def drift_settings(self, value: DriftCorrectionSettings) -> None:
-        self.__drift_settings = value
-        self.notify_property_changed("drift_settings")
+        if self.__drift_settings != value:
+            self.__drift_settings = value
+            self.notify_property_changed("drift_settings")
 
     def disconnect_probe_connections(self):
         self.__scan_context_data_items = list()
@@ -310,6 +316,7 @@ class STEMController(Observable.Observable):
             value = Geometry.FloatPoint(y=max(min(value.y, 1.0), 0.0), x=max(min(value.x, 1.0), 0.0))
         if self.probe_position != value:
             self.__probe_position = value
+            self.notify_property_changed("probe_position")
             # update the probe position for listeners and also explicitly update for probe_graphic_connections.
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
@@ -483,7 +490,10 @@ class GraphicSetController:
             for display_item in display_items:
                 graphic = self.__handler._create_graphic()
 
-                graphic_property_changed_listener = graphic.property_changed_event.listen(functools.partial(self.__handler._graphic_property_changed, graphic))
+                def graphic_property_changed(name: str) -> None:
+                    self.__handler._graphic_property_changed(graphic, name)
+
+                graphic_property_changed_listener = graphic.property_changed_event.listen(graphic_property_changed)
 
                 def graphic_removed(graphic: Graphics.Graphic) -> None:
                     self.__remove_one_graphic(graphic)
@@ -692,7 +702,8 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         return graphic
 
     def _update_graphic(self, graphic: Graphics.Graphic) -> None:
-        graphic.position = self.__stem_controller.probe_position
+        if graphic.position != self.__stem_controller.probe_position:
+            graphic.position = self.__stem_controller.probe_position
 
     def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
         if name == "position":
@@ -773,8 +784,10 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         return subscan_graphic
 
     def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
-        subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
-        subscan_graphic.rotation = self.__stem_controller.subscan_rotation
+        if subscan_graphic.bounds != tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region)):
+            subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
+        if subscan_graphic.rotation != self.__stem_controller.subscan_rotation:
+            subscan_graphic.rotation = self.__stem_controller.subscan_rotation
 
     def _graphic_property_changed(self, subscan_graphic: Graphics.Graphic, name: str) -> None:
         if name == "bounds":

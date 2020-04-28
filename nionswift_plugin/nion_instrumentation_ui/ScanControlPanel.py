@@ -1182,13 +1182,14 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         drift_settings_unit = ui.create_combo_box_widget([_("Frames"), _("Seconds"), _("Lines")])
 
         def drift_value_edited(text: str) -> None:
-            drift_settings = scan_controller.drift_settings
+            drift_settings = copy.copy(scan_controller.drift_settings)
             drift_settings.interval = Converter.IntegerToStringConverter().convert_back(text)
             scan_controller.drift_settings = drift_settings
+            drift_settings_value.request_refocus()
 
         def drift_unit_changed(index: int) -> None:
-            drift_settings = scan_controller.drift_settings
-            drift_settings.interval = typing.cast(stem_controller.DriftIntervalUnit, index)
+            drift_settings = copy.copy(scan_controller.drift_settings)
+            drift_settings.interval_units = stem_controller.DriftIntervalUnit(index)
             scan_controller.drift_settings = drift_settings
 
         drift_settings_value.on_editing_finished = drift_value_edited
