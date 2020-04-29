@@ -93,8 +93,6 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.Hard
         super().__init__()
         # outgoing messages
         self.value_stream = Event.Event()
-        # references
-        self.__hardware_source_choice = hardware_source_choice
         # initialize
         self.__value = None
         # listen for display changes
@@ -104,7 +102,6 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.Hard
     def close(self) -> None:
         self.__hardware_source_changed_listener.close()
         self.__hardware_source_changed_listener = None
-        self.__hardware_source_choice = None
         super().close()
 
     @property

@@ -14,6 +14,7 @@ from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
+from nion.instrumentation import stem_controller
 from nion.swift import Facade
 from nion.swift import HistogramPanel
 from nion.swift.model import DataItem
@@ -153,7 +154,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
         self.__last_xdata = None
-        self.__last_offset = None
+        # self.__last_offset = None
         self.__last_offset_nm = Geometry.FloatSize()
 
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
@@ -172,7 +173,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
-                new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
+                # new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 if self.__last_xdata:
                     from nion.data import xdata_1_0 as xd
                     # calculate offset. if data shifts down/right, offset will be negative (register_translation convention).
@@ -194,7 +195,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                         new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 else:
                     self.__last_xdata = xdatas[0]
-                    self.__last_offset = new_offset
+                    # self.__last_offset = new_offset
         return adjustments
 
 
@@ -286,12 +287,11 @@ class ScanAcquisitionController:
 
         camera_data_channel.start()
 
+        drift_correction_behavior : typing.Optional[DriftCorrectionBehavior] = None
+        section_height = None
         if self.__scan_specifier.drift_interval_lines > 0:
             drift_correction_behavior = DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
-        else:
-            drift_correction_behavior = None
-            section_height = None
 
         def grab_synchronized():
             self.acquisition_state_changed_event.fire(SequenceState.scanning)
@@ -402,7 +402,7 @@ class PanelDelegate:
         self.__target_region_stream_listener = None
 
     def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
-        stem_controller = Registry.get_component("stem_controller")
+        stem_controller_ = typing.cast(stem_controller.STEMController, Registry.get_component("stem_controller"))
 
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_camera"))
@@ -420,9 +420,9 @@ class PanelDelegate:
         self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
         self.__drift_tuple_stream = Stream.CombineLatestStream([
-            Stream.PropertyChangedEventStream(stem_controller, "drift_channel_id"),
-            Stream.PropertyChangedEventStream(stem_controller, "drift_region"),
-            Stream.PropertyChangedEventStream(stem_controller, "drift_settings")
+            Stream.PropertyChangedEventStream(stem_controller_, "drift_channel_id"),
+            Stream.PropertyChangedEventStream(stem_controller_, "drift_region"),
+            Stream.PropertyChangedEventStream(stem_controller_, "drift_settings")
         ]).add_ref()
 
         def match_scan_display_item(display_item: DisplayItem.DisplayItem) -> typing.Optional[DataItem.DataItem]:
@@ -495,7 +495,7 @@ class PanelDelegate:
                 else:
                     scan_width = 0
                     scan_height = 0
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000)
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
@@ -523,7 +523,7 @@ class PanelDelegate:
                 else:
                     scan_width = 0
                     scan_height = 0
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000)
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
