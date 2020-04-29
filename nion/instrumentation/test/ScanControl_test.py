@@ -1158,6 +1158,32 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(stem_controller_.drift_channel_id)
             self.assertIsNone(stem_controller_.drift_region)
 
+    def test_subscan_has_proper_calibrations(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            scan_state_controller.handle_subscan_enabled(True)
+            document_controller.periodic()
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].scale, document_model.data_items[1].dimensional_calibrations[1].scale)
+            self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, document_model.data_items[1].dimensional_calibrations[1].units)
+
+    def test_record_immediate_has_proper_calibrations(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            frame_parameters = copy.copy(hardware_source.get_current_frame_parameters())
+            frame_parameters.subscan_pixel_size = 128, 128
+            frame_parameters.subscan_fractional_size = 0.5, 0.5
+            frame_parameters.subscan_fractional_center = 0.5, 0.5
+            xdata = hardware_source.record_immediate(frame_parameters, [hardware_source.data_channels[0].channel_id])[0]
+            self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale)
+            self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
+            frame_parameters.subscan_pixel_size = 256, 256
+            xdata = hardware_source.record_immediate(frame_parameters, [hardware_source.data_channels[0].channel_id])[0]
+            self.assertAlmostEquals(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
+            self.assertAlmostEquals(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
+
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
 

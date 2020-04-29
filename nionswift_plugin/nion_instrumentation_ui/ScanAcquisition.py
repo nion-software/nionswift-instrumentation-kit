@@ -152,6 +152,9 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_fractional_center = None
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
+        self.__last_xdata = None
+        self.__last_offset = None
+        self.__last_offset_nm = Geometry.FloatSize()
 
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
         # this method must be thread safe
@@ -163,15 +166,35 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
         drift_rotation = self.__scan_hardware_source.drift_rotation
         if drift_channel_id is not None and drift_region is not None:
-            frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height), int(context_size.width * drift_region.width)
+            frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4)
             if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
                 frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
-                print(f"{len(xdatas)} {xdatas[0].data_shape} {xdatas[0].dimensional_calibrations}")
-                adjustments.offset_nm = Geometry.FloatSize(h=0*xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(context_size.height / 20),
-                                                           w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(context_size.width / 50))
+                new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
+                if self.__last_xdata:
+                    from nion.data import xdata_1_0 as xd
+                    # calculate offset. if data shifts down/right, offset will be negative (register_translation convention).
+                    offset = Geometry.FloatPoint.make(xd.register_translation(self.__last_xdata, xdatas[0], upsample_factor=10))
+                    offset_nm = Geometry.FloatSize(
+                        h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
+                        w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+                    # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
+                    delta = offset_nm - self.__last_offset_nm
+                    self.__last_offset_nm = offset_nm
+                    # report the difference from the last time we reported, but negative since center_nm positive shifts up/left
+                    adjustments.offset_nm = -delta
+                    # print(f"{self.__last_offset_nm} {adjustments.offset_nm} [{(new_offset - self.__last_offset) * 1E9}] {offset} {frame_parameters.fov_nm}")
+                    if False:  # if offset_nm > drift area / 10?
+                        # retake to provide reference at new offset
+                        frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + adjustments.offset_nm)
+                        self.__scan_frame_parameters.center_nm = frame_parameters.center_nm
+                        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
+                        new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
+                else:
+                    self.__last_xdata = xdatas[0]
+                    self.__last_offset = new_offset
         return adjustments
 
 

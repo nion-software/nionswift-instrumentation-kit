@@ -136,7 +136,14 @@ def update_scan_data_element(data_element, scan_frame_parameters, data_shape, sc
     center_x_nm = float(scan_properties.get("center_x_nm", 0.0))
     center_y_nm = float(scan_properties.get("center_y_nm", 0.0))
     fov_nm = float(scan_properties["fov_nm"])
-    pixel_size_nm = fov_nm / max(data_shape)
+    if scan_frame_parameters.size[0] > scan_frame_parameters.size[1]:
+        fractional_size = scan_frame_parameters.subscan_fractional_size[0] if scan_frame_parameters.subscan_fractional_size else 1.0
+        pixel_size = scan_frame_parameters.subscan_pixel_size[0] if scan_frame_parameters.subscan_pixel_size else scan_frame_parameters.size[0]
+        pixel_size_nm = fov_nm * fractional_size / pixel_size
+    else:
+        fractional_size = scan_frame_parameters.subscan_fractional_size[1] if scan_frame_parameters.subscan_fractional_size else 1.0
+        pixel_size = scan_frame_parameters.subscan_pixel_size[1] if scan_frame_parameters.subscan_pixel_size else scan_frame_parameters.size[1]
+        pixel_size_nm = fov_nm * fractional_size / pixel_size
     data_element["title"] = channel_name
     data_element["version"] = 1
     data_element["channel_id"] = channel_id  # needed to match to the channel
@@ -687,7 +694,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     if scan_behavior:
                         adjustments = scan_behavior.prepare_section()
                         if adjustments.offset_nm:
-                            print(f"{adjustments.offset_nm=}")
                             scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(scan_frame_parameters.center_nm) + adjustments.offset_nm)
                     scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
                     self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
@@ -995,7 +1001,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         while self.is_recording:
             if finished_event.wait(0.01):  # 10 msec
                 break
-        print(self.is_recording)
         # self.stop_task('record')
         self._record_task_updated(None)
         sync_timeout = sync_timeout or 3.0
