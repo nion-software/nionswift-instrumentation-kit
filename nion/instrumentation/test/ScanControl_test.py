@@ -1181,8 +1181,8 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
             frame_parameters.subscan_pixel_size = 256, 256
             xdata = hardware_source.record_immediate(frame_parameters, [hardware_source.data_channels[0].channel_id])[0]
-            self.assertAlmostEquals(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
-            self.assertAlmostEquals(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
+            self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
+            self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass
