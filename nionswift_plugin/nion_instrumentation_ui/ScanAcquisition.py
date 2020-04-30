@@ -176,9 +176,10 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 # new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 if self.__last_xdata:
-                    from nion.data import xdata_1_0 as xd
                     # calculate offset. if data shifts down/right, offset will be negative (register_translation convention).
-                    offset = Geometry.FloatPoint.make(xd.register_translation(self.__last_xdata, xdatas[0], upsample_factor=10))
+                    # offset = Geometry.FloatPoint.make(xd.register_translation(self.__last_xdata, xdatas[0], upsample_factor=10))
+                    quality, offset = xd.register_template(xdatas[0], self.__last_xdata)
+                    offset = Geometry.FloatPoint(y=xdatas[0].data_shape[0] * 0.5 - offset[0], x=xdatas[0].data_shape[1] * 0.5 - offset[1])
                     offset_nm = Geometry.FloatSize(
                         h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                         w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
