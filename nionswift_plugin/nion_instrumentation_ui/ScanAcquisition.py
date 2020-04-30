@@ -167,12 +167,13 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
         drift_rotation = self.__scan_hardware_source.drift_rotation
         if drift_channel_id is not None and drift_region is not None:
+            drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
             frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4)
             if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
                 frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
-                xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
+                xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 # new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 if self.__last_xdata:
                     from nion.data import xdata_1_0 as xd
@@ -191,7 +192,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                         # retake to provide reference at new offset
                         frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + adjustments.offset_nm)
                         self.__scan_frame_parameters.center_nm = frame_parameters.center_nm
-                        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_id])
+                        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                         new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 else:
                     self.__last_xdata = xdatas[0]

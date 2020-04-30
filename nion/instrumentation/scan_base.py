@@ -973,25 +973,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
 
-    def record_immediate(self, frame_parameters: ScanFrameParameters, channel_ids: typing.Sequence[str],
+    def record_immediate(self, frame_parameters: ScanFrameParameters, enabled_channels: typing.Sequence[int] = None,
                          sync_timeout: float = None) -> typing.List[DataAndMetadata.DataAndMetadata]:
         assert not self.is_recording
         frame_parameters = copy.deepcopy(frame_parameters)
         old_enabled_channels = self.get_enabled_channels()
-        enabled_channels = list()
-        ordered_channel_ids = list()
-        for i in range(self.__device.channel_count):
-            channel_id = self.get_channel_state(i).channel_id
-            if channel_id in channel_ids:
-                enabled_channels.append(i)
-                ordered_channel_ids.append(channel_id)
-        self.set_enabled_channels(enabled_channels)
-        record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, ordered_channel_ids, self.display_name)
+        channel_states = [self.get_channel_state(i) for i in range(self.__device.channel_count)]
+        channel_ids = [channel_state.channel_id for channel_state in channel_states]
+        if enabled_channels is not None:
+            self.set_enabled_channels(enabled_channels)
+        record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
         finished_event = threading.Event()
         xdatas = list()
         def finished(xdatas_: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
             nonlocal xdatas
-            xdatas = xdatas_
+            xdatas = [copy.deepcopy(xdata) for xdata in xdatas_]  # low level may be reused; copy here
             self.set_enabled_channels(old_enabled_channels)
             finished_event.set()
         record_task.finished_callback_fn = finished
@@ -1181,6 +1177,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__task_queue.put(channel_states_changed)
 
     ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
+
+    def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
+        for channel_index in range(self.channel_count):
+            if self.get_channel_state(channel_index).channel_id == channel_id:
+                return channel_index
+        return None
 
     def __make_channel_id(self, channel_index) -> str:
         return "abcdefgh"[channel_index]

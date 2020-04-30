@@ -1176,11 +1176,11 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters.subscan_pixel_size = 128, 128
             frame_parameters.subscan_fractional_size = 0.5, 0.5
             frame_parameters.subscan_fractional_center = 0.5, 0.5
-            xdata = hardware_source.record_immediate(frame_parameters, [hardware_source.data_channels[0].channel_id])[0]
+            xdata = hardware_source.record_immediate(frame_parameters, [0])[0]
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
             frame_parameters.subscan_pixel_size = 256, 256
-            xdata = hardware_source.record_immediate(frame_parameters, [hardware_source.data_channels[0].channel_id])[0]
+            xdata = hardware_source.record_immediate(frame_parameters, [0])[0]
             self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
 

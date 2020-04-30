@@ -377,6 +377,7 @@ class ScanControlStateController:
                     data_item = DataItem.DataItem()
                     data_item.ensure_data_source()
 
+                    data_and_metadata = copy.deepcopy(data_and_metadata)  # low level may be reused; copy here
                     display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                     display_name = display_name if display_name else _("Record")
                     channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
