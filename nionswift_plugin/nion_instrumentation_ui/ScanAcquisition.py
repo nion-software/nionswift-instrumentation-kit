@@ -155,6 +155,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.channel_override = "drift"
         self.__last_xdata = None
         # self.__last_offset = None
+        self.__center_nm = Geometry.FloatSize()
         self.__last_offset_nm = Geometry.FloatSize()
 
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
@@ -173,6 +174,8 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
+                # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
+                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + self.__center_nm)
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 # new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 if self.__last_xdata:
@@ -184,10 +187,12 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                         h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                         w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
                     # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
-                    delta = offset_nm - self.__last_offset_nm
+                    offset_nm -= self.__center_nm  # adjust for center_nm adjustment above
+                    delta_nm = offset_nm - self.__last_offset_nm
                     self.__last_offset_nm = offset_nm
                     # report the difference from the last time we reported, but negative since center_nm positive shifts up/left
-                    adjustments.offset_nm = -delta
+                    adjustments.offset_nm = -delta_nm
+                    self.__center_nm -= delta_nm
                     # print(f"{self.__last_offset_nm} {adjustments.offset_nm} [{(new_offset - self.__last_offset) * 1E9}] {offset} {frame_parameters.fov_nm}")
                     if False:  # if offset_nm > drift area / 10?
                         # retake to provide reference at new offset
