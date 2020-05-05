@@ -886,6 +886,18 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertFalse(hardware_source.subscan_enabled)
 
+    def test_subscan_not_allowed_with_width_or_height_of_zero(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            scan_state_controller.handle_subscan_enabled(True)
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            display_item.graphics[0].size = 0, 0.25
+            document_controller.periodic()
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual((1, 64), document_model.data_items[1].data_shape)
+
     def test_scan_context_updated_when_starting_playing(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects

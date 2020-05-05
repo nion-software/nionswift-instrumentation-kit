@@ -688,6 +688,7 @@ class PanelDelegate:
 
         def scan_width_changed(text):
             displayed_width = Converter.IntegerToStringConverter().convert_back(text) if text else 1
+            displayed_width = max(displayed_width, 1)
             spacing = self.__graphic_width / displayed_width if self.__graphic_width and self.__graphic_width > 0 else 0
             if spacing > 0 and self.__calibration:
                 if self.__scan_spacing_px != spacing:

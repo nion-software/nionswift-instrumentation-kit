@@ -861,8 +861,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             pass  # let the parameters speak for themselves
         elif self.subscan_enabled and self.subscan_region:
             subscan_region = self.subscan_region
-            frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
-            frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
+            frame_parameters.subscan_pixel_size = max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1)
+            frame_parameters.subscan_fractional_size = frame_parameters.subscan_pixel_size[0] / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
             frame_parameters.subscan_rotation = self.subscan_rotation
 
@@ -1023,8 +1023,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if self.subscan_enabled and self.subscan_region:
             subscan_region = Geometry.FloatRect.make(self.subscan_region)
             context_size = Geometry.FloatSize.make(frame_parameters["size"])
-            frame_parameters.subscan_pixel_size = int(context_size.height * subscan_region.height), int(context_size.width * subscan_region.width)
-            frame_parameters.subscan_fractional_size = subscan_region.height, subscan_region.width
+            frame_parameters.subscan_pixel_size = max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1)
+            frame_parameters.subscan_fractional_size = frame_parameters.subscan_pixel_size[0] / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
             frame_parameters.subscan_rotation = self.subscan_rotation
             frame_parameters.channel_modifier = "subscan"
