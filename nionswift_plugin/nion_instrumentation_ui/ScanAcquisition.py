@@ -181,8 +181,8 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 if self.__last_xdata:
                     # calculate offset. if data shifts down/right, offset will be negative (register_translation convention).
                     # offset = Geometry.FloatPoint.make(xd.register_translation(self.__last_xdata, xdatas[0], upsample_factor=10))
-                    quality, offset = xd.register_template(xdatas[0], self.__last_xdata)
-                    offset = Geometry.FloatPoint(y=xdatas[0].data_shape[0] * 0.5 - offset[0], x=xdatas[0].data_shape[1] * 0.5 - offset[1])
+                    quality, offset = xd.register_template(self.__last_xdata, xdatas[0])
+                    offset = Geometry.FloatPoint.make(offset)
                     offset_nm = Geometry.FloatSize(
                         h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                         w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
