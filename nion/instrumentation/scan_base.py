@@ -624,14 +624,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         fov_nm = float(scan_frame_parameters["fov_nm"])
         pixel_size_nm = fov_nm / max(scan_shape)
 
-        # only spatial and angular make sense for synchronized scan; exclude temporal calibrations.
-        if hasattr(self.__device, "get_scan_calibrations"):
-            scan_calibrations = self.__device.get_scan_calibrations(scan_frame_parameters, allow_temporal=False)
-        else:
-            scan_calibrations = (
-                Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
-                Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
-            )
+        scan_calibrations = (
+            Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
+            Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
+        )
 
         data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
         data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
