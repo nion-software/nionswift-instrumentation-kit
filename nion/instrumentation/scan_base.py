@@ -52,6 +52,8 @@ class ScanFrameParameters(dict):
         self.channel_override = self.get("channel_override")
         self.external_clock_wait_time_ms = self.get("external_clock_wait_time_ms", 0)
         self.external_clock_mode = self.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.external_scan_mode = self.get("external_scan_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.external_scan_ratio = self.get("external_scan_ratio", 1.0)
         self.ac_line_sync = self.get("ac_line_sync", False)
         self.ac_frame_sync = self.get("ac_frame_sync", True)
         self.flyback_time_us = self.get("flyback_time_us", 30.0)
@@ -74,6 +76,8 @@ class ScanFrameParameters(dict):
             "rotation_rad": self.rotation_rad,
             "external_clock_wait_time_ms": self.external_clock_wait_time_ms,
             "external_clock_mode": self.external_clock_mode,
+            "external_scan_mode": self.external_scan_mode,
+            "external_scan_ratio": self.external_scan_ratio,
             "ac_line_sync": self.ac_line_sync,
             "ac_frame_sync": self.ac_frame_sync,
             "flyback_time_us": self.flyback_time_us,
@@ -101,6 +105,8 @@ class ScanFrameParameters(dict):
                "\nrotation: " + str(self.rotation_rad) +\
                "\nexternal clock wait time: " + str(self.external_clock_wait_time_ms) +\
                "\nexternal clock mode: " + str(self.external_clock_mode) +\
+               "\nexternal scan mode: " + str(self.external_scan_mode) +\
+               "\nexternal scan ratio: " + str(self.external_scan_ratio) +\
                "\nac line sync: " + str(self.ac_line_sync) +\
                "\nac frame sync: " + str(self.ac_frame_sync) +\
                "\nflyback time: " + str(self.flyback_time_us) +\
