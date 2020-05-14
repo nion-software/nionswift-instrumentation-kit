@@ -605,6 +605,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__key_released_event_listener = DisplayPanel.DisplayPanelManager().key_released_event.listen(self.image_panel_key_released)
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
+        self.__image_display_mouse_double_clicked_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_double_clicked_event.listen(self.image_panel_mouse_double_clicked)
         self.__mouse_pressed = False
 
         help_widget = None
@@ -918,6 +919,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener= None
         self.__image_display_mouse_released_event_listener.close()
         self.__image_display_mouse_released_event_listener= None
+        self.__image_display_mouse_double_clicked_event_listener.close()
+        self.__image_display_mouse_double_clicked_event_listener = None
         self.__state_controller.close()
         self.__state_controller = None
         super().close()
@@ -955,6 +958,11 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def image_panel_key_released(self, display_panel, key):
         self.__shift_click_state = None
+        return False
+
+    def image_panel_mouse_double_clicked(self, display_panel, display_item, image_position, modifiers):
+        if self.__shift_click_state is not None:
+            return True
         return False
 
     @property
