@@ -3,6 +3,10 @@ Changelog (nionswift-instrumentation)
 
 0.18.4 (UNRELEASED)
 -------------------
+- Add section-by-section drift correction during synchronized acquisition.
+- Add support for specifying drift correction parameters (only used in synchronized acquisition).
+- Add record_immediate function for scan devices.
+- Add partial updating during synchronized acquisition.
 - Add optional help button and ability to register delegate for camera panel to handle.
 - Fix numerous issues handling the subscan and beam position graphics.
 - Fix issue starting scan record immediately after another one.
