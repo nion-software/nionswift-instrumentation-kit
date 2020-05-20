@@ -154,7 +154,11 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
         self.__last_xdata = None
-        # self.__last_offset = None
+        self.__center_nm = Geometry.FloatSize()
+        self.__last_offset_nm = Geometry.FloatSize()
+
+    def reset(self) -> None:
+        self.__last_xdata = None
         self.__center_nm = Geometry.FloatSize()
         self.__last_offset_nm = Geometry.FloatSize()
 
@@ -202,7 +206,6 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                         new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
                 else:
                     self.__last_xdata = xdatas[0]
-                    # self.__last_offset = new_offset
         return adjustments
 
 

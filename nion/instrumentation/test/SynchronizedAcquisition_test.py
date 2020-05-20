@@ -1,5 +1,6 @@
 import collections
 import copy
+import math
 import numpy
 import unittest
 import uuid
@@ -343,6 +344,28 @@ class TestScanControlClass(unittest.TestCase):
                                                                             camera_data_channel=camera_data_channel,
                                                                             section_height=2,
                                                                             scan_behavior=drift_correction_behavior)
+    def test_drift_corrector(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            document_controller.periodic()
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            self.assertIsNone(drift_correction_behavior.prepare_section().offset_nm)
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertLess(dist_nm, 0.1)
+            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertTrue(1.9 < dist_nm < 2.1)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertTrue(1.9 < dist_nm < 2.1)
 
     # TODO: check for counts per electron
 

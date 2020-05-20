@@ -141,7 +141,7 @@ def update_scan_data_element(data_element, scan_frame_parameters, data_shape, sc
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
     center_x_nm = float(scan_properties.get("center_x_nm", 0.0))
     center_y_nm = float(scan_properties.get("center_y_nm", 0.0))
-    fov_nm = float(scan_properties["fov_nm"])
+    fov_nm = float(scan_frame_parameters["fov_nm"])  # context fov_nm, not actual fov_nm returned from low level
     if scan_frame_parameters.size[0] > scan_frame_parameters.size[1]:
         fractional_size = scan_frame_parameters.subscan_fractional_size[0] if scan_frame_parameters.subscan_fractional_size else 1.0
         pixel_size = scan_frame_parameters.subscan_pixel_size[0] if scan_frame_parameters.subscan_pixel_size else scan_frame_parameters.size[0]
