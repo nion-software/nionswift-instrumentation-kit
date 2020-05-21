@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 # system imports
 import copy
 import enum
+import functools
 import gettext
 import logging
 import math
@@ -10,6 +13,7 @@ import typing
 import uuid
 
 # local libraries
+from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import camera_base
@@ -30,6 +34,9 @@ from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import Stream
 from . import HardwareSourceChoice
+
+if typing.TYPE_CHECKING:
+    from nion.swift.model import DocumentModel
 
 _ = gettext.gettext
 
@@ -117,6 +124,11 @@ class CameraDataChannel:
         self.__document_model.begin_data_item_live(self.__data_item)
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+        # there are a few techniques for getting data into a data item. this method prefers directly calling the
+        # document model method update_data_item_partial, which is thread safe. if that method is not available, it
+        # falls back to the data item method set_data_and_metadata, which must be called from the main thread.
+        # the hardware source also supplies a data channel which is thread safe and ends up calling set_data_and_metadata
+        # but we skip that so that the updates fit into this class instead.
         update_data_item_partial = getattr(self.__document_model, "update_data_item_partial", None)
         if callable(update_data_item_partial):
             collection_rank = len(tuple(scan_shape))
@@ -143,8 +155,9 @@ class CameraDataChannel:
 
 
 class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
         # init with the frame parameters from the synchronized grab
+        self.__document_model = document_model
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
         # here we convert those frame parameters to the context
@@ -156,6 +169,23 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__last_xdata = None
         self.__center_nm = Geometry.FloatSize()
         self.__last_offset_nm = Geometry.FloatSize()
+        self.__offset_nm_data = numpy.zeros((3, 0), numpy.float)
+        data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
+        if data_item:
+            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+            data_item.set_data_and_metadata(offset_nm_xdata)
+        else:
+            data_item = DataItem.DataItem(self.__offset_nm_data)
+            data_item.title = f"Drift Log"
+            self.__document_model.append_data_item(data_item)
+            display_item = self.__document_model.get_display_item_for_data_item(data_item)
+            display_item.display_type = "line_plot"
+            display_layers = display_item.display_layers
+            display_layers[0]["label"] = _("x")
+            display_layers[1]["label"] = _("y")
+            display_layers[2]["label"] = _("m")
+            display_item.display_layers = display_layers
+        self.__data_item = data_item
 
     def reset(self) -> None:
         self.__last_xdata = None
@@ -194,6 +224,12 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                     offset_nm -= self.__center_nm  # adjust for center_nm adjustment above
                     delta_nm = offset_nm - self.__last_offset_nm
                     self.__last_offset_nm = offset_nm
+                    offset_nm_xy = math.sqrt(pow(offset_nm.height, 2) + pow(offset_nm.width, 2))
+                    self.__offset_nm_data = numpy.hstack([self.__offset_nm_data, numpy.array([offset_nm.height, offset_nm.width, offset_nm_xy]).reshape(3, 1)])
+                    offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+                    def update_data_item(offset_nm_xdata: DataAndMetadata.DataAndMetadata) -> None:
+                        self.__data_item.set_data_and_metadata(offset_nm_xdata)
+                    self.__scan_hardware_source._call_soon(functools.partial(update_data_item, offset_nm_xdata))
                     # report the difference from the last time we reported, but negative since center_nm positive shifts up/left
                     adjustments.offset_nm = -delta_nm
                     self.__center_nm -= delta_nm
@@ -211,7 +247,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
 
 class ScanAcquisitionController:
 
-    def __init__(self, api, document_controller, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
+    def __init__(self, api, document_controller: Facade.DocumentWindow, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
         self.__api = api
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
@@ -300,7 +336,7 @@ class ScanAcquisitionController:
         drift_correction_behavior : typing.Optional[DriftCorrectionBehavior] = None
         section_height = None
         if self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_behavior = DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
 
         def grab_synchronized():
