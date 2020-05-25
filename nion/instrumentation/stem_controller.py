@@ -45,6 +45,12 @@ class DriftIntervalUnit(enum.IntEnum):
     LINE = 2
 
 
+class ControlState(enum.IntFlag):
+    NONEXISTENT = -1
+    UNKNOWN = 0
+    ERROR = 1
+
+
 class DriftCorrectionSettings:
     def __init__(self):
         self.interval = 0
@@ -359,9 +365,13 @@ class STEMController(Observable.Observable):
     def get_control_output(self, name):
         return self.GetVal(name)
 
-    def get_control_state(self, name):
+    def get_control_state(self, name) -> ControlState:
         value_exists, value = self.TryGetVal(name)
-        return "unknown" if value_exists else None
+        if value_exists:
+            if self.IsElementBad(name):
+                return ControlState.ERROR
+            return ControlState.UNKNOWN
+        return ControlState.NONEXISTENT
 
     def get_property(self, name):
         if name in ("probe_position", "probe_state"):
@@ -385,6 +395,9 @@ class STEMController(Observable.Observable):
     # end instrument API
 
     # required functions (templates). subclasses should override.
+
+    def IsElementBad(self, s: str) -> bool:
+        return False
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         return False, None

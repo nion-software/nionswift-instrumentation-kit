@@ -1005,7 +1005,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def shift_click(self, mouse_position, camera_shape):
         instrument_controller = self.__get_instrument_controller()
         if callable(getattr(instrument_controller, "handle_shift_click", None)):
-            instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+            return instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
         else:
             # TODO: remove this backwards compatibility code once everyone updated to new technique above
             if self.__camera_category.lower() == "ronchigram":
@@ -1019,8 +1019,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def tilt_click(self, mouse_position, camera_shape):
         instrument_controller = self.__get_instrument_controller()
-        if callable(getattr(instrument_controller, "handle_shift_click", None)):
-            instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+        if callable(getattr(instrument_controller, "handle_tilt_click", None)):
+            return instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
         else:
             # TODO: remove this backwards compatibility code once everyone updated to new technique above
             if self.__camera_category.lower() == "ronchigram":

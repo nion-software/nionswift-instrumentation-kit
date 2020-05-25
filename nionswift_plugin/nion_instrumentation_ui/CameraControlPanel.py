@@ -116,6 +116,7 @@ class CameraControlStateController:
         self.on_display_new_data_item = None
         self.on_camera_current_changed = None
         self.on_log_messages = None
+        self.on_hardware_source_message_received = None
 
         self.__captured_xdatas_available_event = None
 
@@ -160,6 +161,7 @@ class CameraControlStateController:
         self.on_capture_button_state_changed = None
         self.on_display_new_data_item = None
         self.on_log_messages = None
+        self.on_hardware_source_message_received = None
         self.__hardware_source = None
 
     def _reset_camera_current(self):
@@ -276,14 +278,22 @@ class CameraControlStateController:
     # must be called on ui thread
     def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape):
         if hardware_source_id == self.__hardware_source.hardware_source_id:
-            self.__hardware_source.shift_click(mouse_position, camera_shape)
+            control_state = self.__hardware_source.shift_click(mouse_position, camera_shape)
+            if control_state:
+                self.__hardware_source_message_received(logging.ERROR, "Shift click control out of range!")
+            else:
+                self.__hardware_source_message_received(logging.DEBUG, "")
             return True
         return False
 
     # must be called on ui thread
     def handle_tilt_click(self, hardware_source_id, mouse_position, camera_shape):
         if hardware_source_id == self.__hardware_source.hardware_source_id:
-            self.__hardware_source.tilt_click(mouse_position, camera_shape)
+            control_state = self.__hardware_source.tilt_click(mouse_position, camera_shape)
+            if control_state:
+                self.__hardware_source_message_received(logging.ERROR, "Tilt click control out of range!")
+            else:
+                self.__hardware_source_message_received(logging.DEBUG, "")
             return True
         return False
 
@@ -364,6 +374,10 @@ class CameraControlStateController:
     def __data_item_states_changed(self, data_item_states):
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(data_item_states)
+
+    def __hardware_source_message_received(self, severity: int, message: str):
+        if callable(self.on_hardware_source_message_received):
+            self.on_hardware_source_message_received(severity, message)
 
 
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
@@ -606,6 +620,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
+        self.__display_panel = None
+        self.__clear_messages_handle = None
 
         help_widget = None
         if self.__delegate and self.__delegate.has_feature("help"):
@@ -888,6 +904,27 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 data_element = data_elements.pop(0)
                 document_controller.add_data_element(data_element)
 
+        def clear_messages():
+            if self.__display_panel:
+                self.__display_panel.content_canvas_item.highlighted = False
+                self.__display_panel.content_canvas_item.show_popup_message(None)
+
+        def hardware_source_message_received(severity, message):
+            color_map = {logging.INFO: None, logging.WARNING: "orange", logging.ERROR: "red"}
+            if self.__display_panel:
+                if self.__clear_messages_handle:
+                    self.__clear_messages_handle.cancel()
+                    self.__clear_messages_handle = None
+
+                if severity > logging.INFO:
+                    self.__display_panel.content_canvas_item.highlighted_style = color_map.get(severity, "")
+                    self.__display_panel.content_canvas_item.highlighted = True
+                    self.__display_panel.content_canvas_item.show_popup_message(message)
+                    self.__clear_messages_handle = self.document_controller.event_loop.call_later(3.0, clear_messages)
+                else:
+                    self.__display_panel.content_canvas_item.highlighted = False
+                    self.__display_panel.content_canvas_item.show_popup_message(None)
+
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_binning_values_changed = binning_values_changed
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -899,6 +936,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_monitor_button_state_changed = monitor_button_state_changed
         self.__state_controller.on_camera_current_changed = camera_current_changed
         self.__state_controller.on_log_messages = log_messages
+        self.__state_controller.on_hardware_source_message_received = hardware_source_message_received
 
         self.__state_controller.initialize_state()
 
@@ -920,6 +958,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_released_event_listener= None
         self.__state_controller.close()
         self.__state_controller = None
+        if self.__clear_messages_handle:
+            self.__clear_messages_handle.cancel()
+            self.__clear_messages_handle = None
+        self.__display_panel = None
         super().close()
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
@@ -935,6 +977,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         if self.__shift_click_state == "tilt":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
+            self.__display_panel = display_panel
             self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, camera_shape)
             return self.__mouse_pressed
         return False
