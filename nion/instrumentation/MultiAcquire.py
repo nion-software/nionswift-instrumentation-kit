@@ -546,6 +546,11 @@ class MultiAcquireController:
                 for n in range(parameters['frames']):
                     if self.abort_event.is_set():
                         break
+                    # This is a workaround for the slow start of dectris.
+                    if n > 0:
+                        self.camera.camera.do_configure = False
+                    else:
+                        self.camera.camera.do_configure = True
                     parameters['current_frame'] = n
                     camera_data_channel = CameraDataChannel()
                     camera_data_channel.get_parameters_fn = lambda: parameters.copy()
@@ -558,7 +563,7 @@ class MultiAcquireController:
                     self.__flyback_pixels = 2
                     parameters['complete_shape'] = tuple(self.scan_parameters.size)
                     result = self.superscan.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
-                                                              camera_data_channel=camera_data_channel, section_height=1,
+                                                              camera_data_channel=camera_data_channel,
                                                               scan_frame_parameters=self.scan_parameters)
                     if result is not None:
                         scan_xdata_list, _ = result
@@ -570,6 +575,7 @@ class MultiAcquireController:
                         self.new_data_ready_event.fire(scan_data_dict)
                     new_data_listener.close()
                     new_data_listener = None
+                self.camera.camera.do_configure = True
         except Exception as e:
             self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
             import traceback
@@ -578,6 +584,7 @@ class MultiAcquireController:
             self.cancel()
             raise
         finally:
+            self.camera.camera.do_configure = True
             self.__acquisition_finished_event.set()
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'spectrum image'})
             self.acquisition_state_changed_event.fire({'message': 'end processing'})

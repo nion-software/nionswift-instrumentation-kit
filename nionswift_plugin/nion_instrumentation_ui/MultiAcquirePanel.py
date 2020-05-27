@@ -637,9 +637,9 @@ class MultiAcquirePanelDelegate:
 
     def __format_time_string(self, acquisition_time):
         if acquisition_time > 3600:
-            time_str = '{0:.1f} hours'.format((int(acquisition_time) + 3599) / 3600)
+            time_str = '{0:.1f} hours'.format(acquisition_time / 3600)
         elif acquisition_time > 90:
-            time_str = '{0:.1f} minutes'.format((int(acquisition_time) + 59) / 60)
+            time_str = '{0:.1f} minutes'.format(acquisition_time / 60)
         else:
             time_str = '{:.1f} seconds'.format(acquisition_time)
         return time_str
