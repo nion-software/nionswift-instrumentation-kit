@@ -558,7 +558,7 @@ class MultiAcquireController:
                     self.__flyback_pixels = 2
                     parameters['complete_shape'] = tuple(self.scan_parameters.size)
                     result = self.superscan.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
-                                                              camera_data_channel=camera_data_channel, section_height=1,
+                                                              camera_data_channel=camera_data_channel,
                                                               scan_frame_parameters=self.scan_parameters)
                     if result is not None:
                         scan_xdata_list, _ = result
