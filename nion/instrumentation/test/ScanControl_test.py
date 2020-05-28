@@ -13,6 +13,7 @@ from nion.swift import Facade
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
+from nion.swift.model import ImportExportManager
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
@@ -1195,6 +1196,34 @@ class TestScanControlClass(unittest.TestCase):
             xdata = hardware_source.record_immediate(frame_parameters, [0])[0]
             self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
+
+    def test_get_buffer_data_basic_functionality(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                for i in range(4):
+                    hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            data_element_groups = hardware_source.get_buffer_data(-4, 4)
+            # ensure we got 4 acquisitions
+            self.assertEqual(4, len(data_element_groups))
+            # ensure all of them are calibrated the same
+            offsets = set()
+            scales = set()
+            units = set()
+            for data_element_group in data_element_groups:
+                for data_element  in data_element_group:
+                    xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                    offsets.add(xdata.dimensional_calibrations[0].offset)
+                    scales.add(xdata.dimensional_calibrations[0].scale)
+                    units.add(xdata.dimensional_calibrations[0].units)
+            self.assertEqual(1, len(offsets))
+            self.assertEqual(1, len(scales))
+            self.assertEqual(1, len(units))
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

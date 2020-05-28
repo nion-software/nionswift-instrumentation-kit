@@ -1268,7 +1268,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                         channel_id += "_subscan"
                     properties = data_element["properties"]
                     update_instrument_properties(data_element["properties"], self.__stem_controller, self.__device)
-                    update_scan_data_element(data_element, None, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties)
+                    update_scan_data_element(data_element, self.__frame_parameters, data_element["data"].shape, scan_id, None, channel_name, channel_id, properties)
                     data_element["properties"]["channel_index"] = channel_index
                     data_element["properties"]["hardware_source_name"] = self.display_name
                     data_element["properties"]["hardware_source_id"] = self.hardware_source_id

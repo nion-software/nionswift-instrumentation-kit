@@ -1,5 +1,4 @@
 # system imports
-import functools
 import gettext
 import threading
 import time
