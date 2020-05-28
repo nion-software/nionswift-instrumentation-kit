@@ -337,7 +337,7 @@ class TestScanControlClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
@@ -352,7 +352,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             self.assertIsNone(drift_correction_behavior.prepare_section().offset_nm)
             offset_nm = drift_correction_behavior.prepare_section().offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
