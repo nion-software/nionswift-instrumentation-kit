@@ -428,6 +428,9 @@ class STEMController(Observable.Observable):
     def InformControl2D(self, s: str, val: Geometry.FloatPoint, *, axis: AxisType) -> bool:
         return False
 
+    def HasValError(self, s: str) -> bool:
+        return False
+
     # end required functions
 
     # high level commands
