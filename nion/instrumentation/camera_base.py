@@ -1002,10 +1002,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def get_frame_parameters_from_dict(self, d):
         return self.__camera_settings.get_frame_parameters_from_dict(d)
 
-    def shift_click(self, mouse_position, camera_shape):
+    def shift_click(self, mouse_position, camera_shape, logger: logging.Logger) -> None:
         instrument_controller = self.__get_instrument_controller()
         if callable(getattr(instrument_controller, "handle_shift_click", None)):
-            instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+            instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera, logger=logger)
         else:
             # TODO: remove this backwards compatibility code once everyone updated to new technique above
             if self.__camera_category.lower() == "ronchigram":
@@ -1013,21 +1013,21 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 defocus_value = instrument_controller.get_value("C10")  # get the defocus
                 dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
                 dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
-                logging.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
+                logger.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
                 instrument_controller.set_value("SShft.x", instrument_controller.get_value("SShft.x") - dx)
                 instrument_controller.set_value("SShft.y", instrument_controller.get_value("SShft.y") - dy)
 
-    def tilt_click(self, mouse_position, camera_shape):
+    def tilt_click(self, mouse_position, camera_shape, logger: logging.Logger) -> None:
         instrument_controller = self.__get_instrument_controller()
-        if callable(getattr(instrument_controller, "handle_shift_click", None)):
-            instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera)
+        if callable(getattr(instrument_controller, "handle_tilt_click", None)):
+            instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera, logger=logger)
         else:
             # TODO: remove this backwards compatibility code once everyone updated to new technique above
             if self.__camera_category.lower() == "ronchigram":
                 radians_per_pixel = instrument_controller.get_value("TVPixelAngle")
                 da = radians_per_pixel * (mouse_position[1] - (camera_shape[1] / 2))
                 db = radians_per_pixel * (mouse_position[0] - (camera_shape[0] / 2))
-                logging.info("Tilting (%s,%s) rad.\n", -da, -db)
+                logger.info("Tilting (%s,%s) rad.\n", -da, -db)
                 instrument_controller.set_value("STilt.x", instrument_controller.get_value("STilt.x") - da)
                 instrument_controller.set_value("STilt.y", instrument_controller.get_value("STilt.y") - db)
 

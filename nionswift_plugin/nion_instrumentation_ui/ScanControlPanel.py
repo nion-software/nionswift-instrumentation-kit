@@ -3,6 +3,8 @@ import asyncio
 import copy
 import functools
 import gettext
+import logging
+import logging.handlers
 import pkgutil
 import sys
 import typing
@@ -417,9 +419,9 @@ class ScanControlStateController:
         self.__scan_hardware_source.open_configuration_interface(api_broker)
 
     # must be called on ui thread
-    def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape):
+    def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape, logger: logging.Logger) -> bool:
         if hardware_source_id == self.__scan_hardware_source.hardware_source_id:
-            self.__scan_hardware_source.shift_click(mouse_position, camera_shape)
+            self.__scan_hardware_source.shift_click(mouse_position, camera_shape, logger)
             return True
         return False
 
@@ -1483,10 +1485,18 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     def image_panel_mouse_pressed(self, display_panel, display_item, image_position, modifiers):
         data_item = display_panel.data_item if display_panel else None
         hardware_source_id = data_item and data_item.metadata.get("hardware_source", dict()).get("hardware_source_id")
+        logger = logging.getLogger("camera_control_ui")
+        logger.propagate = False  # do not send messages to root logger
+        if not logger.handlers:
+            logger.addHandler(logging.handlers.BufferingHandler(4))
         if self.__shift_click_state == "shift":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
-            self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape)
+            self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape, logger)
+            logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
+            for record in logger_buffer.buffer:
+                display_panel.document_controller.display_log_record(record)
+            logger_buffer.flush()
             return self.__mouse_pressed
         return False
 
