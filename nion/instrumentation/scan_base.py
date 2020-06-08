@@ -324,7 +324,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             channel_override = self.__frame_parameters.channel_override
             channel_modifier = self.__frame_parameters.channel_modifier
             channel_id = channel_override or (self.__channel_ids[channel_index] + (("_" + channel_modifier) if channel_modifier else ""))
-            update_instrument_properties(_data_element, self.__stem_controller, self.__device)
+            update_instrument_properties(data_element["properties"], self.__stem_controller, self.__device)
             update_scan_data_element(data_element, self.__frame_parameters, _data.shape, self.__scan_id, self.__frame_number, channel_name, channel_id, _scan_properties)
             update_data_element(data_element, complete, sub_area, _data)
             data_elements.append(data_element)
@@ -1380,8 +1380,6 @@ class InstrumentController(abc.ABC):
 
     def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
 
-    def update_acquisition_properties(self, properties: typing.MutableMapping, **kwargs) -> None: pass
-
     def get_autostem_properties(self) -> typing.Dict: return dict()
 
     def handle_shift_click(self, **kwargs) -> None: pass
@@ -1389,25 +1387,19 @@ class InstrumentController(abc.ABC):
     def handle_tilt_click(self, **kwargs) -> None: pass
 
 
-def update_instrument_properties(properties, instrument_controller: InstrumentController, scan_device) -> None:
+def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, scan_device) -> None:
     if instrument_controller:
         # give the instrument controller opportunity to add properties
         if callable(getattr(instrument_controller, "get_autostem_properties", None)):
             try:
                 autostem_properties = instrument_controller.get_autostem_properties()
-                properties.setdefault("autostem", dict()).update(autostem_properties)
+                stem_properties.update(autostem_properties)
             except Exception as e:
                 pass
-        if callable(getattr(instrument_controller, "update_acquisition_properties", None)):
-            instrument_controller.update_acquisition_properties(properties)
-        # give scan device a chance to add additional properties not already supplied. this also gives
-        # the scan device a place to add properties outside of the 'autostem' dict.
-        if callable(getattr(scan_device, "update_acquisition_properties", None)):
-            scan_device.update_acquisition_properties(properties)
         # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(scan_device, "acquisition_metatdata_groups"):
             acquisition_metatdata_groups = scan_device.acquisition_metatdata_groups
-            instrument_controller.apply_metadata_groups(properties, acquisition_metatdata_groups)
+            instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
 _component_registered_listener = None

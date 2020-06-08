@@ -4,6 +4,7 @@ import threading
 import time
 import typing
 import unittest
+import uuid
 
 import numpy
 
@@ -14,6 +15,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
+from nion.swift.model import Metadata
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
@@ -326,6 +328,33 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(display_item.graphics), 0)
             hardware_source.stop_playing()
+
+    def test_context_scan_attaches_required_metadata(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(2, True)
+            self._acquire_one(document_controller, hardware_source)
+            metadata_source0 = document_model.data_items[0]
+            metadata_source1 = document_model.data_items[1]
+            frame_parameters = hardware_source.get_current_frame_parameters()
+            for metadata_source, channel_index in zip([metadata_source0, metadata_source1], [0, 2]):
+                # import pprint; print(pprint.pformat(metadata_source.metadata))
+                # note: frame_time and line_time_us do not currently handle flyback - so this is intentionally wrong
+                self.assertEqual(hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
+                self.assertEqual(channel_index, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
+                self.assertEqual(hardware_source.get_channel_state(channel_index).channel_id, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
+                self.assertEqual(hardware_source.get_channel_state(channel_index).name, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1E6, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_time"))
+                self.assertEqual(100.0, Metadata.get_metadata_value(metadata_source, "stem.scan.fov_nm"))
+                self.assertEqual(1, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_index"))
+                self.assertAlmostEqual(frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.pixel_time_us"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
+                self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata_source, "stem.scan.scan_id")))
+                self.assertAlmostEqual(frame_parameters.size[1], Metadata.get_metadata_value(metadata_source, "stem.scan.valid_rows"))
+                self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.line_time_us"))
 
     def test_acquiring_multiple_channels_attaches_common_scan_id(self):
         with self._make_scan_context() as scan_context:
@@ -1224,6 +1253,13 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(offsets))
             self.assertEqual(1, len(scales))
             self.assertEqual(1, len(units))
+
+    # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
+    # all requested and actual frame parameters are recorded
+    # stem values are recorded
+    # external scan values are recorded
+    # subscan info is recorded
+    # image groups from stem controller are being added
 
     def planned_test_changing_pixel_count_mid_scan_does_not_change_nm_per_pixel(self):
         pass

@@ -378,8 +378,6 @@ class InstrumentController(abc.ABC):
 
     def get_autostem_properties(self) -> typing.Dict: return dict()
 
-    def update_acquisition_properties(self, d: typing.Dict, **kwargs) -> None: pass
-
     def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
 
     def handle_shift_click(self, **kwargs) -> None: pass
@@ -1196,19 +1194,12 @@ def update_intensity_calibration(data_element, instrument_controller: Instrument
 def update_instrument_properties(properties, instrument_controller: InstrumentController, camera):
     if instrument_controller:
         # give the instrument controller opportunity to add properties
-        # TODO: get_autostem_properties is deprecated. use update_acquisition_properties instead.
         if callable(getattr(instrument_controller, "get_autostem_properties", None)):
             try:
                 autostem_properties = instrument_controller.get_autostem_properties()
                 properties.setdefault("autostem", dict()).update(autostem_properties)
             except Exception as e:
                 pass
-        if callable(getattr(instrument_controller, "update_acquisition_properties", None)):
-            instrument_controller.update_acquisition_properties(properties, camera=camera)
-        # give camera a chance to add additional properties not already supplied. this also gives
-        # the camera a place to add properties outside of the 'autostem' dict.
-        if callable(getattr(camera, "update_acquisition_properties", None)):
-            camera.update_acquisition_properties(properties)
         # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(camera, "acquisition_metatdata_groups"):
             acquisition_metatdata_groups = camera.acquisition_metatdata_groups
