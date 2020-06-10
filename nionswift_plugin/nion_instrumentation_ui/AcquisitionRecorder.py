@@ -160,7 +160,7 @@ class Controller:
                     data_descriptor = DataAndMetadata.DataDescriptor(True,
                                                                      xdata.data_descriptor.collection_dimension_count,
                                                                      xdata.data_descriptor.datum_dimension_count)
-                    data = numpy.vstack(xdata_group[i].data for xdata_group in xdata_group_list[-valid_count:]).reshape(valid_count, *shapes[i])
+                    data = numpy.vstack(list(xdata_group[i].data for xdata_group in xdata_group_list[-valid_count:])).reshape(valid_count, *shapes[i])
                     xdata = DataAndMetadata.new_data_and_metadata(data,
                                                                   intensity_calibration=intensity_calibration,
                                                                   dimensional_calibrations=dimensional_calibrations,
