@@ -437,39 +437,45 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         integration_count = frame_parameters.integration_count if frame_parameters.integration_count else 1
         cumulative_frame_count = 0  # used for integration_count
         cumulative_data = None
-        data_element = None  # avoid use-before-set warning
+        _data_element = None  # avoid use-before-set warning
         had_grace_frame = False  # whether grace frame has been used up (allows for extra frame during accumulation startup)
         while cumulative_frame_count < integration_count:
-            data_element = self.__camera.acquire_image()
-            frames_acquired = data_element["properties"].get("integration_count", 1)
+            _data_element = self.__camera.acquire_image()
+            frames_acquired = _data_element["properties"].get("integration_count", 1)
             if cumulative_data is None:
-                cumulative_data = data_element["data"]
+                cumulative_data = _data_element["data"]
                 cumulative_frame_count += frames_acquired
             else:
                 # if the cumulative shape does not match in size, assume it is an acquisition steady state problem
                 # and start again with the newer frame. only allow this to occur once.
-                if cumulative_data.shape != data_element["data"].shape:
+                if cumulative_data.shape != _data_element["data"].shape:
                     assert not had_grace_frame
-                    cumulative_data = data_element["data"]
+                    cumulative_data = _data_element["data"]
                     had_grace_frame = True
                 else:
-                    cumulative_data += data_element["data"]
+                    cumulative_data += _data_element["data"]
                     cumulative_frame_count += frames_acquired
             assert cumulative_frame_count <= integration_count
         if self.__stop_after_acquire:
             self.__camera.stop_live()
         # camera data is always assumed to be full frame, otherwise deal with subarea 1d and 2d
+        data_element = dict()
+        data_element["metadata"] = dict()
+        data_element["metadata"]["hardware_source"] = copy.deepcopy(_data_element["properties"])
         data_element["data"] = cumulative_data
         data_element["version"] = 1
         data_element["state"] = "complete"
-        data_element["timestamp"] = data_element.get("timestamp", datetime.datetime.utcnow())
+        data_element["timestamp"] = _data_element.get("timestamp", datetime.datetime.utcnow())
         update_spatial_calibrations(data_element, self.__instrument_controller, self.__camera, self.__camera_category, cumulative_data.shape, binning, binning)
         update_intensity_calibration(data_element, self.__instrument_controller, self.__camera)
-        update_instrument_properties(data_element["properties"], self.__instrument_controller, self.__camera)
-        update_camera_properties(data_element["properties"], frame_parameters, self.hardware_source_id, self.__display_name, data_element.get("signal_type", self.__signal_type))
-        data_element["properties"]["valid_rows"] = cumulative_data.shape[0]
-        data_element["properties"]["frame_index"] = data_element["properties"]["frame_number"]
-        data_element["properties"]["integration_count"] = cumulative_frame_count
+        instrument_metadata = dict()
+        update_instrument_properties(instrument_metadata, self.__instrument_controller, self.__camera)
+        if instrument_metadata:
+            data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
+        update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.__display_name, data_element.get("signal_type", self.__signal_type))
+        data_element["metadata"]["hardware_source"]["valid_rows"] = cumulative_data.shape[0]
+        data_element["metadata"]["hardware_source"]["frame_index"] = data_element["metadata"]["hardware_source"]["frame_number"]
+        data_element["metadata"]["hardware_source"]["integration_count"] = cumulative_frame_count
         return [data_element]
 
     def __activate_frame_parameters(self):
@@ -915,7 +921,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             acquisition_task._stop_acquisition()
         data_element = dict()
         data_element["data"] = data
-        data_element["properties"] = properties
+        data_element["metadata"] = dict()
+        data_element["hardware_source"] = properties
         return data_element
 
     def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
@@ -940,8 +947,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         update_intensity_calibration(data_element, instrument_controller, self.__camera)
-        update_instrument_properties(data_element["properties"], instrument_controller, self.__camera)
-        update_camera_properties(data_element["properties"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+        update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
+        update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
 
     def update_camera_properties(self, properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", signal_type: str = None) -> None:
         update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
@@ -1145,8 +1152,8 @@ def build_calibration_dict(instrument_controller: InstrumentController, calibrat
 
 def update_spatial_calibrations(data_element, instrument_controller: InstrumentController, camera, camera_category, data_shape, scaling_x, scaling_y):
     if "spatial_calibrations" not in data_element:
-        if "spatial_calibrations" in data_element["properties"]:
-            data_element["spatial_calibrations"] = data_element["properties"]["spatial_calibrations"]
+        if "spatial_calibrations" in data_element.get("hardware_source", dict()):
+            data_element["spatial_calibrations"] = data_element["hardware_source"]["spatial_calibrations"]
         elif hasattr(camera, "calibration"):  # used in nionccd1010
             data_element["spatial_calibrations"] = camera.calibration
         elif instrument_controller:
@@ -1180,30 +1187,30 @@ def update_intensity_calibration(data_element, instrument_controller: Instrument
     else:
         calibration_controls = None
     if "intensity_calibration" not in data_element:
-        if "intensity_calibration" in data_element["properties"]:
-            data_element["intensity_calibration"] = data_element["properties"]["intensity_calibration"]
+        if "intensity_calibration" in data_element.get("hardware_source", dict()):
+            data_element["intensity_calibration"] = data_element["hardware_source"]["intensity_calibration"]
         elif calibration_controls is not None:
             data_element["intensity_calibration"] = build_calibration_dict(instrument_controller, calibration_controls, "intensity")
     if "counts_per_electron" not in data_element:
         if calibration_controls is not None:
             counts_per_electron = get_instrument_calibration_value(instrument_controller, calibration_controls, "counts_per_electron")
             if counts_per_electron:
-                data_element["properties"]["counts_per_electron"] = counts_per_electron
+                data_element.setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
 
 
-def update_instrument_properties(properties, instrument_controller: InstrumentController, camera):
+def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, camera):
     if instrument_controller:
         # give the instrument controller opportunity to add properties
         if callable(getattr(instrument_controller, "get_autostem_properties", None)):
             try:
                 autostem_properties = instrument_controller.get_autostem_properties()
-                properties.setdefault("autostem", dict()).update(autostem_properties)
+                stem_properties.update(autostem_properties)
             except Exception as e:
                 pass
         # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(camera, "acquisition_metatdata_groups"):
             acquisition_metatdata_groups = camera.acquisition_metatdata_groups
-            instrument_controller.apply_metadata_groups(properties, acquisition_metatdata_groups)
+            instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
 def update_camera_properties(properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", hardware_source_id: str, display_name: str, signal_type: str = None) -> None:

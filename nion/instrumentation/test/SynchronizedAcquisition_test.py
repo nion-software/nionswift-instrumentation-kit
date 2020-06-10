@@ -10,6 +10,7 @@ from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
+from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
@@ -160,18 +161,29 @@ class TestScanControlClass(unittest.TestCase):
             # self.assertEqual(scans[0].timezone_offset, spectrum_images[0].timezone_offset)
             # self.assertEqual(scans[0].timestamp, spectrum_images[0].timestamp)
             # check the metadata
-            self.assertIn("scan_detector", spectrum_images[0].metadata)
-            self.assertIn("hardware_source", spectrum_images[0].metadata)
-            self.assertIn("center_x_nm", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("center_y_nm", spectrum_images[0].metadata["scan_detector"])
-            self.assertNotIn("channel_index", spectrum_images[0].metadata["scan_detector"])
-            self.assertNotIn("channel_name", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("fov_nm", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("hardware_source_id", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("hardware_source_name", spectrum_images[0].metadata["scan_detector"])
-            self.assertIn("rotation", spectrum_images[0].metadata["scan_detector"])
-            self.assertEqual(scan_frame_parameters["scan_id"], scans[0].metadata["hardware_source"]["scan_id"])
-            self.assertEqual(scan_frame_parameters["scan_id"], spectrum_images[0].metadata["scan_detector"]["scan_id"])
+            for metadata_source in spectrum_images:
+                # import pprint; print(pprint.pformat(metadata_source.metadata))
+                self.assertEqual(camera_hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
+                self.assertEqual(camera_hardware_source.display_name, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.name"))
+                self.assertGreater(Metadata.get_metadata_value(metadata_source, "stem.camera.exposure"), 0.0)
+                self.assertIsNotNone(Metadata.get_metadata_value(metadata_source, "stem.signal_type"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                # self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.frame_time"))
+                self.assertEqual(100.0, Metadata.get_metadata_value(metadata_source, "stem.scan.fov_nm"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.pixel_time_us"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
+                self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata_source, "stem.scan.scan_id")))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.hardware_source.valid_rows"))
+                self.assertEqual(scan_frame_parameters.size[1], Metadata.get_metadata_value(metadata_source, "stem.scan.valid_rows"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata_source, "stem.scan.line_time_us"))
+                self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
+                self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
+                self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_context_size"])
+                self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_size"])
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
         with self._make_acquisition_context() as context:
@@ -223,13 +235,17 @@ class TestScanControlClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            camera_metadata = grab_sync_info.camera_metadata
-            self.assertIn("autostem", camera_metadata)
-            self.assertIn("hardware_source_id", camera_metadata)
-            self.assertIn("hardware_source_name", camera_metadata)
-            self.assertIn("exposure", camera_metadata)
-            self.assertIn("binning", camera_metadata)
-            self.assertIn("signal_type", camera_metadata)
+            metadata = {
+                "scan": copy.deepcopy(grab_sync_info.scan_metadata),
+                "hardware_source": copy.deepcopy(grab_sync_info.camera_metadata),
+                "instrument": copy.deepcopy(grab_sync_info.instrument_metadata)
+            }
+            self.assertEqual(camera_hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata, "stem.hardware_source.id"))
+            self.assertEqual(camera_hardware_source.display_name, Metadata.get_metadata_value(metadata, "stem.hardware_source.name"))
+            self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata, "stem.high_tension"))
+            self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata, "stem.defocus"))
+            self.assertGreater(Metadata.get_metadata_value(metadata, "stem.camera.exposure"), 0.0)
+            self.assertIsNotNone(Metadata.get_metadata_value(metadata, "stem.signal_type"))
             # 'is_dark_subtracted': False,
             # 'is_flipped_horizontally': False,
             # 'is_gain_corrected': False,
@@ -241,24 +257,35 @@ class TestScanControlClass(unittest.TestCase):
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
-            scan_frame_parameters["size"] = (8, 8)
+            scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            scan_metadata = grab_sync_info.scan_metadata
-            self.assertIn("autostem", scan_metadata)
-            self.assertIn("hardware_source_id", scan_metadata)
-            self.assertIn("hardware_source_name", scan_metadata)
-            self.assertIn("center_x_nm", scan_metadata)
-            self.assertIn("center_y_nm", scan_metadata)
-            self.assertNotIn("channel_index", scan_metadata)
-            self.assertNotIn("channel_name", scan_metadata)
-            self.assertIn("fov_nm", scan_metadata)
-            self.assertIn("rotation", scan_metadata)
-            self.assertEqual(scan_frame_parameters["scan_id"], scan_metadata["scan_id"])
+            metadata = {
+                "scan": copy.deepcopy(grab_sync_info.scan_metadata),
+                "hardware_source": copy.deepcopy(grab_sync_info.camera_metadata),
+                "instrument": copy.deepcopy(grab_sync_info.instrument_metadata)
+            }
+            self.assertEqual(camera_hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata, "stem.hardware_source.id"))
+            self.assertEqual(camera_hardware_source.display_name, Metadata.get_metadata_value(metadata, "stem.hardware_source.name"))
+            self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata, "stem.high_tension"))
+            self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata, "stem.defocus"))
+            self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_index"))
+            self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_id"))
+            self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_name"))
+            self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.center_x_nm"))
+            self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.center_x_nm"))
+            # self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.frame_time"))
+            self.assertEqual(100.0, Metadata.get_metadata_value(metadata, "stem.scan.fov_nm"))
+            self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.pixel_time_us"))
+            self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.rotation"))
+            self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata, "stem.scan.scan_id")))
+            self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.line_time_us"))
+            self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])
+            self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     def test_partial_acquisition_has_proper_metadata(self):
 
@@ -267,11 +294,13 @@ class TestScanControlClass(unittest.TestCase):
         class CameraDataChannel(ScanAcquisition.CameraDataChannel):
             def __init__(self, document_model, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo, update_period: float = 1.0):
                 super().__init__(document_model, channel_name, grab_sync_info)
+                self.__document_model = document_model
                 self._update_period = update_period
                 self.updates = list()
 
             def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
                 super().update(data_and_metadata, state, scan_shape, dest_sub_area, sub_area, view_id)
+                self.__document_model.perform_data_item_updates()
                 self.updates.append(PartialUpdate(
                     copy.deepcopy(self.data_item.xdata),
                     state,
@@ -305,24 +334,48 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[0].units)
                 self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[1].units)
                 self.assertEqual("eV", partial_update.xdata.dimensional_calibrations[2].units)
-                camera_metadata = partial_update.xdata.metadata["hardware_source"]
-                self.assertIn("autostem", camera_metadata)
-                self.assertIn("hardware_source_id", camera_metadata)
-                self.assertIn("hardware_source_name", camera_metadata)
-                self.assertIn("exposure", camera_metadata)
-                self.assertIn("binning", camera_metadata)
-                self.assertIn("signal_type", camera_metadata)
-                scan_metadata = partial_update.xdata.metadata["scan_detector"]
-                self.assertIn("autostem", scan_metadata)
-                self.assertIn("hardware_source_id", scan_metadata)
-                self.assertIn("hardware_source_name", scan_metadata)
-                self.assertIn("center_x_nm", scan_metadata)
-                self.assertIn("center_y_nm", scan_metadata)
-                self.assertNotIn("channel_index", scan_metadata)
-                self.assertNotIn("channel_name", scan_metadata)
-                self.assertIn("fov_nm", scan_metadata)
-                self.assertIn("rotation", scan_metadata)
-                self.assertIn("scan_id", scan_metadata)
+                metadata = partial_update.xdata.metadata
+                # import pprint; print(pprint.pformat(metadata))
+                self.assertEqual(camera_hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata, "stem.hardware_source.id"))
+                self.assertEqual(camera_hardware_source.display_name, Metadata.get_metadata_value(metadata, "stem.hardware_source.name"))
+                self.assertNotIn("autostem", metadata["hardware_source"])
+                self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata, "stem.high_tension"))
+                self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata, "stem.defocus"))
+                self.assertGreater(Metadata.get_metadata_value(metadata, "stem.camera.exposure"), 0.0)
+                self.assertIsNotNone(Metadata.get_metadata_value(metadata, "stem.signal_type"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_index"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_id"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.channel_name"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.center_x_nm"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.center_x_nm"))
+                # self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.frame_time"))
+                self.assertEqual(100.0, Metadata.get_metadata_value(metadata, "stem.scan.fov_nm"))
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.pixel_time_us"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.rotation"))
+                self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata, "stem.scan.scan_id")))
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.hardware_source.valid_rows"))
+                self.assertTrue(1 <= Metadata.get_metadata_value(metadata, "stem.scan.valid_rows") <= 6)
+                self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.line_time_us"))
+                self.assertEqual((6, 6), metadata["scan"]["scan_context_size"])
+                self.assertEqual((6, 6), metadata["scan"]["scan_size"])
+                # camera_metadata = partial_update.xdata.metadata["hardware_source"]
+                # self.assertIn("autostem", camera_metadata)
+                # self.assertIn("hardware_source_id", camera_metadata)
+                # self.assertIn("hardware_source_name", camera_metadata)
+                # self.assertIn("exposure", camera_metadata)
+                # self.assertIn("binning", camera_metadata)
+                # self.assertIn("signal_type", camera_metadata)
+                # scan_metadata = partial_update.xdata.metadata["scan_detector"]
+                # self.assertIn("autostem", scan_metadata)
+                # self.assertIn("hardware_source_id", scan_metadata)
+                # self.assertIn("hardware_source_name", scan_metadata)
+                # self.assertIn("center_x_nm", scan_metadata)
+                # self.assertIn("center_y_nm", scan_metadata)
+                # self.assertNotIn("channel_index", scan_metadata)
+                # self.assertNotIn("channel_name", scan_metadata)
+                # self.assertIn("fov_nm", scan_metadata)
+                # self.assertIn("rotation", scan_metadata)
+                # self.assertIn("scan_id", scan_metadata)
 
     def test_grab_synchronized_basic_eels_with_drift_correction(self):
         with self._make_acquisition_context() as context:
@@ -344,6 +397,7 @@ class TestScanControlClass(unittest.TestCase):
                                                                             camera_data_channel=camera_data_channel,
                                                                             section_height=2,
                                                                             scan_behavior=drift_correction_behavior)
+
     def test_drift_corrector(self):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects

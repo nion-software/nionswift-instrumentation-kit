@@ -342,6 +342,10 @@ class TestScanControlClass(unittest.TestCase):
                 # import pprint; print(pprint.pformat(metadata_source.metadata))
                 # note: frame_time and line_time_us do not currently handle flyback - so this is intentionally wrong
                 self.assertEqual(hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
+                self.assertEqual(hardware_source.display_name, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.name"))
+                self.assertNotIn("autostem", metadata_source.metadata["hardware_source"])
+                self.assertEqual(hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
+                self.assertEqual(hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
                 self.assertEqual(channel_index, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
                 self.assertEqual(hardware_source.get_channel_state(channel_index).channel_id, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
                 self.assertEqual(hardware_source.get_channel_state(channel_index).name, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
@@ -349,12 +353,50 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
                 self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.size[1] * frame_parameters.pixel_time_us / 1E6, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_time"))
                 self.assertEqual(100.0, Metadata.get_metadata_value(metadata_source, "stem.scan.fov_nm"))
-                self.assertEqual(1, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_index"))
+                self.assertEqual(0, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_index"))
                 self.assertAlmostEqual(frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.pixel_time_us"))
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
                 self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata_source, "stem.scan.scan_id")))
-                self.assertAlmostEqual(frame_parameters.size[1], Metadata.get_metadata_value(metadata_source, "stem.scan.valid_rows"))
+                self.assertEqual(frame_parameters.size[1], Metadata.get_metadata_value(metadata_source, "stem.hardware_source.valid_rows"))
+                self.assertEqual(frame_parameters.size[1], Metadata.get_metadata_value(metadata_source, "stem.scan.valid_rows"))
                 self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.line_time_us"))
+                self.assertEqual((256, 256), metadata_source.metadata["scan"]["scan_context_size"])
+                self.assertEqual((256, 256), metadata_source.metadata["scan"]["scan_size"])
+
+    def test_sub_scan_attaches_required_metadata(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.set_channel_enabled(0, True)
+            hardware_source.set_channel_enabled(2, True)
+            hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, hardware_source)
+            metadata_source0 = document_model.data_items[0]
+            metadata_source1 = document_model.data_items[1]
+            frame_parameters = hardware_source.get_current_frame_parameters()
+            for metadata_source, channel_index in zip([metadata_source0, metadata_source1], [4, 6]):
+                # import pprint; print(pprint.pformat(metadata_source.metadata))
+                # note: frame_time and line_time_us do not currently handle flyback - so this is intentionally wrong
+                self.assertEqual(hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
+                self.assertEqual(hardware_source.display_name, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.name"))
+                self.assertNotIn("autostem", metadata_source.metadata["hardware_source"])
+                self.assertEqual(hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
+                self.assertEqual(hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
+                self.assertEqual(channel_index, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
+                self.assertEqual(hardware_source.get_channel_state(channel_index % 4).channel_id + "_subscan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
+                self.assertEqual(hardware_source.get_channel_state(channel_index % 4).name + " SubScan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
+                self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.subscan_fractional_size[0] * frame_parameters.size[1] * frame_parameters.subscan_fractional_size[1] * frame_parameters.pixel_time_us / 1E6, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_time"))
+                self.assertEqual(100.0, Metadata.get_metadata_value(metadata_source, "stem.scan.fov_nm"))
+                self.assertEqual(0, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_index"))
+                self.assertAlmostEqual(frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.pixel_time_us"))
+                self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
+                self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata_source, "stem.scan.scan_id")))
+                self.assertEqual(frame_parameters.size[1] * frame_parameters.subscan_fractional_size[1], Metadata.get_metadata_value(metadata_source, "stem.hardware_source.valid_rows"))
+                self.assertEqual(frame_parameters.size[1] * frame_parameters.subscan_fractional_size[1], Metadata.get_metadata_value(metadata_source, "stem.scan.valid_rows"))
+                self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.subscan_fractional_size[0] * frame_parameters.pixel_time_us, Metadata.get_metadata_value(metadata_source, "stem.scan.line_time_us"))
+                self.assertEqual((256, 256), metadata_source.metadata["scan"]["scan_context_size"])
+                self.assertEqual((128, 128), metadata_source.metadata["scan"]["scan_size"])
 
     def test_acquiring_multiple_channels_attaches_common_scan_id(self):
         with self._make_scan_context() as scan_context:
@@ -363,10 +405,8 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].metadata
-            metadata1 = document_model.data_items[1].metadata
-            scan_id0 = metadata0.get("hardware_source", dict()).get("scan_id")
-            scan_id1 = metadata1.get("hardware_source", dict()).get("scan_id")
+            scan_id0 = Metadata.get_metadata_value(document_model.data_items[0], "stem.scan.scan_id")
+            scan_id1 = Metadata.get_metadata_value(document_model.data_items[1], "stem.scan.scan_id")
             self.assertIsNotNone(scan_id0)
             self.assertEqual(scan_id0, scan_id1)
 
@@ -377,15 +417,11 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(2, True)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 2)
-            metadata0 = document_model.data_items[0].metadata
-            metadata1 = document_model.data_items[1].metadata
-            scan_id00 = metadata0.get("hardware_source", dict()).get("scan_id")
-            scan_id01 = metadata1.get("hardware_source", dict()).get("scan_id")
+            scan_id00 = Metadata.get_metadata_value(document_model.data_items[0], "stem.scan.scan_id")
+            scan_id01 = Metadata.get_metadata_value(document_model.data_items[1], "stem.scan.scan_id")
             self._acquire_one(document_controller, hardware_source)
-            metadata0 = document_model.data_items[0].metadata
-            metadata1 = document_model.data_items[1].metadata
-            scan_id10 = metadata0.get("hardware_source", dict()).get("scan_id")
-            scan_id11 = metadata1.get("hardware_source", dict()).get("scan_id")
+            scan_id10 = Metadata.get_metadata_value(document_model.data_items[0], "stem.scan.scan_id")
+            scan_id11 = Metadata.get_metadata_value(document_model.data_items[1], "stem.scan.scan_id")
             self.assertIsNotNone(scan_id00)
             self.assertIsNotNone(scan_id10)
             self.assertEqual(scan_id00, scan_id01)
@@ -642,7 +678,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(2, frame_parameters_2)
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
-            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 10)
+            self.assertEqual(Metadata.get_metadata_value(hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 10)
             # give view a chance to start before recording. this must finished _before_ the final segment of partial
             # acquisition for this test to work; otherwise the final segment finishes and notifies and gets picked up
             # in the first wait call after start_recording below.
@@ -650,8 +686,8 @@ class TestScanControlClass(unittest.TestCase):
             time.sleep(frame_time * 0.1)
             hardware_source.start_recording()
             time.sleep(frame_time * 0.1)  # give record a chance to start; starting record will abort view immediately
-            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 100)
-            self.assertEqual(hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["fov_nm"], 10)
+            self.assertEqual(Metadata.get_metadata_value(hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 100)
+            self.assertEqual(Metadata.get_metadata_value(hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 10)
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the scan is saturated (or otherwise produces identical values naturally)

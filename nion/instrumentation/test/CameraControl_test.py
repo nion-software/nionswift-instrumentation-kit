@@ -7,11 +7,12 @@ import zlib
 
 import numpy
 
-from nion.swift.model import DocumentModel
-from nion.swift.model import HardwareSource
 from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift import Facade
+from nion.swift.model import DocumentModel
+from nion.swift.model import HardwareSource
+from nion.swift.model import Metadata
 from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Event
@@ -588,15 +589,32 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source(is_eels=True)
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].metadata["hardware_source"]["signal_type"], "eels")
-            self.assertEqual(document_model.data_items[1].metadata["hardware_source"]["signal_type"], "eels")
+            self.assertEqual("eels", Metadata.get_metadata_value(document_model.data_items[0], "stem.signal_type"))
+            self.assertEqual("eels", Metadata.get_metadata_value(document_model.data_items[1], "stem.signal_type"))
 
     def test_acquiring_ronchigram_sets_signal_type(self):
         # assumes EELS camera produces two data items
         document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
         with contextlib.closing(document_controller):
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].metadata["hardware_source"]["signal_type"], "ronchigram")
+            self.assertEqual("ronchigram", Metadata.get_metadata_value(document_model.data_items[0], "stem.signal_type"))
+
+    def test_acquire_attaches_required_metadata(self):
+        document_controller, document_model, hardware_source, state_controller = self.__setup_hardware_source()
+        stem_controller = Registry.get_component("stem_controller")
+        with contextlib.closing(document_controller):
+            self._acquire_one(document_controller, hardware_source)
+            frame_parameters = hardware_source.get_current_frame_parameters()
+            for metadata_source in [document_model.data_items[0]]:
+                # import pprint; print(pprint.pformat(metadata_source.metadata))
+                # note: frame_time and line_time_us do not currently handle flyback - so this is intentionally wrong
+                self.assertEqual(hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
+                self.assertEqual(hardware_source.display_name, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.name"))
+                self.assertNotIn("autostem", metadata_source.metadata["hardware_source"])
+                self.assertEqual(stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
+                self.assertEqual(stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
+                self.assertEqual(frame_parameters.binning, Metadata.get_metadata_value(metadata_source, "stem.camera.binning"))
+                self.assertEqual(frame_parameters.exposure_ms / 1000, Metadata.get_metadata_value(metadata_source, "stem.camera.exposure"))
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the camera is saturated (or otherwise produces identical values naturally)

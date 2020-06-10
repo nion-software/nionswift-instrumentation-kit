@@ -109,8 +109,9 @@ class CameraDataChannel:
         data_item.dimensional_calibrations = scan_calibrations + data_calibrations
         data_item.intensity_calibration = data_intensity_calibration
         data_item_metadata = data_item.metadata
-        data_item_metadata["hardware_source"] = grab_sync_info.camera_metadata
-        data_item_metadata["scan_detector"] = grab_sync_info.scan_metadata
+        data_item_metadata["instrument"] = copy.deepcopy(grab_sync_info.instrument_metadata)
+        data_item_metadata["hardware_source"] = copy.deepcopy(grab_sync_info.camera_metadata)
+        data_item_metadata["scan"] = copy.deepcopy(grab_sync_info.scan_metadata)
         data_item.metadata = data_item_metadata
         return data_item
 
