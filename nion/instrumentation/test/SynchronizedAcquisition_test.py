@@ -2,6 +2,7 @@ import collections
 import copy
 import math
 import numpy
+import typing
 import unittest
 import uuid
 
@@ -127,7 +128,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.__scan_test._close_hardware(self.document_controller, self.instrument, self.scan_hardware_source, self.camera_hardware_source)
 
             @property
-            def objects(self):
+            def objects(self) -> typing.Tuple[DocumentController.DocumentController, DocumentModel.DocumentModel, scan_base.ScanHardwareSource, camera_base.CameraHardwareSource]:
                 return self.document_controller, self.document_model, self.scan_hardware_source, self.camera_hardware_source
 
         return ScanContext(self)
@@ -204,6 +205,21 @@ class TestScanControlClass(unittest.TestCase):
                 scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             finally:
                 camera_data_channel.stop()
+
+    def test_grab_rotated_synchronized_eels(self):
+        # tests whether rotation was applied, as judged by the resulting metadata
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 4)
+            scan_frame_parameters.rotation_rad = math.radians(30)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            camera_data_channel = None
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            for metadata_source in spectrum_images:
+                self.assertAlmostEqual(math.radians(30), Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
 
     def test_grab_sync_info_has_proper_calibrations(self):
         with self._make_acquisition_context() as context:

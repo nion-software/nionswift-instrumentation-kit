@@ -124,7 +124,7 @@ def update_scan_properties(properties: typing.MutableMapping, scan_frame_paramet
     properties["center_x_nm"] = float(scan_frame_parameters.get("center_x_nm", 0.0))
     properties["center_y_nm"] = float(scan_frame_parameters.get("center_y_nm", 0.0))
     properties["fov_nm"] = float(scan_frame_parameters["fov_nm"])
-    properties["rotation"] = float(scan_frame_parameters.get("rotation", math.radians(scan_frame_parameters.get("rotation_deg", 0.0))))
+    properties["rotation"] = float(scan_frame_parameters.get("rotation_rad", math.radians(scan_frame_parameters.get("rotation_deg", 0.0))))
     properties["rotation_deg"] = math.degrees(properties["rotation"])
     properties["scan_context_size"] = tuple(scan_frame_parameters["size"])
     if scan_frame_parameters.subscan_fractional_size is not None:
@@ -173,6 +173,7 @@ def update_scan_data_element(data_element, scan_frame_parameters, data_shape, ch
             {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
         )
 
+
 def update_scan_metadata(scan_metadata: typing.MutableMapping, hardware_source_id: str, display_name: str, scan_frame_parameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping) -> None:
     scan_metadata["hardware_source_id"] = hardware_source_id
     scan_metadata["hardware_source_name"] = display_name
@@ -183,6 +184,7 @@ def update_scan_metadata(scan_metadata: typing.MutableMapping, hardware_source_i
         scan_properties = dict(scan_properties)
         scan_properties.pop("channel_id", None)  # not part of scan description
         scan_metadata["scan_device_properties"] = scan_properties
+
 
 def update_detector_metadata(detector_metadata: typing.MutableMapping, hardware_source_id: str, display_name: str, data_shape, frame_number: typing.Optional[int], channel_name: str, channel_id: str, scan_properties: typing.Mapping) -> None:
     detector_metadata["hardware_source_id"] = hardware_source_id
@@ -360,6 +362,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
 
 class RecordTask:
+    """Run acquisition in a thread and record the result."""
 
     def __init__(self, hardware_source, frame_parameters):
         self.__hardware_source = hardware_source
@@ -1071,7 +1074,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.__stem_controller._clear_scan_context()
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
 
-    def get_current_frame_parameters(self):
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
         return ScanFrameParameters(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters):
