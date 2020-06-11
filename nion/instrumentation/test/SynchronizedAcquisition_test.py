@@ -8,6 +8,7 @@ import uuid
 from nion.data import DataAndMetadata
 from nion.swift import Application
 from nion.swift import DocumentController
+from nion.swift import Facade
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.swift.model import Metadata
@@ -420,6 +421,29 @@ class TestScanControlClass(unittest.TestCase):
             offset_nm = drift_correction_behavior.prepare_section().offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
+
+    def test_scan_acquisition_controller(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual(1, len(document_model.data_items))
+            context_data_item = document_model.data_items[-1]
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.context_data_item = Facade.DataItem(context_data_item)
+            scan_specifier.rect = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            scan_specifier.spacing_px = 32  # 256 / 32 = 4 x 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(True)
+            scan_acquisition_controller._wait()
+            self.assertEqual((4, 4, 512), document_model.data_items[-1].data_shape)
+            metadata = document_model.data_items[-1].metadata
+            # import pprint ; print(pprint.pformat(metadata))
+            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])
+            self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     # TODO: check for counts per electron
 

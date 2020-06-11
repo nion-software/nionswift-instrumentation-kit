@@ -129,6 +129,9 @@ def update_scan_properties(properties: typing.MutableMapping, scan_frame_paramet
     properties["scan_context_size"] = tuple(scan_frame_parameters["size"])
     if scan_frame_parameters.subscan_fractional_size is not None:
         properties["subscan_fractional_size"] = tuple(scan_frame_parameters.subscan_fractional_size)
+    if scan_frame_parameters.subscan_pixel_size is not None:
+        properties["scan_size"] = (int(scan_frame_parameters.subscan_pixel_size[0]), int(scan_frame_parameters.subscan_pixel_size[1]))
+    elif scan_frame_parameters.subscan_fractional_size is not None:
         properties["scan_size"] = (int(properties["scan_context_size"][0] * properties["subscan_fractional_size"][0]),
                                    int(properties["scan_context_size"][0] * properties["subscan_fractional_size"][1]))
     else:

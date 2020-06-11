@@ -255,6 +255,7 @@ class ScanAcquisitionController:
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.acquisition_state_changed_event = Event.Event()
+        self.__thread = None
 
     def start(self, sum_frames: bool) -> None:
 
@@ -276,8 +277,8 @@ class ScanAcquisitionController:
                 dy = line_end[0] - line_start[0]
                 dx = line_end[1] - line_start[1]
                 line_length = int(math.sqrt(math.pow(dy, 2) + math.pow(dx, 2)))
-                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
-                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
                 scan_frame_parameters.subscan_pixel_size = (1, line_length / self.__scan_specifier.spacing_px)
                 # for fraction size/center, the line will start as horizontal and be rotated from there
                 scan_frame_parameters.subscan_fractional_size = 1 / context_data_shape[0], line_length / context_data_shape[1]
@@ -291,8 +292,8 @@ class ScanAcquisitionController:
                 cy = (self.__scan_specifier.rect[0][0] * context_data_shape[0] + self.__scan_specifier.rect[1][0] * context_data_shape[0] / 2) / context_data_shape[0]
                 cx = (self.__scan_specifier.rect[0][1] * context_data_shape[1] + self.__scan_specifier.rect[1][1] * context_data_shape[1] / 2) / context_data_shape[1]
                 scan_frame_parameters.size = context_data_shape
-                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
-                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
                 # print(f"{cx}, {cy}  {width} x {height}")
                 scan_frame_parameters.subscan_pixel_size = (height / self.__scan_specifier.spacing_px, width / self.__scan_specifier.spacing_px)
                 scan_frame_parameters.subscan_fractional_size = height / context_data_shape[0], width / context_data_shape[1]
@@ -301,8 +302,8 @@ class ScanAcquisitionController:
             else:
                 # print("FULL")
                 scan_frame_parameters.size = context_data_shape[0] / self.__scan_specifier.spacing_px, context_data_shape[1] / self.__scan_specifier.spacing_px
-                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["hardware_source"]["fov_nm"]
-                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["hardware_source"]["rotation"]
+                scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
+                scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
                 scan_frame_parameters.subscan_pixel_size = None
                 scan_frame_parameters.subscan_fractional_size = None
                 scan_frame_parameters.subscan_fractional_center = None
@@ -372,6 +373,11 @@ class ScanAcquisitionController:
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
         self.__scan_hardware_source._hardware_source.grab_synchronized_abort()
+
+    # for running tests
+    def _wait(self, timeout: float = 60.0) -> None:
+        if self.__thread:
+            self.__thread.join(timeout)
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
