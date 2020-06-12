@@ -280,10 +280,11 @@ class STEMController(Observable.Observable):
 
     def _data_item_states_changed(self, data_item_states):
         if len(data_item_states) > 0:
-            if self.subscan_state == SubscanState.DISABLED:
-                # only update context display items when subscan is disabled
-                self.__scan_context_data_items = [data_item_state.get("data_item") for data_item_state in data_item_states]
-                self.__scan_context_channel_map = {data_item_state.get("channel_id"): data_item_state.get("data_item") for data_item_state in data_item_states}
+            channel_map = {data_item_state.get("channel_id"): data_item_state.get("data_item") for data_item_state in data_item_states}
+            if self.subscan_state == SubscanState.DISABLED and set(channel_map.keys()) != {"drift"}:
+                # only update context display items when subscan is disabled and not taking drift
+                self.__scan_context_data_items = channel_map.values()
+                self.__scan_context_channel_map = channel_map
             self.scan_context_data_items_changed_event.fire()
 
     @property
