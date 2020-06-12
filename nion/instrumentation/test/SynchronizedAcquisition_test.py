@@ -442,12 +442,35 @@ class TestScanControlClass(unittest.TestCase):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
             self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, scan_hardware_source)
+            # self.assertEqual(1, len(document_model.data_items))
+            context_data_item = document_model.data_items[0]
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.context_data_item = Facade.DataItem(context_data_item)
+            scan_specifier.spacing_px = 64  # 256 / 64 = 4 x 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(True)
+            scan_acquisition_controller._wait()
+            self.assertEqual((4, 4, 512), document_model.data_items[-1].data_shape)
+            metadata = document_model.data_items[-1].metadata
+            self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
+            self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
+    def test_scan_acquisition_controller_with_rect(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
             self.assertEqual(1, len(document_model.data_items))
             context_data_item = document_model.data_items[-1]
             scan_specifier = ScanAcquisition.ScanSpecifier()
             scan_specifier.context_data_item = Facade.DataItem(context_data_item)
             scan_specifier.rect = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-            scan_specifier.spacing_px = 32  # 256 / 32 = 4 x 4
+            scan_specifier.spacing_px = 32  # 128 / 32 = 4 x 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
                                                                                     Facade.DocumentWindow(document_controller),
                                                                                     Facade.HardwareSource(scan_hardware_source),
@@ -460,6 +483,35 @@ class TestScanControlClass(unittest.TestCase):
             # import pprint ; print(pprint.pformat(metadata))
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
+    def test_update_from_device_puts_current_profile_into_valid_state(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, scan_hardware_source)
+            context_data_item = document_model.data_items[0]
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.context_data_item = Facade.DataItem(context_data_item)
+            scan_specifier.spacing_px = 64  # 256 / 64 = 4 x 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(True)
+            scan_acquisition_controller._wait()
+            updated_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            for k in list(updated_frame_parameters.keys()):
+                if k not in ("size", "center_nm", "pixel_time_us", "fov_nm", "rotation_rad", "flyback_time_us"):
+                    updated_frame_parameters.pop(k)
+            scan_hardware_source._update_frame_parameters_test(0, updated_frame_parameters)
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            # import pprint; print(pprint.pformat(dict(current_frame_parameters)))
+            self.assertIsNotNone(current_frame_parameters.channel_modifier)
+            self.assertIsNotNone(current_frame_parameters.subscan_fractional_center)
+            self.assertIsNotNone(current_frame_parameters.subscan_fractional_size)
+            self.assertIsNotNone(current_frame_parameters.subscan_pixel_size)
 
     # TODO: check for counts per electron
 

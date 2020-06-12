@@ -899,9 +899,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
+            # if subscan enabled, ensure there is a subscan region
             if self.__stem_controller.subscan_state == stem_controller.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
                 self.__stem_controller.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
                 self.__stem_controller.subscan_rotation = 0.0
+            # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     def __subscan_region_changed(self, name: str) -> None:
@@ -1049,7 +1051,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def set_current_frame_parameters(self, frame_parameters):
         self.__set_current_frame_parameters(frame_parameters, True)
 
-    def __set_current_frame_parameters(self, frame_parameters, is_context: bool) -> None:
+    def __set_current_frame_parameters(self, frame_parameters, is_context: bool, update_task: bool = True) -> None:
         frame_parameters = ScanFrameParameters(frame_parameters)
         if self.subscan_enabled and self.subscan_region:
             subscan_region = Geometry.FloatRect.make(self.subscan_region)
@@ -1066,7 +1068,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             frame_parameters.subscan_rotation = 0.0
             frame_parameters.channel_modifier = None
         if self.__acquisition_task:
-            self.__acquisition_task.set_frame_parameters(frame_parameters)
+            if update_task:
+                self.__acquisition_task.set_frame_parameters(frame_parameters)
             if not self.subscan_enabled:
                 fov_size_nm = Geometry.FloatSize(height=frame_parameters.fov_nm * Geometry.FloatSize.make(frame_parameters.size).aspect_ratio, width=frame_parameters.fov_nm)
                 self.__stem_controller._update_scan_context(frame_parameters.center_nm, fov_size_nm, frame_parameters.rotation_rad)
@@ -1155,19 +1158,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
         # update the frame parameters as they are changed from the low level.
+        # the low level frame parameters should be treated as if they are updating
+        # the existing profiles since the low level device has no way to know
+        # the complete set of frame parameters being used at this level.
         frame_parameters = ScanFrameParameters(frame_parameters)
-        self.__profiles[profile_index] = frame_parameters
+        self.__profiles[profile_index].update(frame_parameters)
         if profile_index == self.__current_profile_index:
-            # set the new frame parameters, keeping the channel modifier
-            new_frame_parameters = ScanFrameParameters(frame_parameters)
-            new_frame_parameters.channel_modifier = self.__frame_parameters.channel_modifier
-            self.__frame_parameters = new_frame_parameters
+            self.__frame_parameters.update(frame_parameters)
+            # validates the frame parameters (applies subscan, etc.)
+            self.__set_current_frame_parameters(self.__frame_parameters, True, update_task=False)
         if profile_index == 2:
-            # set the new record parameters, keeping the channel modifier
-            new_record_parameters = ScanFrameParameters(frame_parameters)
-            new_record_parameters.channel_modifier = self.__record_parameters.channel_modifier
-            self.__record_parameters = new_record_parameters
+            self.__record_parameters.update(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
+
+    def _update_frame_parameters_test(self, profile_index, frame_parameters):
+        self.__update_frame_parameters(profile_index, frame_parameters)
 
     def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
         # this method will be called when the device changes parameters (via a dialog or something similar).
