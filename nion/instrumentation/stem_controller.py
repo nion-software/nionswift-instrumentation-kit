@@ -882,8 +882,11 @@ class DriftView(EventLoopMonitor):
                 self.__remove_graphic()
             # it already exists on the correct display item, update it.
             if self.__graphic:
-                self.__graphic.bounds = tuple(self.__stem_controller.drift_region)
-                self.__graphic.rotation = self.__stem_controller.drift_rotation
+                # only fire messages when something changes to avoid flickering, difficulty editing.
+                if self.__graphic.bounds != tuple(self.__stem_controller.drift_region):
+                    self.__graphic.bounds = tuple(self.__stem_controller.drift_region)
+                if self.__graphic.rotation != self.__stem_controller.drift_rotation:
+                    self.__graphic.rotation = self.__stem_controller.drift_rotation
             # otherwise create it if there is a display item for it
             elif drift_display_item:
                 drift_graphic = Graphics.RectangleGraphic()
