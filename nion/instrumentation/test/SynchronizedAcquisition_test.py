@@ -520,6 +520,31 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
+    def test_scan_acquisition_controller_space_px(self):
+        # tests rounding calculation when spacing_px is not a nice divisor
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            frame_parameters = scan_hardware_source.get_frame_parameters(0)
+            scan_hardware_source.set_frame_parameters(0, frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual(1, len(document_model.data_items))
+            context_data_item = document_model.data_items[-1]
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.context_data_item = Facade.DataItem(context_data_item)
+            scan_specifier.spacing_px = 256 / 5
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(True)
+            scan_acquisition_controller._wait()
+            self.assertEqual((5, 5, 512), document_model.data_items[-1].data_shape)
+            metadata = document_model.data_items[-1].metadata
+            # import pprint ; print(pprint.pformat(metadata))
+            self.assertEqual((5, 5), metadata["scan"]["scan_context_size"])
+            self.assertEqual((5, 5), metadata["scan"]["scan_size"])
+
     def test_update_from_device_puts_current_profile_into_valid_state(self):
         with self._make_acquisition_context() as context:
             document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects

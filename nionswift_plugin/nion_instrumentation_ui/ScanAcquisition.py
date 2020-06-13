@@ -279,7 +279,7 @@ class ScanAcquisitionController:
                 line_length = int(math.sqrt(math.pow(dy, 2) + math.pow(dx, 2)))
                 scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
                 scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
-                scan_frame_parameters.subscan_pixel_size = (1, line_length // self.__scan_specifier.spacing_px)
+                scan_frame_parameters.subscan_pixel_size = (1, int(round(line_length / self.__scan_specifier.spacing_px)))
                 # for fraction size/center, the line will start as horizontal and be rotated from there
                 scan_frame_parameters.subscan_fractional_size = 1 / context_data_shape[0], line_length / context_data_shape[1]
                 scan_frame_parameters.subscan_fractional_center = (((line_start[0] + line_end[0]) / 2) / context_data_shape[0], ((line_start[1] + line_end[1]) / 2) / context_data_shape[1])
@@ -295,13 +295,13 @@ class ScanAcquisitionController:
                 scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
                 scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
                 # print(f"{cx}, {cy}  {width} x {height}")
-                scan_frame_parameters.subscan_pixel_size = (height // self.__scan_specifier.spacing_px, width // self.__scan_specifier.spacing_px)
+                scan_frame_parameters.subscan_pixel_size = int(round(height / self.__scan_specifier.spacing_px)), int(round(width / self.__scan_specifier.spacing_px))
                 scan_frame_parameters.subscan_fractional_size = height / context_data_shape[0], width / context_data_shape[1]
                 scan_frame_parameters.subscan_fractional_center = (cy, cx)
                 scan_frame_parameters.subscan_rotation = self.__scan_specifier.rect_rotation  # radians counterclockwise
             else:
                 # print("FULL")
-                scan_frame_parameters.size = context_data_shape[0] // self.__scan_specifier.spacing_px, context_data_shape[1] // self.__scan_specifier.spacing_px
+                scan_frame_parameters.size = int(round(context_data_shape[0] / self.__scan_specifier.spacing_px)), int(round(context_data_shape[1] / self.__scan_specifier.spacing_px))
                 scan_frame_parameters.fov_nm = self.__scan_specifier.context_data_item.metadata["scan"]["fov_nm"]
                 scan_frame_parameters.rotation_rad = self.__scan_specifier.context_data_item.metadata["scan"]["rotation"]
                 scan_frame_parameters.subscan_pixel_size = None
