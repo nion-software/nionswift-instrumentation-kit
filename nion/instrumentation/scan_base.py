@@ -411,11 +411,18 @@ class RecordTask:
 def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rect: Geometry.IntRect, scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect, channel_modifier: str) -> typing.MutableMapping:
     section_rect = Geometry.IntRect.make(section_rect)
     section_rect_f = section_rect.to_float_rect()
+    subscan_rotation = scan_frame_parameters.get("subscan_rotation", None) or 0.0
+    subscan_fractional_center0 = Geometry.FloatPoint.make(scan_frame_parameters.get("subscan_fractional_center", None) or (0.5, 0.5))
+    subscan_fractional_size = Geometry.FloatSize(h=fractional_area.height * section_rect_f.height / scan_size.height,
+                                                 w=fractional_area.width * section_rect_f.width / scan_size.width)
+    subscan_fractional_center = Geometry.FloatPoint(y=fractional_area.top + fractional_area.height * section_rect_f.center.y / scan_size.height,
+                                                    x=fractional_area.left + fractional_area.width * section_rect_f.center.x / scan_size.width)
+    subscan_fractional_center = subscan_fractional_center.rotate(-subscan_rotation, subscan_fractional_center0)
     section_frame_parameters = copy.deepcopy(scan_frame_parameters)
     section_frame_parameters["section_rect"] = tuple(section_rect)
     section_frame_parameters["subscan_pixel_size"] = tuple(section_rect.size)
-    section_frame_parameters["subscan_fractional_size"] = fractional_area.height * section_rect_f.height / scan_size.height, fractional_area.width * section_rect_f.width / scan_size.width
-    section_frame_parameters["subscan_fractional_center"] = fractional_area.top + fractional_area.height * section_rect_f.center.y / scan_size.height, fractional_area.left + fractional_area.width * section_rect_f.center.x / scan_size.width
+    section_frame_parameters["subscan_fractional_size"] = tuple(subscan_fractional_size)
+    section_frame_parameters["subscan_fractional_center"] = tuple(subscan_fractional_center)
     section_frame_parameters["channel_modifier"] = channel_modifier
     section_frame_parameters["data_shape_override"] = tuple(scan_size)  # no flyback addition since this is data from scan device
     section_frame_parameters["state_override"] = "complete" if section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1] else "partial"
