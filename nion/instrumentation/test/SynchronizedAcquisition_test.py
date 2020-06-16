@@ -507,10 +507,44 @@ class TestScanControlClass(unittest.TestCase):
             offset_nm = drift_correction_behavior.prepare_section().offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
+            self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
+            self.assertTrue(abs(offset_nm.height) < 0.1)
             stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
             offset_nm = drift_correction_behavior.prepare_section().offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
+            self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
+            self.assertTrue(abs(offset_nm.height) < 0.1)
+
+    def test_drift_corrector_with_drift_sub_area_rotation(self):
+        with self._make_acquisition_context() as context:
+            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            rotation = math.radians(30)
+            scan_hardware_source.drift_rotation = rotation
+            document_controller.periodic()
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            self.assertIsNone(drift_correction_behavior.prepare_section().offset_nm)
+            # offset will be rotated into the context reference frame
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertLess(dist_nm, 0.1)
+            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertTrue(1.9 < dist_nm < 2.1)
+            self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
+            self.assertTrue(abs(offset_nm.height) < 0.1)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
+            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
+            self.assertTrue(1.9 < dist_nm < 2.1)
+            self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
+            self.assertTrue(abs(offset_nm.height) < 0.1)
 
     def test_scan_acquisition_controller(self):
         with self._make_acquisition_context() as context:

@@ -717,6 +717,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     if scan_behavior:
                         adjustments = scan_behavior.prepare_section()
                         if adjustments.offset_nm:
+                            # offset_nm will be in the context reference frame.
                             scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(scan_frame_parameters.center_nm) + adjustments.offset_nm)
                     scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
                     self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)

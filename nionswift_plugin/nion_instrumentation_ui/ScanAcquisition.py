@@ -222,6 +222,8 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                         h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                         w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
                     # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
+                    # rotate back into context reference frame
+                    offset_nm = offset_nm.rotate(-drift_rotation)
                     offset_nm -= self.__center_nm  # adjust for center_nm adjustment above
                     delta_nm = offset_nm - self.__last_offset_nm
                     self.__last_offset_nm = offset_nm
