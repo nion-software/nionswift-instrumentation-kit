@@ -1174,7 +1174,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if profile_index == self.__current_profile_index:
             self.__frame_parameters.update(frame_parameters)
             # validates the frame parameters (applies subscan, etc.)
-            self.__set_current_frame_parameters(self.__frame_parameters, True, update_task=False)
+            self.__set_current_frame_parameters(self.__frame_parameters, False, update_task=False)
         if profile_index == 2:
             self.__record_parameters.update(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)

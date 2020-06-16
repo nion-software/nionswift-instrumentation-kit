@@ -80,7 +80,7 @@ class ScanContext:
 
     @property
     def is_valid(self) -> bool:
-        return self.fov_size_nm is not None
+        return self.fov_size_nm is not None and self.rotation_rad is not None
 
     def clear(self) -> None:
         self.center_nm = None

@@ -1036,6 +1036,24 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(scan_context3.is_valid)
             self.assertFalse(scan_context4.is_valid)
 
+    def test_scan_context_not_cleared_after_stopping_subscan(self):
+        # this tests a failure mode where the current profile is updated during acquisition on
+        # a signal from the device.
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            stem_controller_ = scan_context.instrument
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+            hardware_source._update_frame_parameters_test(0, hardware_source.get_current_frame_parameters())
+            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
+            hardware_source.subscan_enabled = True
+            hardware_source.get_next_xdatas_to_start()  # grab at least one frame
+            hardware_source._update_frame_parameters_test(0, hardware_source.get_current_frame_parameters())
+            hardware_source.stop_playing()
+            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
+            self.assertTrue(scan_context1.is_valid)
+            self.assertTrue(scan_context2.is_valid)
+
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
