@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 # standard libraries
 import abc
 import asyncio
+import copy
 import enum
 import functools
 import gettext
@@ -122,15 +125,13 @@ class STEMController(Observable.Observable):
         self.__drift_region = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_data_items : typing.List["DataItem.DataItem"] = list()
-        self.__scan_context_channel_map : typing.Dict[str, "DataItem.DataItem"] = dict()
+        self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
         self.__scan_controller = None
 
     def close(self):
-        self.__scan_context_data_items = None
         self.__scan_context_channel_map = None
 
     def reset(self) -> None:
@@ -146,7 +147,7 @@ class STEMController(Observable.Observable):
         self.__drift_region = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_data_items.clear()
+        self.__scan_context_channel_map.clear()
 
     # configuration methods
 
@@ -274,25 +275,21 @@ class STEMController(Observable.Observable):
             self.notify_property_changed("drift_settings")
 
     def disconnect_probe_connections(self):
-        self.__scan_context_data_items = list()
         self.__scan_context_channel_map = dict()
         self.scan_context_data_items_changed_event.fire()
 
-    def _data_item_states_changed(self, data_item_states):
-        if len(data_item_states) > 0:
-            channel_map = {data_item_state.get("channel_id"): data_item_state.get("data_item") for data_item_state in data_item_states}
-            if self.subscan_state == SubscanState.DISABLED and set(channel_map.keys()) != {"drift"}:
-                # only update context display items when subscan is disabled and not taking drift
-                self.__scan_context_data_items = channel_map.values()
-                self.__scan_context_channel_map = channel_map
+    def _update_scan_channel_map(self, channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
+        old_scan_context_channel_map = copy.copy(self.__scan_context_channel_map)
+        self.__scan_context_channel_map.update(channel_map)
+        if old_scan_context_channel_map != self.__scan_context_channel_map:
             self.scan_context_data_items_changed_event.fire()
 
     @property
-    def scan_context_data_items(self) -> typing.Sequence["DataItem.DataItem"]:
-        return self.__scan_context_data_items
+    def scan_context_data_items(self) -> typing.Sequence[DataItem.DataItem]:
+        return list(self.__scan_context_channel_map.values())
 
     @property
-    def scan_context_channel_map(self) -> typing.Mapping[str, "DataItem.DataItem"]:
+    def scan_context_channel_map(self) -> typing.Mapping[str, DataItem.DataItem]:
         return self.__scan_context_channel_map
 
     @property

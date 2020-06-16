@@ -1365,7 +1365,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     # override from the HardwareSource parent class.
     def data_item_states_changed(self, data_item_states):
-        self.__stem_controller._data_item_states_changed(data_item_states)
+        channel_ids = {self.get_channel_state(channel_index).channel_id for channel_index in range(self.channel_count)}
+        channel_map = dict()
+        for data_item_state in data_item_states:
+            if data_item_state.get("channel_id") in channel_ids:
+                channel_map[data_item_state.get("channel_id")] = data_item_state.get("data_item")
+        self.__stem_controller._update_scan_channel_map(channel_map)
 
     @property
     def use_hardware_simulator(self):
