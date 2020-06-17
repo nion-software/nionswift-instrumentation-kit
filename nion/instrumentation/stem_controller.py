@@ -150,6 +150,7 @@ class STEMController(Observable.Observable):
         self.__drift_settings = DriftCorrectionSettings()
         self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
+        self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera = None
         self.__eels_camera = None
         self.__scan_controller = None
@@ -318,10 +319,22 @@ class STEMController(Observable.Observable):
         return self.__scan_context
 
     def _update_scan_context(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
+        old_context = copy.deepcopy(self.scan_context)
         self.__scan_context.update(size, center_nm, fov_nm, rotation_rad)
+        if old_context != self.scan_context:
+            self.scan_context_changed_event.fire()
 
     def _clear_scan_context(self) -> None:
+        old_context = copy.deepcopy(self.scan_context)
         self.__scan_context.clear()
+        if old_context != self.scan_context:
+            self.scan_context_changed_event.fire()
+
+    def _confirm_scan_context(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
+        current_context = copy.deepcopy(self.scan_context)
+        current_context.update(size, center_nm, fov_nm, rotation_rad)
+        if current_context != self.scan_context:
+            self._clear_scan_context()
 
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:

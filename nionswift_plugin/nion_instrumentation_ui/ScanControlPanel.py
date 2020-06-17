@@ -154,6 +154,7 @@ class ScanControlStateController:
         self.__drift_channel_id_listener = None
         self.__drift_region_listener = None
         self.__drift_settings_listener = None
+        self.__scan_context_changed_listener = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState], None]] = None
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
@@ -213,6 +214,9 @@ class ScanControlStateController:
         if self.__drift_settings_listener:
             self.__drift_settings_listener.close()
             self.__drift_settings_listener = None
+        if self.__scan_context_changed_listener:
+            self.__scan_context_changed_listener.close()
+            self.__scan_context_changed_listener = None
         self.on_display_name_changed = None
         self.on_subscan_state_changed = None
         self.on_drift_state_changed = None
@@ -316,6 +320,13 @@ class ScanControlStateController:
             self.__drift_region_listener = stem_controller.property_changed_event.listen(drift_state_changed)
             self.__drift_settings_listener = stem_controller.property_changed_event.listen(drift_state_changed)
             drift_state_changed("value")
+
+            def scan_context_changed() -> None:
+                # when the scan context changes, if it is no longer valid, turn off probe position
+                if not stem_controller.scan_context.is_valid:
+                    self.__scan_hardware_source.probe_position = None
+
+            self.__scan_context_changed_listener = stem_controller.scan_context_changed_event.listen(scan_context_changed)
 
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)

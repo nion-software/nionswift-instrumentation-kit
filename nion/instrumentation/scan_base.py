@@ -1086,6 +1086,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             context_size = Geometry.FloatSize.make(device_frame_parameters.size)
             device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
             self.__device.set_frame_parameters(device_frame_parameters)
+            self.__stem_controller._confirm_scan_context(frame_parameters.size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
