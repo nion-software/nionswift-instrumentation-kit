@@ -1054,6 +1054,17 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(scan_context1.is_valid)
             self.assertTrue(scan_context2.is_valid)
 
+    def test_changing_rotation_and_fov_update_device_parameters_immediately(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            self._acquire_one(document_controller, hardware_source)
+            frame_parameters = copy.deepcopy(hardware_source.scan_device.current_frame_parameters)
+            fov_nm = frame_parameters.fov_nm
+            frame_parameters.fov_nm //= 2
+            hardware_source.set_frame_parameters(0, frame_parameters)
+            hardware_source._update_frame_parameters_test(0, hardware_source.get_current_frame_parameters())
+            self.assertEqual(fov_nm // 2, hardware_source.scan_device.current_frame_parameters.fov_nm)
+
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
