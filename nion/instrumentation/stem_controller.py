@@ -59,38 +59,61 @@ AxisType = typing.Tuple[str, str]
 
 class ScanContext:
     def __init__(self):
+        self.size = None
         self.center_nm = None
-        self.fov_size_nm = None
+        self.fov_nm = None
         self.rotation_rad = None
 
     def __repr__(self) -> str:
-        return f"{self.fov_size_nm[0]}nm {math.degrees(self.rotation_rad)}deg" if self.fov_size_nm else "NO CONTEXT"
+        return f"{tuple(self.size)} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg" if self.fov_nm else "NO CONTEXT"
 
     def __eq__(self, other) -> bool:
-        return other is not None and isinstance(other, self.__class__) and other.center_nm == self.center_nm and other.fov_size_nm == self.fov_size_nm and other.rotation_rad == self.rotation_rad
+        if other is None:
+            return False
+        if not isinstance(other, self.__class__):
+            return False
+        if other.size != self.size:
+            return False
+        if other.center_nm != self.center_nm:
+            return False
+        if other.fov_nm != self.fov_nm:
+            return False
+        if other.rotation_rad != self.rotation_rad:
+            return False
+        return True
 
     def __deepcopy__(self, memo):
         cls = self.__class__
         result = cls.__new__(cls)
         memo[id(self)] = result
+        result.size = self.size
         result.center_nm = self.center_nm
-        result.fov_size_nm = self.fov_size_nm
+        result.fov_nm = self.fov_nm
         result.rotation_rad = self.rotation_rad
         return result
 
     @property
     def is_valid(self) -> bool:
-        return self.fov_size_nm is not None and self.rotation_rad is not None
+        return self.size is not None and self.fov_nm is not None and self.rotation_rad is not None and self.center_nm is not None
 
     def clear(self) -> None:
+        self.size = None
         self.center_nm = None
-        self.fov_size_nm = None
+        self.fov_nm = None
         self.rotation_rad = None
 
-    def update(self, center_nm: Geometry.FloatPoint, fov_size_nm: Geometry.FloatSize, rotation_rad: float) -> None:
+    def update(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
+        self.size = Geometry.IntSize.make(size)
         self.center_nm = Geometry.FloatPoint.make(center_nm)
-        self.fov_size_nm = Geometry.FloatSize.make(fov_size_nm)
+        self.fov_nm = fov_nm
         self.rotation_rad = rotation_rad
+
+    @property
+    def fov_size_nm(self) -> Geometry.FloatSize:
+        if self.size.aspect_ratio > 1.0:
+            return Geometry.FloatSize(height=self.fov_nm / self.size.aspect_ratio, width=self.fov_nm)
+        else:
+            return Geometry.FloatSize(height=self.fov_nm, width=self.fov_nm * self.size.aspect_ratio)
 
 
 class STEMController(Observable.Observable):
@@ -138,9 +161,7 @@ class STEMController(Observable.Observable):
         self.__probe_position = None
         self.__probe_state_stack.clear()
         self.__probe_state_stack.append("parked")
-        self.__scan_context.center_nm = None
-        self.__scan_context.fov_size_nm = None
-        self.__scan_context.rotation_rad = None
+        self.__scan_context.clear()
         self.__subscan_state = SubscanState.INVALID
         self.__subscan_rotation = 0.0
         self.__drift_channel_id = None
@@ -296,8 +317,8 @@ class STEMController(Observable.Observable):
     def scan_context(self) -> ScanContext:
         return self.__scan_context
 
-    def _update_scan_context(self, center_nm: Geometry.FloatPoint, fov_size_nm: Geometry.FloatSize, rotation_rad: float) -> None:
-        self.__scan_context.update(center_nm, fov_size_nm, rotation_rad)
+    def _update_scan_context(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
+        self.__scan_context.update(size, center_nm, fov_nm, rotation_rad)
 
     def _clear_scan_context(self) -> None:
         self.__scan_context.clear()

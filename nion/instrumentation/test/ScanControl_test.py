@@ -987,8 +987,8 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(0, frame_parameters_0)
             hardware_source.stop_playing()
             scan_context2 = copy.deepcopy(stem_controller_.scan_context)
-            self.assertEqual(20, scan_context2.fov_size_nm.width)
-            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
+            self.assertEqual(20, scan_context2.fov_nm)
+            self.assertNotEqual(20, scan_context1.fov_nm)
 
     def test_scan_context_update_after_changing_parameters_during_subscan_and_disabling(self):
         with self._make_scan_context() as scan_context:
@@ -1009,10 +1009,10 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             scan_context4 = copy.deepcopy(stem_controller_.scan_context)
             hardware_source.stop_playing()
-            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
-            self.assertNotEqual(20, scan_context2.fov_size_nm.width)
+            self.assertNotEqual(20, scan_context1.fov_nm)
+            self.assertNotEqual(20, scan_context2.fov_nm)
             self.assertFalse(scan_context3.is_valid)
-            self.assertEqual(20, scan_context4.fov_size_nm.width)
+            self.assertEqual(20, scan_context4.fov_nm)
 
     def test_scan_context_cleared_after_changing_parameters_during_subscan_and_stopping(self):
         with self._make_scan_context() as scan_context:
@@ -1031,8 +1031,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_context3 = copy.deepcopy(stem_controller_.scan_context)
             hardware_source.stop_playing()
             scan_context4 = copy.deepcopy(stem_controller_.scan_context)
-            self.assertNotEqual(20, scan_context1.fov_size_nm.width)
-            self.assertNotEqual(20, scan_context2.fov_size_nm.width)
+            self.assertNotEqual(20, scan_context1.fov_nm)
+            self.assertNotEqual(20, scan_context2.fov_nm)
             self.assertFalse(scan_context3.is_valid)
             self.assertFalse(scan_context4.is_valid)
 

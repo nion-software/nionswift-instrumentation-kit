@@ -689,7 +689,7 @@ class TestCameraControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             stem_controller = Registry.get_component("stem_controller")
             stem_controller.validate_probe_position()
-            stem_controller._update_scan_context(Geometry.FloatPoint(), Geometry.FloatSize(width=12, height=12), 0.0)
+            stem_controller._update_scan_context(Geometry.IntSize(256, 256), Geometry.FloatPoint(), 12.0, 0.0)
             self._acquire_one(document_controller, hardware_source)
             self.assertIsNotNone(document_model.data_items[0].timezone)
 
@@ -699,7 +699,7 @@ class TestCameraControlClass(unittest.TestCase):
         with contextlib.closing(document_controller), contextlib.closing(state_controller):
             stem_controller = Registry.get_component("stem_controller")
             stem_controller.validate_probe_position()
-            stem_controller._update_scan_context(Geometry.FloatPoint(), Geometry.FloatSize(width=12, height=12), 0.0)
+            stem_controller._update_scan_context(Geometry.IntSize(256, 256), Geometry.FloatPoint(), 12.0, 0.0)
             self._acquire_one(document_controller, hardware_source)
             self.assertIsNotNone(document_model.data_items[0].timezone)
 

@@ -875,8 +875,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__stem_controller.subscan_state = stem_controller.SubscanState.ENABLED
         else:
             self.__stem_controller.subscan_state = stem_controller.SubscanState.DISABLED
-            fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
-            self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
+            self.__stem_controller._update_scan_context(self.__frame_parameters.size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
@@ -993,8 +992,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
         if not self.subscan_enabled:
-            fov_size_nm = Geometry.FloatSize(height=self.__frame_parameters.fov_nm * Geometry.FloatSize.make(self.__frame_parameters.size).aspect_ratio, width=self.__frame_parameters.fov_nm)
-            self.__stem_controller._update_scan_context(self.__frame_parameters.center_nm, fov_size_nm, self.__frame_parameters.rotation_rad)
+            self.__stem_controller._update_scan_context(self.__frame_parameters.size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
         frame_parameters = copy.deepcopy(self.__frame_parameters)
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, channel_ids, self.display_name)
@@ -1079,8 +1077,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             if update_task:
                 self.__acquisition_task.set_frame_parameters(frame_parameters)
             if not self.subscan_enabled:
-                fov_size_nm = Geometry.FloatSize(height=frame_parameters.fov_nm * Geometry.FloatSize.make(frame_parameters.size).aspect_ratio, width=frame_parameters.fov_nm)
-                self.__stem_controller._update_scan_context(frame_parameters.center_nm, fov_size_nm, frame_parameters.rotation_rad)
+                self.__stem_controller._update_scan_context(frame_parameters.size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
             elif is_context:
                 self.__stem_controller._clear_scan_context()
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
