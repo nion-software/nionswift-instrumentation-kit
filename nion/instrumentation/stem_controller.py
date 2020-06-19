@@ -42,6 +42,12 @@ class SubscanState(enum.Enum):
     ENABLED = 1
 
 
+class LineScanState(enum.Enum):
+    INVALID = -1
+    DISABLED = 0
+    ENABLED = 1
+
+
 class DriftIntervalUnit(enum.IntEnum):
     FRAME = 0
     TIME = 1
@@ -144,6 +150,8 @@ class STEMController(Observable.Observable):
         self.__subscan_state = SubscanState.INVALID
         self.__subscan_region = None
         self.__subscan_rotation = 0.0
+        self.__line_scan_state = LineScanState.INVALID
+        self.__line_scan_vector = None
         self.__drift_channel_id = None
         self.__drift_region = None
         self.__drift_rotation = 0.0
@@ -164,7 +172,10 @@ class STEMController(Observable.Observable):
         self.__probe_state_stack.append("parked")
         self.__scan_context.clear()
         self.__subscan_state = SubscanState.INVALID
+        self.__subscan_region = None
         self.__subscan_rotation = 0.0
+        self.__line_scan_state = LineScanState.INVALID
+        self.__line_scan_vector = None
         self.__drift_channel_id = None
         self.__drift_region = None
         self.__drift_rotation = 0.0
@@ -212,6 +223,8 @@ class STEMController(Observable.Observable):
         # ensure that SubscanState is valid (ENABLED or DISABLED, not INVALID)
         if self.subscan_state == SubscanState.INVALID:
             self.subscan_state = SubscanState.DISABLED
+        if self.line_scan_state == LineScanState.INVALID:
+            self.line_scan_state = LineScanState.DISABLED
 
     def _exit_scanning_state(self) -> None:
         # pop the 'scanning' probe state and fire off the probe state changed event.
@@ -254,6 +267,26 @@ class STEMController(Observable.Observable):
         if self.__subscan_rotation != value:
             self.__subscan_rotation = value
             self.notify_property_changed("subscan_rotation")
+
+    @property
+    def line_scan_state(self) -> LineScanState:
+        return self.__line_scan_state
+
+    @line_scan_state.setter
+    def line_scan_state(self, value: LineScanState) -> None:
+        if self.__line_scan_state != value:
+            self.__line_scan_state = value
+            self.notify_property_changed("line_scan_state")
+
+    @property
+    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
+        return self.__line_scan_vector
+
+    @line_scan_vector.setter
+    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+        if self.__line_scan_vector != value:
+            self.__line_scan_vector = value
+            self.notify_property_changed("line_scan_vector")
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
@@ -723,7 +756,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
 
     # implement methods for the graphic set handler
 
-    def _graphic_removed(self, subscan_graphic: Graphics.Graphic) -> None:
+    def _graphic_removed(self, probe_graphic: Graphics.Graphic) -> None:
         # clear probe state
         self.__stem_controller.probe_position = None
 
@@ -829,6 +862,78 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
             self.__stem_controller.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
         if name == "rotation":
             self.__stem_controller.subscan_rotation = subscan_graphic.rotation
+
+    def get_dependents(self, item) -> typing.Sequence:
+        graphics = self.__graphic_set.graphics
+        if item in graphics:
+            return list(set(graphics) - {item})
+        return list()
+
+
+class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+    """Observes the STEM controller and updates data items and graphics."""
+
+    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        super().__init__(document_model, event_loop)
+        self.__stem_controller = stem_controller
+        self.__document_model = document_model
+        self.__scan_display_items_model = ScanContextDisplayItemListModel(document_model, stem_controller)
+        self.__graphic_set = GraphicSetController(self)
+        # note: these property changed listeners can all possibly be fired from a thread.
+        self.__line_scan_vector_changed_listener = stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
+        self.__document_model.register_implicit_dependency(self)
+
+    def close(self):
+        self._mark_closed()
+        self.__document_model.unregister_implicit_dependency(self)
+        self.__graphic_set.close()
+        self.__graphic_set = None
+        self.__scan_display_items_model.close()
+        self.__scan_display_items_model = None
+        self.__document_model = None
+        self.__stem_controller = None
+
+    def _unlisten(self) -> None:
+        # unlisten to the event loop dependent listeners
+        self.__line_scan_vector_changed_listener.close()
+        self.__line_scan_vector_changed_listener = None
+
+    # methods for handling changes to the line scan region
+
+    def __line_scan_vector_changed(self, name: str) -> None:
+        # must be thread safe
+        if name == "line_scan_vector":
+            self._call_soon_threadsafe(self.__update_line_scan_vector)
+
+    def __update_line_scan_vector(self) -> None:
+        assert threading.current_thread() == threading.main_thread()
+        if self.__stem_controller.line_scan_vector:
+            self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
+        else:
+            self.__graphic_set.remove_all_graphics()
+
+    # implement methods for the graphic set handler
+
+    def _graphic_removed(self, line_scan_graphic: Graphics.Graphic) -> None:
+        # clear line scan state
+        self.__stem_controller.line_scan_state = LineScanState.DISABLED
+        self.__stem_controller.line_scan_vector = None
+
+    def _create_graphic(self) -> Graphics.LineGraphic:
+        line_scan_graphic = Graphics.LineGraphic()
+        line_scan_graphic.graphic_id = "line_scan"
+        line_scan_graphic.label = _("Line Scan")
+        line_scan_graphic.vector = self.__stem_controller.line_scan_vector
+        line_scan_graphic.is_bounds_constrained = True
+        return line_scan_graphic
+
+    def _update_graphic(self, line_scan_graphic: Graphics.Graphic) -> None:
+        if line_scan_graphic.vector != self.__stem_controller.line_scan_vector:
+            line_scan_graphic.vector = self.__stem_controller.line_scan_vector
+
+    def _graphic_property_changed(self, line_scan_graphic: Graphics.Graphic, name: str) -> None:
+        if name == "vector":
+            self.__stem_controller.line_scan_vector = line_scan_graphic.vector
 
     def get_dependents(self, item) -> typing.Sequence:
         graphics = self.__graphic_set.graphics
@@ -992,6 +1097,8 @@ class ScanContextController:
             instrument._probe_view = ProbeView(instrument, self.__document_model, self.__event_loop)
         if hasattr(instrument, "subscan_region"):
             instrument._subscan_view = SubscanView(instrument, self.__document_model, self.__event_loop)
+        if hasattr(instrument, "line_scan_vector"):
+            instrument._line_scan_view = LineScanView(instrument, self.__document_model, self.__event_loop)
         if hasattr(instrument, "drift_region"):
             instrument._drift_view = DriftView(instrument, self.__document_model, self.__event_loop)
 
@@ -1002,6 +1109,9 @@ class ScanContextController:
         if hasattr(instrument, "_subscan_view"):
             instrument._subscan_view.close()
             instrument._subscan_view = None
+        if hasattr(instrument, "_line_scan_view"):
+            instrument._line_scan_view.close()
+            instrument._line_scan_view = None
         if hasattr(instrument, "_drift_view"):
             instrument._drift_view.close()
             instrument._drift_view = None

@@ -151,12 +151,13 @@ class ScanControlStateController:
         self.__probe_state_changed_event_listener = None
         self.__channel_state_changed_event_listener = None
         self.__subscan_state_changed_listener = None
+        self.__line_scan_state_changed_listener = None
         self.__drift_channel_id_listener = None
         self.__drift_region_listener = None
         self.__drift_settings_listener = None
         self.__scan_context_changed_listener = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
-        self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState], None]] = None
+        self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState, stem_controller.LineScanState], None]] = None
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
@@ -205,6 +206,9 @@ class ScanControlStateController:
         if self.__subscan_state_changed_listener:
             self.__subscan_state_changed_listener.close()
             self.__subscan_state_changed_listener = None
+        if self.__line_scan_state_changed_listener:
+            self.__line_scan_state_changed_listener.close()
+            self.__line_scan_state_changed_listener = None
         if self.__drift_channel_id_listener:
             self.__drift_channel_id_listener.close()
             self.__drift_channel_id_listener = None
@@ -306,7 +310,7 @@ class ScanControlStateController:
             def subscan_state_changed(name: str) -> None:
                 if name == "subscan_state":
                     if callable(self.on_subscan_state_changed):
-                        self.on_subscan_state_changed(stem_controller.subscan_state)
+                        self.on_subscan_state_changed(stem_controller.subscan_state, stem_controller.line_scan_state)
                     if callable(self.on_drift_state_changed):
                         self.on_drift_state_changed(stem_controller.drift_channel_id,
                                                     stem_controller.drift_region,
@@ -315,6 +319,21 @@ class ScanControlStateController:
 
             self.__subscan_state_changed_listener = stem_controller.property_changed_event.listen(subscan_state_changed)
             subscan_state_changed("subscan_state")
+
+            def line_scan_state_changed(name: str) -> None:
+                if name == "line_scan_state":
+                    if callable(self.on_subscan_state_changed):
+                        self.on_subscan_state_changed(stem_controller.subscan_state, stem_controller.line_scan_state)
+                    if callable(self.on_drift_state_changed):
+                        # note: passing subscan state -- subscan state being not invalid is the same
+                        # as line scan state being not invalid. ugh.
+                        self.on_drift_state_changed(stem_controller.drift_channel_id,
+                                                    stem_controller.drift_region,
+                                                    stem_controller.drift_settings,
+                                                    stem_controller.subscan_state)
+
+            self.__line_scan_state_changed_listener = stem_controller.property_changed_event.listen(line_scan_state_changed)
+            line_scan_state_changed("line_scan_state")
 
             self.__drift_channel_id_listener = stem_controller.property_changed_event.listen(drift_state_changed)
             self.__drift_region_listener = stem_controller.property_changed_event.listen(drift_state_changed)
@@ -331,7 +350,7 @@ class ScanControlStateController:
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
         if self.on_subscan_state_changed:
-            self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state)
+            self.on_subscan_state_changed(self.__scan_hardware_source.subscan_state, self.__scan_hardware_source.line_scan_state)
         if callable(self.on_drift_state_changed):
             self.on_drift_state_changed(self.__scan_hardware_source.drift_channel_id, self.__scan_hardware_source.drift_region, self.__scan_hardware_source.drift_settings, self.__scan_hardware_source.subscan_state)
         channel_count = self.__scan_hardware_source.channel_count
@@ -415,7 +434,13 @@ class ScanControlStateController:
 
     # must be called on ui thread
     def handle_subscan_enabled(self, enabled: bool) -> None:
+        self.__scan_hardware_source.line_scan_enabled = False
         self.__scan_hardware_source.subscan_enabled = enabled
+
+    # must be called on ui thread
+    def handle_line_scan_enabled(self, enabled: bool) -> None:
+        self.__scan_hardware_source.subscan_enabled = False
+        self.__scan_hardware_source.line_scan_enabled = enabled
 
     # must be called on ui thread
     def handle_drift_enabled(self, enabled: bool) -> None:
@@ -1190,6 +1215,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         subscan_checkbox = ui.create_check_box_widget(_("Subscan"))
         subscan_checkbox.on_checked_changed = self.__state_controller.handle_subscan_enabled
 
+        line_scan_checkbox = ui.create_check_box_widget(_("Line Scan"))
+        line_scan_checkbox.on_checked_changed = self.__state_controller.handle_line_scan_enabled
+
         drift_checkbox = ui.create_check_box_widget(_("Drift Correction"))
         drift_checkbox.on_checked_changed = self.__state_controller.handle_drift_enabled
 
@@ -1238,9 +1266,14 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         sizes_row.add(link_column)
         sizes_row.add(size_column)
 
+        subscan_column = ui.create_column_widget()
+        subscan_column.add(subscan_checkbox)
+        subscan_column.add_spacing(4)
+        subscan_column.add(line_scan_checkbox)
+
         sizes_row_column = ui.create_column_widget()
         sizes_row_column.add(sizes_row)
-        sizes_row_column.add(subscan_checkbox)
+        sizes_row_column.add(subscan_column)
         sizes_row_column.add_stretch()
 
         parameters_group1 = ui.create_row_widget()
@@ -1395,7 +1428,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def ac_line_sync_check_box_changed(checked):
             ac_line_sync_check_box.check_state = "checked" if checked else "unchecked"
 
-        def channel_state_changed(channel_index: int, enabled: bool, subscan_state: stem_controller.SubscanState) -> None:
+        def channel_state_changed(channel_index: int, enabled: bool, is_subscan_channel: bool) -> None:
             # then rebuild thumbnail for the channel_index, setting up the thumbnail widget, a drag
             # handler, and checkbox handler.
 
@@ -1406,7 +1439,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_column = thumbnail_group.children[channel_index]
             thumbnail_column.remove_all()
 
-            actual_channel_id = channel_id if subscan_state != stem_controller.SubscanState.ENABLED else channel_id + "_subscan"
+            actual_channel_id = channel_id if not is_subscan_channel else channel_id + "_subscan"
 
             document_model = document_controller.document_model
             data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_controller.hardware_source_id, actual_channel_id))
@@ -1428,15 +1461,18 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
             thumbnail_column.add(channel_enabled_check_box_widget)
 
-        async def update_subscan_state(subscan_state: stem_controller.SubscanState) -> None:
+        async def update_subscan_state(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
             for channel_index in range(scan_controller.channel_count):
-                channel_state_changed(channel_index, self.__state_controller.get_channel_enabled(channel_index), subscan_state)
+                is_subscan_channel = subscan_state == stem_controller.SubscanState.ENABLED or line_scan_state == stem_controller.LineScanState.ENABLED
+                channel_state_changed(channel_index, self.__state_controller.get_channel_enabled(channel_index), is_subscan_channel)
             subscan_checkbox.enabled = subscan_state != stem_controller.SubscanState.INVALID
             subscan_checkbox.checked = subscan_state == stem_controller.SubscanState.ENABLED
+            line_scan_checkbox.enabled = line_scan_state != stem_controller.LineScanState.INVALID
+            line_scan_checkbox.checked = line_scan_state == stem_controller.LineScanState.ENABLED
 
-        def subscan_state_changed(subscan_state: stem_controller.SubscanState) -> None:
+        def subscan_state_changed(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
             # handle subscan state changes from the low level
-            self.document_controller.event_loop.create_task(update_subscan_state(subscan_state))
+            self.document_controller.event_loop.create_task(update_subscan_state(subscan_state, line_scan_state))
 
         async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
             enabled = subscan_state != stem_controller.SubscanState.INVALID

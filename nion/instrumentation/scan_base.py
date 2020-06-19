@@ -32,6 +32,7 @@ from nion.utils import Registry
 _ = gettext.gettext
 
 SubscanState = stem_controller.SubscanState
+LineScanState = stem_controller.LineScanState
 DriftCorrectionSettings = stem_controller.DriftCorrectionSettings
 
 class ScanFrameParameters(dict):
@@ -466,9 +467,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller = stem_controller_
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
+
         self.__subscan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_state_changed)
         self.__subscan_region_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_region_changed)
         self.__subscan_rotation_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
+
+        self.__line_scan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_state_changed)
+        self.__line_scan_vector_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
@@ -523,6 +528,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         if self.__subscan_rotation_changed_event_listener:
             self.__subscan_rotation_changed_event_listener.close()
             self.__subscan_rotation_changed_event_listener = None
+        if self.__line_scan_vector_changed_event_listener:
+            self.__line_scan_vector_changed_event_listener.close()
+            self.__line_scan_vector_changed_event_listener = None
         super().close()
 
         # keep the device around until super close is called, since super
@@ -893,16 +901,59 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def subscan_rotation(self, value: float) -> None:
         self.__stem_controller.subscan_rotation = value
 
-    def apply_subscan(self, frame_parameters):
-        context_size = Geometry.FloatSize.make(frame_parameters["size"])
-        if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
-            pass  # let the parameters speak for themselves
-        elif self.subscan_enabled and self.subscan_region:
+    @property
+    def line_scan_state(self) -> LineScanState:
+        return self.__stem_controller.line_scan_state
+
+    @property
+    def line_scan_enabled(self) -> bool:
+        return self.__stem_controller.line_scan_state == stem_controller.LineScanState.ENABLED
+
+    @line_scan_enabled.setter
+    def line_scan_enabled(self, enabled: bool) -> None:
+        if enabled:
+            self.__stem_controller.line_scan_state = stem_controller.LineScanState.ENABLED
+        else:
+            self.__stem_controller.line_scan_state = stem_controller.LineScanState.DISABLED
+            self.__stem_controller._update_scan_context(self.__frame_parameters.size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
+
+    @property
+    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
+        return self.__stem_controller.line_scan_vector
+
+    @line_scan_vector.setter
+    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+        self.__stem_controller.line_scan_region = value
+
+    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        context_size = Geometry.FloatSize.make(frame_parameters.size)
+        if self.subscan_enabled and self.subscan_region:
             subscan_region = self.subscan_region
             frame_parameters.subscan_pixel_size = max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1)
             frame_parameters.subscan_fractional_size = frame_parameters.subscan_pixel_size[0] / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
             frame_parameters.subscan_rotation = self.subscan_rotation
+        elif self.line_scan_enabled and self.line_scan_vector:
+            line_scan_vector = self.line_scan_vector
+            start = Geometry.FloatPoint.make(line_scan_vector[0])
+            end = Geometry.FloatPoint.make(line_scan_vector[1])
+            length = Geometry.distance(start, end)
+            frame_parameters.subscan_pixel_size = 1, max(int(context_size.width * length), 1)
+            frame_parameters.subscan_fractional_size = 1 / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
+            frame_parameters.subscan_fractional_center = tuple(Geometry.midpoint(start, end))
+            frame_parameters.subscan_rotation = -math.atan2(end.y - start.y, end.x - start.x)
+        else:
+            frame_parameters.subscan_pixel_size = None
+            frame_parameters.subscan_fractional_size = None
+            frame_parameters.subscan_fractional_center = None
+            frame_parameters.subscan_rotation = 0.0
+
+    def apply_subscan(self, frame_parameters: ScanFrameParameters) -> None:
+        context_size = Geometry.FloatSize.make(frame_parameters["size"])
+        if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
+            pass  # let the parameters speak for themselves
+        else:
+            self.__apply_subscan_parameters(frame_parameters)
 
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
@@ -922,6 +973,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __subscan_rotation_changed(self, name: str) -> None:
         if name == "subscan_rotation":
+            self.__set_current_frame_parameters(self.__frame_parameters, False)
+
+    def __line_scan_state_changed(self, name: str) -> None:
+        if name == "line_scan_state":
+            # if line scan enabled, ensure there is a line scan region
+            if self.__stem_controller.line_scan_state == stem_controller.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
+                self.__stem_controller.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
+            # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
+            self.__set_current_frame_parameters(self.__frame_parameters, False)
+
+    def __line_scan_vector_changed(self, name: str) -> None:
+        if name == "line_scan_vector":
+            line_scan_vector = self.line_scan_vector
+            if not line_scan_vector:
+                self.line_scan_enabled = False
             self.__set_current_frame_parameters(self.__frame_parameters, False)
 
     @property
@@ -1059,19 +1125,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __set_current_frame_parameters(self, frame_parameters, is_context: bool, update_task: bool = True) -> None:
         frame_parameters = ScanFrameParameters(frame_parameters)
-        if self.subscan_enabled and self.subscan_region:
-            subscan_region = Geometry.FloatRect.make(self.subscan_region)
-            context_size = Geometry.FloatSize.make(frame_parameters["size"])
-            frame_parameters.subscan_pixel_size = max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1)
-            frame_parameters.subscan_fractional_size = frame_parameters.subscan_pixel_size[0] / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
-            frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
-            frame_parameters.subscan_rotation = self.subscan_rotation
+        self.__apply_subscan_parameters(frame_parameters)
+        if frame_parameters.subscan_pixel_size:
             frame_parameters.channel_modifier = "subscan"
         else:
-            frame_parameters.subscan_pixel_size = None
-            frame_parameters.subscan_fractional_size = None
-            frame_parameters.subscan_fractional_center = None
-            frame_parameters.subscan_rotation = 0.0
             frame_parameters.channel_modifier = None
         if self.__acquisition_task:
             if update_task:
@@ -1274,11 +1331,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         for display_item in display_items:
             for graphic in copy.copy(display_item.graphics):
                 graphic_id = graphic.graphic_id
-                if graphic_id == "probe":
-                    display_item.remove_graphic(graphic)
-                elif graphic_id == "subscan":
-                    display_item.remove_graphic(graphic)
-                elif graphic_id == "drift":
+                if graphic_id in ("probe", "subscan", "line_scan", "drift"):
                     display_item.remove_graphic(graphic)
 
     def get_buffer_data(self, start: int, count: int) -> typing.Optional[typing.List[typing.List[typing.Dict]]]:

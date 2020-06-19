@@ -940,6 +940,23 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.stop_playing()
             self.assertFalse(hardware_source.subscan_enabled)
 
+    def test_removing_line_scan_graphic_disables_line_scan_when_acquisition_running(self):
+        with self._make_scan_context() as scan_context:
+            document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
+            hardware_source.start_playing()
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(len(display_item.graphics), 0)
+            hardware_source.line_scan_enabled = True
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            display_item.remove_graphic(display_item.graphics[0])
+            hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+            document_controller.periodic()
+            hardware_source.stop_playing()
+            self.assertFalse(hardware_source.line_scan_enabled)
+
     def test_removing_subscan_graphic_disables_subscan(self):
         with self._make_scan_context() as scan_context:
             document_controller, document_model, hardware_source, scan_state_controller = scan_context.objects
