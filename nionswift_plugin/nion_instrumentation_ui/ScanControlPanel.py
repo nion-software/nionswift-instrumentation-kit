@@ -163,7 +163,7 @@ class ScanControlStateController:
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
         self.on_linked_changed : typing.Optional[typing.Callable[[bool], None]] = None
-        self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, stem_controller.SubscanState], None]] = None
+        self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, bool], None]] = None
         self.on_data_channel_state_changed : typing.Optional[typing.Callable[[int, str, str, bool], None]] = None
         self.on_scan_button_state_changed : typing.Optional[typing.Callable[[bool, str], None]] = None
         self.on_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
@@ -629,7 +629,8 @@ class ScanControlStateController:
 
     def __channel_state_changed(self, channel_index: int, channel_id: str, name: str, enabled: bool) -> None:
         if self.on_channel_state_changed:
-            self.on_channel_state_changed(channel_index, enabled, self.__scan_hardware_source.subscan_state)
+            is_subscan_channel = self.__scan_hardware_source.subscan_state == stem_controller.SubscanState.ENABLED or self.__scan_hardware_source.line_scan_state == stem_controller.LineScanState.ENABLED
+            self.on_channel_state_changed(channel_index, enabled, is_subscan_channel)
         data_channel_state_changed = self.on_data_channel_state_changed
         if callable(data_channel_state_changed):
             data_channel_state_changed(channel_index, channel_id, name, enabled)
