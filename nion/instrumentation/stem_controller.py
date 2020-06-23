@@ -15,6 +15,7 @@ import typing
 # None
 
 # local libraries
+from nion.data import Calibration
 from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
 from nion.swift.model import HardwareSource
@@ -120,6 +121,10 @@ class ScanContext:
             return Geometry.FloatSize(height=self.fov_nm / self.size.aspect_ratio, width=self.fov_nm)
         else:
             return Geometry.FloatSize(height=self.fov_nm, width=self.fov_nm * self.size.aspect_ratio)
+
+    @property
+    def calibration(self) -> Calibration.Calibration:
+        return Calibration.Calibration(scale=self.fov_nm / max(self.size.width, self.size.height), units="nm")
 
 
 class STEMController(Observable.Observable):

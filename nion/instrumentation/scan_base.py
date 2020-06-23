@@ -559,6 +559,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 traceback.print_stack()
 
     @property
+    def scan_context(self) -> stem_controller.ScanContext:
+        return self.__stem_controller.scan_context
+
+    @property
     def stem_controller(self) -> stem_controller.STEMController:
         return self.__stem_controller
 
@@ -925,12 +929,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
         self.__stem_controller.line_scan_region = value
 
-    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Tuple[int, int]) -> None:
+        scan_context = self.scan_context
+        if scan_context.is_valid:
+            frame_parameters.size = tuple(scan_context.size)
+            frame_parameters.center_nm = tuple(scan_context.center_nm)
+            frame_parameters.fov_nm = scan_context.fov_nm
+            frame_parameters.rotation_rad = scan_context.rotation_rad
+        self.__apply_subscan_parameters(frame_parameters, size)
+
+    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         context_size = Geometry.FloatSize.make(frame_parameters.size)
         if self.subscan_enabled and self.subscan_region:
             subscan_region = self.subscan_region
-            frame_parameters.subscan_pixel_size = max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1)
-            frame_parameters.subscan_fractional_size = frame_parameters.subscan_pixel_size[0] / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
+            subscan_pixel_size = size or (max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
+            frame_parameters.subscan_pixel_size = subscan_pixel_size
+            frame_parameters.subscan_fractional_size = max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width)
             frame_parameters.subscan_fractional_center = subscan_region.center.y, subscan_region.center.x
             frame_parameters.subscan_rotation = self.subscan_rotation
         elif self.line_scan_enabled and self.line_scan_vector:
@@ -938,18 +952,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             start = Geometry.FloatPoint.make(line_scan_vector[0])
             end = Geometry.FloatPoint.make(line_scan_vector[1])
             length = Geometry.distance(start, end)
-            frame_parameters.subscan_pixel_size = 1, max(int(context_size.width * length), 1)
-            frame_parameters.subscan_fractional_size = 1 / context_size.height, frame_parameters.subscan_pixel_size[1] / context_size.width
+            length = max(length, max(1 / context_size.width, 1 / context_size.height))
+            subscan_pixel_length = max(int(context_size.width * length), 1)
+            subscan_pixel_size = size or (1, subscan_pixel_length)
+            frame_parameters.subscan_pixel_size = subscan_pixel_size
+            frame_parameters.subscan_fractional_size = 1 / context_size.height, length
             frame_parameters.subscan_fractional_center = tuple(Geometry.midpoint(start, end))
             frame_parameters.subscan_rotation = -math.atan2(end.y - start.y, end.x - start.x)
         else:
+            size = size or Geometry.IntSize.make(tuple(context_size))
+            frame_parameters.size = tuple(size)
             frame_parameters.subscan_pixel_size = None
             frame_parameters.subscan_fractional_size = None
             frame_parameters.subscan_fractional_center = None
             frame_parameters.subscan_rotation = 0.0
 
     def apply_subscan(self, frame_parameters: ScanFrameParameters) -> None:
-        context_size = Geometry.FloatSize.make(frame_parameters["size"])
         if frame_parameters.get("subscan_fractional_size") and frame_parameters.get("subscan_fractional_center"):
             pass  # let the parameters speak for themselves
         else:
