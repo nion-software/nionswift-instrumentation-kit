@@ -424,7 +424,7 @@ class STEMController(Observable.Observable):
         elif value_type == "delta" and not inform:
             self.SetValDelta(name, value)
         else:
-            raise NotImplemented()
+            raise NotImplementedError()
 
     def get_control_output(self, name):
         return self.GetVal(name)
@@ -507,11 +507,11 @@ class STEMController(Observable.Observable):
 
     def change_stage_position(self, *, dy: int=None, dx: int=None):
         """Shift the stage by dx, dy (meters). Do not wait for confirmation."""
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def change_pmt_gain(self, pmt_type: PMTType, *, factor: float) -> None:
         """Change specified PMT by factor. Do not wait for confirmation."""
-        raise NotImplemented()
+        raise NotImplementedError()
 
     # end high level commands
 
