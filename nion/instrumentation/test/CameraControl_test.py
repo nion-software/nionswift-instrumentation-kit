@@ -611,6 +611,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.id"))
                 self.assertEqual(hardware_source.display_name, Metadata.get_metadata_value(metadata_source, "stem.hardware_source.name"))
                 self.assertNotIn("autostem", metadata_source.metadata["hardware_source"])
+                self.assertIn("counts_per_electron", metadata_source.metadata["hardware_source"])
                 self.assertEqual(stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
                 self.assertEqual(stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
                 self.assertEqual(frame_parameters.binning, Metadata.get_metadata_value(metadata_source, "stem.camera.binning"))

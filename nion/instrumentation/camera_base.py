@@ -1195,7 +1195,7 @@ def update_intensity_calibration(data_element, instrument_controller: Instrument
         if calibration_controls is not None:
             counts_per_electron = get_instrument_calibration_value(instrument_controller, calibration_controls, "counts_per_electron")
             if counts_per_electron:
-                data_element.setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
+                data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, camera):
