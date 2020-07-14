@@ -122,12 +122,11 @@ class MultiAcquirePanelDelegate:
         self.panel_positions = ['left', 'right']
         self.panel_position = 'right'
         self.api = api
-        self.line_edit_widgets = {}
-        self.push_button_widgets = {}
-        self.multi_acquire_controller = MultiAcquire.MultiAcquireController()
-        self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
-        self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
-        self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)
+        self.line_edit_widgets = None
+        self.multi_acquire_controller = None
+        self.__acquisition_state_changed_event_listener = None
+        self.__multi_eels_parameters_changed_event_listener = None
+        self.__progress_updated_event_listener = None
         self.__settings_changed_event_listener = None
         self.__component_registered_event_listener = None
         self.__component_unregistered_event_listener = None
@@ -139,13 +138,13 @@ class MultiAcquirePanelDelegate:
         self.settings_window_open = False
         self.parameters_window_open = False
         self.parameter_column = None
-        self.result_data_items = {}
-        self.__result_data_items_refs = []
+        self.result_data_items = None
         self.__acquisition_running = False
-        self.__display_queue = queue.Queue()
+        self.__display_queue = None
         self.__display_thread = None
         self.__acquisition_thread = None
-        self.__data_processed_event = threading.Event()
+        self.__data_processed_event = None
+        self.time_estimate_label = None
 
     @property
     def superscan(self):
@@ -164,22 +163,61 @@ class MultiAcquirePanelDelegate:
     def _data_processed_event(self):
         return self.__data_processed_event
 
-    def close(self):
-        if self.__acquisition_state_changed_event_listener:
-            self.__acquisition_state_changed_event_listener.close()
+    def _close_listeners_for_test(self) -> None:
         if self.__progress_updated_event_listener:
             self.__progress_updated_event_listener.close()
+            self.__progress_updated_event_listener = None
+        if self.__multi_eels_parameters_changed_event_listener:
+            self.__multi_eels_parameters_changed_event_listener.close()
+            self.__multi_eels_parameters_changed_event_listener = None
+        if self.__acquisition_state_changed_event_listener:
+            self.__acquisition_state_changed_event_listener.close()
+            self.__acquisition_state_changed_event_listener = None
+
+    def close(self):
+        # close anything created in `create_panel_widget`.
+        # called when the panel closes, not when the delegate closes.
+        if self.__acquisition_state_changed_event_listener:
+            self.__acquisition_state_changed_event_listener.close()
+            self.__acquisition_state_changed_event_listener = None
+        if self.__multi_eels_parameters_changed_event_listener:
+            self.__multi_eels_parameters_changed_event_listener.close()
+            self.__multi_eels_parameters_changed_event_listener = None
+        if self.__progress_updated_event_listener:
+            self.__progress_updated_event_listener.close()
+            self.__progress_updated_event_listener = None
         if self.__settings_changed_event_listener:
             self.__settings_changed_event_listener.close()
+            self.__settings_changed_event_listener = None
         if self.__component_registered_event_listener:
             self.__component_registered_event_listener.close()
+            self.__component_registered_event_listener = None
         if self.__component_unregistered_event_listener:
             self.__component_unregistered_event_listener.close()
+            self.__component_unregistered_event_listener = None
         if self.__new_data_ready_event_listener:
             self.__new_data_ready_event_listener.close()
+            self.__new_data_ready_event_listener = None
         if self.__superscan_frame_parameters_changed_event_listener:
             self.__superscan_frame_parameters_changed_event_listener.close()
+            self.__superscan_frame_parameters_changed_event_listener = None
         self.__data_processed_event.set()
+        self.__display_thread.join()
+        self.__display_queue = None
+        self.__display_thread = None
+        self.line_edit_widgets = None
+        self.multi_acquire_controller = None
+        self._stem_controller = None
+        self.eels_camera = None
+        self._superscan = None
+        self.settings_window_open = False
+        self.parameters_window_open = False
+        self.parameter_column = None
+        self.result_data_items = None
+        self.__acquisition_running = False
+        self.__acquisition_thread = None
+        self.__data_processed_event = None
+        self.time_estimate_label = None
 
     def spectrum_parameters_changed(self):
         parameter_list = self.multi_acquire_controller.spectrum_parameters.copy()
@@ -290,7 +328,7 @@ class MultiAcquirePanelDelegate:
         if self.__new_data_ready_event_listener:
             self.__new_data_ready_event_listener.close()
         self.__new_data_ready_event_listener = None
-        self.result_data_items = {}
+        self.result_data_items = None
 
     def add_to_display_queue(self, data_dict):
         self.__display_queue.put(data_dict)
@@ -455,6 +493,32 @@ class MultiAcquirePanelDelegate:
             self.__api.queue_task(update)
 
     def create_panel_widget(self, ui, document_controller):
+        # note: anything created here should be disposed in close.
+        # this method may be called more than once.
+
+        self.line_edit_widgets = {}
+        self.multi_acquire_controller = MultiAcquire.MultiAcquireController()
+        self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
+        self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
+        self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)
+        self.__settings_changed_event_listener = None
+        self.__component_registered_event_listener = None
+        self.__component_unregistered_event_listener = None
+        self.__superscan_frame_parameters_changed_event_listener = None
+        self.__new_data_ready_event_listener = None
+        self._stem_controller = None
+        self.eels_camera = None
+        self._superscan = None
+        self.settings_window_open = False
+        self.parameters_window_open = False
+        self.parameter_column = None
+        self.result_data_items = None
+        self.__acquisition_running = False
+        self.__display_queue = None
+        self.__display_thread = None
+        self.__acquisition_thread = None
+        self.__data_processed_event = None
+
         self.ui = ui
         self.document_controller = document_controller
 
@@ -479,11 +543,8 @@ class MultiAcquirePanelDelegate:
                 self.multi_acquire_controller.stem_controller = self.stem_controller
                 self.multi_acquire_controller.camera = self.camera_choice_combo_box.current_item
                 self.multi_acquire_controller.superscan = self.superscan
-                self.result_data_items = {}
                 self.__new_data_ready_event_listener = self.multi_acquire_controller.new_data_ready_event.listen(self.add_to_display_queue)
-                self.__data_processed_event.clear()
-                self.__display_thread = threading.Thread(target=self.process_display_queue)
-                self.__display_thread.start()
+                self._start_display_queue_thread()
                 self.__acquisition_thread = threading.Thread(
                         target=self.multi_acquire_controller.acquire_multi_eels_spectrum_image, daemon=True)
                 self.__acquisition_thread.start()
@@ -612,6 +673,16 @@ class MultiAcquirePanelDelegate:
         column.add_stretch()
         return column
 
+    def _start_display_queue_thread(self) -> None:
+        # private. used internally and for tests.
+        # initialize any instance variables used for display queue thread.
+        self.__data_processed_event = threading.Event()
+        self.__data_processed_event.clear()
+        self.result_data_items = dict()
+        self.__display_queue = queue.Queue()
+        self.__display_thread = threading.Thread(target=self.process_display_queue)
+        self.__display_thread.start()
+
     def update_camera_list(self):
         cameras = list(Registry.get_components_by_type('camera_hardware_source'))
         self.camera_choice_combo_box.items = cameras
@@ -645,7 +716,7 @@ class MultiAcquirePanelDelegate:
         return time_str
 
     def update_time_estimate(self):
-        if hasattr(self, 'time_estimate_label'):
+        if self.time_estimate_label:
             acquisition_time, si_acquisition_time = self.multi_acquire_controller.get_total_acquisition_time()
             time_str = self.__format_time_string(acquisition_time)
             si_time_str = self.__format_time_string(si_acquisition_time)

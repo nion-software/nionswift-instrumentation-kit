@@ -202,13 +202,17 @@ class PanelDelegate:
         self.panel_name = _("Scan Acquisition Recorder")
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
-        self.__controller = Controller()
+        self.__controller = None
         self.__scan_hardware_source_choice = None
         self.__scan_hardware_source = None
         self.__state_changed_listener = None
         self.__scan_hardware_changed_event_listener = None
 
     def create_panel_widget(self, ui, document_controller):
+        # note: anything created here should be disposed in close.
+        # this method may be called more than once.
+        self.__controller = Controller()
+
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
 
         column = ui.create_column_widget()
@@ -310,6 +314,8 @@ class PanelDelegate:
         return column
 
     def close(self):
+        # close anything created in `create_panel_widget`.
+        # called when the panel closes, not when the delegate closes.
         if self.__scan_hardware_changed_event_listener:
             self.__scan_hardware_changed_event_listener.close()
             self.__scan_hardware_changed_event_listener = None
