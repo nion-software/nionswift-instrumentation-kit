@@ -14,6 +14,7 @@ from nion.swift import Facade
 from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.swift.model import Metadata
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
@@ -35,7 +36,7 @@ result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
 """
 
-class TestScanControlClass(unittest.TestCase):
+class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def setUp(self):
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
@@ -45,28 +46,42 @@ class TestScanControlClass(unittest.TestCase):
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
 
     def tearDown(self):
-        HardwareSource.HardwareSourceManager()._close_hardware_sources()
+        # HardwareSource.HardwareSourceManager()._close_hardware_sources()
         HardwareSource.HardwareSourceManager()._close_instruments()
 
-    def _setup_hardware(self, is_eels: bool):
-        document_model = DocumentModel.DocumentModel()
-        document_controller = DocumentController.DocumentController(self.app.ui, document_model, workspace_id="library")
+    def __test_context(self, is_eels: bool = True):
+
+        class SimpleTestContext(TestContext.MemoryProfileContext):
+            def __init__(self, instrument, scan_hardware_source, camera_hardware_source):
+                super().__init__()
+                self.document_controller = self.create_document_controller(auto_close=False)
+                self.document_model = self.document_controller.document_model
+                self.instrument = instrument
+                self.scan_hardware_source = scan_hardware_source
+                self.camera_hardware_source = camera_hardware_source
+                HardwareSource.HardwareSourceManager().register_hardware_source(self.camera_hardware_source)
+                HardwareSource.HardwareSourceManager().register_hardware_source(self.scan_hardware_source)
+                self.scan_context_controller = stem_controller.ScanContextController(self.document_model, self.document_controller.event_loop)
+
+            def close(self):
+                self.document_controller.periodic()
+                self.document_controller.close()
+                self.scan_context_controller.close()
+                self.scan_context_controller = None
+                # self.instrument.close()
+                self.scan_hardware_source.close()
+                self.camera_hardware_source.close()
+                HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
+                HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
+                super().close()
+
         instrument = self._setup_instrument()
         scan_hardware_source = self._setup_scan_hardware_source(instrument)
         camera_hardware_source = self._setup_camera_hardware_source(instrument, is_eels)
         HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
         HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
-        return document_controller, document_model, instrument, scan_hardware_source, camera_hardware_source
 
-    def _close_hardware(self, document_controller, instrument, scan_hardware_source, camera_hardware_source):
-        camera_hardware_source.close()
-        scan_hardware_source.close()
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
-        self._close_camera_hardware_source()
-        self._close_scan_hardware_source()
-        self._close_instrument(instrument)
-        document_controller.close()
+        return SimpleTestContext(instrument, scan_hardware_source, camera_hardware_source)
 
     def _setup_instrument(self):
         instrument = InstrumentDevice.Instrument("usim_stem_controller")
@@ -103,45 +118,15 @@ class TestScanControlClass(unittest.TestCase):
     def _close_camera_hardware_source(self) -> None:
         pass
 
-    def _make_acquisition_context(self, is_eels: bool = True):
-
-        class ScanContext:
-
-            def __init__(self, scan_test):
-                self.__scan_test = scan_test
-
-            def __enter__(self):
-                document_controller, document_model, instrument, scan_hardware_source, camera_hardware_source =\
-                    self.__scan_test._setup_hardware(is_eels)
-
-                self.document_controller = document_controller
-                self.document_model = document_model
-                self.instrument = instrument
-                self.scan_hardware_source = scan_hardware_source
-                self.camera_hardware_source = camera_hardware_source
-                self.scan_context_controller = stem_controller.ScanContextController(self.document_model, self.document_controller.event_loop)
-
-                return self
-
-            def __exit__(self, *exc_details):
-                self.scan_context_controller.close()
-                self.scan_context_controller = None
-                self.__scan_test._close_hardware(self.document_controller, self.instrument, self.scan_hardware_source, self.camera_hardware_source)
-
-            @property
-            def objects(self) -> typing.Tuple[DocumentController.DocumentController, DocumentModel.DocumentModel, scan_base.ScanHardwareSource, camera_base.CameraHardwareSource]:
-                return self.document_controller, self.document_model, self.scan_hardware_source, self.camera_hardware_source
-
-        return ScanContext(self)
-
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)
         hardware_source.stop_playing(sync_timeout=3.0)
         document_controller.periodic()
 
     def test_grab_synchronized_basic_eels(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
@@ -189,8 +174,10 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_size"])
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
@@ -209,8 +196,9 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_grab_rotated_synchronized_eels(self):
         # tests whether rotation was applied, as judged by the resulting metadata
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
@@ -223,8 +211,9 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertAlmostEqual(math.radians(30), Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
 
     def test_grab_sync_info_has_proper_calibrations(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
@@ -242,8 +231,9 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual("counts", grab_sync_info.data_intensity_calibration.units)
 
     def test_grab_sync_info_has_proper_camera_metadata(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
@@ -271,8 +261,9 @@ class TestScanControlClass(unittest.TestCase):
             # 'sensor_readout_area_tlbr': (964, 0, 1084, 2048),
 
     def test_grab_sync_info_has_proper_scan_metadata(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
@@ -329,8 +320,10 @@ class TestScanControlClass(unittest.TestCase):
                 ))
                 # print(f"update {len(self.updates)}")
 
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (6, 6)
@@ -396,8 +389,11 @@ class TestScanControlClass(unittest.TestCase):
                 # self.assertIn("scan_id", scan_metadata)
 
     def test_grab_synchronized_basic_eels_with_drift_correction(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -417,8 +413,11 @@ class TestScanControlClass(unittest.TestCase):
                                                                             scan_behavior=drift_correction_behavior)
 
     def test_grab_synchronized_basic_eels_with_drift_correction_leaves_graphic_during_scan(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -452,8 +451,11 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(drift_graphic, display_item.graphics[-1])
 
     def test_grab_synchronized_basic_eels_with_drift_correction_leaves_graphic_during_subscan(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -490,8 +492,10 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(drift_graphic, display_item.graphics[-1])
 
     def test_drift_corrector(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -517,8 +521,10 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(abs(offset_nm.height) < 0.1)
 
     def test_drift_corrector_with_drift_sub_area_rotation(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -547,8 +553,11 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(abs(offset_nm.height) < 0.1)
 
     def test_scan_acquisition_controller(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             scan_specifier = ScanAcquisition.ScanSpecifier()
@@ -567,8 +576,11 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     def test_scan_acquisition_controller_with_rect(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -589,8 +601,10 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     def test_update_from_device_puts_current_profile_into_valid_state(self):
-        with self._make_acquisition_context() as context:
-            document_controller, document_model, scan_hardware_source, camera_hardware_source = context.objects
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             self._acquire_one(document_controller, scan_hardware_source)
