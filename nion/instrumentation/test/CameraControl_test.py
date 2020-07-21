@@ -108,6 +108,9 @@ class TestCameraControlClass(unittest.TestCase):
 
         return SimpleTestContext(camera_hardware_source, initialize)
 
+    def _test_context(self, initialize: bool=True, is_eels: bool=False):
+        return self.__test_context(initialize=initialize, is_eels=is_eels)
+
     ## STANDARD ACQUISITION TESTS ##
 
     # Do not change the comment above as it is used to search for places needing updates when a new
