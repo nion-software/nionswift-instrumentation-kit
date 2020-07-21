@@ -111,6 +111,9 @@ class TestScanControlClass(unittest.TestCase):
 
         return SimpleTestContext(instrument, hardware_source, channel_id)
 
+    def _test_context(self, channel_id: str = None):
+        return self.__test_context(channel_id=channel_id)
+
     def _setup_hardware_source(self, instrument) -> HardwareSource.HardwareSource:
         from nionswift_plugin.usim import ScanDevice  # here so that this method can be overridden
         stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
