@@ -482,10 +482,13 @@ class TestScanControlClass(unittest.TestCase):
             time.sleep(frame_time * 0.25)  # this sleep is not really necessary but leave it here for extra robustness
             was_playing = hardware_source.is_playing
             hardware_source.periodic()
-            time.sleep(frame_time * 2)  # scan should definitely be stopped after 2 frames
+            time.sleep(frame_time * 2)  # scan should definitely be stopped after 4 frames
+            # updating is_playing may take some time; sync here
+            start = time.time()
+            while time.time() - start < 3.0 and hardware_source.is_playing:
+                time.sleep(0.01)
             is_playing = hardware_source.is_playing
             hardware_source.stop_playing()
-            time.sleep(frame_time * 2)  # scan should definitely be stopped after 2 frames
             self.assertTrue(was_playing)
             self.assertFalse(is_playing)
 
