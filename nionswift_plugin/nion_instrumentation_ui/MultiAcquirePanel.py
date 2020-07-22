@@ -201,10 +201,12 @@ class MultiAcquirePanelDelegate:
         if self.__superscan_frame_parameters_changed_event_listener:
             self.__superscan_frame_parameters_changed_event_listener.close()
             self.__superscan_frame_parameters_changed_event_listener = None
-        self.__data_processed_event.set()
-        self.__display_thread.join()
+        if self.__data_processed_event:
+            self.__data_processed_event.set()
+        if self.__display_thread:
+            self.__display_thread.join()
+            self.__display_thread = None
         self.__display_queue = None
-        self.__display_thread = None
         self.line_edit_widgets = None
         self.multi_acquire_controller = None
         self._stem_controller = None
