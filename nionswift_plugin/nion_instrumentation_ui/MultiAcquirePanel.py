@@ -130,11 +130,11 @@ class MultiAcquirePanelDelegate:
         self.__settings_changed_event_listener = None
         self.__component_registered_event_listener = None
         self.__component_unregistered_event_listener = None
-        self.__superscan_frame_parameters_changed_event_listener = None
+        self.__scan_frame_parameters_changed_event_listener = None
         self.__new_data_ready_event_listener = None
         self._stem_controller = None
         self.eels_camera = None
-        self._superscan = None
+        self._scan_controller = None
         self.settings_window_open = False
         self.parameters_window_open = False
         self.parameter_column = None
@@ -147,10 +147,10 @@ class MultiAcquirePanelDelegate:
         self.time_estimate_label = None
 
     @property
-    def superscan(self):
-        if self._superscan is None:
-            self._superscan = self.stem_controller.scan_controller
-        return self._superscan
+    def scan_controller(self):
+        if self._scan_controller is None:
+            self._scan_controller = self.stem_controller.scan_controller
+        return self._scan_controller
 
     @property
     def stem_controller(self):
@@ -198,9 +198,9 @@ class MultiAcquirePanelDelegate:
         if self.__new_data_ready_event_listener:
             self.__new_data_ready_event_listener.close()
             self.__new_data_ready_event_listener = None
-        if self.__superscan_frame_parameters_changed_event_listener:
-            self.__superscan_frame_parameters_changed_event_listener.close()
-            self.__superscan_frame_parameters_changed_event_listener = None
+        if self.__scan_frame_parameters_changed_event_listener:
+            self.__scan_frame_parameters_changed_event_listener.close()
+            self.__scan_frame_parameters_changed_event_listener = None
         if self.__data_processed_event:
             self.__data_processed_event.set()
         if self.__display_thread:
@@ -211,7 +211,7 @@ class MultiAcquirePanelDelegate:
         self.multi_acquire_controller = None
         self._stem_controller = None
         self.eels_camera = None
-        self._superscan = None
+        self._scan_controller = None
         self.settings_window_open = False
         self.parameters_window_open = False
         self.parameter_column = None
@@ -506,11 +506,11 @@ class MultiAcquirePanelDelegate:
         self.__settings_changed_event_listener = None
         self.__component_registered_event_listener = None
         self.__component_unregistered_event_listener = None
-        self.__superscan_frame_parameters_changed_event_listener = None
+        self.__scan_frame_parameters_changed_event_listener = None
         self.__new_data_ready_event_listener = None
         self._stem_controller = None
         self.eels_camera = None
-        self._superscan = None
+        self._scan_controller = None
         self.settings_window_open = False
         self.parameters_window_open = False
         self.parameter_column = None
@@ -544,7 +544,7 @@ class MultiAcquirePanelDelegate:
             else:
                 self.multi_acquire_controller.stem_controller = self.stem_controller
                 self.multi_acquire_controller.camera = self.camera_choice_combo_box.current_item
-                self.multi_acquire_controller.superscan = self.superscan
+                self.multi_acquire_controller.scan_controller = self.scan_controller
                 self.__new_data_ready_event_listener = self.multi_acquire_controller.new_data_ready_event.listen(self.add_to_display_queue)
                 self._start_display_queue_thread()
                 self.__acquisition_thread = threading.Thread(
@@ -632,10 +632,10 @@ class MultiAcquirePanelDelegate:
         time_estimate_row.add(self.si_time_estimate_label)
         time_estimate_row.add_spacing(6)
         self.multi_acquire_controller.stem_controller = self.stem_controller
-        self.multi_acquire_controller.superscan = self.superscan
+        self.multi_acquire_controller.scan_controller = self.scan_controller
         def frame_parameters_changed(profile_index, frame_parameters):
             self.update_time_estimate()
-        self.__superscan_frame_parameters_changed_event_listener = self.superscan.frame_parameters_changed_event.listen(frame_parameters_changed)
+        self.__scan_frame_parameters_changed_event_listener = self.scan_controller.frame_parameters_changed_event.listen(frame_parameters_changed)
         self.update_camera_list()
 
         self.start_button = ui.create_push_button_widget('Start Multi-Acquire')

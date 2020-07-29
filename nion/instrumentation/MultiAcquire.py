@@ -129,7 +129,7 @@ class MultiAcquireController:
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': ''})
         self.stem_controller: stem_controller.STEMController = None
         self.camera: camera_base.CameraHardwareSource = None
-        self.superscan: scan_base.ScanHardwareSource = None
+        self.scan_controller: scan_base.ScanHardwareSource = None
         self.zeros = {'x': 0, 'focus': 0}
         self.scan_calibrations = [{'offset': 0, 'scale': 1, 'units': ''}, {'offset': 0, 'scale': 1, 'units': ''}]
         self.__progress_counter = 0
@@ -261,7 +261,7 @@ class MultiAcquireController:
                                                        getattr(self, 'scan_parameters', None))
 
     def get_total_acquisition_time(self):
-        scan_parameters = self.superscan.get_current_frame_parameters() if self.superscan else None
+        scan_parameters = self.scan_controller.get_current_frame_parameters() if self.scan_controller else None
         acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, None) * 0.001
         si_acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, scan_parameters) * 0.001
         if self.settings['auto_dark_subtract']:
@@ -343,7 +343,7 @@ class MultiAcquireController:
         self.abort_event.set()
         try:
             self.camera.acquire_sequence_cancel()
-            self.superscan.grab_synchronized_abort()
+            self.scan_controller.grab_synchronized_abort()
         except Exception as e:
             print(e)
         # give it some time to finish processing
@@ -551,13 +551,13 @@ class MultiAcquireController:
                     camera_data_channel.get_parameters_fn = lambda: parameters.copy()
                     camera_data_channel.get_settings_fn = lambda: self.__active_settings.copy()
                     new_data_listener = camera_data_channel.new_data_ready_event.listen(send_new_data_and_update_progress)
-                    # grab_synchronized_info = self.superscan.grab_synchronized_get_info(scan_frame_parameters=self.superscan.get_current_frame_parameters(),
+                    # grab_synchronized_info = self.scan_controller.grab_synchronized_get_info(scan_frame_parameters=self.scan_controller.get_current_frame_parameters(),
                     #                                                                    camera=self.camera,
                     #                                                                    camera_frame_parameters=frame_parameters)
-                    self.scan_parameters = self.superscan.get_current_frame_parameters()
+                    self.scan_parameters = self.scan_controller.get_current_frame_parameters()
                     self.__flyback_pixels = 2
                     parameters['complete_shape'] = tuple(self.scan_parameters.size)
-                    result = self.superscan.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
+                    result = self.scan_controller.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
                                                               camera_data_channel=camera_data_channel,
                                                               scan_frame_parameters=self.scan_parameters)
                     if result is not None:

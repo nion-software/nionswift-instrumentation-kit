@@ -242,15 +242,15 @@ class TestMultiAcquire(unittest.TestCase):
                             cm.callback(si_receiver.close)
                             multi_acquire = self._set_up_multi_acquire(settings, parameters, multi_acquire_instance=si_receiver.multi_acquire_controller)
                             multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera(is_eels=True)
-                            multi_acquire.superscan = self._get_scan_controller(multi_acquire.stem_controller)
+                            multi_acquire.scan_controller = self._get_scan_controller(multi_acquire.stem_controller)
                             # enable binning for speed
                             frame_parameters = multi_acquire.camera.get_current_frame_parameters()
                             frame_parameters['binning'] = 8
                             multi_acquire.camera.set_current_frame_parameters(frame_parameters)
-                            scan_frame_parameters = multi_acquire.superscan.get_current_frame_parameters()
+                            scan_frame_parameters = multi_acquire.scan_controller.get_current_frame_parameters()
                             scan_frame_parameters['size'] = (10, 10)
                             scan_frame_parameters['fov_size_nm'] = 16
-                            multi_acquire.superscan.set_current_frame_parameters(scan_frame_parameters)
+                            multi_acquire.scan_controller.set_current_frame_parameters(scan_frame_parameters)
                             progress = 0
                             def update_progress(minimum, maximum, value):
                                 nonlocal progress
