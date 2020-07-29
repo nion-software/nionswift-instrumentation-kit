@@ -6,6 +6,9 @@ import threading
 import logging
 
 # local libraries
+import typing
+from nion.instrumentation import scan_base
+from nion.instrumentation import stem_controller
 from nion.instrumentation import MultiAcquire
 from nion.swift.model import ImportExportManager
 from nion.ui import Dialog
@@ -134,7 +137,7 @@ class MultiAcquirePanelDelegate:
         self.__new_data_ready_event_listener = None
         self._stem_controller = None
         self.eels_camera = None
-        self._scan_controller = None
+        self._scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
         self.settings_window_open = False
         self.parameters_window_open = False
         self.parameter_column = None
@@ -147,13 +150,13 @@ class MultiAcquirePanelDelegate:
         self.time_estimate_label = None
 
     @property
-    def scan_controller(self):
-        if self._scan_controller is None:
-            self._scan_controller = self.stem_controller.scan_controller
+    def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
+        if not self._scan_controller and self.stem_controller:
+            self._scan_controller = typing.cast(scan_base.ScanHardwareSource, self.stem_controller.scan_controller)
         return self._scan_controller
 
     @property
-    def stem_controller(self):
+    def stem_controller(self) -> typing.Optional[stem_controller.STEMController]:
         if self._stem_controller is None:
             self._stem_controller = Registry.get_component('stem_controller')
         return self._stem_controller
@@ -635,7 +638,8 @@ class MultiAcquirePanelDelegate:
         self.multi_acquire_controller.scan_controller = self.scan_controller
         def frame_parameters_changed(profile_index, frame_parameters):
             self.update_time_estimate()
-        self.__scan_frame_parameters_changed_event_listener = self.scan_controller.frame_parameters_changed_event.listen(frame_parameters_changed)
+        if self.scan_controller:
+            self.__scan_frame_parameters_changed_event_listener = self.scan_controller.frame_parameters_changed_event.listen(frame_parameters_changed)
         self.update_camera_list()
 
         self.start_button = ui.create_push_button_widget('Start Multi-Acquire')

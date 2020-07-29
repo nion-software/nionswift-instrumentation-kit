@@ -11,7 +11,9 @@ import time
 # local libraries
 from nion.utils import Event, Geometry
 from nion.data import DataAndMetadata, Calibration
-from nion.instrumentation import camera_base, scan_base, stem_controller
+from nion.instrumentation import camera_base
+from nion.instrumentation import scan_base
+from nion.instrumentation import stem_controller
 
 
 class MultiEELSSettings(dict):

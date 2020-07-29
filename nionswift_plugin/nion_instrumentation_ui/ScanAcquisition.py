@@ -483,7 +483,9 @@ class PanelDelegate:
             if key in ("subscan_state", "subscan_region", "subscan_rotation", "line_scan_state", "line_scan_vector", "drift_channel_id", "drift_region", "drift_settings"):
                 document_controller._document_controller.event_loop.call_soon_threadsafe(update_context)
 
-        self.__stem_controller_property_listener = stem_controller_.property_changed_event.listen(stem_controller_property_changed)
+        self.__stem_controller_property_listener = None
+        if stem_controller_:
+            self.__stem_controller_property_listener = stem_controller_.property_changed_event.listen(stem_controller_property_changed)
 
         column = ui.create_column_widget()
 
