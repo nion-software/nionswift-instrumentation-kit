@@ -3,15 +3,12 @@ import copy
 import math
 import numpy
 import threading
-import typing
 import unittest
 import uuid
 
 from nion.data import DataAndMetadata
 from nion.swift import Application
-from nion.swift import DocumentController
 from nion.swift import Facade
-from nion.swift.model import DocumentModel
 from nion.swift.model import HardwareSource
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext

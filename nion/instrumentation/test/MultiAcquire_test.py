@@ -213,6 +213,7 @@ class TestMultiAcquire(unittest.TestCase):
                     with self.subTest(parameters=parameters[i]):
                         self.assertEqual(len(data_element['spatial_calibrations']), len(data_element['data'].shape))
 
+    @unittest.skip("MultiSI requires non-thread data item updates")
     def test_acquire_multi_eels_spectrum_image_produces_data_of_correct_shape(self):
         app = Application.Application(TestUI.UserInterface(), set_global=False)
         for sum_frames in [True, False]:

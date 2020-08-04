@@ -752,6 +752,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                             uncropped_xdata = partial_data_info.xdata
                             is_complete = partial_data_info.is_complete
                             is_canceled = partial_data_info.is_canceled
+                            last_valid_rows = 0  # valid rows within section
                             # this loop is awkward because to make it easy to implement synchronized begin in a backwards
                             # compatible manner, it must return all of its data on the first call. this means that we need
                             # to handle the data by sending it to the channel. and this leads to the awkward implementation
@@ -763,16 +764,21 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 metadata["hardware_source"] = copy.deepcopy(scan_info.camera_metadata)
                                 metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                                 metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
-                                metadata["scan"]["valid_rows"] = section_rect[0][0] + section_rect[1][0]
+                                metadata["scan"]["valid_rows"] = section_rect[0][0] + partial_data_info.valid_rows
                                 partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations, data_calibrations, data_intensity_calibration, metadata)
-                                if camera_data_channel:
+                                if camera_data_channel and partial_data_info.valid_rows > 0:
                                     data_channel_state = "complete" if is_complete and is_last_section else "partial"
                                     data_channel_data_and_metadata = partial_xdata
-                                    data_channel_sub_area = Geometry.IntRect(Geometry.IntPoint(), Geometry.IntSize.make(data_channel_data_and_metadata.collection_dimension_shape))
+                                    # src rect is the area of the section data that will be copied
+                                    partial_size = Geometry.IntSize(height=partial_data_info.valid_rows - last_valid_rows, width=section_rect.width)
+                                    src_rect = Geometry.IntRect(Geometry.IntPoint(y=last_valid_rows), partial_size)
+                                    # dst rect is the destination in the final layout.
+                                    dst_rect = src_rect + section_rect.origin
                                     data_channel_view_id = None
                                     camera_data_channel.update(data_channel_data_and_metadata, data_channel_state,
                                                                Geometry.IntSize(h=scan_param_height, w=scan_param_width),
-                                                               section_rect, data_channel_sub_area, data_channel_view_id)
+                                                               dst_rect, src_rect, data_channel_view_id)
+                                    last_valid_rows = partial_data_info.valid_rows
                                 # break out if we're complete
                                 if is_complete:
                                     break
