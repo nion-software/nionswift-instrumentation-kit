@@ -787,6 +787,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue(update_period=update_period)
                                 is_complete = partial_data_info.is_complete
                                 is_canceled = partial_data_info.is_canceled
+                                uncropped_xdata = partial_data_info.uncropped_xdata
                                 # unless it's cancelled or aborted, of course.
                                 if is_canceled or self.__grab_synchronized_aborted:
                                     break
