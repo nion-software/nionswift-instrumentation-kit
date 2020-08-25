@@ -154,7 +154,7 @@ class AcquireController(metaclass=Utility.Singleton):
             crop_region.is_bounds_constrained = True
             display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
             display_item.add_graphic(crop_region)
-            eels_data_item = document_controller.document_model.get_projection_new(display_item, crop_region)
+            eels_data_item = document_controller.document_model.get_projection_new(display_item, display_item.data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
                 eels_display_item = document_controller.document_model.get_display_item_for_data_item(eels_data_item)

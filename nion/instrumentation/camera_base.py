@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # standard libraries
 import abc
 import asyncio
@@ -64,8 +66,18 @@ class Camera(abc.ABC):
 
 
 class CameraDevice(abc.ABC):
+    """Camera device.
 
-    """Properties that should be defined for the camera device:
+    Camera devices can support several modes of operation:
+        - continue acquire (acquire single images repeatedly for viewing)
+        - single acquire (acquire one image)
+        - sequence acquire (acquire n continuous images)
+        - synchronized acquire (synchronized with scan controller)
+
+    It is recommended to implement all optional methods that are not deprecated. Some methods are deprecated but still
+    valid for backward compatibility.
+
+    Properties that should be defined for the camera device:
 
     camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
     camera_name (required, the name of the camera. example: 'Bottom Camera')
@@ -242,7 +254,21 @@ class CameraDevice(abc.ABC):
 
         { "counts_per_electron_control": "Camera1_CountsPerElectron" }
         """
-        ...
+        return dict()
+
+    # @property
+    # @abc.abstractmethod
+    # def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]):
+        """Return metadata groups to be read from instrument controller and stored in metadata.
+
+        Metadata groups are a list of tuples where the first item is the destination path and the second item is the
+        control group name.
+
+        This method is optional. Default is to return an empty list.
+
+        Note: for backward compatibility, if the destination root is 'autostem', it is skipped and the rest of the path
+        is used. this can be removed in the future.
+        """
 
     @abc.abstractmethod
     def start_live(self) -> None:
@@ -305,12 +331,16 @@ class CameraDevice(abc.ABC):
     # def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
         """Prepare for synchronized acquisition.
 
+        THIS METHOD IS DEPRECATED TO ADD SUPPORT FOR PARTIAL ACQUISITION.
+
         Default implementation calls acquire_sequence_prepare.
         """
         # pass
 
     # def acquire_synchronized(self, data_shape, **kwargs) -> typing.Optional[typing.Dict]:
         """Acquire a sequence of images with the data_shape. Return a single data element with two dimensions n x data_shape.
+
+        THIS METHOD IS DEPRECATED TO ADD SUPPORT FOR PARTIAL ACQUISITION.
 
         Default implementation calls acquire_sequence.
 
@@ -325,6 +355,42 @@ class CameraDevice(abc.ABC):
         Raise exception for error.
         """
         # pass
+
+    # def acquire_synchronized_begin(self, camera_frame_parameters: typing.Mapping, scan_shape: typing.Tuple[int, ...], **kwargs) -> PartialData: ...
+        """Begin synchronized acquire.
+
+        The camera device can allocate memory to accommodate the scan_shape and begin acquisition immediately.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows set to 0 or valid_row_range set to 0, 0.
+
+        Returns PartialData.
+        """
+
+    # def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs) -> PartialData: ...
+        """Continue synchronized acquire.
+
+        The camera device should wait up to update_period seconds for data and populate PartialData with data and
+        information about the acquisition.
+
+        The valid_rows field of PartialData indicates how many rows are valid in xdata. The grab_synchronized method
+        will keep track of the last valid row and copy data from the last valid row to valid_rows into the acquisition
+        data and then update last valid row with valid_rows.
+
+        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+
+        Returns PartialData.
+        """
+
+    # def acquire_synchronized_end(self, **kwargs) -> None: ...
+        """Clean up synchronized acquire.
+
+        The camera device can clean up anything internal that was required for acquisition.
+
+        The memory returned during acquire_synchronized_begin or acquire_synchronized_continue must remain valid until
+        the last Python reference to that memory is released.
+        """
 
     # def acquire_sequence_prepare(self, n: int) -> None:
         """Prepare for acquire_sequence."""
@@ -843,7 +909,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
-    PartialData = collections.namedtuple("PartialData", ["xdata", "is_complete", "is_canceled", "valid_rows"])
+    class PartialData:
+        def __init__(self, xdata: numpy.ndarray, is_complete: bool, is_canceled: bool, valid_rows: typing.Optional[int] = None):
+            self.xdata = xdata
+            self.is_complete = is_complete
+            self.is_canceled = is_canceled
+            self.valid_rows = valid_rows
 
     def acquire_synchronized_begin(self, camera_frame_parameters: typing.Mapping, scan_shape: typing.Tuple[int, ...]) -> PartialData:
         if callable(getattr(self.__camera, "acquire_synchronized_begin", None)):
@@ -950,11 +1021,11 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
         update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
 
-    def update_camera_properties(self, properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", signal_type: str = None) -> None:
+    def update_camera_properties(self, properties: typing.MutableMapping, frame_parameters: CameraFrameParameters, signal_type: str = None) -> None:
         update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
         update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
-    def get_camera_calibrations(self, camera_frame_parameters: "CameraFrameParameters") -> typing.Tuple[Calibration.Calibration, ...]:
+    def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
         processing = camera_frame_parameters.get("processing")
         instrument_controller = self.__get_instrument_controller()
         calibration_controls = self.__camera.calibration_controls
@@ -968,7 +1039,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
             return (x_calibration,)
 
-    def get_camera_intensity_calibration(self, camera_frame_parameters: "CameraFrameParameters") -> Calibration.Calibration:
+    def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
         return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")
 
     def acquire_sequence_cancel(self) -> None:
@@ -1198,7 +1269,7 @@ def update_intensity_calibration(data_element, instrument_controller: Instrument
                 data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
 
 
-def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, camera):
+def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, camera: CameraDevice) -> None:
     if instrument_controller:
         # give the instrument controller opportunity to add properties
         if callable(getattr(instrument_controller, "get_autostem_properties", None)):
@@ -1213,7 +1284,7 @@ def update_instrument_properties(stem_properties: typing.MutableMapping, instrum
             instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
-def update_camera_properties(properties: typing.MutableMapping, frame_parameters: "CameraFrameParameters", hardware_source_id: str, display_name: str, signal_type: str = None) -> None:
+def update_camera_properties(properties: typing.MutableMapping, frame_parameters: CameraFrameParameters, hardware_source_id: str, display_name: str, signal_type: str = None) -> None:
     properties["hardware_source_id"] = hardware_source_id
     properties["hardware_source_name"] = display_name
     properties["exposure"] = frame_parameters.exposure_ms / 1000.0
