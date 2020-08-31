@@ -462,13 +462,13 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_start_playing_with_no_channels_enabled_does_nothing(self):
         with self.__test_context() as test_context:
-            document_controller = test_context.document_controller
-            document_model = test_context.document_model
             hardware_source = test_context.hardware_source
             hardware_source.set_channel_enabled(0, False)
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
-            time.sleep(frame_time)
+            start = time.time()
+            while hardware_source.is_playing and time.time() - start < 3.0:
+                time.sleep(frame_time * 0.2)
             is_playing = hardware_source.is_playing
             hardware_source.stop_playing()
             self.assertFalse(is_playing)
