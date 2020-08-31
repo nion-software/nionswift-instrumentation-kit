@@ -468,7 +468,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.set_channel_enabled(0, False)
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
-            time.sleep(frame_time * 0.5)
+            time.sleep(frame_time)
             is_playing = hardware_source.is_playing
             hardware_source.stop_playing()
             self.assertFalse(is_playing)
