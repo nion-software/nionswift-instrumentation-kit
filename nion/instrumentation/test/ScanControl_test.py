@@ -1467,6 +1467,21 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(scales))
             self.assertEqual(1, len(units))
 
+    def test_reloading_document_cleans_display_items(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.hardware_source
+            scan_state_controller = test_context.state_controller
+            self._acquire_one(document_controller, hardware_source)
+            scan_state_controller.handle_subscan_enabled(True)
+            self._acquire_one(document_controller, hardware_source)
+            document_controller.close()
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            document_model = test_context.document_model
+            self.assertFalse(document_model.display_items[0].graphics)
+
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded
     # stem values are recorded
