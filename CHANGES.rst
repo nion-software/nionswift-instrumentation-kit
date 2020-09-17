@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.18.4 (UNRELEASED)
+0.19.0 (2020-08-31)
 -------------------
 - Add section-by-section drift correction during synchronized acquisition.
 - Add support for specifying drift correction parameters (only used in synchronized acquisition).
