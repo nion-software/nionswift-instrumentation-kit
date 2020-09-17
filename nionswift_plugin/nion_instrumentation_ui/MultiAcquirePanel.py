@@ -4,6 +4,8 @@ import numpy
 import queue
 import threading
 import logging
+import copy
+import gettext
 
 # local libraries
 import typing
@@ -11,9 +13,13 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import MultiAcquire
 from nion.swift.model import ImportExportManager
+from nion.swift.model import DataItem
 from nion.ui import Dialog
 from nion.utils import Registry
+from nion.utils import Geometry
 from nion.data import DataAndMetadata, Calibration
+
+_ = gettext.gettext
 
 
 # copied from https://github.com/mrmrs/colors
@@ -146,7 +152,6 @@ class MultiAcquirePanelDelegate:
         self.__display_queue = None
         self.__display_thread = None
         self.__acquisition_thread = None
-        self.__data_processed_event = None
         self.time_estimate_label = None
 
     @property
@@ -160,11 +165,6 @@ class MultiAcquirePanelDelegate:
         if self._stem_controller is None:
             self._stem_controller = Registry.get_component('stem_controller')
         return self._stem_controller
-
-    # For testing
-    @property
-    def _data_processed_event(self):
-        return self.__data_processed_event
 
     def _close_listeners_for_test(self) -> None:
         if self.__progress_updated_event_listener:
@@ -204,8 +204,6 @@ class MultiAcquirePanelDelegate:
         if self.__scan_frame_parameters_changed_event_listener:
             self.__scan_frame_parameters_changed_event_listener.close()
             self.__scan_frame_parameters_changed_event_listener = None
-        if self.__data_processed_event:
-            self.__data_processed_event.set()
         if self.__display_thread:
             self.__display_thread.join()
             self.__display_thread = None
@@ -221,7 +219,6 @@ class MultiAcquirePanelDelegate:
         self.result_data_items = None
         self.__acquisition_running = False
         self.__acquisition_thread = None
-        self.__data_processed_event = None
         self.time_estimate_label = None
 
     def spectrum_parameters_changed(self):
@@ -249,21 +246,23 @@ class MultiAcquirePanelDelegate:
             exposure_ms = data_dict['parameter_list'][i]['exposure_ms']
             summed = ' (summed)' if not data_dict['data_element_list'][i].get('is_sequence', False) and number_frames > 1 else ''
             data_item = None
-            if i == sorted_indices[0] and xdata.datum_dimension_count == 1:
+            if i == sorted_indices[0] and xdata.datum_dimension_count == 1 and data_dict['settings_list'][i]['use_multi_eels_calibration']:
                 data_item = self.document_controller.library.create_data_item_from_data_and_metadata(
                                                                     xdata,
                                                                     title='MultiAcquire (stacked)')
                 display_item = self.__api.library._document_model.get_display_item_for_data_item(data_item._data_item)
                 #new_data_item = data_item
             #else:
+            units_str = ' eV' if data_dict['settings_list'][i]['use_multi_eels_calibration'] else ''
             new_data_item = self.document_controller.library.create_data_item_from_data_and_metadata(
                                 xdata,
-                                title='MultiAcquire #{:d}, {:g}-{:g} eV, {:g}x{:g} ms{}'.format(index+1,
-                                                                                                start_ev,
-                                                                                                end_ev,
-                                                                                                number_frames,
-                                                                                                exposure_ms,
-                                                                                                summed))
+                                title='MultiAcquire #{:d}, {:g}-{:g}{}, {:g}x{:g} ms{}'.format(index+1,
+                                                                                               start_ev,
+                                                                                               end_ev,
+                                                                                               units_str,
+                                                                                               number_frames,
+                                                                                               exposure_ms,
+                                                                                               summed))
             metadata = new_data_item.metadata
             metadata['MultiAcquire.parameters'] = data_dict['parameter_list'][i]
             metadata['MultiAcquire.settings'] = data_dict['settings_list'][i]
@@ -316,9 +315,6 @@ class MultiAcquirePanelDelegate:
                 self.start_button._widget.enabled = True
                 self.start_si_button._widget.enabled = True
             self.__api.queue_task(update_buttons)
-            self.__data_processed_event.set()
-        elif info_dict.get('message') == 'end processing':
-            self.__data_processed_event.set()
 
     def __close_data_item_refs(self):
         logging.debug('Closing data item refs')
@@ -335,8 +331,8 @@ class MultiAcquirePanelDelegate:
         self.__new_data_ready_event_listener = None
         self.result_data_items = None
 
-    def add_to_display_queue(self, data_dict):
-        self.__display_queue.put(data_dict)
+    # def add_to_display_queue(self, data_dict):
+    #     self.__display_queue.put(data_dict)
 
     def process_scan_data(self, scan_data_dict):
         index = scan_data_dict['parameters']['index']
@@ -408,86 +404,86 @@ class MultiAcquirePanelDelegate:
                         pass
                 self.__api.queue_task(get_and_display_data_item)
 
-    def process_display_queue(self):
-        while True:
-            try:
-                data_dict = self.__display_queue.get(timeout=1)
-            except queue.Empty:
-                if self.__data_processed_event.is_set() and not self.__acquisition_running:
-                    self.__close_data_item_refs()
-                    break
-            else:
-                if data_dict.get('is_scan_data'):
-                    self.process_scan_data(data_dict)
-                    continue
-                index = data_dict['parameters']['index']
-                start_ev = data_dict['parameters']['start_ev']
-                end_ev = data_dict['parameters']['end_ev']
-                number_frames = data_dict['parameters']['frames']
-                exposure_ms = data_dict['parameters']['exposure_ms']
-                dest_sub_area = data_dict['dest_sub_area']
-                current_frame = data_dict['parameters']['current_frame']
-                # state = data_dict['state']
-                xdata = data_dict['xdata']
-                logging.debug('got data from display queue')
-                if not self.result_data_items.get(index):
-                    logging.debug('creating new data item')
-                    metadata = xdata.metadata
-                    metadata['MultiAcquire.parameters'] = dict(data_dict['parameters'])
-                    metadata['MultiAcquire.settings'] = dict(data_dict['settings'])
-                    xdata._set_metadata(metadata)
-                    title = 'MultiAcquire #{:d}, {:g}-{:g} eV, {:g}x{:g} ms'.format(index+1, start_ev, end_ev,
-                                                                                    number_frames, exposure_ms)
-                    data_item_ready_event = threading.Event()
-                    new_data_item = None
-                    def create_data_item():
-                        nonlocal new_data_item
-                        # we have to create the initial data item with some data that has more than 2 dimensions
-                        # otherwise Swift does not use HDF5 and we will have a problem if it grows too big later
-                        new_data_item = self.__api.library.create_data_item_from_data_and_metadata(xdata,
-                                                                                                   title=title)
-                        try:
-                            self.__api.application.document_controllers[0].display_data_item(new_data_item)
-                        except AttributeError:
-                            pass
-                        data_item_ready_event.set()
-                    self.__api.queue_task(create_data_item)
-                    data_item_ready_event.wait()
-                    max_shape = data_dict['parameters']['complete_shape']
-                    if number_frames > 1 and not data_dict['settings']['sum_frames']:
-                        max_shape = (number_frames,) + max_shape
-                    max_shape += xdata.datum_dimension_shape
-                    new_appendable_data_item = AppendableDataItemFixedSize(new_data_item, max_shape, self.__api)
-                    new_appendable_data_item.enter_write_suspend_state()
-                    self.result_data_items[index] = new_appendable_data_item
-                    del new_appendable_data_item
+    # def process_display_queue(self):
+    #     while True:
+    #         try:
+    #             data_dict = self.__display_queue.get(timeout=1)
+    #         except queue.Empty:
+    #             if self.__data_processed_event.is_set() and not self.__acquisition_running:
+    #                 self.__close_data_item_refs()
+    #                 break
+    #         else:
+    #             if data_dict.get('is_scan_data'):
+    #                 self.process_scan_data(data_dict)
+    #                 continue
+    #             index = data_dict['parameters']['index']
+    #             start_ev = data_dict['parameters']['start_ev']
+    #             end_ev = data_dict['parameters']['end_ev']
+    #             number_frames = data_dict['parameters']['frames']
+    #             exposure_ms = data_dict['parameters']['exposure_ms']
+    #             dest_sub_area = data_dict['dest_sub_area']
+    #             current_frame = data_dict['parameters']['current_frame']
+    #             # state = data_dict['state']
+    #             xdata = data_dict['xdata']
+    #             logging.debug('got data from display queue')
+    #             if not self.result_data_items.get(index):
+    #                 logging.debug('creating new data item')
+    #                 metadata = xdata.metadata
+    #                 metadata['MultiAcquire.parameters'] = dict(data_dict['parameters'])
+    #                 metadata['MultiAcquire.settings'] = dict(data_dict['settings'])
+    #                 xdata._set_metadata(metadata)
+    #                 title = 'MultiAcquire #{:d}, {:g}-{:g} eV, {:g}x{:g} ms'.format(index+1, start_ev, end_ev,
+    #                                                                                 number_frames, exposure_ms)
+    #                 data_item_ready_event = threading.Event()
+    #                 new_data_item = None
+    #                 def create_data_item():
+    #                     nonlocal new_data_item
+    #                     # we have to create the initial data item with some data that has more than 2 dimensions
+    #                     # otherwise Swift does not use HDF5 and we will have a problem if it grows too big later
+    #                     new_data_item = self.__api.library.create_data_item_from_data_and_metadata(xdata,
+    #                                                                                                title=title)
+    #                     try:
+    #                         self.__api.application.document_controllers[0].display_data_item(new_data_item)
+    #                     except AttributeError:
+    #                         pass
+    #                     data_item_ready_event.set()
+    #                 self.__api.queue_task(create_data_item)
+    #                 data_item_ready_event.wait()
+    #                 max_shape = data_dict['parameters']['complete_shape']
+    #                 if number_frames > 1 and not data_dict['settings']['sum_frames']:
+    #                     max_shape = (number_frames,) + max_shape
+    #                 max_shape += xdata.datum_dimension_shape
+    #                 new_appendable_data_item = AppendableDataItemFixedSize(new_data_item, max_shape, self.__api)
+    #                 new_appendable_data_item.enter_write_suspend_state()
+    #                 self.result_data_items[index] = new_appendable_data_item
+    #                 del new_appendable_data_item
 
-                data_item = self.result_data_items[index]
-                if data_dict['settings']['sum_frames']:
-                    data = data_item.get_data(dest_sub_area.slice)
-                    data += xdata.data
-                    def get_and_display_data_item():
-                        data_item.get_partial_data_item((slice(0, dest_sub_area.bottom_right[0]),
-                                                         slice(0, dest_sub_area.bottom_right[1])))
+    #             data_item = self.result_data_items[index]
+    #             if data_dict['settings']['sum_frames']:
+    #                 data = data_item.get_data(dest_sub_area.slice)
+    #                 data += xdata.data
+    #                 def get_and_display_data_item():
+    #                     data_item.get_partial_data_item((slice(0, dest_sub_area.bottom_right[0]),
+    #                                                      slice(0, dest_sub_area.bottom_right[1])))
 
-                    self.__api.queue_task(get_and_display_data_item)
-                elif number_frames > 1:
-                    data_item.add_data((current_frame,) + dest_sub_area.slice, xdata.data)
-                    def get_and_display_data_item():
-                        data_item.get_partial_data_item((slice(0, current_frame+1),
-                                                         slice(0, dest_sub_area.bottom_right[0]),
-                                                         slice(0, dest_sub_area.bottom_right[1])))
-                        #self.__api.application.document_controllers[0].display_data_item(data_item)
-                    self.__api.queue_task(get_and_display_data_item)
-                else:
-                    data_item.add_data(dest_sub_area.slice, xdata.data)
-                    def get_and_display_data_item():
-                        data_item.get_partial_data_item((slice(0, dest_sub_area.bottom_right[0]),
-                                                         slice(0, dest_sub_area.bottom_right[1])))
-                        #self.__api.application.document_controllers[0].display_data_item(data_item)
-                    self.__api.queue_task(get_and_display_data_item)
-                del data_dict
-                self.__display_queue.task_done()
+    #                 self.__api.queue_task(get_and_display_data_item)
+    #             elif number_frames > 1:
+    #                 data_item.add_data((current_frame,) + dest_sub_area.slice, xdata.data)
+    #                 def get_and_display_data_item():
+    #                     data_item.get_partial_data_item((slice(0, current_frame+1),
+    #                                                      slice(0, dest_sub_area.bottom_right[0]),
+    #                                                      slice(0, dest_sub_area.bottom_right[1])))
+    #                     #self.__api.application.document_controllers[0].display_data_item(data_item)
+    #                 self.__api.queue_task(get_and_display_data_item)
+    #             else:
+    #                 data_item.add_data(dest_sub_area.slice, xdata.data)
+    #                 def get_and_display_data_item():
+    #                     data_item.get_partial_data_item((slice(0, dest_sub_area.bottom_right[0]),
+    #                                                      slice(0, dest_sub_area.bottom_right[1])))
+    #                     #self.__api.application.document_controllers[0].display_data_item(data_item)
+    #                 self.__api.queue_task(get_and_display_data_item)
+    #             del data_dict
+    #             self.__display_queue.task_done()
 
     def update_progress_bar(self, minimum, maximum, value):
         if self.progress_bar:
@@ -502,7 +498,7 @@ class MultiAcquirePanelDelegate:
         # this method may be called more than once.
 
         self.line_edit_widgets = {}
-        self.multi_acquire_controller = MultiAcquire.MultiAcquireController()
+        self.multi_acquire_controller = MultiAcquire.MultiAcquireController(document_controller._document_controller.document_model, document_controller)
         self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
         self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
         self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)
@@ -510,7 +506,7 @@ class MultiAcquirePanelDelegate:
         self.__component_registered_event_listener = None
         self.__component_unregistered_event_listener = None
         self.__scan_frame_parameters_changed_event_listener = None
-        self.__new_data_ready_event_listener = None
+        self.__new_scan_data_ready_event_listener = None
         self._stem_controller = None
         self.eels_camera = None
         self._scan_controller = None
@@ -522,7 +518,6 @@ class MultiAcquirePanelDelegate:
         self.__display_queue = None
         self.__display_thread = None
         self.__acquisition_thread = None
-        self.__data_processed_event = None
 
         self.ui = ui
         self.document_controller = document_controller
@@ -548,8 +543,9 @@ class MultiAcquirePanelDelegate:
                 self.multi_acquire_controller.stem_controller = self.stem_controller
                 self.multi_acquire_controller.camera = self.camera_choice_combo_box.current_item
                 self.multi_acquire_controller.scan_controller = self.scan_controller
-                self.__new_data_ready_event_listener = self.multi_acquire_controller.new_data_ready_event.listen(self.add_to_display_queue)
-                self._start_display_queue_thread()
+                self.result_data_items = dict()
+                self.__new_scan_data_ready_event_listener = self.multi_acquire_controller.new_scan_data_ready_event.listen(self.process_scan_data)
+                # self._start_display_queue_thread()
                 self.__acquisition_thread = threading.Thread(
                         target=self.multi_acquire_controller.acquire_multi_eels_spectrum_image, daemon=True)
                 self.__acquisition_thread.start()
@@ -563,18 +559,47 @@ class MultiAcquirePanelDelegate:
             if current_item:
                 self.multi_acquire_controller.settings['camera_hardware_source_id'] = current_item.hardware_source_id
 
+        def binning_changed(current_item):
+            if current_item == 'Spectra':
+                self.multi_acquire_controller.settings['bin_spectra'] = True
+                self.multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+            elif current_item == 'Images':
+                self.multi_acquire_controller.settings['bin_spectra'] = False
+                self.multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+            elif current_item == 'MultiEELS Spectra':
+                self.multi_acquire_controller.settings['bin_spectra'] = True
+                self.multi_acquire_controller.settings['use_multi_eels_calibration'] = True
+
         camera_choice_row = ui.create_row_widget()
-        settings_button = ui.create_push_button_widget('Settings...')
+        binning_choice_combo_box = ui.create_combo_box_widget()
+        binning_choice_combo_box.on_current_item_changed = binning_changed
+        binning_choice_combo_box.items = ['Spectra', 'Images', 'MultiEELS Spectra']
+        settings_button = ui.create_push_button_widget('\N{GEAR WITHOUT HUB}')
+        style="""
+QPushButton {
+    border-color: transparent;
+    background-color: transparent;
+    border-radius: 20px;
+    width: 40px;
+    height: 40px;
+    font: bold 20px;
+}
+QPushButton:hover {
+    background-color: lightgrey;
+}
+"""
+        settings_button._widget.set_property('stylesheet', style)
         settings_button.on_clicked = settings_button_clicked
         self.camera_choice_combo_box = ui.create_combo_box_widget(item_text_getter=lambda camera: getattr(camera, 'display_name'))
         self.camera_choice_combo_box.on_current_item_changed = camera_changed
         camera_choice_row.add_spacing(5)
-        camera_choice_row.add(ui.create_label_widget('Camera: '))
         camera_choice_row.add(self.camera_choice_combo_box)
+        camera_choice_row.add_spacing(10)
+        camera_choice_row.add(binning_choice_combo_box)
         camera_choice_row.add_stretch()
-        camera_choice_row.add_spacing(5)
+        camera_choice_row.add_spacing(10)
         camera_choice_row.add(settings_button)
-        camera_choice_row.add_spacing(5)
+        camera_choice_row.add_spacing(10)
         self.update_camera_list()
         self.update_current_camera()
         self.__settings_changed_event_listener = self.multi_acquire_controller.settings.settings_changed_event.listen(self.update_current_camera)
@@ -594,7 +619,7 @@ class MultiAcquirePanelDelegate:
         parameter_description_row.add_spacing(5)
         parameter_description_row.add(ui.create_label_widget('#'))
         parameter_description_row.add_spacing(20)
-        parameter_description_row.add(ui.create_label_widget('X Offset (eV)'))
+        parameter_description_row.add(ui.create_label_widget('X Offset'))
         parameter_description_row.add_spacing(25)
         parameter_description_row.add_stretch()
         parameter_description_row.add(ui.create_label_widget('Exposure (ms)'))
@@ -679,15 +704,15 @@ class MultiAcquirePanelDelegate:
         column.add_stretch()
         return column
 
-    def _start_display_queue_thread(self) -> None:
-        # private. used internally and for tests.
-        # initialize any instance variables used for display queue thread.
-        self.__data_processed_event = threading.Event()
-        self.__data_processed_event.clear()
-        self.result_data_items = dict()
-        self.__display_queue = queue.Queue()
-        self.__display_thread = threading.Thread(target=self.process_display_queue)
-        self.__display_thread.start()
+    # def _start_display_queue_thread(self) -> None:
+    #     # private. used internally and for tests.
+    #     # initialize any instance variables used for display queue thread.
+    #     self.__data_processed_event = threading.Event()
+    #     self.__data_processed_event.clear()
+    #     self.result_data_items = dict()
+    #     self.__display_queue = queue.Queue()
+    #     self.__display_thread = threading.Thread(target=self.process_display_queue)
+    #     self.__display_thread.start()
 
     def update_camera_list(self):
         cameras = list(Registry.get_components_by_type('camera_hardware_source'))
@@ -817,9 +842,6 @@ class MultiAcquirePanelDelegate:
                 def auto_dark_subtract_checkbox_changed(check_state):
                     multi_eels_panel.multi_acquire_controller.settings['auto_dark_subtract'] = check_state == 'checked'
 
-                def bin_1D_checkbox_changed(check_state):
-                    multi_eels_panel.multi_acquire_controller.settings['bin_spectra'] = check_state == 'checked'
-
                 def sum_frames_checkbox_changed(check_state):
                     multi_eels_panel.multi_acquire_controller.settings['sum_frames'] = check_state == 'checked'
 
@@ -827,62 +849,55 @@ class MultiAcquirePanelDelegate:
                 row1 = self.ui.create_row_widget()
                 row2 = self.ui.create_row_widget()
                 row3 = self.ui.create_row_widget()
-                row4 = self.ui.create_row_widget()
 
                 x_shifter_label = self.ui.create_label_widget('X-shift control name: ')
-                x_shifter_field = self.ui.create_line_edit_widget(properties={'min-width': 120})
+                x_shifter_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 x_shift_delay_label = self.ui.create_label_widget('X shifter delay (s): ')
                 x_shift_delay_field = self.ui.create_line_edit_widget(properties={'min-width': 40})
                 auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction ')
-                bin_1D_checkbox = self.ui.create_check_box_widget('Bin data in y direction ')
                 sum_frames_checkbox = self.ui.create_check_box_widget('Sum frames')
                 blanker_label = self.ui.create_label_widget('Blanker control name: ')
-                blanker_field = self.ui.create_line_edit_widget(properties={'min-width': 120})
+                blanker_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 blanker_delay_label = self.ui.create_label_widget('Blanker delay (s): ')
                 blanker_delay_field = self.ui.create_line_edit_widget(properties={'min-width': 40})
 
-                row1.add_spacing(5)
+                row1.add_spacing(10)
                 row1.add(x_shifter_label)
                 row1.add(x_shifter_field)
                 row1.add_spacing(10)
                 row1.add(x_shift_delay_label)
                 row1.add(x_shift_delay_field)
-                row1.add_spacing(5)
+                row1.add_spacing(10)
                 row1.add_stretch()
 
-                row3.add_spacing(5)
-                row3.add(blanker_label)
-                row3.add(blanker_field)
-                row3.add_spacing(10)
-                row3.add(blanker_delay_label)
-                row3.add(blanker_delay_field)
-                row3.add_stretch()
-                row3.add_spacing(5)
+                row2.add_spacing(10)
+                row2.add(blanker_label)
+                row2.add(blanker_field)
+                row2.add_spacing(10)
+                row2.add(blanker_delay_label)
+                row2.add(blanker_delay_field)
+                row2.add_stretch()
+                row2.add_spacing(10)
 
-                row4.add_spacing(5)
-                row4.add(bin_1D_checkbox)
-                row4.add_spacing(20)
-                row4.add(auto_dark_subtract_checkbox)
-                row4.add_spacing(20)
-                row4.add(sum_frames_checkbox)
-                row4.add_spacing(5)
-                row4.add_stretch()
+                row3.add_spacing(10)
+                row3.add(auto_dark_subtract_checkbox)
+                row3.add_spacing(10)
+                row3.add(sum_frames_checkbox)
+                row3.add_spacing(10)
+                row3.add_stretch()
 
                 column.add(row1)
-                column.add_spacing(5)
+                column.add_spacing(10)
                 column.add(row2)
-                column.add_spacing(5)
+                column.add_spacing(10)
                 column.add(row3)
-                column.add_spacing(5)
-                column.add(row4)
                 column.add_stretch()
 
-                self.content.add_spacing(5)
+                self.content.add_spacing(10)
                 self.content.add(column)
                 self.content.add_spacing(5)
 
                 auto_dark_subtract_checkbox.on_check_state_changed = auto_dark_subtract_checkbox_changed
-                bin_1D_checkbox.on_check_state_changed = bin_1D_checkbox_changed
                 sum_frames_checkbox.on_check_state_changed = sum_frames_checkbox_changed
                 x_shifter_field.on_editing_finished = x_shifter_finished
                 x_shift_delay_field.on_editing_finished = x_shift_delay_finished
@@ -895,7 +910,6 @@ class MultiAcquirePanelDelegate:
                                         'blanker_delay': blanker_delay_field})
 
                 self.checkboxes.update({'auto_dark_subtract': auto_dark_subtract_checkbox,
-                                        'bin_spectra': bin_1D_checkbox,
                                         'sum_frames': sum_frames_checkbox})
 
                 self.settings_changed()

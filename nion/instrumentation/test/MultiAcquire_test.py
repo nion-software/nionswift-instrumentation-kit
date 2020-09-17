@@ -3,13 +3,14 @@ import copy
 import numpy as np
 import threading
 import unittest
+import time
 
-from nion.instrumentation import camera_base, scan_base
+from nion.instrumentation import camera_base, scan_base, stem_controller
 from nion.swift.model import HardwareSource, DocumentModel
 from nion.swift import Facade, Application
 from nion.swift.test import TestContext
 from nion.utils import Event
-from nion.utils import Registry
+from nion.utils import Registry, Geometry
 from nionswift_plugin.usim import InstrumentDevice, CameraDevice, ScanDevice
 from nion.ui import TestUI
 
@@ -45,6 +46,11 @@ class TestMultiAcquire(unittest.TestCase):
         if is_eels:
             camera_hardware_source.features["is_eels_camera"] = True
             camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0))))
+            # EELS camera only produces data if a valid scan context is presend in intrument controller, so set one up here
+            scan_context = stem_controller.ScanContext()
+            scan_context.update(Geometry.IntSize(128, 128), Geometry.FloatPoint(), 10.0, 0.0)
+            # This is the only method that allows access to the scan context
+            instrument._set_scan_context_probe_position(scan_context, Geometry.FloatPoint(0.5, 0.5))
         camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000, "binning": 2}))
         camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000, "binning": 2}))
         camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters({"exposure_ms": self.exposure * 1000 * 2, "binning": 1}))
@@ -59,8 +65,9 @@ class TestMultiAcquire(unittest.TestCase):
         HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
         return scan_hardware_source
 
-    def _set_up_multi_acquire(self, settings: dict, parameters: list, multi_acquire_instance=None):
-        multi_acquire = multi_acquire_instance or MultiAcquire.MultiAcquireController()
+    def _set_up_multi_acquire(self, settings: dict, parameters: list, multi_acquire_instance=None,
+                              document_controller=None, document_model=None):
+        multi_acquire = multi_acquire_instance or MultiAcquire.MultiAcquireController(document_model, document_controller)
         multi_acquire._MultiAcquireController__savepath = None
         multi_acquire.settings.update(settings)
         multi_acquire.spectrum_parameters[:] = parameters
@@ -69,7 +76,8 @@ class TestMultiAcquire(unittest.TestCase):
     def test_acquire_multi_eels_spectrum_works_and_finishes_in_time(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank',
                     'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
-                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': ''}
+                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                    'use_multi_eels_calibration': False}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
                       {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
                       {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}]
@@ -83,97 +91,63 @@ class TestMultiAcquire(unittest.TestCase):
         total_acquisition_time += settings['x_shift_delay']*2
         total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
         multi_acquire = self._set_up_multi_acquire(settings, parameters)
-        multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera()
+        multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera(is_eels=True)
         # enable binning for speed
         frame_parameters = multi_acquire.camera.get_current_frame_parameters()
         frame_parameters['binning'] = 8
         multi_acquire.camera.set_current_frame_parameters(frame_parameters)
-        event = threading.Event()
-        event2 = threading.Event()
-        data_dict = None
-        def run():
-            nonlocal data_dict
-            data_dict = multi_acquire.acquire_multi_eels_spectrum()
-            event2.set()
-        thread = threading.Thread(target=run, daemon=True)
-        def react_to_event(message):
-            if message['message'] == 'end' and message['description'] == 'single spectrum':
-                event.set()
-        acquisition_event_listener = multi_acquire.acquisition_state_changed_event.listen(react_to_event)
         progress = 0
         def update_progress(minimum, maximum, value):
             nonlocal progress
             progress = minimum + value/maximum
         progress_event_listener = multi_acquire.progress_updated_event.listen(update_progress)
-        thread.start()
-        self.assertTrue(event.wait(total_acquisition_time), msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
-        self.assertAlmostEqual(progress, 1.0)
-        self.assertTrue(event2.wait(total_acquisition_time), msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+        t0 = time.time()
+        data_dict = multi_acquire.acquire_multi_eels_spectrum()
+        elapsed = time.time() - t0
+        progress_event_listener.close()
+        self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
         self.assertEqual(len(data_dict['data_element_list']), len(parameters))
-        del acquisition_event_listener, progress_event_listener
+        self.assertAlmostEqual(progress, 1.0)
 
     def test_data_intensity_scale_is_correct_for_summed_frames(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
-                    'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': ''}
+                    'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                    'use_multi_eels_calibration': True}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
-                      {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 5},
-                      {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}]
+                      {'index': 1, 'offset_x': 0, 'exposure_ms': 8, 'frames': 5},
+                      {'index': 2, 'offset_x': 0, 'exposure_ms': 16, 'frames': 1}]
         multi_acquire = self._set_up_multi_acquire(settings, parameters)
-        multi_acquire._MultiAcquireController__active_settings = copy.deepcopy(multi_acquire.settings)
-        multi_acquire._MultiAcquireController__active_spectrum_parameters = copy.deepcopy(multi_acquire.spectrum_parameters)
-        for parms in parameters:
-            data = np.ones((parms['frames'], 10))*parms['exposure_ms']
-            data_element = {'data': data,
-                            'spatial_calibrations': [{'offset': 0, 'scale': 1, 'units': ''},
-                                                     {'offset': parms['offset_x'], 'scale': 0.123, 'units': 'ev'}],
-                            'intensity_calibration': {'offset': 0, 'scale': 0.9, 'units': 'counts'},
-                            'properties': {'exposure': parms['exposure_ms'], 'counts_per_electron': 37}}
-            data_dict = {'data_element': data_element,
-                         'parameters': {'line_number': 0, 'flyback_pixels': 0, 'frames': parms['frames']}}
-            multi_acquire._MultiAcquireController__queue.put(data_dict)
-        multi_acquire._MultiAcquireController__acquisition_finished_event.set()
-        processed_data = []
-        def react_to_event(data_dict):
-            processed_data.append(np.mean(data_dict['data_element']['data']*
-                                          data_dict['data_element']['intensity_calibration']['scale']))
-        event_listener = multi_acquire.new_data_ready_event.listen(react_to_event)
-        multi_acquire.process_and_send_data()
-        for val in processed_data:
-            self.assertAlmostEqual(val, processed_data[0])
-        del event_listener
+        multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera(is_eels=True)
+        data_dict = multi_acquire.acquire_multi_eels_spectrum()
+
+        calibrated_intensities = []
+        for data_element in data_dict['data_element_list']:
+            calibrated_intensities.append(np.mean(data_element['data'] * data_element['intensity_calibration']['scale']))
+
+        for val in calibrated_intensities:
+            self.assertAlmostEqual(val, calibrated_intensities[0], delta=100)
 
     def test_data_intensity_scale_is_correct_for_non_summed_frames(self):
-        settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'x_units_per_ev': 1, 'blanker': 'C_Blank',
-                    'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0,  'auto_dark_subtract': False,
-                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': False, 'camera_hardware_source_id': ''}
+        settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
+                    'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
+                    'blanker_delay': 0.05, 'sum_frames': False, 'camera_hardware_source_id': '',
+                    'use_multi_eels_calibration': True}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
-                      {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 5},
-                      {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}]
+                      {'index': 1, 'offset_x': 0, 'exposure_ms': 8, 'frames': 5},
+                      {'index': 2, 'offset_x': 0, 'exposure_ms': 16, 'frames': 1}]
         multi_acquire = self._set_up_multi_acquire(settings, parameters)
-        multi_acquire._MultiAcquireController__active_settings = copy.deepcopy(multi_acquire.settings)
-        multi_acquire._MultiAcquireController__active_spectrum_parameters = copy.deepcopy(multi_acquire.spectrum_parameters)
-        for parms in parameters:
-            data = np.ones((parms['frames'], 10))*parms['exposure_ms']
-            data_element = {'data': data,
-                            'spatial_calibrations': [{'offset': 0, 'scale': 1, 'units': ''},
-                                                     {'offset': parms['offset_x'], 'scale': 0.123, 'units': 'ev'}],
-                            'intensity_calibration': {'offset': 0, 'scale': 0.9, 'units': 'counts'},
-                            'properties': {'exposure': parms['exposure_ms'], 'counts_per_electron': 37}}
-            data_dict = {'data_element': data_element,
-                         'parameters': {'line_number': 0, 'flyback_pixels': 0, 'frames': parms['frames']}}
-            multi_acquire._MultiAcquireController__queue.put(data_dict)
-        multi_acquire._MultiAcquireController__acquisition_finished_event.set()
-        processed_data = []
-        def react_to_event(data_dict):
-            processed_data.append(np.mean(data_dict['data_element']['data']*
-                                          data_dict['data_element']['intensity_calibration']['scale']))
-        event_listener = multi_acquire.new_data_ready_event.listen(react_to_event)
-        multi_acquire.process_and_send_data()
-        for val in processed_data:
-            self.assertAlmostEqual(val, processed_data[0])
-        del event_listener
+        multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera(is_eels=True)
+        data_dict = multi_acquire.acquire_multi_eels_spectrum()
 
+        calibrated_intensities = []
+        for data_element in data_dict['data_element_list']:
+            calibrated_intensities.append(np.mean(data_element['data'] * data_element['intensity_calibration']['scale']))
+
+        for val in calibrated_intensities:
+            self.assertAlmostEqual(val, calibrated_intensities[0], delta=100)
+
+    @unittest.skip('Not updated to new version yet')
     def test_acquire_multi_eels_spectrum_produces_data_with_correct_number_of_dimensional_calibrations(self):
         for sum_frames in [True, False]:
             with self.subTest(sum_frames=sum_frames):
@@ -213,7 +187,6 @@ class TestMultiAcquire(unittest.TestCase):
                     with self.subTest(parameters=parameters[i]):
                         self.assertEqual(len(data_element['spatial_calibrations']), len(data_element['data'].shape))
 
-    @unittest.skip("MultiSI requires non-thread data item updates")
     def test_acquire_multi_eels_spectrum_image_produces_data_of_correct_shape(self):
         app = Application.Application(TestUI.UserInterface(), set_global=False)
         for sum_frames in [True, False]:
@@ -237,11 +210,13 @@ class TestMultiAcquire(unittest.TestCase):
                                 total_acquisition_time += 0.15
                                 total_acquisition_time += settings['x_shift_delay']*2
                             total_acquisition_time += settings['x_shift_delay']*2
-                            api = Facade.get_api('~1.0', '~1.0')
-                            si_receiver = MultiAcquirePanel.MultiAcquirePanelDelegate(api)
-                            si_receiver._close_listeners_for_test()
-                            cm.callback(si_receiver.close)
-                            multi_acquire = self._set_up_multi_acquire(settings, parameters, multi_acquire_instance=si_receiver.multi_acquire_controller)
+                            # api = Facade.get_api('~1.0', '~1.0')
+                            # si_receiver = MultiAcquirePanel.MultiAcquirePanelDelegate(api)
+                            # si_receiver._close_listeners_for_test()
+                            # cm.callback(si_receiver.close)
+                            multi_acquire = self._set_up_multi_acquire(settings, parameters,
+                                                                       document_controller=Facade.DocumentWindow(document_controller),
+                                                                       document_model=document_model)
                             multi_acquire.stem_controller, multi_acquire.camera = self._get_stem_controller_and_camera(is_eels=True)
                             multi_acquire.scan_controller = self._get_scan_controller(multi_acquire.stem_controller)
                             # enable binning for speed
@@ -259,26 +234,24 @@ class TestMultiAcquire(unittest.TestCase):
                                 document_controller.periodic()
                             progress_event_listener = multi_acquire.progress_updated_event.listen(update_progress)
                             cm.callback(progress_event_listener.close)
-                            new_data_ready_event_listener = multi_acquire.new_data_ready_event.listen(si_receiver.add_to_display_queue)
-                            cm.callback(new_data_ready_event_listener.close)
-                            def acquisition_state_changed(info_dict):
-                                if info_dict.get('message') in {'end processing', 'exception'}:
-                                    si_receiver._data_processed_event.set()
-                            acquisition_state_changed_event_listener = multi_acquire.acquisition_state_changed_event.listen(acquisition_state_changed)
-                            cm.callback(acquisition_state_changed_event_listener.close)
-                            si_receiver._start_display_queue_thread()
+                            # def acquisition_state_changed(info_dict):
+                            #     if info_dict.get('message') in {'end processing', 'exception'}:
+                            #         si_receiver._data_processed_event.set()
+                            # acquisition_state_changed_event_listener = multi_acquire.acquisition_state_changed_event.listen(acquisition_state_changed)
+                            # cm.callback(acquisition_state_changed_event_listener.close)
+                            # si_receiver._start_display_queue_thread()
                             # starttime = time.time()
                             multi_acquire.camera.start_playing()
                             multi_acquire.acquire_multi_eels_spectrum_image()
                             document_controller.periodic()
-                            self.assertTrue(si_receiver._data_processed_event.wait(10))
+                            # self.assertTrue(si_receiver._data_processed_event.wait(10))
                             self.assertGreaterEqual(progress, 1)
                             #self.assertLess(time.time() - starttime, total_acquisition_time)
                             multi_acquire_data_items = list()
                             for data_item in document_model.data_items:
                                 if 'MultiAcquire' in data_item.title:
                                     multi_acquire_data_items.append(data_item)
-                            self.assertEqual(len(multi_acquire_data_items), len(parameters) * 2)
+                            self.assertEqual(len(multi_acquire_data_items), len(parameters))
                             for data_item in multi_acquire_data_items:
                                 with self.subTest():
                                     camera_dims = multi_acquire.camera.get_expected_dimensions(frame_parameters['binning'])
@@ -292,10 +265,10 @@ class TestMultiAcquire(unittest.TestCase):
                                         total_shape += camera_dims[1:]
                                     else:
                                         total_shape += camera_dims
-                                    if 'HAADF' in data_item.title:
-                                        self.assertSequenceEqual(data_item.data.shape, haadf_shape)
-                                    else:
-                                        self.assertSequenceEqual(data_item.data.shape, total_shape)
+
+# TODO: Setup receiver for HAADF data item and check their shape, too
+
+                                    self.assertSequenceEqual(data_item.data.shape, total_shape)
 
 if __name__ == '__main__':
     unittest.main()
