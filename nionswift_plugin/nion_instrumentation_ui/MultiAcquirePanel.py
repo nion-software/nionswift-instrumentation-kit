@@ -127,7 +127,7 @@ class MultiAcquirePanelDelegate:
     def __init__(self, api):
         self.__api = api
         self.panel_id = 'MultiAcquire-Panel'
-        self.panel_name = 'Multi-Acquire'
+        self.panel_name = 'MultiAcquire'
         self.panel_positions = ['left', 'right']
         self.panel_position = 'right'
         self.api = api
@@ -275,9 +275,10 @@ class MultiAcquirePanelDelegate:
                 display_item.append_display_data_channel_for_data_item(data_item._data_item if data_item else new_data_item._data_item)
                 start_ev = data_dict['parameter_list'][i]['start_ev']
                 end_ev = data_dict['parameter_list'][i]['end_ev']
-                display_layers.append({'label': '#{:d}: {:g}-{:g} eV, {:g}x{:g} ms{}'.format(index+1,
+                display_layers.append({'label': '#{:d}: {:g}-{:g}{}, {:g}x{:g} ms{}'.format(index+1,
                                                                                             start_ev,
                                                                                             end_ev,
+                                                                                            units_str,
                                                                                             number_frames,
                                                                                             exposure_ms,
                                                                                             summed),
@@ -543,11 +544,10 @@ QPushButton:hover {
         parameter_description_row.add_spacing(5)
         parameter_description_row.add(ui.create_label_widget('#'))
         parameter_description_row.add_spacing(20)
-        parameter_description_row.add(ui.create_label_widget('X Offset'))
-        parameter_description_row.add_spacing(25)
+        parameter_description_row.add(ui.create_label_widget('Offset'))
+        parameter_description_row.add_spacing(36)
         parameter_description_row.add_stretch()
         parameter_description_row.add(ui.create_label_widget('Exposure (ms)'))
-        parameter_description_row.add_spacing(25)
         parameter_description_row.add_stretch()
         parameter_description_row.add(ui.create_label_widget('Frames'))
         parameter_description_row.add_spacing(5)
@@ -565,14 +565,17 @@ QPushButton:hover {
         add_remove_parameters_row.add(add_parameters_button)
         add_remove_parameters_row.add_spacing(5)
         add_remove_parameters_row.add(remove_parameters_button)
-        add_remove_parameters_row.add_spacing(20)
-        add_remove_parameters_row.add_stretch()
-
-        progress_row = ui.create_row_widget()
-        progress_row.add_spacing(180)
+        add_remove_parameters_row.add_spacing(90)
+        # add_remove_parameters_row.add_stretch()
         self.progress_bar = ui.create_progress_bar_widget()
-        progress_row.add(self.progress_bar)
-        progress_row.add_spacing(5)
+        add_remove_parameters_row.add(self.progress_bar)
+        add_remove_parameters_row.add_spacing(5)
+
+        # progress_row = ui.create_row_widget()
+        # progress_row.add_spacing(180)
+        # self.progress_bar = ui.create_progress_bar_widget()
+        # progress_row.add(self.progress_bar)
+        # progress_row.add_spacing(5)
 
         time_estimate_row = ui.create_row_widget()
         time_estimate_row.add_spacing(6)
@@ -591,9 +594,9 @@ QPushButton:hover {
             self.__scan_frame_parameters_changed_event_listener = self.scan_controller.frame_parameters_changed_event.listen(frame_parameters_changed)
         self.update_camera_list()
 
-        self.start_button = ui.create_push_button_widget('Start Multi-Acquire')
+        self.start_button = ui.create_push_button_widget('Start MultiAcquire')
         self.start_button.on_clicked = start_clicked
-        self.start_si_button = ui.create_push_button_widget('Start Multi-Acquire spectrum image')
+        self.start_si_button = ui.create_push_button_widget('Start MultiAcquire spectrum image')
         self.start_si_button.on_clicked = start_si_clicked
         start_row = ui.create_row_widget()
         start_row.add_spacing(5)
@@ -606,9 +609,9 @@ QPushButton:hover {
         column = ui.create_column_widget()
         column.add_spacing(5)
         column.add(camera_choice_row)
-        column.add_spacing(5)
-        column.add(change_parameters_row)
         column.add_spacing(10)
+        column.add(change_parameters_row)
+        column.add_spacing(5)
         column.add(parameter_description_row)
         column.add_spacing(10)
         self.parameter_column = ui.create_column_widget()
@@ -618,13 +621,13 @@ QPushButton:hover {
         column.add(self.parameter_column)
         column.add_spacing(5)
         column.add(add_remove_parameters_row)
-        column.add_spacing(5)
-        column.add(progress_row)
-        column.add_spacing(10)
+        # column.add_spacing(5)
+        # column.add(progress_row)
+        column.add_spacing(15)
         column.add(time_estimate_row)
         column.add_spacing(5)
         column.add(start_row)
-        column.add_spacing(5)
+        column.add_spacing(10)
         column.add_stretch()
         # Make sure the binning combo box shows the actual settings
         self.update_binning_combo_box()
@@ -788,9 +791,9 @@ QPushButton:hover {
                 row2 = self.ui.create_row_widget()
                 row3 = self.ui.create_row_widget()
 
-                x_shifter_label = self.ui.create_label_widget('X-shift control name: ')
+                x_shifter_label = self.ui.create_label_widget('Offset control name: ')
                 x_shifter_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
-                x_shift_delay_label = self.ui.create_label_widget('X shifter delay (s): ')
+                x_shift_delay_label = self.ui.create_label_widget('Offset delay (s): ')
                 x_shift_delay_field = self.ui.create_line_edit_widget(properties={'min-width': 40})
                 auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction ')
                 sum_frames_checkbox = self.ui.create_check_box_widget('Sum frames')

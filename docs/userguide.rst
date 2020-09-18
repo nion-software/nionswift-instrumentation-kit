@@ -62,50 +62,56 @@ The resulting data will be a collection (one dimension) of your selected data ty
 
 Using the Multi-Acquire Panel
 -----------------------------
-A Nion Swift plug-in that acquires and displays multiple EEL spectra with different energy offsets.
+
+This plugin allows you to acquire series of images/spectra or whole synchronized scans with multiple offsets and exposure settings.
 
 Main window
-+++++++++++
+^^^^^^^^^^^
+
 Get the plug-in main window by selecting it from the "Window" menu.
 
 .. image:: resources/multi_acquire_main_window.png
+   :width: 350
 
-This plugin allows you to acquire series of EEL spectra with multiple energy offsets and exposure settings. The acquisitions can
-be set up with the table in the main window. Every spectrum corresponds to one line. Use the "+" and "-" buttons to add or remove
-lines. The first column shows the spectrum number, which will also be added to the titles of the result data items.
-You have the option to acquire the programmed sequence of spectra as individual spectra or as spectrum images by clicking
-either on "Start Multi-Acquire" or "Start Multi-Acquire spectrum image".
-Note that for individual spectra, the progress bar will only update once per spectrum (i.e. if only one spectrum is defined it will jump
-straight from 0 to 100%). For spectrum images, the progress bar will update once per acquired line of a spectrum image.
-The times shown above the two "start" buttons are the estimated acquisition times for the two modes.
+The acquisitions can be set up with the table in the main window. Each returned data item corresponds to one line in the configuration table.
+Use the "+" and "-" buttons to add or remove lines. The first column shows the data item number, which will also be added to
+the titles of the results. You have the option to acquire the programmed sequence as individual spectra/images or
+as spectrum images/4D images by clicking either on *Start MultiAcquire* or *Start MultiAcquire spectrum image*.
+Note that for individual spectra/images, the progress bar will only update once per line in the configuration table (i.e. if only one spectrum is defined it will jump
+straight from 0 to 100%). For spectrum images/4D images, the progress bar will update once per acquired line of a spectrum image.
+The left dropdown menu at the top of the main window lets you select the camera that is used to acquire the data.
+The right dropdown menu lets you select between different output styles for the acquired data:
 
+- *Spectra:* Bins the camera frames in y-direction which results in spectra or spectrum images being returned.
+- *Images:* Returns the full camera frames which results in images or 4D data sets being returned.
+- *MultiEELS Spectra:* Also bins the camera frames in y-direction but additionally calibrates the returned data
+  in e\ :sup:`-`\ /eV/s. If you are not acquiring a spectrum image, this mode will also create one additional data
+  item that contains all acquired spectra as multiple line plots (see image below for an example).
 
-Settings Window
-+++++++++++++++
-You can access the settings menu via the "Settings..." button in the top-right corner of the main window.
-
-.. image:: resources/multi_acquire_settings_window.png
-
-In order to set the energy offsets, the plugin needs to know which control it has to change in AS2. Type the name of
-this control into the "X-shift control name" field. If the field is empty, x-shifts are disabled, regardless of what
-is configured in the main window.
-The checkboxes in the bottom row allow you to configure how the data will be returned:
-
-* "Bin data in y-direction" will sum the images in vertical direction to obtain spectra.
-* "Auto dark subtraction" will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data.
-  Make sure "Blanker control name" is set correctly, otherwise this mode will fail. Note that this settings has no effect for spectrum images as it will always be deactivated in this mode.
-* "Sum frames" will sum all frames that were acquired for each spectrum (as specified by the column "frames" in the main window). If this is off, the plug-in will return a stack for each spectrum.
-
-Output
-++++++
-The plug-in will create one result data item per spectrum. These data items can be either single spectra, single images,
-stacks of spectra or stacks of images, depending on the settings. When you are acquring spectrum images, the result data items
-will be either single spectrum images, single 4D images, stacks of spectrum images or stacks of 4d images.
-Additionaly the plug-in will create a data item that contains all acquired spectra as multiple line plots.
-This last data item will only be created if "Bin data in y-direction"
-is selected in the settings window and if you are not acquiring spectrum images.
+The plug-in will always create one result data item per line in the configuration table. If *frames* is larger than 1,
+the corresponding result data item will be a stack of the data type that is configured via the dropdown menu.
 
 .. image:: resources/multi_acquire_output_stacked.png
+
+Settings Window
+^^^^^^^^^^^^^^^
+
+.. |gear| unicode:: U+26ED .. gear without hub
+
+You can access the settings menu via the "|gear|" button in the top-right corner of the main window.
+
+.. image:: resources/multi_acquire_settings_window.png
+   :width: 500
+
+In order to set the offsets, the plugin needs to know which control it has to change in AS2. Type the name of
+this control into the *Offset control name* field. If the field is empty, offsets are disabled, regardless of what
+is configured in the main window.
+
+The checkboxes in the bottom row allow you to configure how the data will be returned:
+
+- *Auto dark subtraction* will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data.
+  Make sure *Blanker control name* is set correctly, otherwise this mode will fail. Note that this settings has no effect for spectrum images as it will always be deactivated in this mode.
+- *Sum frames* will sum all frames that were acquired for each spectrum (as specified by the column *frames* in the main window). If this is off, the plug-in will return a stack for each spectrum.
 
 .. _multiple-shift-acquire-panel:
 
