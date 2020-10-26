@@ -11,6 +11,8 @@ import numpy
 import threading
 import typing
 import uuid
+import collections
+import operator
 
 # local libraries
 from nion.data import Calibration
@@ -33,6 +35,7 @@ from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import Stream
+from nion.utils import ListModel
 from . import HardwareSourceChoice
 
 if typing.TYPE_CHECKING:
@@ -88,19 +91,24 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.__data_item_transaction = None
         self.__data_and_metadata = None
+        self.__grab_sync_info = grab_sync_info
 
     def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
         scan_calibrations = grab_sync_info.scan_calibrations
         data_calibrations = grab_sync_info.data_calibrations
         data_intensity_calibration = grab_sync_info.data_intensity_calibration
-        data_item = DataItem.DataItem(large_format=True)
+        _, data_shape = self.__calculate_axes_order_and_data_shape(grab_sync_info.axes_descriptor, grab_sync_info.scan_size, grab_sync_info.camera_readout_size_squeezed)
+        large_format = numpy.prod(data_shape) > 2048**2 * 10
+        data_item = DataItem.DataItem(large_format=large_format)
         data_item.title = f"{title_base} ({channel_name})"
         self.__document_model.append_data_item(data_item)
-        if hasattr(data_item, "reserve_data"):
-            scan_size = tuple(grab_sync_info.scan_size)
-            camera_readout_size = grab_sync_info.camera_readout_size_squeezed
-            data_shape = scan_size + camera_readout_size
-            data_descriptor = DataAndMetadata.DataDescriptor(False, 2, len(data_shape) - 2)
+        # Only call "reserve_data" for HDF5 backed data items because it causes problems for ndata backed items.
+        if large_format:
+            axes_descriptor = grab_sync_info.axes_descriptor
+            is_sequence = axes_descriptor.sequence_axes is not None
+            collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+            datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+            data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
             data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
         data_item.dimensional_calibrations = scan_calibrations + data_calibrations
         data_item.intensity_calibration = data_intensity_calibration
@@ -120,6 +128,27 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
         self.__document_model.begin_data_item_live(self.__data_item)
 
+    def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.ScanHardwareSource.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
+        # axes_descriptor provides the information needed to re-order the axes of the result data approprietly.
+        axes_order = []
+        if axes_descriptor.sequence_axes:
+            axes_order.extend(axes_descriptor.sequence_axes)
+        if axes_descriptor.collection_axes:
+            axes_order.extend(axes_descriptor.collection_axes)
+        if axes_descriptor.data_axes:
+            axes_order.extend(axes_descriptor.data_axes)
+
+        data_shape = tuple(scan_shape) + camera_readout_size
+
+        assert len(axes_order) == len(data_shape)
+
+        data_shape = numpy.array(data_shape)[axes_order].tolist()
+        is_sequence = axes_descriptor.sequence_axes is not None
+        if is_sequence and data_shape[0] == 1:
+            data_shape = data_shape[1:]
+
+        return axes_order, data_shape
+
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
         # there are a few techniques for getting data into a data item. this method prefers directly calling the
         # document model method update_data_item_partial, which is thread safe. if that method is not available, it
@@ -128,14 +157,50 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         # but we skip that so that the updates fit into this class instead.
         update_data_item_partial = getattr(self.__document_model, "update_data_item_partial", None)
         if callable(update_data_item_partial):
-            collection_rank = len(tuple(scan_shape))
-            data_metadata = DataAndMetadata.DataMetadata(
-                (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype),
-                data_and_metadata.intensity_calibration,
-                data_and_metadata.dimensional_calibrations, metadata=data_and_metadata.metadata,
-                data_descriptor=DataAndMetadata.DataDescriptor(False, collection_rank, len(data_and_metadata.data_shape) - collection_rank))
-            src_slice = sub_area.slice + (Ellipsis,)
-            dst_slice = dest_sub_area.slice + (Ellipsis,)
+            axes_descriptor = self.__grab_sync_info.axes_descriptor
+            # The low-level always produces a collection of 1d or 2d data. Re-oder axes and remove length-1-axes below.
+            # Calibrations, data descriptor and shape estimates are updated accordingly.
+            dimensional_calibrations = data_and_metadata.dimensional_calibrations
+            data = data_and_metadata.data
+            axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
+            assert len(axes_order) == data.ndim
+            data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
+            dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
+            is_sequence = axes_descriptor.sequence_axes is not None
+            collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+            datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+
+            src_slice = tuple()
+            dst_slice = tuple()
+            for index in axes_order:
+                if index >= len(sub_area.slice):
+                    src_slice += (slice(None),)
+                else:
+                    src_slice += (sub_area.slice[index],)
+                if index >= len(dest_sub_area.slice):
+                    dst_slice += (slice(None),)
+                else:
+                    dst_slice += (dest_sub_area.slice[index],)
+
+            if is_sequence and data.shape[0] == 1:
+                data = numpy.squeeze(data, axis=0)
+                dimensional_calibrations = dimensional_calibrations[1:]
+                src_slice = src_slice[1:]
+                dst_slice = dst_slice[1:]
+                is_sequence = False
+            data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
+
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
+                                                                      dimensional_calibrations,
+                                                                      data_and_metadata.metadata, None,
+                                                                      data_descriptor, None,
+                                                                      None)
+            data_metadata = DataAndMetadata.DataMetadata((tuple(data_shape), data_and_metadata.data_dtype),
+                                                         data_and_metadata.intensity_calibration,
+                                                         data_and_metadata.dimensional_calibrations,
+                                                         metadata=data_and_metadata.metadata,
+                                                         data_descriptor=data_descriptor)
+
             update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
         elif state == "complete":
             # hack for Swift 0.14
@@ -244,6 +309,15 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         return adjustments
 
 
+ProcessingOption = collections.namedtuple("ProcessingOption", ["processing_id", "display_name"])
+
+
+class ScanAcquisitionProcessing(enum.Enum):
+    NONE = ProcessingOption(None,  _("Images"))
+    SUM_PROJECT = ProcessingOption("sum_project", _("Spectra"))
+    SUM_MASKED = ProcessingOption("sum_masked", _("Virtual Detectors"))
+
+
 class ScanAcquisitionController:
 
     def __init__(self, api, document_controller: Facade.DocumentWindow, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
@@ -255,7 +329,7 @@ class ScanAcquisitionController:
         self.acquisition_state_changed_event = Event.Event()
         self.__thread = None
 
-    def start(self, sum_frames: bool) -> None:
+    def start(self, processing: ScanAcquisitionProcessing) -> None:
 
         document_window = self.__document_controller
 
@@ -276,8 +350,7 @@ class ScanAcquisitionController:
 
         camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
 
-        if sum_frames:
-            camera_frame_parameters["processing"] = "sum_project"
+        camera_frame_parameters["processing"] = processing.value.processing_id
 
         grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
             scan_frame_parameters=scan_frame_parameters,
@@ -389,6 +462,8 @@ class PanelDelegate:
         self.__exposure_time_ms_value_model = None
         self.__scan_hardware_source_choice = None
         self.__camera_hardware_source_choice = None
+        self.__styles_list_model = None
+        self.__styles_list_property_model = None
         self.__camera_width = 0
         self.__camera_height = 0
         self.__scan_specifier = ScanSpecifier()
@@ -495,7 +570,13 @@ class PanelDelegate:
 
         column = ui.create_column_widget()
 
-        self.__style_combo_box = ui.create_combo_box_widget([_("Spectra"), _("Images")])
+        self.__styles_list_model = ListModel.ListModel(items=[ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE])
+        self.__styles_list_property_model = ListModel.ListPropertyModel(self.__styles_list_model)
+        self.__style_combo_box = ui.create_combo_box_widget(self.__styles_list_property_model.value, item_text_getter=operator.attrgetter("value.display_name"))
+        self.__style_combo_box._widget.set_property("min-width", 100)
+        items_binding = Binding.PropertyBinding(self.__styles_list_property_model, "value")
+        items_binding.source_setter = None
+        self.__style_combo_box._widget.bind_items(items_binding)
         self.__style_combo_box.current_index = 0
 
         self.__acquire_button = ui.create_push_button_widget(_("Acquire"))
@@ -592,6 +673,10 @@ class PanelDelegate:
             self.disconnect_camera_hardware_source()
             if hardware_source:
                 self.connect_camera_hardware_source(hardware_source)
+                if hardware_source.features.get("has_masked_sum_option"):
+                    self.__styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE, ScanAcquisitionProcessing.SUM_MASKED]
+                else:
+                    self.__styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE]
 
         self.__camera_hardware_changed_event_listener = self.__camera_hardware_source_choice.hardware_source_changed_event.listen(camera_hardware_source_changed)
         camera_hardware_source_changed(self.__camera_hardware_source_choice.hardware_source)
@@ -644,7 +729,7 @@ class PanelDelegate:
                 if scan_hardware_source and camera_hardware_source:
                     self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source, self.__scan_specifier)
                     self.__acquisition_state_changed_event_listener = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(acquisition_state_changed)
-                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_index == 0)
+                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_item)
 
         self.__acquire_button.on_clicked = acquire_sequence
 
@@ -733,6 +818,12 @@ class PanelDelegate:
             self.__scan_hardware_source_stream.remove_ref()
         if self.__camera_hardware_source_stream:
             self.__camera_hardware_source_stream.remove_ref()
+        if self.__styles_list_model:
+            self.__styles_list_model.close()
+            self.__styles_list_model = None
+        if self.__styles_list_property_model:
+            self.__styles_list_property_model.close()
+            self.__styles_list_property_model = None
 
 
 class ScanAcquisitionPreferencePanel:

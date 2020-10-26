@@ -13,6 +13,7 @@ import os
 import pathlib
 import typing
 import traceback
+import uuid
 
 # typing
 # None
@@ -27,6 +28,7 @@ from nion.data import DataAndMetadata
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
+from nion.swift.model import Graphics
 from nion.utils import Event
 from nion.utils import Process
 from nion.utils import Registry
@@ -550,6 +552,68 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera.set_frame_parameters(self.__frame_parameters)
 
 
+class Mask:
+    def __init__(self):
+        self._layers = list()
+        self.name = None
+        self.uuid = uuid.uuid4()
+
+    def add_layer(self, graphic: Graphics.Graphic, value: typing.Union[float, str], inverted: bool = False):
+        self._layers.append({"value": value, "inverted": inverted, "graphic_dict": graphic.mime_data_dict()})
+
+    def to_dict(self):
+        return {"name": self.name, "uuid": str(self.uuid), "layers": self._layers}
+
+    def as_dict(self):
+        return self.to_dict()
+
+    @classmethod
+    def from_dict(cls, mask_description: typing.Mapping) -> "Mask":
+        mask = cls()
+        mask.name = mask_description["name"]
+        if "uuid" in mask_description:
+            mask.uuid = uuid.UUID(mask_description["uuid"])
+        mask._layers = mask_description["layers"]
+        return mask
+
+    def get_mask_array(self, data_shape: typing.Sequence[int]) -> numpy.ndarray:
+        if len(self._layers) == 0:
+            return numpy.ones(data_shape)
+        mask = numpy.zeros(data_shape)
+        for layer in self._layers:
+            graphic_dict = layer["graphic_dict"]
+            value = layer["value"]
+            inverted = layer.get("inverted", False)
+            graphic = Graphics.factory(lambda t: graphic_dict["type"])
+            graphic.read_from_mime_data(graphic_dict)
+            if graphic:
+                part_mask = graphic.get_mask(data_shape).astype(numpy.bool)
+                if inverted:
+                    part_mask = numpy.logical_not(part_mask)
+                if value == "grad_x":
+                    if hasattr(graphic, "center"):
+                        center = graphic.center
+                    else:
+                        center = (0.5, 0.5)
+                    center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])
+                    grad = numpy.tile(numpy.linspace(-center_coords[1], center_coords[1], data_shape[1]), (data_shape[0], 1))
+                    mask[part_mask] = grad[part_mask]
+                elif value == "grad_y":
+                    if hasattr(graphic, "center"):
+                        center = graphic.center
+                    else:
+                        center = (0.5, 0.5)
+                    center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])
+                    grad = numpy.tile(numpy.linspace(-center_coords[0], center_coords[0], data_shape[0]), (data_shape[1], 1)).T
+                    mask[part_mask] = grad[part_mask]
+                else:
+                    mask[part_mask] = value
+        return mask
+
+    def copy(self) -> 'Mask':
+        return Mask.from_dict(copy.deepcopy(self.to_dict()))
+
+
 class CameraSettings:
     """Document and define types for camera settings.
 
@@ -666,6 +730,15 @@ class CameraSettings:
         """Return the current settings index."""
         return 0
 
+#    @property
+#    def masks(self) -> typing.Sequence[Mask]:
+        """
+        If the camera supports masked summing for synchronized acquisition, this attribute is used to access the masks
+        provided by the camera. Whether this attribute exists or not is also used to decide if the camera supports
+        masked summing.
+        Note that the active masks which will be used in the acquisition are defined in the CameraFrameParameters object.
+        """
+
     def get_mode(self) -> str:
         """Return the current mode (named version of current settings index)."""
         return str()
@@ -748,6 +821,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
             self.processor = HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0)))
         self.features["has_processed_channel"] = self.processor is not None
+        if hasattr(camera_settings, "masks"):
+            self.features["has_masked_sum_option"] = True
         # future version will also include the processed channel type;
         # candidates for the official name are "vertical_sum" or "vertical_projection_profile"
 
@@ -1031,13 +1106,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.get("binning", 1)
         data_shape = self.get_expected_dimensions(binning)
-        if processing != "sum_project":
+        if processing in {"sum_project", "sum_masked"}:
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (x_calibration,)
+        else:
             y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
             x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
             return (y_calibration, x_calibration)
-        else:
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
-            return (x_calibration,)
+
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
         return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")
@@ -1177,12 +1253,13 @@ class CameraFrameParameters(dict):
         self.binning = self.get("binning", 1)
         self.processing = self.get("processing")
         self.integration_count = self.get("integration_count")
+        self.active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in self.get("active_masks", [])]
 
     def __copy__(self):
-        return self.__class__(copy.copy(dict(self)))
+        return self.__class__(copy.copy(self.as_dict()))
 
     def __deepcopy__(self, memo):
-        deepcopy = self.__class__(copy.deepcopy(dict(self)))
+        deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
         memo[id(self)] = deepcopy
         return deepcopy
 
@@ -1192,6 +1269,8 @@ class CameraFrameParameters(dict):
             "binning": self.binning,
             "processing": self.processing,
             "integration_count": self.integration_count,
+            "sum_channels": self.sum_channels,
+            "active_masks": [mask.as_dict() for mask in self.active_masks],
         }
 
 

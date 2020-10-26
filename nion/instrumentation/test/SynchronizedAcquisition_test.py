@@ -191,6 +191,27 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             finally:
                 camera_data_channel.stop()
 
+    def test_grab_synchronized_camera_data_channel_basic_sum_masked(self):
+        with self.__test_context() as test_context:
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_masked"
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
+            camera_data_channel.start()
+            try:
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            finally:
+                camera_data_channel.stop()
+
     def test_grab_rotated_synchronized_eels(self):
         # tests whether rotation was applied, as judged by the resulting metadata
         with self.__test_context() as test_context:
@@ -565,10 +586,17 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(True)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
             scan_acquisition_controller._wait()
-            self.assertEqual((4, 4, 512), document_model.data_items[-1].data_shape)
-            metadata = document_model.data_items[-1].metadata
+            document_controller.periodic()
+            si_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title:
+                    si_data_item = data_item
+                    break
+            self.assertIsNotNone(si_data_item)
+            self.assertEqual((4, 4, 512), si_data_item.data_shape)
+            metadata = si_data_item.metadata
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
@@ -589,13 +617,61 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(True)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
             scan_acquisition_controller._wait()
-            self.assertEqual((4, 4, 512), document_model.data_items[-1].data_shape)
-            metadata = document_model.data_items[-1].metadata
-            # import pprint ; print(pprint.pformat(metadata))
-            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])
+
+            document_controller.periodic()
+            si_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title:
+                    si_data_item = data_item
+                    break
+            self.assertIsNotNone(si_data_item)
+            self.assertEqual((4, 4, 512), si_data_item.data_shape)
+            metadata = si_data_item.metadata
+            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
+    def test_scan_acquisition_controller_sum_masked(self):
+        masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
+        for masks in masks_list:
+            with self.subTest(number_masks=len(masks)):
+                with self.__test_context() as test_context:
+                    document_controller = test_context.document_controller
+                    document_model = test_context.document_model
+                    scan_hardware_source = test_context.scan_hardware_source
+                    camera_hardware_source = test_context.camera_hardware_source
+                    camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
+                    camera_frame_parameters.active_masks = masks
+                    camera_hardware_source.set_frame_parameters(0, camera_frame_parameters)
+                    self._acquire_one(document_controller, scan_hardware_source)
+                    scan_hardware_source.subscan_enabled = True
+                    scan_specifier = ScanAcquisition.ScanSpecifier()
+                    scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+                    scan_specifier.size = 4, 4
+                    scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                            Facade.DocumentWindow(document_controller),
+                                                                                            Facade.HardwareSource(scan_hardware_source),
+                                                                                            Facade.HardwareSource(camera_hardware_source),
+                                                                                            scan_specifier)
+                    scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_MASKED)
+                    scan_acquisition_controller._wait()
+                    document_controller.periodic()
+                    si_data_item = None
+                    for data_item in document_model.data_items:
+                        if "Spectrum Image" in data_item.title:
+                            si_data_item = data_item
+                            break
+                    self.assertIsNotNone(si_data_item)
+                    if len(masks) > 1:
+                        self.assertTrue(si_data_item.is_sequence)
+                        self.assertEqual((len(masks), 4, 4), si_data_item.data_shape)
+                    else:
+                        self.assertFalse(si_data_item.is_sequence)
+                        self.assertEqual((4, 4), si_data_item.data_shape)
+                    metadata = si_data_item.metadata
+                    self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
+                    self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     def test_update_from_device_puts_current_profile_into_valid_state(self):
         with self.__test_context() as test_context:
@@ -613,7 +689,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(True)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
             scan_acquisition_controller._wait()
             updated_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             for k in list(updated_frame_parameters.keys()):
