@@ -1031,13 +1031,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.get("binning", 1)
         data_shape = self.get_expected_dimensions(binning)
-        if processing != "sum_project":
+        if processing in {"sum_project", "sum_masked"}:
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (x_calibration,)
+        else:
             y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
             x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
             return (y_calibration, x_calibration)
-        else:
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
-            return (x_calibration,)
+
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
         return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")
