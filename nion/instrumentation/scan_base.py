@@ -661,7 +661,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.get("binning", 1)))
 
-        camera_readout_size_squeezed = (camera_readout_size.width,) if camera_frame_parameters.get("processing") == "sum_project" else tuple(camera_readout_size)
+        if camera_frame_parameters.get("processing") == "sum_project":
+            camera_readout_size_squeezed = (camera_readout_size.width,)
+        elif camera_frame_parameters.get("processing") == "sum_masked":
+            camera_readout_size_squeezed = (camera_frame_parameters.get("sum_channels", 1),)
+        else:
+            camera_readout_size_squeezed = tuple(camera_readout_size)
 
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
