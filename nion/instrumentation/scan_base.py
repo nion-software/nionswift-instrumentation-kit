@@ -16,7 +16,7 @@ import uuid
 import weakref
 
 # third party libraries
-# None
+import numpy
 
 # local libraries
 from nion.data import Calibration
@@ -624,6 +624,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_sequence_get_progress(self) -> typing.Optional[float]:
         return None
 
+    AxesDescriptor = collections.namedtuple("AxesDescriptor", ["sequence_axes", "collection_axes", "data_axes"])
+
     GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo",
                                                   ["scan_size",
                                                    "fractional_area",
@@ -636,7 +638,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                    "data_intensity_calibration",
                                                    "instrument_metadata",
                                                    "camera_metadata",
-                                                   "scan_metadata"])
+                                                   "scan_metadata",
+                                                   "axes_descriptor"])
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
 
@@ -661,9 +664,17 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.get("binning", 1)))
 
-        camera_readout_size_squeezed = (camera_readout_size.width,) if camera_frame_parameters.get("processing") == "sum_project" else tuple(camera_readout_size)
-
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
+
+        if camera_frame_parameters.get("processing") == "sum_project":
+            camera_readout_size_squeezed = (camera_readout_size.width,)
+            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2])
+        elif camera_frame_parameters.get("processing") == "sum_masked":
+            camera_readout_size_squeezed = (len(camera_frame_parameters.get("active_masks", [0])),)
+            axes_descriptor = ScanHardwareSource.AxesDescriptor([2], None, [0, 1])
+        else:
+            camera_readout_size_squeezed = tuple(camera_readout_size)
+            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2, 3])
 
         scan_shape = Geometry.IntSize.make(scan_frame_parameters["size"])
         center_x_nm = float(scan_frame_parameters.get("center_x_nm", 0.0))
@@ -693,7 +704,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
                                                        camera_readout_size_squeezed, channel_modifier,
                                                        scan_calibrations, data_calibrations, data_intensity_calibration,
-                                                       instrument_metadata, camera_metadata, scan_metadata)
+                                                       instrument_metadata, camera_metadata, scan_metadata,
+                                                       axes_descriptor)
 
     GrabSynchronizedResult = typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]
 
