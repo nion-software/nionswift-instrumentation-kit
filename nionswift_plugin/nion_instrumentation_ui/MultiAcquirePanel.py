@@ -398,6 +398,8 @@ class MultiAcquirePanelDelegate:
                         self.__api.application.document_controllers[0].display_data_item(data_item)
                     except AttributeError:
                         pass
+                    if not self.__acquisition_running:
+                        self.__close_data_item_refs()
                 self.__api.queue_task(get_and_display_data_item)
             elif number_frames > 1:
                 self.result_data_items[data_item_key].add_data((current_frame, ...), scan_xdata.data)
@@ -407,6 +409,8 @@ class MultiAcquirePanelDelegate:
                         self.__api.application.document_controllers[0].display_data_item(data_item)
                     except AttributeError:
                         pass
+                    if not self.__acquisition_running:
+                        self.__close_data_item_refs()
                 self.__api.queue_task(get_and_display_data_item)
 
     def update_progress_bar(self, minimum, maximum, value):
