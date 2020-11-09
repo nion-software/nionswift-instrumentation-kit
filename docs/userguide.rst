@@ -96,9 +96,7 @@ the corresponding result data item will be a stack of the data type that is conf
 Settings Window
 ^^^^^^^^^^^^^^^
 
-.. |gear| unicode:: U+26ED .. gear without hub
-
-You can access the settings menu via the "|gear|" button in the top-right corner of the main window.
+You can access the settings menu via the button in the top-right corner of the main window.
 
 .. image:: resources/multi_acquire_settings_window.png
    :width: 500

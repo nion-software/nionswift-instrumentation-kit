@@ -12,6 +12,7 @@ import math
 import functools
 import typing
 import uuid
+import collections
 
 # local libraries
 from nion.utils import Event, Geometry
@@ -23,6 +24,7 @@ from nion.swift import Facade
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
+from nion.utils import Event
 
 _ = gettext.gettext
 
@@ -80,21 +82,117 @@ class MultiEELSParameters(list):
         return self.__copy__()
 
 
+class ScanDataChannel(scan_base.SynchronizedDataChannelInterface):
+    title_base = _("MultiAcquire")
+
+    def __init__(self, document_model: DocumentModel.DocumentModel, channel_names: typing.Sequence[str],
+                 grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo,
+                 multi_acquire_parameters: list, multi_acquire_settings: dict, current_parameters_index: int):
+        self.__document_model = document_model
+        self.__grab_sync_info = grab_sync_info
+        self.__data_item_transactions: list = []
+        self.__data_and_metadata = None
+        self.__multi_acquire_parameters = multi_acquire_parameters
+        self.__multi_acquire_settings = multi_acquire_settings
+        self.__current_parameters_index = current_parameters_index
+        self.current_frames_index = 0
+        self.__data_items = [self.__create_data_item(channel_name) for channel_name in channel_names]
+
+    def __create_data_item(self, channel_name: str) -> DataItem.DataItem:
+        scan_calibrations = self.__grab_sync_info.scan_calibrations
+        data_item = DataItem.DataItem(large_format=True)
+        data_item.title = f'{ScanDataChannel.title_base} ({channel_name}) #{self.__multi_acquire_parameters[self.__current_parameters_index]["index"]+1}'
+        self.__document_model.append_data_item(data_item)
+        frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
+        sum_frames = self.__multi_acquire_settings['sum_frames']
+        if hasattr(data_item, "reserve_data"):
+            scan_size = tuple(self.__grab_sync_info.scan_size)
+            data_shape = scan_size
+            if frames > 1 and not sum_frames:
+                data_shape = (frames,) + scan_size
+            data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 0, len(scan_size))
+            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+        dimensional_calibrations = scan_calibrations
+        if frames > 1 and not sum_frames:
+            dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
+        data_item.dimensional_calibrations = dimensional_calibrations
+        data_item_metadata = data_item.metadata
+        data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
+        data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
+        data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
+        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
+        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+        data_item.metadata = data_item_metadata
+        return data_item
+
+    def start(self) -> None:
+        for data_item in self.__data_items:
+            data_item.increment_data_ref_count()
+            self.__data_item_transactions.append(self.__document_model.item_transaction(data_item))
+            self.__document_model.begin_data_item_live(data_item)
+
+    def update(self, data_and_metadata_list: typing.Sequence[DataAndMetadata.DataAndMetadata], state: str, view_id) -> None:
+        frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
+        sum_frames = self.__multi_acquire_settings['sum_frames']
+        for i, data_and_metadata in enumerate(data_and_metadata_list):
+            data_item = self.__data_items[i]
+            scan_shape = data_and_metadata.data_shape
+            data_shape_and_dtype = (tuple(scan_shape), data_and_metadata.data_dtype)
+            data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 0, len(tuple(scan_shape)))
+            dimensional_calibrations = data_and_metadata.dimensional_calibrations
+            if frames > 1 and not sum_frames:
+                dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
+                data_shape = data_shape_and_dtype[0]
+                data_shape = (frames,) + data_shape
+                data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
+            intensity_calibration = data_and_metadata.intensity_calibration
+            metadata = data_and_metadata.metadata
+            metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
+            metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+            data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
+                                                         intensity_calibration,
+                                                         dimensional_calibrations,
+                                                         metadata=data_and_metadata.metadata,
+                                                         data_descriptor=data_descriptor)
+            src_slice = (Ellipsis,)
+            dst_slice = (Ellipsis,)
+            if frames > 1:
+                if sum_frames:
+                    existing_data = data_item.data
+                    if existing_data is not None:
+                        summed_data = existing_data[dst_slice] + data_and_metadata.data[src_slice]
+                        data_and_metadata._set_data(summed_data)
+                else:
+                    dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
+            self.__document_model.update_data_item_partial(data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+
+
+    def stop(self) -> None:
+        data_item_transactions = self.__data_item_transactions
+        self.__data_item_transactions = []
+        for transaction in data_item_transactions:
+            transaction.close()
+        for data_item in self.__data_items:
+            self.__document_model.end_data_item_live(data_item)
+            data_item.decrement_data_ref_count()
+
+
 class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_name: str,
                  grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo,
-                 multi_acquire_controller: 'MultiAcquireController', current_parameters_index: int,
-                 current_frames_index: int, data_item: typing.Optional[DataItem.DataItem] = None):
+                 multi_acquire_parameters: list, multi_acquire_settings: dict,
+                 current_parameters_index: int):
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
         self.__data_item_transaction = None
         self.__data_and_metadata = None
-        self.__multi_acquire_controller = multi_acquire_controller
-        self.current_parameters_index = current_parameters_index
-        self.current_frames_index = current_frames_index
-        self.__data_item = data_item or self.__create_data_item(channel_name)
+        self.__multi_acquire_parameters = multi_acquire_parameters
+        self.__multi_acquire_settings = multi_acquire_settings
+        self.__current_parameters_index = current_parameters_index
+        self.current_frames_index = 0
+        self.__data_item = self.__create_data_item(channel_name)
         self.progress_updated_event = Event.Event()
 
     def __create_data_item(self, channel_name: str) -> DataItem.DataItem:
@@ -102,10 +200,11 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         data_calibrations = self.__grab_sync_info.data_calibrations
         data_intensity_calibration = self.__grab_sync_info.data_intensity_calibration
         data_item = DataItem.DataItem(large_format=True)
-        data_item.title = f"{CameraDataChannel.title_base} ({channel_name}) #{self.current_parameters_index+1}"
+        parameters = self.__multi_acquire_parameters[self.__current_parameters_index]
+        data_item.title = f"{CameraDataChannel.title_base} ({channel_name}) #{self.__current_parameters_index+1}"
         self.__document_model.append_data_item(data_item)
-        frames = self.__multi_acquire_controller.active_spectrum_parameters[self.current_parameters_index]['frames']
-        sum_frames = self.__multi_acquire_controller.active_settings['sum_frames']
+        frames = parameters['frames']
+        sum_frames = self.__multi_acquire_settings['sum_frames']
         if hasattr(data_item, "reserve_data"):
             scan_size = tuple(self.__grab_sync_info.scan_size)
             camera_readout_size = tuple(self.__grab_sync_info.camera_readout_size_squeezed)
@@ -116,15 +215,15 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
         dimensional_calibrations = scan_calibrations + data_calibrations
         if frames > 1 and not sum_frames:
-            dimensional_calibrations = (Calibration.Calibration(),) + dimensional_calibrations
+            dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
         data_item.dimensional_calibrations = dimensional_calibrations
         data_item.intensity_calibration = data_intensity_calibration
         data_item_metadata = data_item.metadata
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
-        data_item_metadata["MultiAcquire.settings"] = dict(copy.deepcopy(self.__multi_acquire_controller.active_settings))
-        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_controller.active_spectrum_parameters[self.current_parameters_index])
+        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
+        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
         data_item.metadata = data_item_metadata
         return data_item
 
@@ -135,10 +234,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     def update_progress(self, last_complete_line):
         current_time = 0
         current_frame = self.current_frames_index
-        current_index = self.current_parameters_index
         scan_size = tuple(self.__grab_sync_info.scan_size)
-        for parameters in self.__multi_acquire_controller.active_spectrum_parameters:
-            if parameters['index'] >= current_index:
+        for parameters in self.__multi_acquire_parameters:
+            if parameters['index'] >= self.__current_parameters_index:
                 break
             current_time += scan_size[0] * scan_size[1] * parameters['exposure_ms'] * parameters['frames']
         current_time += scan_size[0] * scan_size[1] * parameters['exposure_ms'] * current_frame
@@ -156,35 +254,32 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         # falls back to the data item method set_data_and_metadata, which must be called from the main thread.
         # the hardware source also supplies a data channel which is thread safe and ends up calling set_data_and_metadata
         # but we skip that so that the updates fit into this class instead.
-        parameters = self.__multi_acquire_controller.active_spectrum_parameters[self.current_parameters_index]
-        frames = parameters['frames']
-        sum_frames = self.__multi_acquire_controller.active_settings['sum_frames']
+        frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
+        sum_frames = self.__multi_acquire_settings['sum_frames']
         collection_rank = len(tuple(scan_shape))
         data_shape_and_dtype = (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype)
         data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, collection_rank, len(data_and_metadata.data_shape) - collection_rank)
         dimensional_calibrations = data_and_metadata.dimensional_calibrations
         if frames > 1 and not sum_frames:
-            dimensional_calibrations = (Calibration.Calibration(),) + dimensional_calibrations
+            dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
             data_shape = data_shape_and_dtype[0]
             data_shape = (frames,) + data_shape
             data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
 
         intensity_calibration = data_and_metadata.intensity_calibration
-        if self.__multi_acquire_controller.active_settings['use_multi_eels_calibration']:
-
+        if self.__multi_acquire_settings['use_multi_eels_calibration']:
             metadata = data_and_metadata.metadata.get('hardware_source', {})
             counts_per_electron = metadata.get('counts_per_electron', 1)
-            exposure_s = metadata.get('exposure', parameters['exposure_ms']*0.001)
-            _number_frames = 1 if not sum_frames else parameters['frames']
+            exposure_s = metadata.get('exposure', self.__multi_acquire_parameters[self.__current_parameters_index]['exposure_ms']*0.001)
+            _number_frames = 1 if not sum_frames else frames
             intensity_scale = (data_and_metadata.intensity_calibration.scale / counts_per_electron /
                                data_and_metadata.dimensional_calibrations[-1].scale / exposure_s / _number_frames)
             intensity_calibration = Calibration.Calibration(scale=intensity_scale)
 
-        # print(data_shape_and_dtype)
-        # print(dimensional_calibrations)
+
         metadata = data_and_metadata.metadata
-        metadata["MultiAcquire.settings"] = dict(copy.deepcopy(self.__multi_acquire_controller.active_settings))
-        metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_controller.active_spectrum_parameters[self.current_parameters_index])
+        metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
+        metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
         data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
                                                      intensity_calibration,
                                                      dimensional_calibrations,
@@ -196,10 +291,10 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if sum_frames:
                 existing_data = self.__data_item.data
                 if existing_data is not None:
-                    summed_data = existing_data[dst_slice] + data_and_metadata.data[src_slice]
-                    data_and_metadata._set_data(summed_data)
+                    existing_data[dst_slice] += data_and_metadata.data[src_slice]
             else:
                 dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
+
         self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
         self.update_progress(dest_sub_area.bottom)
 
@@ -211,10 +306,62 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             self.__data_item.decrement_data_ref_count()
 
 
+class SequenceBehavior:
+    def __init__(self):
+        ...
+
+    def prepare_frame(self):
+        ...
+
+
+SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_behavior', 'scan_section_height',
+                                                                   'sequence_behavior', 'sequence_section_length'])
+
+class SISequenceAcquisitionHandler:
+    def __init__(self,
+                 camera: camera_base.CameraHardwareSource,
+                 camera_data_channel: scan_base.SynchronizedDataChannelInterface,
+                 camera_frame_parameters: dict,
+                 scan_controller: scan_base.ScanHardwareSource,
+                 scan_data_channel: scan_base.SynchronizedDataChannelInterface,
+                 scan_frame_parameters: dict,
+                 si_sequence_behavior: typing.Optional[SISequenceBehavior] = None):
+
+        self.__camera = camera
+        self.camera_data_channel = camera_data_channel
+        self.camera_frame_parameters = camera_frame_parameters
+        self.__scan_controller = scan_controller
+        self.scan_data_channel = scan_data_channel
+        self.scan_frame_parameters = scan_frame_parameters
+        self.__si_sequence_behavior = si_sequence_behavior or SISequenceBehavior(None, None, None, None)
+        self.is_canceled = False
+        self.finish_fn: typing.Optional[typing.Callable[[], None]] = None
+
+    def run(self, number_frames: int):
+        for frame in range(number_frames):
+            if self.is_canceled:
+                break
+            self.camera_data_channel.current_frames_index = frame
+            self.scan_data_channel.current_frames_index = frame
+            if self.__si_sequence_behavior.sequence_behavior and self.__si_sequence_behavior.sequence_section_length and frame % self.__si_sequence_behavior.sequence_section_length == 0:
+                self.__si_sequence_behavior.sequence_behavior.prepare_frame()
+            combined_data = self.__scan_controller.grab_synchronized(camera=self.__camera,
+                                                                     camera_frame_parameters=self.camera_frame_parameters,
+                                                                     camera_data_channel=self.camera_data_channel,
+                                                                     scan_frame_parameters=self.scan_frame_parameters,
+                                                                     section_height=self.__si_sequence_behavior.scan_section_height,
+                                                                     scan_behavior=self.__si_sequence_behavior.scan_behavior)
+            if combined_data is not None:
+                scan_xdata_list, _ = combined_data
+                data_channel_state = 'complete' if frame >= number_frames - 1 else 'partial'
+                data_channel_view_id = None
+                self.scan_data_channel.update(scan_xdata_list, data_channel_state, data_channel_view_id)
+        if callable(self.finish_fn):
+            self.finish_fn()
+
+
 class MultiAcquireController:
-    def __init__(self, document_model: DocumentModel.DocumentModel, document_controller: Facade.DocumentWindow, **kwargs):
-        self.__document_model = document_model
-        self.__document_controller = document_controller
+    def __init__(self, stem_controller: stem_controller.STEMController, savepath=None):
         self.spectrum_parameters = MultiEELSParameters(
                                    [{'index': 0, 'offset_x': 0, 'exposure_ms': 1, 'frames': 1},
                                     {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
@@ -224,7 +371,7 @@ class MultiAcquireController:
                          'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
                          'use_multi_eels_calibration': False})
-        self.stem_controller: stem_controller.STEMController = None
+        self.stem_controller = stem_controller
         self.camera: camera_base.CameraHardwareSource = None
         self.scan_controller: scan_base.ScanHardwareSource = None
         self.zeros = {'x': 0, 'focus': 0}
@@ -236,7 +383,7 @@ class MultiAcquireController:
         self.__active_settings = self.settings
         self.__active_spectrum_parameters = self.spectrum_parameters
         self.abort_event = threading.Event()
-        self.__savepath = os.path.join(os.path.expanduser('~'), 'MultiAcquire')
+        self.__savepath = savepath # or os.path.join(os.path.expanduser('~'), 'MultiAcquire')
         self.load_settings()
         self.load_parameters()
         self.__settings_changed_event_listener = self.settings.settings_changed_event.listen(self.save_settings)
@@ -257,7 +404,7 @@ class MultiAcquireController:
                 json.dump(self.settings, f)
 
     def load_settings(self):
-        if os.path.isfile(os.path.join(self.__savepath, 'settings.json')):
+        if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'settings.json')):
             with open(os.path.join(self.__savepath, 'settings.json')) as f:
                 self.settings.update(json.load(f))
 
@@ -268,7 +415,7 @@ class MultiAcquireController:
                 json.dump(self.spectrum_parameters, f)
 
     def load_parameters(self):
-        if os.path.isfile(os.path.join(self.__savepath, 'spectrum_parameters.json')):
+        if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'spectrum_parameters.json')):
             with open(os.path.join(self.__savepath, 'spectrum_parameters.json')) as f:
                 self.spectrum_parameters[:] = json.load(f)
 
@@ -385,8 +532,8 @@ class MultiAcquireController:
     def cancel(self):
         self.abort_event.set()
         try:
-            self.camera.acquire_sequence_cancel()
             self.scan_controller.grab_synchronized_abort()
+            self.camera.acquire_sequence_cancel()
         except Exception as e:
             print(e)
 
@@ -409,7 +556,6 @@ class MultiAcquireController:
                 if self.abort_event.is_set():
                     break
                 self.shift_x(parameters['offset_x'])
-                self.adjust_focus(parameters['offset_x'])
                 frame_parameters = self.camera.get_current_frame_parameters()
                 frame_parameters['exposure_ms'] =  parameters['exposure_ms']
                 frame_parameters['processing'] = 'sum_project' if self.__active_settings['bin_spectra'] else None
@@ -479,7 +625,6 @@ class MultiAcquireController:
             if start_frame_parameters:
                 self.camera.set_current_frame_parameters(start_frame_parameters)
             self.shift_x(0)
-            self.adjust_focus(0)
 
         data_element_list = []
         parameter_list = []
@@ -493,72 +638,29 @@ class MultiAcquireController:
                            'settings_list': settings_list}
         return multi_eels_data
 
-    def acquire_multi_eels_spectrum_image(self):
+    def start_multi_acquire_spectrum_image(self, get_acquisition_handler_fn: typing.Callable[[list, int, dict], SISequenceAcquisitionHandler]):
         self.__active_settings = copy.deepcopy(self.settings)
         self.__active_spectrum_parameters = copy.deepcopy(self.spectrum_parameters)
-        self.abort_event.clear()
         self.reset_progress_counter()
+        self.abort_event.clear()
         if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
             self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+        self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
         try:
-            self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
-
             for parameters in self.__active_spectrum_parameters:
-                if self.abort_event.is_set():
-                    break
-                frame_parameters = self.camera.get_current_frame_parameters()
-                frame_parameters['exposure_ms'] = parameters['exposure_ms']
-                frame_parameters['processing'] = 'sum_project' if self.__active_settings['bin_spectra'] else None
-                scan_frame_parameters = self.scan_controller.get_current_frame_parameters()
-                scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
-                grab_synchronized_info = self.scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                                                         camera=self.camera,
-                                                                                         camera_frame_parameters=frame_parameters)
-                camera_data_channel = None
-                camera_data_channel_ready = threading.Event()
-                def create_data_channel():
-                    nonlocal camera_data_channel
-                    camera_data_channel = CameraDataChannel(self.__document_model, self.camera.display_name, grab_synchronized_info,
-                                                            self, parameters['index'], 0)
-                    self.__document_controller.display_data_item(Facade.DataItem(camera_data_channel.data_item))
-                    camera_data_channel_ready.set()
-                self.__document_controller.queue_task(create_data_channel)
-
                 self.shift_x(parameters['offset_x'])
-                self.adjust_focus(parameters['offset_x'])
-
-                camera_data_channel_ready.wait()
-                progress_updated_event_listener = camera_data_channel.progress_updated_event.listen(self.set_progress_counter)
-                camera_data_channel.start()
-
-                for n in range(parameters['frames']):
-                    if self.abort_event.is_set():
-                        break
-                    camera_data_channel.current_frames_index = n
-                    parameters['current_frame'] = n
-                    self.scan_parameters = self.scan_controller.get_current_frame_parameters()
-                    combined_data = self.scan_controller.grab_synchronized(camera=self.camera, camera_frame_parameters=frame_parameters,
-                                                                           camera_data_channel=camera_data_channel,
-                                                                           scan_frame_parameters=self.scan_parameters)
-                    if combined_data is not None:
-                        scan_xdata_list, _ = combined_data
-                        scan_data_dict = {'xdata_list': scan_xdata_list, 'parameters': parameters, 'settings': self.active_settings}
-                        self.new_scan_data_ready_event.fire(scan_data_dict)
-
-                self.__document_controller.queue_task(camera_data_channel.stop)
-                progress_updated_event_listener.close()
-                del progress_updated_event_listener
-
+                acquisition_handler = get_acquisition_handler_fn(list(self.__active_spectrum_parameters), parameters['index'], dict(self.__active_settings))
+                # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
+                self.scan_parameters = acquisition_handler.scan_frame_parameters
+                acquisition_handler.run(parameters['frames'])
         except Exception as e:
             self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
             import traceback
             traceback.print_stack()
-            print(e)
             self.cancel()
             raise
         finally:
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'spectrum image'})
             self.shift_x(0)
-            self.adjust_focus(0)
             if hasattr(self, 'scan_parameters'):
                 delattr(self, 'scan_parameters')
