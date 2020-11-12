@@ -481,9 +481,9 @@ class TestScanControlClass(unittest.TestCase):
             frame_time = hardware_source.get_current_frame_time()
             hardware_source.start_playing()
             time.sleep(frame_time * 0.25)
+            was_playing = hardware_source.is_playing
             hardware_source.set_channel_enabled(0, False)
             time.sleep(frame_time * 0.25)  # this sleep is not really necessary but leave it here for extra robustness
-            was_playing = hardware_source.is_playing
             hardware_source.periodic()
             time.sleep(frame_time * 2)  # scan should definitely be stopped after 4 frames
             # updating is_playing may take some time; sync here
