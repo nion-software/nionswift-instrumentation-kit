@@ -2,7 +2,7 @@
 import itertools
 import numpy
 import threading
-import logging
+import os
 import gettext
 import uuid
 import pkgutil
@@ -306,7 +306,7 @@ class MultiAcquirePanelDelegate:
         self._stem_controller = None
         self._camera = None
         self._scan_controller = None
-        self.multi_acquire_controller = MultiAcquire.MultiAcquireController(self.stem_controller)
+        self.multi_acquire_controller = MultiAcquire.MultiAcquireController(self.stem_controller, savepath=os.path.join(os.path.expanduser('~'), 'MultiAcquire'))
         self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
         self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
         self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)
