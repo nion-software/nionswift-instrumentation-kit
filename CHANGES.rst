@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.1 (unreleased)
+-------------------
+- Rework MultiAcquire to use new partial data item updates.
+
 0.19.0 (2020-08-31)
 -------------------
 - Add section-by-section drift correction during synchronized acquisition.
