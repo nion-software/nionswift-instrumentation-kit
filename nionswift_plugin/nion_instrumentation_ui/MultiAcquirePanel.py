@@ -332,7 +332,7 @@ class MultiAcquirePanelDelegate:
                 self.multi_acquire_controller.cancel()
             else:
                 self.multi_acquire_controller.stem_controller = self.stem_controller
-                self.multi_acquire_controller.camera = self.camera_choice_combo_box.current_item
+                self.multi_acquire_controller.camera = self.camera
                 def run_multi_eels():
                     data_dict = self.multi_acquire_controller.acquire_multi_eels_spectrum()
                     def create_and_display_data_item():
@@ -345,19 +345,21 @@ class MultiAcquirePanelDelegate:
             if self.__acquisition_running:
                 self.multi_acquire_controller.cancel()
             else:
+                # Camera must be accessed from the UI thread, so do it here and re-use later
+                camera = self.camera
                 self.multi_acquire_controller.stem_controller = self.stem_controller
-                self.multi_acquire_controller.camera = self.camera_choice_combo_box.current_item
+                self.multi_acquire_controller.camera = camera
                 self.multi_acquire_controller.scan_controller = self.scan_controller
 
                 def create_acquisition_handler(multi_acquire_parameters: list, current_parameters_index: int, multi_acquire_settings: dict):
                     document_model = self.document_controller._document_controller.document_model
-                    camera_frame_parameters = self.camera.get_current_frame_parameters()
+                    camera_frame_parameters = camera.get_current_frame_parameters()
                     scan_frame_parameters = self.scan_controller.get_current_frame_parameters()
                     camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                     camera_frame_parameters['processing'] = 'sum_project' if multi_acquire_settings['bin_spectra'] else None
                     scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
                     grab_synchronized_info = self.scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                                                             camera=self.camera,
+                                                                                             camera=camera,
                                                                                              camera_frame_parameters=camera_frame_parameters)
                     camera_data_channel = None
                     scan_data_channel = None
@@ -365,7 +367,7 @@ class MultiAcquirePanelDelegate:
 
                     def create_channels():
                         nonlocal camera_data_channel, scan_data_channel
-                        camera_data_channel = MultiAcquire.CameraDataChannel(document_model, self.camera.display_name, grab_synchronized_info,
+                        camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera.display_name, grab_synchronized_info,
                                                                                      multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
                         enabled_channels = self.scan_controller.get_enabled_channels()
                         enabled_channel_names = [self.scan_controller.data_channels[i].name for i in enabled_channels]
@@ -379,7 +381,7 @@ class MultiAcquirePanelDelegate:
                     assert channels_ready_event.wait(10)
 
                     si_sequence_behavior = MultiAcquire.SISequenceBehavior(None, None, None, None)
-                    handler =  MultiAcquire.SISequenceAcquisitionHandler(self.camera, camera_data_channel, camera_frame_parameters,
+                    handler =  MultiAcquire.SISequenceAcquisitionHandler(camera, camera_data_channel, camera_frame_parameters,
                                                                          self.scan_controller, scan_data_channel, scan_frame_parameters,
                                                                          si_sequence_behavior)
 
@@ -396,18 +398,7 @@ class MultiAcquirePanelDelegate:
 
                     return handler
 
-                def get_acquisition_handler_fn(multi_acquire_parameters, multi_acquire_settings):
-                    document_model = self.document_controller._document_controller.document_model
-                    handler_ready_event = threading.Event()
-                    handler = None
-                    def queue_handler():
-                        nonlocal handler
-                        handler = create_acquisition_handler(document_model, self.camera, self.scan_controller, multi_acquire_parameters, multi_acquire_settings)
-                        handler_ready_event.set()
-                    self.document_controller.queue_task(queue_handler)
-                    assert handler_ready_event.wait(10)
-
-                self.__acquisition_thread = threading.Thread(target=self.multi_acquire_controller.start_multi_acquire_spectrum_image, args=(get_acquisition_handler_fn,))
+                self.__acquisition_thread = threading.Thread(target=self.multi_acquire_controller.start_multi_acquire_spectrum_image, args=(create_acquisition_handler,))
                 self.__acquisition_thread.start()
 
 
