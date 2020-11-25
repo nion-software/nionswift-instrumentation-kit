@@ -147,7 +147,7 @@ class TestMultiAcquire(unittest.TestCase):
             calibrated_intensities.append(np.mean(data_element['data'] * data_element['intensity_calibration']['scale']))
 
         for val in calibrated_intensities:
-            self.assertAlmostEqual(val, calibrated_intensities[0], delta=100)
+            self.assertAlmostEqual(val, calibrated_intensities[0], delta=200)
 
     def test_acquire_multi_eels_spectrum_image(self):
         scan_size = (10, 10)
