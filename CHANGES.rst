@@ -3,6 +3,7 @@ Changelog (nionswift-instrumentation)
 
 0.19.1 (unreleased)
 -------------------
+- Fix issue with spectrum imaging panel Acquire button not getting enabled.
 - Rework MultiAcquire to use new partial data item updates.
 
 0.19.0 (2020-08-31)

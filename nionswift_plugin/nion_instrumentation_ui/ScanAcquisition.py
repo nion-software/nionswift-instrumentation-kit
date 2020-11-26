@@ -483,9 +483,15 @@ class PanelDelegate:
             if key in ("subscan_state", "subscan_region", "subscan_rotation", "line_scan_state", "line_scan_vector", "drift_channel_id", "drift_region", "drift_settings"):
                 document_controller._document_controller.event_loop.call_soon_threadsafe(update_context)
 
+        def scan_context_changed() -> None:
+            update_context()
+
         self.__stem_controller_property_listener = None
+        self.__scan_context_changed_listener = None
+
         if stem_controller_:
             self.__stem_controller_property_listener = stem_controller_.property_changed_event.listen(stem_controller_property_changed)
+            self.__scan_context_changed_listener = stem_controller_.scan_context_changed_event.listen(scan_context_changed)
 
         column = ui.create_column_widget()
 
@@ -644,6 +650,8 @@ class PanelDelegate:
 
         self.__update_estimate()
 
+        update_context()
+
         return column
 
     def __update_estimate(self):
@@ -718,6 +726,9 @@ class PanelDelegate:
         if self.__stem_controller_property_listener:
             self.__stem_controller_property_listener.close()
             self.__stem_controller_property_listener = None
+        if self.__scan_context_changed_listener:
+            self.__scan_context_changed_listener.close()
+            self.__scan_context_changed_listener = None
         if self.__scan_hardware_source_stream:
             self.__scan_hardware_source_stream.remove_ref()
         if self.__camera_hardware_source_stream:
