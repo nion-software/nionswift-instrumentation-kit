@@ -127,7 +127,7 @@ class TestMultiAcquire(unittest.TestCase):
             calibrated_intensities.append(np.mean(data_element['data'] * data_element['intensity_calibration']['scale']))
 
         for val in calibrated_intensities:
-            self.assertAlmostEqual(val, calibrated_intensities[0], delta=100)
+            self.assertAlmostEqual(val, calibrated_intensities[0], delta=200)
 
     def test_data_intensity_scale_is_correct_for_non_summed_frames(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
