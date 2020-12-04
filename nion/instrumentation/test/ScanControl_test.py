@@ -1466,6 +1466,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(offsets))
             self.assertEqual(1, len(scales))
             self.assertEqual(1, len(units))
+            self.assertTrue(next(iter(units)))  # confirm calibration is not empty
 
     def test_reloading_document_cleans_display_items(self):
         with self.__test_context() as test_context:

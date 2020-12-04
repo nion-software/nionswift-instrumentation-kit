@@ -1386,7 +1386,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
             scan_id = uuid.uuid4()
 
+            data_element_groups = list()
+
             for data_element_group in buffer_data:
+                new_data_element_group = list()
                 for channel_index, (_data_element, channel_state) in enumerate(zip(data_element_group, enabled_channel_states)):
                     channel_name = channel_state.name
                     channel_id = channel_state.channel_id
@@ -1405,8 +1408,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     update_scan_data_element(data_element, self.__frame_parameters, _data.shape, channel_name, channel_id, _scan_properties)
                     update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
                     update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
+                    data_element["data"] = _data
+                    new_data_element_group.append(data_element)
+                data_element_groups.append(new_data_element_group)
 
-            return buffer_data
+            return data_element_groups
 
         return None
 
