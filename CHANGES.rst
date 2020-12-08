@@ -1,8 +1,9 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.19.1 (unreleased)
+0.19.1 (2020-12-08)
 -------------------
+- Fix issue with metadata in scan recorder result data items.
 - Fix issue with spectrum imaging panel Acquire button not getting enabled.
 - Rework MultiAcquire to use new partial data item updates.
 
