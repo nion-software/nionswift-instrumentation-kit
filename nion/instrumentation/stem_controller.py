@@ -563,10 +563,10 @@ class GraphicSetController:
             for display_item in display_items:
                 graphic = self.__handler._create_graphic()
 
-                def graphic_property_changed(name: str) -> None:
+                def graphic_property_changed(graphic: Graphics.Graphic, name: str) -> None:
                     self.__handler._graphic_property_changed(graphic, name)
 
-                graphic_property_changed_listener = graphic.property_changed_event.listen(graphic_property_changed)
+                graphic_property_changed_listener = graphic.property_changed_event.listen(functools.partial(graphic_property_changed, graphic))
 
                 def graphic_removed(graphic: Graphics.Graphic) -> None:
                     self.__remove_one_graphic(graphic)

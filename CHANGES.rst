@@ -4,6 +4,7 @@ Changelog (nionswift-instrumentation)
 0.19.2 (UNRELEASED)
 -------------------
 NOTE: requires nionswift 0.15.3
+- Fix issue with probe position graphic when multiple channels enabled.
 
 0.19.1 (2020-12-08)
 -------------------
