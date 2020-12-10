@@ -202,10 +202,10 @@ class MultiAcquirePanelDelegate:
         self.update_time_estimate()
 
     def create_result_data_item(self, data_dict):
-        display_layers = []
         reset_color_cycle()
         display_item = None
         sorted_indices = numpy.argsort([parms['start_ev'] for parms in data_dict['parameter_list']])
+        display_layer_index = 0
         for i in sorted_indices:
             index = data_dict['parameter_list'][i]['index']
             xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_dict['data_element_list'][i])
@@ -220,7 +220,7 @@ class MultiAcquirePanelDelegate:
                                                                     xdata,
                                                                     title='MultiAcquire (stacked)')
                 display_item = self.__api.library._document_model.get_display_item_for_data_item(data_item._data_item)
-                #new_data_item = data_item
+                display_layer_index += 1  # display item has one display layer already
             #else:
             units_str = ' eV' if data_dict['settings_list'][i]['use_multi_eels_calibration'] else ''
             new_data_item = self.document_controller.library.create_data_item_from_data_and_metadata(
@@ -240,18 +240,13 @@ class MultiAcquirePanelDelegate:
                 display_item.append_display_data_channel_for_data_item(data_item._data_item if data_item else new_data_item._data_item)
                 start_ev = data_dict['parameter_list'][i]['start_ev']
                 end_ev = data_dict['parameter_list'][i]['end_ev']
-                display_layers.append({'label': '#{:d}: {:g}-{:g}{}, {:g}x{:g} ms{}'.format(index+1,
-                                                                                            start_ev,
-                                                                                            end_ev,
-                                                                                            units_str,
-                                                                                            number_frames,
-                                                                                            exposure_ms,
-                                                                                            summed),
-                                       'data_index': len(display_layers),
-                                       'stroke_color': get_next_color(),
-                                       'fill_color':None})
+                display_layer_label = '#{:d}: {:g}-{:g}{}, {:g}x{:g} ms{}'.format(index + 1, start_ev, end_ev,
+                                                                                  units_str,
+                                                                                  number_frames, exposure_ms, summed)
+                display_item._set_display_layer_properties(display_layer_index, label=display_layer_label,
+                                                           stroke_color=get_next_color(), fill_color=None)
+                display_layer_index += 1
         if display_item:
-            display_item.display_layers = display_layers
             display_item.set_display_property('legend_position', 'top-right')
             display_item.title = 'MultiAcquire (stacked)'
             show_display_item(self.document_controller, display_item)

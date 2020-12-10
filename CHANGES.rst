@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.2 (UNRELEASED)
+-------------------
+NOTE: requires nionswift 0.15.3
+
 0.19.1 (2020-12-08)
 -------------------
 - Fix issue with metadata in scan recorder result data items.

@@ -242,11 +242,11 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
             self.__document_model.append_data_item(data_item)
             display_item = self.__document_model.get_display_item_for_data_item(data_item)
             display_item.display_type = "line_plot"
-            display_layers = display_item.display_layers
-            display_layers[0]["label"] = _("x")
-            display_layers[1]["label"] = _("y")
-            display_layers[2]["label"] = _("m")
-            display_item.display_layers = display_layers
+            display_item.append_display_data_channel_for_data_item(data_item)
+            display_item.append_display_data_channel_for_data_item(data_item)
+            display_item._set_display_layer_properties(0, label=_("x"))
+            display_item._set_display_layer_properties(1, label=_("y"))
+            display_item._set_display_layer_properties(2, label=_("m"))
         self.__data_item = data_item
 
     def reset(self) -> None:
