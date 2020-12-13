@@ -177,7 +177,7 @@ class CameraDevice(abc.ABC):
         return False
 
     def remove_all_dark_images(self) -> None:
-        """Set the dark image for the given exposure, bin, and readout area."""
+        """Remove all dark reference images."""
         pass
 
     @property
@@ -201,6 +201,14 @@ class CameraDevice(abc.ABC):
         """Return whether gain normalization is available on this camera.
         """
         return False
+
+    def set_gain_image(self, data: numpy.ndarray, voltage: int, bin: int) -> bool:
+        """Set the gain image for the given voltage and binning."""
+        return False
+
+    def remove_all_gain_images(self) -> None:
+        """Remove all gain reference images."""
+        pass
 
     @property
     @abc.abstractmethod

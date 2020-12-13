@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Add camera base methods for setting and clearing gain reference images.
+
 0.19.2 (2020-12-10)
 -------------------
 - Fix issue with probe position graphic when multiple channels enabled.
