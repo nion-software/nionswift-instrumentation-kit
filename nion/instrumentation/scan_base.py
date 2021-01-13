@@ -779,7 +779,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 valid_rows = partial_data_info.valid_rows
                                 src_top_row = last_valid_rows
                                 metadata = copy.deepcopy(uncropped_xdata.metadata)
-                                metadata["hardware_source"] = copy.deepcopy(scan_info.camera_metadata)
+                                metadata.setdefault("hardware_source", dict()).update(copy.deepcopy(scan_info.camera_metadata))
                                 metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                                 metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
                                 metadata["scan"]["valid_rows"] = section_rect[0][0] + valid_rows
