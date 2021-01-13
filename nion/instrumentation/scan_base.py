@@ -780,7 +780,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 valid_rows = partial_data_info.valid_rows
                                 src_top_row = last_valid_rows
                                 metadata = copy.deepcopy(uncropped_xdata.metadata)
-                                metadata["hardware_source"] = copy.deepcopy(scan_info.camera_metadata)
+                                # this is a hack to prevent some of the potentially misleading metadata
+                                # from getting saved into the synchronized data. while it is acceptable to
+                                # assume that the hardware_source properties will get copied to the final
+                                # metadata for now, camera implementers should be aware that this is likely
+                                # to change behavior in the future. please write tests if you make this
+                                # assumption so that they fail when this behavior is changed.
+                                metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
+                                metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
+                                metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
+                                metadata.setdefault("hardware_source", dict()).update(copy.deepcopy(scan_info.camera_metadata))
                                 metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                                 metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
                                 metadata["scan"]["valid_rows"] = section_rect[0][0] + valid_rows
