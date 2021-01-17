@@ -1,8 +1,8 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+0.19.3 (2021-01-17)
+-------------------
 - Add ability to pass some metadata from camera to final synchronized acquisition data. Temporary.
 - Fix issue where record did not work after running synchronized acquisition.
 - Add camera base methods for setting and clearing gain reference images.
