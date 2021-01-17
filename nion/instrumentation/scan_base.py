@@ -719,6 +719,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__stem_controller._enter_synchronized_state(self, camera=camera_hardware_source)
             self.__grab_synchronized_is_scanning = True
             self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+            old_record_parameters = self.get_record_frame_parameters()
             scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
             scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
             try:
@@ -854,6 +855,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                         return new_scan_data_list, []
                 return None
             finally:
+                self.set_record_frame_parameters(old_record_parameters)
                 self.__stem_controller._exit_synchronized_state(self, camera=camera_hardware_source)
                 self.__grab_synchronized_is_scanning = False
                 self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)

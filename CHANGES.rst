@@ -3,6 +3,7 @@ Changelog (nionswift-instrumentation)
 
 UNRELEASED
 ----------
+- Fix issue where record did not work after running synchronized acquisition.
 - Add camera base methods for setting and clearing gain reference images.
 
 0.19.2 (2020-12-10)

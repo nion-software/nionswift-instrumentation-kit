@@ -3,6 +3,7 @@ import copy
 import math
 import numpy
 import threading
+import time
 import unittest
 import uuid
 
@@ -169,6 +170,25 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_context_size"])
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_size"])
+
+    def test_grab_synchronized_basic_eels_followed_by_record(self):
+        # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
+        # after a synchronized acquisition.
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters2 = scan_hardware_source.get_frame_parameters(2)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            camera_data_channel = None
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            frame_time = scan_frame_parameters2.pixel_time_us * scan_frame_parameters2.size[0] * scan_frame_parameters2.size[1] / 1000000.0
+            scan_hardware_source.start_recording()
+            time.sleep(frame_time * 0.6)
+            self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (1024, 1024))
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
         with self.__test_context() as test_context:
