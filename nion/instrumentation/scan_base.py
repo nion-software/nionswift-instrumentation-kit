@@ -205,6 +205,10 @@ def update_detector_metadata(detector_metadata: typing.MutableMapping, hardware_
 
 
 class SynchronizedDataChannelInterface:
+    """Update the data.
+
+    This method is always called with a collection of 1d or 2d data.
+    """
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None: ...
 
 

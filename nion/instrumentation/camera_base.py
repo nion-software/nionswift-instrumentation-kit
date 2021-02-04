@@ -3,7 +3,6 @@ from __future__ import annotations
 # standard libraries
 import abc
 import asyncio
-import collections
 import copy
 import datetime
 import gettext

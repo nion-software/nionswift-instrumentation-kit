@@ -16,7 +16,6 @@ from nionswift_plugin.usim import InstrumentDevice, CameraDevice, ScanDevice
 from nion.ui import TestUI
 
 from nion.instrumentation import MultiAcquire
-from nionswift_plugin.nion_instrumentation_ui import MultiAcquirePanel
 
 
 class TestMultiAcquire(unittest.TestCase):

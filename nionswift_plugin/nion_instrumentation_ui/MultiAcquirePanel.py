@@ -396,7 +396,6 @@ class MultiAcquirePanelDelegate:
                 self.__acquisition_thread = threading.Thread(target=self.multi_acquire_controller.start_multi_acquire_spectrum_image, args=(create_acquisition_handler,))
                 self.__acquisition_thread.start()
 
-
         def settings_button_clicked():
             if not self.settings_window_open:
                 self.settings_window_open = True

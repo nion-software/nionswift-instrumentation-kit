@@ -22,10 +22,7 @@ from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import Facade
-from nion.swift import HistogramPanel
 from nion.swift.model import DataItem
-from nion.swift.model import DisplayItem
-from nion.swift.model import Graphics
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
 from nion.utils import Binding
@@ -34,7 +31,6 @@ from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
-from nion.utils import Stream
 from nion.utils import ListModel
 from . import HardwareSourceChoice
 
@@ -109,7 +105,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
             datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
             data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
-            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         data_item.dimensional_calibrations = scan_calibrations + data_calibrations
         data_item.intensity_calibration = data_intensity_calibration
         data_item_metadata = data_item.metadata
@@ -150,63 +146,53 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         return axes_order, data_shape
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-        # there are a few techniques for getting data into a data item. this method prefers directly calling the
-        # document model method update_data_item_partial, which is thread safe. if that method is not available, it
-        # falls back to the data item method set_data_and_metadata, which must be called from the main thread.
-        # the hardware source also supplies a data channel which is thread safe and ends up calling set_data_and_metadata
-        # but we skip that so that the updates fit into this class instead.
-        update_data_item_partial = getattr(self.__document_model, "update_data_item_partial", None)
-        if callable(update_data_item_partial):
-            axes_descriptor = self.__grab_sync_info.axes_descriptor
-            # The low-level always produces a collection of 1d or 2d data. Re-oder axes and remove length-1-axes below.
-            # Calibrations, data descriptor and shape estimates are updated accordingly.
-            dimensional_calibrations = data_and_metadata.dimensional_calibrations
-            data = data_and_metadata.data
-            axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
-            assert len(axes_order) == data.ndim
-            data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
-            dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
-            is_sequence = axes_descriptor.sequence_axes is not None
-            collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
-            datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+        # This method is always called with a collection of 1d or 2d data. Re-order axes as required and remove length-1-axes.
 
-            src_slice = tuple()
-            dst_slice = tuple()
-            for index in axes_order:
-                if index >= len(sub_area.slice):
-                    src_slice += (slice(None),)
-                else:
-                    src_slice += (sub_area.slice[index],)
-                if index >= len(dest_sub_area.slice):
-                    dst_slice += (slice(None),)
-                else:
-                    dst_slice += (dest_sub_area.slice[index],)
+        axes_descriptor = self.__grab_sync_info.axes_descriptor
 
-            if is_sequence and data.shape[0] == 1:
-                data = numpy.squeeze(data, axis=0)
-                dimensional_calibrations = dimensional_calibrations[1:]
-                src_slice = src_slice[1:]
-                dst_slice = dst_slice[1:]
-                is_sequence = False
-            data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
+        # Calibrations, data descriptor and shape estimates are updated accordingly.
+        dimensional_calibrations = data_and_metadata.dimensional_calibrations
+        data = data_and_metadata.data
+        axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
+        assert len(axes_order) == data.ndim
+        data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
+        dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
+        is_sequence = axes_descriptor.sequence_axes is not None
+        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+        datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
 
-            data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
-                                                                      dimensional_calibrations,
-                                                                      data_and_metadata.metadata, None,
-                                                                      data_descriptor, None,
-                                                                      None)
-            data_metadata = DataAndMetadata.DataMetadata((tuple(data_shape), data_and_metadata.data_dtype),
-                                                         data_and_metadata.intensity_calibration,
-                                                         data_and_metadata.dimensional_calibrations,
-                                                         metadata=data_and_metadata.metadata,
-                                                         data_descriptor=data_descriptor)
+        src_slice = tuple()
+        dst_slice = tuple()
+        for index in axes_order:
+            if index >= len(sub_area.slice):
+                src_slice += (slice(None),)
+            else:
+                src_slice += (sub_area.slice[index],)
+            if index >= len(dest_sub_area.slice):
+                dst_slice += (slice(None),)
+            else:
+                dst_slice += (dest_sub_area.slice[index],)
 
-            update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
-        elif state == "complete":
-            # hack for Swift 0.14
-            def update_data_item():
-                self.__data_item.set_data_and_metadata(data_and_metadata)
-            self.__document_model.call_soon_event.fire_any(update_data_item)
+        if is_sequence and data.shape[0] == 1:
+            data = numpy.squeeze(data, axis=0)
+            dimensional_calibrations = dimensional_calibrations[1:]
+            src_slice = src_slice[1:]
+            dst_slice = dst_slice[1:]
+            is_sequence = False
+        data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
+
+        data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
+                                                                  dimensional_calibrations,
+                                                                  data_and_metadata.metadata, None,
+                                                                  data_descriptor, None,
+                                                                  None)
+        data_metadata = DataAndMetadata.DataMetadata((tuple(data_shape), data_and_metadata.data_dtype),
+                                                     data_and_metadata.intensity_calibration,
+                                                     data_and_metadata.dimensional_calibrations,
+                                                     metadata=data_and_metadata.metadata,
+                                                     data_descriptor=data_descriptor)
+
+        self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
 
     def stop(self) -> None:
         if self.__data_item_transaction:

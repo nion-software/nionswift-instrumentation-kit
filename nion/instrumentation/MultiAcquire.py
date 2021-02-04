@@ -111,7 +111,7 @@ class ScanDataChannel:
             if frames > 1 and not sum_frames:
                 data_shape = (frames,) + scan_size
             data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 0, len(scan_size))
-            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         dimensional_calibrations = scan_calibrations
         if frames > 1 and not sum_frames:
             dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
@@ -166,7 +166,6 @@ class ScanDataChannel:
                     dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
             self.__document_model.update_data_item_partial(data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
 
-
     def stop(self) -> None:
         data_item_transactions = self.__data_item_transactions
         self.__data_item_transactions = []
@@ -205,14 +204,13 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__document_model.append_data_item(data_item)
         frames = parameters['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
-        if hasattr(data_item, "reserve_data"):
-            scan_size = tuple(self.__grab_sync_info.scan_size)
-            camera_readout_size = tuple(self.__grab_sync_info.camera_readout_size_squeezed)
-            data_shape = scan_size + camera_readout_size
-            if frames > 1 and not sum_frames:
-                data_shape = (frames,) + data_shape
-            data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 2, len(camera_readout_size))
-            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.float32, data_descriptor=data_descriptor)
+        scan_size = tuple(self.__grab_sync_info.scan_size)
+        camera_readout_size = tuple(self.__grab_sync_info.camera_readout_size_squeezed)
+        data_shape = scan_size + camera_readout_size
+        if frames > 1 and not sum_frames:
+            data_shape = (frames,) + data_shape
+        data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 2, len(camera_readout_size))
+        data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         dimensional_calibrations = scan_calibrations + data_calibrations
         if frames > 1 and not sum_frames:
             dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
@@ -275,7 +273,6 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             intensity_scale = (data_and_metadata.intensity_calibration.scale / counts_per_electron /
                                data_and_metadata.dimensional_calibrations[-1].scale / exposure_s / _number_frames)
             intensity_calibration = Calibration.Calibration(scale=intensity_scale)
-
 
         metadata = data_and_metadata.metadata
         metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
