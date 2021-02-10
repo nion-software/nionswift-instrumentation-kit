@@ -61,6 +61,7 @@ Future use cases:
 - Synchronized acquisition with alternative master
 - Multiple passes per scan line
 - Tilt or focus series
+- Scan within scan (two scan units?)
 
 Options:
 
@@ -103,6 +104,7 @@ Devices:
 """
 from __future__ import annotations
 
+import enum
 import numpy
 import typing
 
@@ -117,17 +119,24 @@ Channel = typing.Union[str, int]
 PositionType = typing.Tuple[int, ...]
 
 
-class DataStreamEvent:
+class DataStreamStateEnum(enum.Enum):
+    PARTIAL = 1
+    COMPLETE = 2
+
+
+class DataStreamEventArgs:
     def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
-                 slice_index: SliceType, data: numpy.ndarray, data_slice: typing.Optional[SliceType] = None):
+                 slice_index: SliceType, data: numpy.ndarray, data_slice: typing.Optional[SliceType] = None,
+                 state: typing.Optional[DataStreamStateEnum] = None):
         self.data_stream = data_stream
         self.channel = channel
         self.data_metadata = data_metadata
         self.slice_index = slice_index
         self.data = data
         self.data_slice = data_slice or Ellipsis
+        self.state = state or DataStreamStateEnum.COMPLETE
 
-    def copy_data(self, dest_data: numpy.array) -> None:
+    def copy_data(self, dest_data: numpy.ndarray) -> None:
         dest_data[self.slice_index] = self.data[self.data_slice]
 
 
@@ -157,34 +166,48 @@ class Sequencer(DataStream):
         self.__data_stream.remove_ref()
         super().about_to_delete()
 
-    def __data_available(self, data_stream_event: DataStreamEvent) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         # when data arrives, put it into the sequence and send it out again
         # as a new data stream event where the data descriptor is now a sequence
         # and the slice represents the destination the data in the sequence.
+
         data_metadata = data_stream_event.data_metadata
+
         # sequences of sequences are not currently supported
         assert not data_metadata.is_sequence
-        channel = data_stream_event.channel
+
         # new data descriptor is a sequence
         new_data_descriptor = DataAndMetadata.DataDescriptor(True, data_metadata.collection_dimension_count,
                                                              data_metadata.datum_dimension_count)
+
         # add the sequence count to the shape
         shape = (self.__count,) + tuple(data_metadata.data_shape)
+
         # get the current index for the channel
         index = self.__indexes.get(data_stream_event.channel, 0)
+
         # add the index to the slice index as the sequence dimension
         slice_index = (slice(index, index + 1),) + tuple(data_stream_event.slice_index)
+
         # add an empty calibration for the new sequence dimension
         new_dimensional_calibrations = (self.__calibration,) + tuple(data_metadata.dimensional_calibrations)
+
         # create a new data metadata object
         new_data_metadata = DataAndMetadata.DataMetadata((shape, data_metadata.data_dtype),
                                                          data_metadata.intensity_calibration,
                                                          new_dimensional_calibrations,
                                                          data_descriptor=new_data_descriptor)
+
+        # increment the index is frame is complete
+        new_index = index + 1 if data_stream_event.state == DataStreamStateEnum.COMPLETE else index
+
         # send out the new data stream event
-        self.data_available_event.fire(DataStreamEvent(self, channel, new_data_metadata, slice_index, data_stream_event.data))
+        state = DataStreamStateEnum.PARTIAL if new_index < self.__count else DataStreamStateEnum.COMPLETE
+        channel = data_stream_event.channel
+        self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, slice_index, data_stream_event.data, data_stream_event.data_slice, state))
+
         # update the index for this channel
-        self.__indexes[data_stream_event.channel] = index + 1
+        self.__indexes[data_stream_event.channel] = new_index
 
 
 class Collector(DataStream):
@@ -201,37 +224,52 @@ class Collector(DataStream):
         self.__data_stream.remove_ref()
         super().about_to_delete()
 
-    def __data_available(self, data_stream_event: DataStreamEvent) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         # when data arrives, put it into the collection and send it out again
         # as a new data stream event where the data descriptor is now a collection
         # and the slice represents the destination the data in the collection.
+
         data_metadata = data_stream_event.data_metadata
+
         # collections of sequences and collections of collections are not currently supported
         assert not data_metadata.is_sequence
         assert not data_metadata.is_collection
-        channel = data_stream_event.channel
+
         # new data descriptor is a collection
         collection_rank = len(self.__collection_shape)
         new_data_descriptor = DataAndMetadata.DataDescriptor(False, collection_rank, data_metadata.datum_dimension_count)
+
         # add the collection count to the shape
         shape = self.__collection_shape + tuple(data_metadata.data_shape)
+
         # get the current index for the channel
         index = self.__indexes.get(data_stream_event.channel, [0] * collection_rank)
+
         # add the index to the slice index as the collection dimension
         slice_index = tuple(slice(i, i + 1) for i in index) + tuple(data_stream_event.slice_index)
+
         # add an empty calibration for the new collection dimensions
         new_dimensional_calibrations = self.__collection_calibrations + tuple(data_metadata.dimensional_calibrations)
+
         # create a new data metadata object
         new_data_metadata = DataAndMetadata.DataMetadata((shape, data_metadata.data_dtype),
                                                          data_metadata.intensity_calibration,
                                                          new_dimensional_calibrations,
                                                          data_descriptor=new_data_descriptor)
-        # send out the new data stream event
-        self.data_available_event.fire(DataStreamEvent(self, channel, new_data_metadata, slice_index, data_stream_event.data))
-        # update the index for this channel
+
+        # increment the index is frame is complete
         unravel_shape = (self.__collection_shape[0] + 1, ) + self.__collection_shape[1:]
-        self.__indexes[data_stream_event.channel] = numpy.unravel_index(
-            numpy.ravel_multi_index(index, unravel_shape) + 1, unravel_shape)
+        flattened_index = numpy.ravel_multi_index(index, unravel_shape)
+        new_flattened_index = flattened_index + 1 if data_stream_event.state == DataStreamStateEnum.COMPLETE else flattened_index
+        new_index = numpy.unravel_index(new_flattened_index, unravel_shape)
+
+        # send out the new data stream event
+        state = DataStreamStateEnum.COMPLETE if new_flattened_index == numpy.product(self.__collection_shape) else DataStreamStateEnum.PARTIAL
+        channel = data_stream_event.channel
+        self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, slice_index, data_stream_event.data, data_stream_event.data_slice, state))
+
+        # update the index for this channel
+        self.__indexes[data_stream_event.channel] = new_index
 
 
 class DataStreamToDataAndMetadata:
@@ -244,7 +282,7 @@ class DataStreamToDataAndMetadata:
         self.__listener.close()
         self.__data_stream.remove_ref()
 
-    def __data_available(self, data_stream_event: DataStreamEvent) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_and_metadata = self.data.get(data_stream_event.channel, None)
         if not data_and_metadata:
             data_metadata = data_stream_event.data_metadata
