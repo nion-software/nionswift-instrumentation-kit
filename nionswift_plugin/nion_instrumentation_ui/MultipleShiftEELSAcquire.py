@@ -65,7 +65,7 @@ class AcquireController(metaclass=Utility.Singleton):
             first_xdata = camera.get_next_xdatas_to_start()[0]
             first_data = first_xdata.data
 
-            image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=numpy.float)
+            image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
 
             reference_energy = stem_controller.GetVal(energy_adjust_control)
             for frame_index in range(number_frames):

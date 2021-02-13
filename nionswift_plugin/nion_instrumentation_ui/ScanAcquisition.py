@@ -217,7 +217,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__last_xdata = None
         self.__center_nm = Geometry.FloatSize()
         self.__last_offset_nm = Geometry.FloatSize()
-        self.__offset_nm_data = numpy.zeros((3, 0), numpy.float)
+        self.__offset_nm_data = numpy.zeros((3, 0), float)
         data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
         if data_item:
             offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
