@@ -94,7 +94,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         data_calibrations = grab_sync_info.data_calibrations
         data_intensity_calibration = grab_sync_info.data_intensity_calibration
         _, data_shape = self.__calculate_axes_order_and_data_shape(grab_sync_info.axes_descriptor, grab_sync_info.scan_size, grab_sync_info.camera_readout_size_squeezed)
-        large_format = numpy.prod(data_shape) > 2048**2 * 10
+        large_format = numpy.prod(data_shape, dtype=numpy.int64) > 2048**2 * 10
         data_item = DataItem.DataItem(large_format=large_format)
         data_item.title = f"{title_base} ({channel_name})"
         self.__document_model.append_data_item(data_item)
