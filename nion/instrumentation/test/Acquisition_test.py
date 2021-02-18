@@ -27,14 +27,13 @@ class CameraFrameDataStream(Acquisition.DataStream):
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.shape))
         data_metadata = DataAndMetadata.DataMetadata((self.shape, float), data_descriptor=data_descriptor)
-        # slice index describes what slice of the data being sent is valid
-        slice_index = tuple(slice(0, s) for s in self.shape)
-        # data slice describes the source slice of the data being sent. in this case it is not passed and uses
-        # the default of the entire data.
-        # state describes the state of the stream - can be PARTIAL, meaning only part of the current frame is valid,
-        # or can be COMPLETE meaning the current frame is complete with the inclusion of the current slice.
-        # always uses the default (COMPLETE) for this frame-by-frame stream.
-        data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata, slice_index, self.data[self.index])
+        # data slice describes what slice of the data chunk being sent is valid. here, the entire frame is valid.
+        source_data_slice = (slice(0, 1),) + tuple(slice(None) for s in self.shape)
+        dest_data_slice = (slice(self.index, self.index + 1),) + tuple(slice(None) for s in self.shape)
+        # send the data with a count of one. this requires padding the data chunk with an index axis.
+        data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata,
+                                                            self.data[self.index:self.index + 1], source_data_slice,
+                                                            dest_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
         self.data_available_event.fire(data_stream_event)
         self.index += 1
 
@@ -62,16 +61,15 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.shape))
         data_metadata = DataAndMetadata.DataMetadata((self.shape, float), data_descriptor=data_descriptor)
-        # slice index describes the destination slice of the data being sent
+        # update the index to be used in the data slice
         new_partial = min(self.partial + self.partial_height, self.shape[0])
-        slice_index = (slice(self.partial, new_partial), slice(0, self.shape[1]))
-        # data slice describes the source slice of the data being sent. in this case they are the same. they could
-        # be different if only a part of the data was being provided in each event.
-        data_index = slice_index
-        # state describes the state of the stream - can be PARTIAL, meaning only part of the current frame is valid,
-        # or can be COMPLETE meaning the current frame is complete with the inclusion of the current slice.
+        source_data_slice = (slice(0, 1),) + (slice(self.partial, new_partial), slice(None))
+        dest_data_slice = (slice(self.index, self.index + 1),) + (slice(self.partial, new_partial), slice(None))
+        # send the data with no count. this is required when using partial.
         state = Acquisition.DataStreamStateEnum.PARTIAL if new_partial < self.shape[0] else Acquisition.DataStreamStateEnum.COMPLETE
-        data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata, slice_index, self.data[self.index], data_index, state)
+        data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata,
+                                                            self.data[self.index:self.index + 1], source_data_slice,
+                                                            dest_data_slice, state)
         self.data_available_event.fire(data_stream_event)
         if state == Acquisition.DataStreamStateEnum.PARTIAL:
             self.partial = new_partial

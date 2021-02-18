@@ -125,89 +125,79 @@ class DataStreamStateEnum(enum.Enum):
 
 
 class DataStreamEventArgs:
-    def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
-                 slice_index: SliceType, data: numpy.ndarray, data_slice: typing.Optional[SliceType] = None,
-                 state: typing.Optional[DataStreamStateEnum] = None):
-        self.data_stream = data_stream
-        self.channel = channel
-        self.data_metadata = data_metadata
-        self.slice_index = slice_index
-        self.data = data
-        self.data_slice = data_slice or Ellipsis
-        self.state = state or DataStreamStateEnum.COMPLETE
+    """Data stream event arguments.
 
-    def copy_data(self, dest_data: numpy.ndarray) -> None:
-        dest_data[self.slice_index] = self.data[self.data_slice]
+    The `data_stream` property should be passed in from the data stream caller.
+
+    The `channel` property should be set to something unique to allow for collecting multiple
+    data streams in one collector.
+
+    The `data_metadata` property describes the data layout, calibrations, metadata,
+    time stamps, etc. of each data chunk.
+
+    A data stream can send data chunks partially or n at a time.
+
+    If sent partially, the `count` property should be `None` and the `source_slice` and `dest_slice`
+    properties should be filled.
+
+    If the `count` property is not `None`, the data should have an extra dimension whose size
+    matches the `count` property.
+
+    The `source_slice` describes the slice on the source data. It can be `None` to use the entire
+    data chunk.
+
+    The `dest_slice` describes the slice on the destination data. It can be `None` to use the entire
+    data chunk.
+
+    The `state` property indicates if the data chunk is complete or not.
+    """
+
+    def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
+                 source_data: numpy.ndarray, source_slice: SliceType, dest_slice: SliceType,
+                 state: typing.Optional[DataStreamStateEnum]):
+
+        # the data stream sending this event
+        self.data_stream = data_stream
+
+        # the data stream channel. must be unique within a data stream collector.
+        self.channel = channel
+
+        # the data description of the data chunks that this data stream produces.
+        self.data_metadata = data_metadata
+
+        # the data and source data slice list within this data chunk. the first slice represents the index
+        # and must start with 0.
+        self.source_data = source_data
+        self.source_slice = source_slice
+
+        # the destination slice list of this data chunk. the first slice represents the index and can be
+        # repeated for partial data or be a range for multiple data chunks.
+        self.dest_slice = dest_slice
+
+        # the state of data after this event, partial or complete. pass None if not producing partial datums.
+        self.state = state or DataStreamStateEnum.COMPLETE
 
 
 class DataStream(ReferenceCounting.ReferenceCounted):
-    """Provide a single data stream.
+    """Provide a stream of data chunks.
 
-    A data stream is a series of data available events which update
-    the state and data of a stream.
+    A data chunk is data that can be collected into a sequence or a 1d or 2d collection.
+
+    1d or 2d collections can themselves be data chunks and collected into a sequence.
+
+    Currently, sequences themselves cannot be collected into sequences. Nor can collections be collected.
+
+    Future versions may include the ability to collect multiple data streams into lists, tables, or structures.
+
+    The stream communicates by a series of data available events which update data and state.
+
+    The stream can be controlled with a controller.
+
+    The stream may trigger other events in addition to data available events.
     """
     def __init__(self):
         super().__init__()
         self.data_available_event = Event.Event()
-
-
-class Sequencer(DataStream):
-    def __init__(self, data_stream: DataStream, count: int,
-                 calibration: typing.Optional[Calibration.Calibration] = None):
-        super().__init__()
-        self.__data_stream = data_stream.add_ref()
-        self.__count = count
-        self.__calibration = calibration or Calibration.Calibration()
-        self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        self.__indexes: typing.Dict[Channel, int] = dict()
-
-    def about_to_delete(self) -> None:
-        self.__listener.close()
-        self.__data_stream.remove_ref()
-        super().about_to_delete()
-
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        # when data arrives, put it into the sequence and send it out again
-        # as a new data stream event where the data descriptor is now a sequence
-        # and the slice represents the destination the data in the sequence.
-
-        data_metadata = data_stream_event.data_metadata
-
-        # sequences of sequences are not currently supported
-        assert not data_metadata.is_sequence
-
-        # new data descriptor is a sequence
-        new_data_descriptor = DataAndMetadata.DataDescriptor(True, data_metadata.collection_dimension_count,
-                                                             data_metadata.datum_dimension_count)
-
-        # add the sequence count to the shape
-        shape = (self.__count,) + tuple(data_metadata.data_shape)
-
-        # get the current index for the channel
-        index = self.__indexes.get(data_stream_event.channel, 0)
-
-        # add the index to the slice index as the sequence dimension
-        slice_index = (slice(index, index + 1),) + tuple(data_stream_event.slice_index)
-
-        # add an empty calibration for the new sequence dimension
-        new_dimensional_calibrations = (self.__calibration,) + tuple(data_metadata.dimensional_calibrations)
-
-        # create a new data metadata object
-        new_data_metadata = DataAndMetadata.DataMetadata((shape, data_metadata.data_dtype),
-                                                         data_metadata.intensity_calibration,
-                                                         new_dimensional_calibrations,
-                                                         data_descriptor=new_data_descriptor)
-
-        # increment the index is frame is complete
-        new_index = index + 1 if data_stream_event.state == DataStreamStateEnum.COMPLETE else index
-
-        # send out the new data stream event
-        state = DataStreamStateEnum.PARTIAL if new_index < self.__count else DataStreamStateEnum.COMPLETE
-        channel = data_stream_event.channel
-        self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, slice_index, data_stream_event.data, data_stream_event.data_slice, state))
-
-        # update the index for this channel
-        self.__indexes[data_stream_event.channel] = new_index
 
 
 class Collector(DataStream):
@@ -217,36 +207,32 @@ class Collector(DataStream):
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        self.__indexes: typing.Dict[Channel, PositionType] = dict()
 
     def about_to_delete(self) -> None:
         self.__listener.close()
         self.__data_stream.remove_ref()
         super().about_to_delete()
 
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        # when data arrives, put it into the collection and send it out again
-        # as a new data stream event where the data descriptor is now a collection
-        # and the slice represents the destination the data in the collection.
-
-        data_metadata = data_stream_event.data_metadata
-
+    def _get_new_data_descriptor(self, data_metadata):
         # collections of sequences and collections of collections are not currently supported
         assert not data_metadata.is_sequence
         assert not data_metadata.is_collection
 
         # new data descriptor is a collection
         collection_rank = len(self.__collection_shape)
-        new_data_descriptor = DataAndMetadata.DataDescriptor(False, collection_rank, data_metadata.datum_dimension_count)
+        datum_dimension_count = data_metadata.datum_dimension_count
+        return DataAndMetadata.DataDescriptor(False, collection_rank, datum_dimension_count)
+
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        # when data arrives, put it into the sequence/collection and send it out again
+
+        data_metadata = data_stream_event.data_metadata
+
+        # get the new data descriptor
+        new_data_descriptor = self._get_new_data_descriptor(data_metadata)
 
         # add the collection count to the shape
         shape = self.__collection_shape + tuple(data_metadata.data_shape)
-
-        # get the current index for the channel
-        index = self.__indexes.get(data_stream_event.channel, [0] * collection_rank)
-
-        # add the index to the slice index as the collection dimension
-        slice_index = tuple(slice(i, i + 1) for i in index) + tuple(data_stream_event.slice_index)
 
         # add an empty calibration for the new collection dimensions
         new_dimensional_calibrations = self.__collection_calibrations + tuple(data_metadata.dimensional_calibrations)
@@ -257,19 +243,29 @@ class Collector(DataStream):
                                                          new_dimensional_calibrations,
                                                          data_descriptor=new_data_descriptor)
 
-        # increment the index is frame is complete
-        unravel_shape = (self.__collection_shape[0] + 1, ) + self.__collection_shape[1:]
-        flattened_index = numpy.ravel_multi_index(index, unravel_shape)
-        new_flattened_index = flattened_index + 1 if data_stream_event.state == DataStreamStateEnum.COMPLETE else flattened_index
-        new_index = numpy.unravel_index(new_flattened_index, unravel_shape)
-
-        # send out the new data stream event
-        state = DataStreamStateEnum.COMPLETE if new_flattened_index == numpy.product(self.__collection_shape) else DataStreamStateEnum.PARTIAL
+        # send out the new data stream event. this sends out a single datum at a time, so index slice will be None
+        # and datum slice will be same as source stream.
         channel = data_stream_event.channel
-        self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, slice_index, data_stream_event.data, data_stream_event.data_slice, state))
+        source_data = data_stream_event.source_data
+        source_slice = data_stream_event.source_slice
+        dest_slice = data_stream_event.dest_slice
+        count = numpy.product(self.__collection_shape, dtype=numpy.int64)
+        state = DataStreamStateEnum.COMPLETE if dest_slice[0].stop == count else DataStreamStateEnum.PARTIAL
+        self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, source_data, source_slice, dest_slice, state))
 
-        # update the index for this channel
-        self.__indexes[data_stream_event.channel] = new_index
+
+class Sequencer(Collector):
+    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None):
+        super().__init__(data_stream, (count,), (calibration,))
+
+    def _get_new_data_descriptor(self, data_metadata):
+        # scalar data is not supported
+        assert data_metadata.datum_dimension_count > 0
+
+        # new data descriptor is a collection
+        collection_dimension_count = data_metadata.collection_dimension_count
+        datum_dimension_count = data_metadata.datum_dimension_count
+        return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
 
 
 class DataStreamToDataAndMetadata:
@@ -293,4 +289,16 @@ class DataStreamToDataAndMetadata:
                                                                       data_descriptor=data_metadata.data_descriptor)
             self.data[data_stream_event.channel] = data_and_metadata
         assert data_and_metadata
-        data_stream_event.copy_data(data_and_metadata.data)
+        source_slice = data_stream_event.source_slice
+        dest_slice = data_stream_event.dest_slice
+        # print(f"{data_and_metadata.data_shape=}")
+        # print(f"{data_stream_event.count=}")
+        # print(f"{data_stream_event.data_metadata.data_shape=}")
+        # print(f"{data_stream_event.source_data.shape=}")
+        # print(f"{data_stream_event.source_slice=}")
+        # print(f"{data_stream_event.dest_slice=}")
+        data_chunk_rank = len(data_stream_event.source_data.shape) - 1
+        # TODO: optimize cases where dest data is contiguous.
+        for i in range(data_stream_event.source_slice[0].start, data_stream_event.source_slice[0].stop):
+            dest_index = numpy.unravel_index(data_stream_event.dest_slice[0].start + i, data_and_metadata.data_shape[:-data_chunk_rank])
+            data_and_metadata.data[dest_index][dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
