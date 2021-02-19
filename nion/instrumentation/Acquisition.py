@@ -221,7 +221,11 @@ class Collector(DataStream):
         # new data descriptor is a collection
         collection_rank = len(self.__collection_shape)
         datum_dimension_count = data_metadata.datum_dimension_count
-        return DataAndMetadata.DataDescriptor(False, collection_rank, datum_dimension_count)
+
+        if datum_dimension_count > 0:
+            return DataAndMetadata.DataDescriptor(False, collection_rank, datum_dimension_count)
+        else:
+            return DataAndMetadata.DataDescriptor(False, 0, collection_rank)
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         # when data arrives, put it into the sequence/collection and send it out again
@@ -283,10 +287,11 @@ class DataStreamToDataAndMetadata:
         if not data_and_metadata:
             data_metadata = data_stream_event.data_metadata
             data = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
+            data_descriptor = data_metadata.data_descriptor
             data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
                                                                       data_metadata.intensity_calibration,
                                                                       data_metadata.dimensional_calibrations,
-                                                                      data_descriptor=data_metadata.data_descriptor)
+                                                                      data_descriptor=data_descriptor)
             self.data[data_stream_event.channel] = data_and_metadata
         assert data_and_metadata
         source_slice = data_stream_event.source_slice
@@ -298,7 +303,12 @@ class DataStreamToDataAndMetadata:
         # print(f"{data_stream_event.source_slice=}")
         # print(f"{data_stream_event.dest_slice=}")
         data_chunk_rank = len(data_stream_event.source_data.shape) - 1
-        # TODO: optimize cases where dest data is contiguous.
-        for i in range(data_stream_event.source_slice[0].start, data_stream_event.source_slice[0].stop):
-            dest_index = numpy.unravel_index(data_stream_event.dest_slice[0].start + i, data_and_metadata.data_shape[:-data_chunk_rank])
-            data_and_metadata.data[dest_index][dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
+        ravel_data_shape = data_and_metadata.data_shape[:-data_chunk_rank]
+        if not ravel_data_shape:
+            flat_shape = (numpy.product(data_and_metadata.data.shape, dtype=numpy.int64),)
+            data_and_metadata.data.reshape(flat_shape)[dest_slice] = data_stream_event.source_data[source_slice]
+        else:
+            # TODO: optimize cases where dest data is contiguous.
+            for i in range(source_slice[0].start, source_slice[0].stop):
+                dest_index = numpy.unravel_index(dest_slice[0].start + i, ravel_data_shape)
+                data_and_metadata.data[dest_index][dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
