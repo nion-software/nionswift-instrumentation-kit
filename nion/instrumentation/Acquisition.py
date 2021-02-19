@@ -110,6 +110,7 @@ import typing
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
+from nion.data import xdata_1_0 as xd
 from nion.utils import Event
 from nion.utils import ReferenceCounting
 
@@ -200,7 +201,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.data_available_event = Event.Event()
 
 
-class Collector(DataStream):
+class CollectedDataStream(DataStream):
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
@@ -258,7 +259,7 @@ class Collector(DataStream):
         self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, source_data, source_slice, dest_slice, state))
 
 
-class Sequencer(Collector):
+class SequenceDataStream(CollectedDataStream):
     def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None):
         super().__init__(data_stream, (count,), (calibration,))
 
@@ -270,6 +271,25 @@ class Sequencer(Collector):
         collection_dimension_count = data_metadata.collection_dimension_count
         datum_dimension_count = data_metadata.datum_dimension_count
         return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
+
+
+class CombinedDataStream(DataStream):
+    def __init__(self, data_streams: typing.Sequence[DataStream]):
+        super().__init__()
+        self.__data_streams = [data_stream.add_ref() for data_stream in data_streams]
+        self.__listeners = [data_stream.data_available_event.listen(self.__data_available) for data_stream in data_streams]
+
+    def about_to_delete(self) -> None:
+        for listener in self.__listeners:
+            listener.close()
+        self.__listeners = typing.cast(typing.List, None)
+        for data_stream in self.__data_streams:
+            data_stream.remove_ref()
+        self.__data_streams = typing.cast(typing.List, None)
+        super().about_to_delete()
+
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        self.data_available_event.fire(data_stream_event)
 
 
 class DataStreamToDataAndMetadata:
@@ -296,12 +316,6 @@ class DataStreamToDataAndMetadata:
         assert data_and_metadata
         source_slice = data_stream_event.source_slice
         dest_slice = data_stream_event.dest_slice
-        # print(f"{data_and_metadata.data_shape=}")
-        # print(f"{data_stream_event.count=}")
-        # print(f"{data_stream_event.data_metadata.data_shape=}")
-        # print(f"{data_stream_event.source_data.shape=}")
-        # print(f"{data_stream_event.source_slice=}")
-        # print(f"{data_stream_event.dest_slice=}")
         data_chunk_rank = len(data_stream_event.source_data.shape) - 1
         ravel_data_shape = data_and_metadata.data_shape[:-data_chunk_rank]
         if not ravel_data_shape:
