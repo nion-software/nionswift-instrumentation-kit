@@ -117,7 +117,6 @@ from nion.utils import ReferenceCounting
 ShapeType = typing.Sequence[int]
 SliceType = typing.Sequence[slice]
 Channel = typing.Union[str, int]
-PositionType = typing.Tuple[int, ...]
 
 
 class DataStreamStateEnum(enum.Enum):
@@ -200,6 +199,13 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         super().__init__()
         self.data_available_event = Event.Event()
 
+    @property
+    def is_finished(self) -> bool:
+        return True
+
+    def send_next(self) -> None:
+        pass
+
 
 class CollectedDataStream(DataStream):
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]):
@@ -211,7 +217,9 @@ class CollectedDataStream(DataStream):
 
     def about_to_delete(self) -> None:
         self.__listener.close()
+        self.__listener = None
         self.__data_stream.remove_ref()
+        self.__data_stream = None
         super().about_to_delete()
 
     def _get_new_data_descriptor(self, data_metadata):
@@ -292,18 +300,32 @@ class CombinedDataStream(DataStream):
         self.data_available_event.fire(data_stream_event)
 
 
-class DataStreamToDataAndMetadata:
+class FramedDataStream(DataStream):
     def __init__(self, data_stream: DataStream):
+        super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        self.data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
+        self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
+        self.__index = 0
 
-    def close(self) -> None:
+    def about_to_delete(self) -> None:
         self.__listener.close()
+        self.__listener = None
         self.__data_stream.remove_ref()
+        self.__data_stream = None
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__data_stream.is_finished
+
+    def send_next(self) -> None:
+        self.__data_stream.send_next()
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__data[channel]
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        data_and_metadata = self.data.get(data_stream_event.channel, None)
+        data_and_metadata = self.__data.get(data_stream_event.channel, None)
         if not data_and_metadata:
             data_metadata = data_stream_event.data_metadata
             data = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
@@ -312,17 +334,54 @@ class DataStreamToDataAndMetadata:
                                                                       data_metadata.intensity_calibration,
                                                                       data_metadata.dimensional_calibrations,
                                                                       data_descriptor=data_descriptor)
-            self.data[data_stream_event.channel] = data_and_metadata
+            self.__data[data_stream_event.channel] = data_and_metadata
         assert data_and_metadata
         source_slice = data_stream_event.source_slice
         dest_slice = data_stream_event.dest_slice
         data_chunk_rank = len(data_stream_event.source_data.shape) - 1
-        ravel_data_shape = data_and_metadata.data_shape[:-data_chunk_rank]
-        if not ravel_data_shape:
+        if data_chunk_rank == 0:
+            # this is a case where scalar data is being provided.
             flat_shape = (numpy.product(data_and_metadata.data.shape, dtype=numpy.int64),)
             data_and_metadata.data.reshape(flat_shape)[dest_slice] = data_stream_event.source_data[source_slice]
+        elif data_chunk_rank == len(data_and_metadata.data_shape):
+            # this is a case where a single buffer is being used over and over for processing.
+            for i in range(source_slice[0].start, source_slice[0].stop):
+                data_and_metadata.data[dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
         else:
+            # this is a case where data is being stored.
             # TODO: optimize cases where dest data is contiguous.
+            ravel_data_shape = data_and_metadata.data_shape[:-data_chunk_rank]
             for i in range(source_slice[0].start, source_slice[0].stop):
                 dest_index = numpy.unravel_index(dest_slice[0].start + i, ravel_data_shape)
                 data_and_metadata.data[dest_index][dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE:
+            # data metadata describes the data being sent from this stream: shape, data type, and descriptor
+            new_data_and_metadata = self._process(self.__data[data_stream_event.channel])
+            # data slice describes what slice of the data chunk being sent is valid. here, the entire frame is valid.
+            slices = tuple(slice(None) for s in new_data_and_metadata.data_shape)
+            source_data_slice = (slice(0, 1),) + slices
+            dest_data_slice = (slice(self.__index, self.__index + 1),) + slices
+            # send the data with a count of one. this requires padding the data chunk with an index axis.
+            new_data_stream_event = DataStreamEventArgs(self, data_stream_event.channel,
+                                                        new_data_and_metadata.data_metadata,
+                                                        new_data_and_metadata.data[numpy.newaxis, :], source_data_slice,
+                                                        dest_data_slice, DataStreamStateEnum.COMPLETE)
+            self.data_available_event.fire(new_data_stream_event)
+            self.__index += 1
+
+    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+        return data_and_metadata
+
+
+class SummedDataStream(FramedDataStream):
+    def __init__(self, data_stream: DataStream, axis: typing.Optional[int] = None):
+        super().__init__(data_stream)
+        self.__axis = axis
+
+    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+        return xd.sum(data_and_metadata, self.__axis)
+
+
+class DataStreamToDataAndMetadata(FramedDataStream):
+    def __init__(self, data_stream: DataStream):
+        super().__init__(data_stream)
