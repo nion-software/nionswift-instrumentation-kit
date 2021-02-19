@@ -247,6 +247,49 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(2).data_descriptor)
 
+    def test_scan_as_collection_camera_summed_to_scalar(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        scan_shape = (8, 8)
+        camera_data_stream = CameraFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
+        summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
+        collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        with maker.ref():
+            while not camera_data_stream.is_finished:
+                if not camera_data_stream.is_finished:
+                    camera_data_stream.send_next()
+            expected_camera_shape = scan_shape
+            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(2).data_descriptor)
+
+    def test_scan_as_collection_two_channels_and_camera_summed_to_scalar(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        scan_shape = (8, 8)
+        scan_data_stream = ScanDataStream(1, numpy.product(scan_shape), [0, 1], scan_shape[1])
+        camera_data_stream = CameraFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
+        summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
+        combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
+        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        with maker.ref():
+            while not scan_data_stream.is_finished or not camera_data_stream.is_finished:
+                if not scan_data_stream.is_finished:
+                    scan_data_stream.send_next()
+                if not camera_data_stream.is_finished:
+                    camera_data_stream.send_next()
+            expected_scan_shape = scan_shape
+            expected_camera_shape = scan_shape
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[0].reshape(expected_scan_shape), maker.get_data(0).data))
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[1].reshape(expected_scan_shape), maker.get_data(1).data))
+            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(0).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(1).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(2).data_descriptor)
+
     def test_sequence_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
         # camera will produce one stream of frames.

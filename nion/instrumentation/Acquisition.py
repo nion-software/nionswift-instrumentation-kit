@@ -155,6 +155,7 @@ class DataStreamEventArgs:
     def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
                  source_data: numpy.ndarray, source_slice: SliceType, dest_slice: SliceType,
                  state: typing.Optional[DataStreamStateEnum]):
+        self.__print = False
 
         # the data stream sending this event
         self.data_stream = data_stream
@@ -176,6 +177,14 @@ class DataStreamEventArgs:
 
         # the state of data after this event, partial or complete. pass None if not producing partial datums.
         self.state = state or DataStreamStateEnum.COMPLETE
+
+    def print(self) -> None:
+        if self.__print:
+            print(f"received {self.data_stream} / {self.channel}")
+            print(f"{self.data_metadata.data_shape} [{self.data_metadata.data_dtype}] {self.data_metadata.data_descriptor}")
+            print(f"{self.source_data.shape=} {self.source_slice} -> {self.dest_slice}")
+            print(f"{self.state}")
+            print("")
 
 
 class DataStream(ReferenceCounting.ReferenceCounted):
@@ -238,6 +247,7 @@ class CollectedDataStream(DataStream):
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         # when data arrives, put it into the sequence/collection and send it out again
+        data_stream_event.print()
 
         data_metadata = data_stream_event.data_metadata
 
@@ -297,6 +307,7 @@ class CombinedDataStream(DataStream):
         super().about_to_delete()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        data_stream_event.print()
         self.data_available_event.fire(data_stream_event)
 
 
@@ -325,6 +336,7 @@ class FramedDataStream(DataStream):
         return self.__data[channel]
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        data_stream_event.print()
         data_and_metadata = self.__data.get(data_stream_event.channel, None)
         if not data_and_metadata:
             data_metadata = data_stream_event.data_metadata
@@ -339,38 +351,44 @@ class FramedDataStream(DataStream):
         source_slice = data_stream_event.source_slice
         dest_slice = data_stream_event.dest_slice
         data_chunk_rank = len(data_stream_event.source_data.shape) - 1
+        assert data_chunk_rank >= 0
         if data_chunk_rank == 0:
             # this is a case where scalar data is being provided.
             flat_shape = (numpy.product(data_and_metadata.data.shape, dtype=numpy.int64),)
             data_and_metadata.data.reshape(flat_shape)[dest_slice] = data_stream_event.source_data[source_slice]
-        elif data_chunk_rank == len(data_and_metadata.data_shape):
-            # this is a case where a single buffer is being used over and over for processing.
-            for i in range(source_slice[0].start, source_slice[0].stop):
-                data_and_metadata.data[dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
         else:
             # this is a case where data is being stored.
             # TODO: optimize cases where dest data is contiguous.
             ravel_data_shape = data_and_metadata.data_shape[:-data_chunk_rank]
             for i in range(source_slice[0].start, source_slice[0].stop):
-                dest_index = numpy.unravel_index(dest_slice[0].start + i, ravel_data_shape)
+                # the index is modulo the ravel_data_shape so that the source data stream
+                # can produce increasing frame numbers without worrying about the enclosing collectors
+                # and processing.
+                index = (dest_slice[0].start + i) % numpy.product(ravel_data_shape, dtype=numpy.int64)
+                dest_index = numpy.unravel_index(index, ravel_data_shape)
                 data_and_metadata.data[dest_index][dest_slice[1:]] = data_stream_event.source_data[i][source_slice[1:]]
         if data_stream_event.state == DataStreamStateEnum.COMPLETE:
             # data metadata describes the data being sent from this stream: shape, data type, and descriptor
-            new_data_and_metadata = self._process(self.__data[data_stream_event.channel])
+            new_data_metadata, new_data = self._process(self.__data[data_stream_event.channel])
             # data slice describes what slice of the data chunk being sent is valid. here, the entire frame is valid.
-            slices = tuple(slice(None) for s in new_data_and_metadata.data_shape)
+            slices = tuple(slice(None) for s in range(len(new_data_metadata.dimensional_shape)))
             source_data_slice = (slice(0, 1),) + slices
             dest_data_slice = (slice(self.__index, self.__index + 1),) + slices
-            # send the data with a count of one. this requires padding the data chunk with an index axis.
+            # send the data with a count of one. this requires padding the data chunk with an index axis
+            # unless the data is scalar in which case it is already padded.
+            if len(new_data_metadata.dimensional_shape) > 0:
+                new_data = new_data[numpy.newaxis, :]
+            else:
+                assert len(new_data.shape) == 1
             new_data_stream_event = DataStreamEventArgs(self, data_stream_event.channel,
-                                                        new_data_and_metadata.data_metadata,
-                                                        new_data_and_metadata.data[numpy.newaxis, :], source_data_slice,
+                                                        new_data_metadata,
+                                                        new_data, source_data_slice,
                                                         dest_data_slice, DataStreamStateEnum.COMPLETE)
             self.data_available_event.fire(new_data_stream_event)
             self.__index += 1
 
-    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
-        return data_and_metadata
+    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Tuple[DataAndMetadata.DataMetadata, numpy.ndarray]:
+        return data_and_metadata.data_metadata, data_and_metadata.data
 
 
 class SummedDataStream(FramedDataStream):
@@ -378,8 +396,14 @@ class SummedDataStream(FramedDataStream):
         super().__init__(data_stream)
         self.__axis = axis
 
-    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
-        return xd.sum(data_and_metadata, self.__axis)
+    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Tuple[DataAndMetadata.DataMetadata, numpy.ndarray]:
+        if self.__axis is not None:
+            summed = xd.sum(data_and_metadata, self.__axis)
+            return summed.data_metadata, summed.data
+        else:
+            data_metadata = DataAndMetadata.DataMetadata(((), float), data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0))
+            data_summed = numpy.array([data_and_metadata.data.sum()])
+            return data_metadata, data_summed
 
 
 class DataStreamToDataAndMetadata(FramedDataStream):
