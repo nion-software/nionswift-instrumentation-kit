@@ -1047,7 +1047,7 @@ class CameraDisplayPanelController:
         self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
         self.__playback_controls_composition.layout = CanvasItem.CanvasItemLayout()
-        self.__playback_controls_composition.sizing.set_fixed_height(30)
+        self.__playback_controls_composition.update_sizing(self.__playback_controls_composition.sizing.with_fixed_height(30))
         playback_controls_row = CanvasItem.CanvasItemComposition()
         playback_controls_row.layout = CanvasItem.CanvasItemRowLayout()
         play_button_canvas_item = CanvasItem.TextButtonCanvasItem()

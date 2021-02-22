@@ -676,7 +676,7 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         if vertical_padding is None:
             vertical_padding = 0
 
-        self.sizing.set_fixed_size(Geometry.IntSize(18 + 2 * horizontal_padding, 18 + 2 * vertical_padding))
+        self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18 + 2 * horizontal_padding, 18 + 2 * vertical_padding)))
 
     def mouse_entered(self):
         self.__mouse_inside = True
@@ -949,8 +949,7 @@ class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
 
     def __init__(self):
         super(LinkedCheckBoxCanvasItem, self).__init__()
-        self.sizing.set_fixed_width(10)
-        self.sizing.set_fixed_height(30)
+        self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(w=10, h=30)))
 
     def _repaint(self, drawing_context):
         canvas_size = self.canvas_size
@@ -1620,7 +1619,7 @@ class ScanDisplayPanelController:
         self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
         self.__playback_controls_composition.layout = CanvasItem.CanvasItemLayout()
-        self.__playback_controls_composition.sizing.set_fixed_height(30)
+        self.__playback_controls_composition.update_sizing(self.__playback_controls_composition.sizing.with_fixed_height(30))
         playback_controls_row = CanvasItem.CanvasItemComposition()
         playback_controls_row.layout = CanvasItem.CanvasItemRowLayout()
         scan_button_canvas_item = CanvasItem.TextButtonCanvasItem()
