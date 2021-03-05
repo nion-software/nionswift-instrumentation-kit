@@ -6,6 +6,7 @@ import os
 import gettext
 import uuid
 import pkgutil
+import webbrowser
 
 # local libraries
 import typing
@@ -351,7 +352,7 @@ class MultiAcquirePanelDelegate:
                     camera_frame_parameters = camera.get_current_frame_parameters()
                     scan_frame_parameters = self.scan_controller.get_current_frame_parameters()
                     camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                    camera_frame_parameters['processing'] = 'sum_project' if multi_acquire_settings['bin_spectra'] else None
+                    camera_frame_parameters['processing'] = multi_acquire_settings['processing']
                     scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
                     grab_synchronized_info = self.scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                              camera=camera,
@@ -362,8 +363,10 @@ class MultiAcquirePanelDelegate:
 
                     def create_channels():
                         nonlocal camera_data_channel, scan_data_channel
+                        stack_metadata_keys = getattr(camera.camera, 'stack_metadata_keys', None)
                         camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera.display_name, grab_synchronized_info,
-                                                                                     multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
+                                                                             multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
+                                                                             stack_metadata_keys=stack_metadata_keys)
                         enabled_channels = self.scan_controller.get_enabled_channels()
                         enabled_channel_names = [self.scan_controller.data_channels[i].name for i in enabled_channels]
                         scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
@@ -375,7 +378,8 @@ class MultiAcquirePanelDelegate:
                     self.document_controller.queue_task(create_channels)
                     assert channels_ready_event.wait(10)
 
-                    si_sequence_behavior = MultiAcquire.SISequenceBehavior(None, None, None, None)
+                    sequence_behavior = MultiAcquire.SequenceBehavior(self.multi_acquire_controller, current_parameters_index)
+                    si_sequence_behavior = MultiAcquire.SISequenceBehavior(None, None, sequence_behavior, 1)
                     handler =  MultiAcquire.SISequenceAcquisitionHandler(camera, camera_data_channel, camera_frame_parameters,
                                                                          self.scan_controller, scan_data_channel, scan_frame_parameters,
                                                                          si_sequence_behavior)
@@ -401,31 +405,48 @@ class MultiAcquirePanelDelegate:
                 self.settings_window_open = True
                 self.show_config_box()
 
+        def help_clicked():
+            webbrowser.open('https://nionswift-instrumentation.readthedocs.io/en/latest/userguide.html#multi-acquire-panel', new=2)
+
         def camera_changed(current_item):
             if current_item:
                 self.multi_acquire_controller.settings['camera_hardware_source_id'] = current_item.hardware_source_id
+                if current_item.features.get("has_masked_sum_option"):
+                    self.binning_choice_combo_box.items = ['Spectra', 'Images', 'MultiEELS Spectra', 'Virtual Detectors']
+                else:
+                    self.binning_choice_combo_box.items = ['Spectra', 'Images', 'MultiEELS Spectra']
+                binning_changed(self.binning_choice_combo_box.current_item)
 
         def binning_changed(current_item):
+            if not self.__acquisition_running:
+                self.start_button._widget.enabled = True
             if current_item == 'Spectra':
-                self.multi_acquire_controller.settings['bin_spectra'] = True
+                self.multi_acquire_controller.settings['processing'] = 'sum_project'
                 self.multi_acquire_controller.settings['use_multi_eels_calibration'] = False
             elif current_item == 'Images':
-                self.multi_acquire_controller.settings['bin_spectra'] = False
+                self.multi_acquire_controller.settings['processing'] = None
                 self.multi_acquire_controller.settings['use_multi_eels_calibration'] = False
             elif current_item == 'MultiEELS Spectra':
-                self.multi_acquire_controller.settings['bin_spectra'] = True
+                self.multi_acquire_controller.settings['processing'] = 'sum_project'
                 self.multi_acquire_controller.settings['use_multi_eels_calibration'] = True
+            elif current_item == 'Virtual Detectors':
+                self.multi_acquire_controller.settings['processing'] = 'sum_masked'
+                self.multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+                self.start_button._widget.enabled = False
 
         camera_choice_row = ui.create_row_widget()
         self.binning_choice_combo_box = ui.create_combo_box_widget()
-        self.binning_choice_combo_box.on_current_item_changed = binning_changed
+        # Delay connecting the callback functions because otherwise loading the plugin fails because "start button" is not defined yet
         self.binning_choice_combo_box.items = ['Spectra', 'Images', 'MultiEELS Spectra']
         settings_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/sliders_icon_24.png"), "png"))
         settings_widget = ui._ui.create_canvas_widget(properties={"height": 24, "width": 24})
         settings_widget.canvas_item.add_canvas_item(settings_button)
         settings_button.on_button_clicked = settings_button_clicked
+        help_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/help_icon_24.png"), "png"))
+        help_widget = ui._ui.create_canvas_widget(properties={"height": 24, "width": 24})
+        help_widget.canvas_item.add_canvas_item(help_button)
+        help_button.on_button_clicked = help_clicked
         self.camera_choice_combo_box = ui.create_combo_box_widget(item_text_getter=lambda camera: getattr(camera, 'display_name'))
-        self.camera_choice_combo_box.on_current_item_changed = camera_changed
         camera_choice_row.add_spacing(5)
         camera_choice_row.add(self.camera_choice_combo_box)
         camera_choice_row.add_spacing(10)
@@ -433,6 +454,8 @@ class MultiAcquirePanelDelegate:
         camera_choice_row.add_stretch()
         camera_choice_row.add_spacing(10)
         camera_choice_row._widget.add(settings_widget)
+        camera_choice_row.add_spacing(10)
+        camera_choice_row._widget.add(help_widget)
         camera_choice_row.add_spacing(10)
         self.update_camera_list()
         self.update_current_camera()
@@ -530,17 +553,24 @@ class MultiAcquirePanelDelegate:
         column.add(start_row)
         column.add_spacing(10)
         column.add_stretch()
+        # Make sure we update the available options in the binning combo box.
+        camera_changed(self.camera_choice_combo_box.current_item)
         # Make sure the binning combo box shows the actual settings
         self.update_binning_combo_box()
+        # Delay setting up the callbacks until the end to make sure loading the plugin doesn't fail due to missing attributes
+        self.binning_choice_combo_box.on_current_item_changed = binning_changed
+        self.camera_choice_combo_box.on_current_item_changed = camera_changed
         return column
 
     def update_binning_combo_box(self):
         current_item = self.binning_choice_combo_box.current_item
         new_item = current_item
-        if self.multi_acquire_controller.settings['bin_spectra'] and self.multi_acquire_controller.settings['use_multi_eels_calibration']:
+        if self.multi_acquire_controller.settings['processing'] == 'sum_project' and self.multi_acquire_controller.settings['use_multi_eels_calibration']:
             new_item = 'MultiEELS Spectra'
-        elif self.multi_acquire_controller.settings['bin_spectra']:
+        elif self.multi_acquire_controller.settings['processing'] == 'sum_project':
             new_item = 'Spectra'
+        elif self.multi_acquire_controller.settings['processing'] == 'sum_masked':
+            new_item = 'Virtual Detectors'
         else:
             new_item = 'Images'
         if new_item != current_item:
@@ -677,6 +707,9 @@ class MultiAcquirePanelDelegate:
                 def sum_frames_checkbox_changed(check_state):
                     multi_eels_panel.multi_acquire_controller.settings['sum_frames'] = check_state == 'checked'
 
+                def shift_each_checkbox_changed(check_state):
+                    multi_eels_panel.multi_acquire_controller.settings['shift_each_sequence_slice'] = check_state == 'checked'
+
                 column = self.ui.create_column_widget()
                 row1 = self.ui.create_row_widget()
                 row2 = self.ui.create_row_widget()
@@ -686,8 +719,9 @@ class MultiAcquirePanelDelegate:
                 x_shifter_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 x_shift_delay_label = self.ui.create_label_widget('Offset delay (s): ')
                 x_shift_delay_field = self.ui.create_line_edit_widget(properties={'min-width': 40})
-                auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction ')
+                auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction')
                 sum_frames_checkbox = self.ui.create_check_box_widget('Sum frames')
+                shift_each_checkbox = self.ui.create_check_box_widget('Apply shift for each sequence slice')
                 blanker_label = self.ui.create_label_widget('Blanker control name: ')
                 blanker_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 blanker_delay_label = self.ui.create_label_widget('Blanker delay (s): ')
@@ -716,6 +750,8 @@ class MultiAcquirePanelDelegate:
                 row3.add_spacing(10)
                 row3.add(sum_frames_checkbox)
                 row3.add_spacing(10)
+                row3.add(shift_each_checkbox)
+                row3.add_spacing(10)
                 row3.add_stretch()
 
                 column.add(row1)
@@ -731,6 +767,7 @@ class MultiAcquirePanelDelegate:
 
                 auto_dark_subtract_checkbox.on_check_state_changed = auto_dark_subtract_checkbox_changed
                 sum_frames_checkbox.on_check_state_changed = sum_frames_checkbox_changed
+                shift_each_checkbox.on_check_state_changed = shift_each_checkbox_changed
                 x_shifter_field.on_editing_finished = x_shifter_finished
                 x_shift_delay_field.on_editing_finished = x_shift_delay_finished
                 blanker_field.on_editing_finished = blanker_finished
@@ -742,7 +779,8 @@ class MultiAcquirePanelDelegate:
                                         'blanker_delay': blanker_delay_field})
 
                 self.checkboxes.update({'auto_dark_subtract': auto_dark_subtract_checkbox,
-                                        'sum_frames': sum_frames_checkbox})
+                                        'sum_frames': sum_frames_checkbox,
+                                        'shift_each_sequence_slice': shift_each_checkbox})
 
                 self.settings_changed()
 

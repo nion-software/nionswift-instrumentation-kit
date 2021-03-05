@@ -182,7 +182,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_name: str,
                  grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo,
                  multi_acquire_parameters: list, multi_acquire_settings: dict,
-                 current_parameters_index: int):
+                 current_parameters_index: int,
+                 stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None):
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
         self.__data_item_transaction = None
@@ -190,26 +191,59 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__multi_acquire_parameters = multi_acquire_parameters
         self.__multi_acquire_settings = multi_acquire_settings
         self.__current_parameters_index = current_parameters_index
+        self.__stack_metadata_keys = stack_metadata_keys
         self.current_frames_index = 0
-        self.__data_item = self.__create_data_item(channel_name)
+        self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.progress_updated_event = Event.Event()
 
-    def __create_data_item(self, channel_name: str) -> DataItem.DataItem:
-        scan_calibrations = self.__grab_sync_info.scan_calibrations
-        data_calibrations = self.__grab_sync_info.data_calibrations
-        data_intensity_calibration = self.__grab_sync_info.data_intensity_calibration
+    def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.ScanHardwareSource.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
+        # axes_descriptor provides the information needed to re-order the axes of the result data approprietly.
+        axes_order = []
+        if axes_descriptor.sequence_axes:
+            axes_order.extend(axes_descriptor.sequence_axes)
+        if axes_descriptor.collection_axes:
+            axes_order.extend(axes_descriptor.collection_axes)
+        if axes_descriptor.data_axes:
+            axes_order.extend(axes_descriptor.data_axes)
+
+        data_shape = tuple(scan_shape) + camera_readout_size
+
+        assert len(axes_order) == len(data_shape)
+
+        data_shape = numpy.array(data_shape)[axes_order].tolist()
+        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+        is_sequence = axes_descriptor.sequence_axes is not None
+        if collection_dimension_count == 1:
+            collection_axis = 1 if is_sequence else 0
+            if data_shape[collection_axis] == 1:
+                data_shape.pop(collection_axis)
+
+        return axes_order, data_shape
+
+    def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
+        scan_calibrations = grab_sync_info.scan_calibrations
+        data_calibrations = grab_sync_info.data_calibrations
+        axes_descriptor = grab_sync_info.axes_descriptor
+        data_intensity_calibration = grab_sync_info.data_intensity_calibration
+        _, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, grab_sync_info.scan_size, grab_sync_info.camera_readout_size_squeezed)
         data_item = DataItem.DataItem(large_format=True)
         parameters = self.__multi_acquire_parameters[self.__current_parameters_index]
         data_item.title = f"{CameraDataChannel.title_base} ({channel_name}) #{self.__current_parameters_index+1}"
         self.__document_model.append_data_item(data_item)
         frames = parameters['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
-        scan_size = tuple(self.__grab_sync_info.scan_size)
-        camera_readout_size = tuple(self.__grab_sync_info.camera_readout_size_squeezed)
-        data_shape = scan_size + camera_readout_size
+        is_sequence = False
         if frames > 1 and not sum_frames:
-            data_shape = (frames,) + data_shape
-        data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 2, len(camera_readout_size))
+            data_shape = (frames,) + tuple(data_shape)
+            is_sequence = True
+        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+        datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+        # This is for the case of one virtual detector, where we squeeze the length-1 axis
+        if collection_dimension_count == 1:
+            expected_ndim = int(is_sequence) + collection_dimension_count + datum_dimension_count
+            if expected_ndim > len(data_shape):
+                collection_dimension_count = 0
+        data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
         data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         dimensional_calibrations = scan_calibrations + data_calibrations
         if frames > 1 and not sum_frames:
@@ -247,19 +281,66 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__document_model.begin_data_item_live(self.__data_item)
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-        # there are a few techniques for getting data into a data item. this method prefers directly calling the
-        # document model method update_data_item_partial, which is thread safe. if that method is not available, it
-        # falls back to the data item method set_data_and_metadata, which must be called from the main thread.
-        # the hardware source also supplies a data channel which is thread safe and ends up calling set_data_and_metadata
-        # but we skip that so that the updates fit into this class instead.
+        # This method is always called with a collection of 1d or 2d data. Re-order axes as required and remove length-1-axes.
+
+        axes_descriptor = self.__grab_sync_info.axes_descriptor
+
+        # Calibrations, data descriptor and shape estimates are updated accordingly.
+        dimensional_calibrations = data_and_metadata.dimensional_calibrations
+        data = data_and_metadata.data
+        axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
+        assert len(axes_order) == data.ndim
+        data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
+        dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
+        is_sequence = axes_descriptor.sequence_axes is not None
+        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
+        datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+        metadata = data_and_metadata.metadata
+
+        src_slice = tuple()
+        dst_slice = tuple()
+        for index in axes_order:
+            if index >= len(sub_area.slice):
+                src_slice += (slice(None),)
+            else:
+                src_slice += (sub_area.slice[index],)
+            if index >= len(dest_sub_area.slice):
+                dst_slice += (slice(None),)
+            else:
+                dst_slice += (dest_sub_area.slice[index],)
+
+        # This is to make virtual detector data look sensible: If only one virtual detector is defined the data should
+        # not have a length-1 collection axis
+        if collection_dimension_count == 1:
+            collection_axis = 1 if is_sequence else 0
+            if data.shape[collection_axis] == 1:
+                data = numpy.squeeze(data, axis=collection_axis)
+                dimensional_calibrations = dimensional_calibrations[1:]
+                src_slice = list(src_slice)
+                src_slice.pop(collection_axis)
+                src_slice = tuple(src_slice)
+                dst_slice = list(dst_slice)
+                dst_slice.pop(collection_axis)
+                dst_slice = tuple(dst_slice)
+                collection_dimension_count = 0
+        data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
+
+        data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
+                                                                  dimensional_calibrations,
+                                                                  data_and_metadata.metadata, None,
+                                                                  data_descriptor, None,
+                                                                  None)
+
         frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
-        collection_rank = len(tuple(scan_shape))
-        data_shape_and_dtype = (tuple(scan_shape) + data_and_metadata.data_shape[collection_rank:], data_and_metadata.data_dtype)
-        data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, collection_rank, len(data_and_metadata.data_shape) - collection_rank)
-        dimensional_calibrations = data_and_metadata.dimensional_calibrations
+        data_shape_and_dtype = (data_and_metadata.data_shape, data_and_metadata.data_dtype)
+        data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, collection_dimension_count, datum_dimension_count)
         if frames > 1 and not sum_frames:
-            dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
+            if self.__multi_acquire_settings['shift_each_sequence_slice']:
+                sequence_calibration = Calibration.Calibration(scale=self.__multi_acquire_parameters[self.__current_parameters_index]['offset_x'])
+            else:
+                sequence_calibration = Calibration.Calibration()
+            dimensional_calibrations = (sequence_calibration,) + tuple(dimensional_calibrations)
             data_shape = data_shape_and_dtype[0]
             data_shape = (frames,) + data_shape
             data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
@@ -274,16 +355,49 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                                data_and_metadata.dimensional_calibrations[-1].scale / exposure_s / _number_frames)
             intensity_calibration = Calibration.Calibration(scale=intensity_scale)
 
-        metadata = data_and_metadata.metadata
         metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
         metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+        # This is needed for metadata that changes with each spectrum image in the stack and needs to be preserved.
+        # One usecase is the storage information that comes with virtual detector data that has the full dataset saved
+        # in the background. Currently the camera defines which metadata keys to stack and we copy that information
+        # when setting up the CameraDataChannel
+        if self.__stack_metadata_keys is not None:
+            for key_path in self.__stack_metadata_keys:
+                existing_data = None
+                if isinstance(key_path, str):
+                    key_path = [key_path]
+                sub_dict = self.__data_item.metadata
+                for key in key_path:
+                    sub_dict = sub_dict.get(key)
+                    if sub_dict is None:
+                        break
+                else:
+                    existing_data = copy.deepcopy(sub_dict)
+
+                parent = None
+                sub_dict = metadata
+                for key in key_path:
+                    parent = sub_dict
+                    sub_dict = sub_dict.get(key)
+                    if sub_dict is None:
+                        break
+                else:
+                    if self.current_frames_index == 0 and parent is not None:
+                        parent[key_path[-1]] = [sub_dict]
+                    elif existing_data is not None and parent is not None:
+                        if isinstance(existing_data, list):
+                            if len(existing_data) <= self.current_frames_index:
+                                existing_data.append(copy.deepcopy(sub_dict))
+                            else:
+                                existing_data[self.current_frames_index] = copy.deepcopy(sub_dict)
+                            parent[key_path[-1]] = existing_data
+
         data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
                                                      intensity_calibration,
                                                      dimensional_calibrations,
-                                                     metadata=data_and_metadata.metadata,
+                                                     metadata=metadata,
                                                      data_descriptor=data_descriptor)
-        src_slice = sub_area.slice + (Ellipsis,)
-        dst_slice = dest_sub_area.slice + (Ellipsis,)
+
         if frames > 1:
             if sum_frames:
                 existing_data = self.__data_item.data
@@ -304,11 +418,15 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
 
 class SequenceBehavior:
-    def __init__(self):
-        ...
+    def __init__(self, multi_acquire_controller: 'MultiAcquireController', current_parameters_index: int):
+        self.__multi_acquire_controller = multi_acquire_controller
+        self.__current_parameters_index = current_parameters_index
+        self.__last_shift = 0
 
     def prepare_frame(self):
-        ...
+        if self.__multi_acquire_controller.active_settings['shift_each_sequence_slice']:
+            self.__multi_acquire_controller.shift_x(self.__last_shift)
+            self.__last_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index]['offset_x']
 
 
 SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_behavior', 'scan_section_height',
@@ -365,9 +483,9 @@ class MultiAcquireController:
                                     {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}])
         self.settings = MultiEELSSettings(
                         {'x_shifter': 'LossMagnetic', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
-                         'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
+                         'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
-                         'use_multi_eels_calibration': False})
+                         'use_multi_eels_calibration': False, 'shift_each_sequence_slice': False})
         self.stem_controller = stem_controller
         self.camera: camera_base.CameraHardwareSource = None
         self.scan_controller: scan_base.ScanHardwareSource = None
@@ -403,7 +521,13 @@ class MultiAcquireController:
     def load_settings(self):
         if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'settings.json')):
             with open(os.path.join(self.__savepath, 'settings.json')) as f:
-                self.settings.update(json.load(f))
+                settings_dict = json.load(f)
+                # Upgrade the settings dict to the new version. We replaced "bin_spectra" with "processing" to allow
+                # "sum_masked" as an additional option
+                bin_spectra = settings_dict.pop('bin_spectra', None)
+                if bin_spectra is not None:
+                    settings_dict['processing'] = 'sum_project' if bin_spectra else None
+                self.settings.update(settings_dict)
 
     def save_parameters(self):
         if self.__savepath:
@@ -555,7 +679,7 @@ class MultiAcquireController:
                 self.shift_x(parameters['offset_x'])
                 frame_parameters = self.camera.get_current_frame_parameters()
                 frame_parameters['exposure_ms'] =  parameters['exposure_ms']
-                frame_parameters['processing'] = 'sum_project' if self.__active_settings['bin_spectra'] else None
+                frame_parameters['processing'] = self.__active_settings['processing']
                 self.camera.set_current_frame_parameters(frame_parameters)
                 self.camera.acquire_sequence_prepare(parameters['frames'])
                 data_element = self.camera.acquire_sequence(parameters['frames'])
@@ -570,7 +694,7 @@ class MultiAcquireController:
                 parameters['start_ev'] = start_ev
                 parameters['end_ev'] = end_ev
                 data_element['collection_dimension_count'] = 0
-                data_element['datum_dimension_count'] = 1 if self.__active_settings['bin_spectra'] else 2
+                data_element['datum_dimension_count'] = 1 if self.__active_settings['processing'] == 'sum_project' else 2
                 # sum along frames axis
                 if self.__active_settings['sum_frames'] or parameters['frames'] < 2:
                     data_element['data'] = numpy.sum(data_element['data'], axis=0)
@@ -645,11 +769,15 @@ class MultiAcquireController:
         self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
         try:
             for parameters in self.__active_spectrum_parameters:
-                self.shift_x(parameters['offset_x'])
+                if not self.__active_settings['shift_each_sequence_slice']:
+                    self.shift_x(parameters['offset_x'])
                 acquisition_handler = get_acquisition_handler_fn(list(self.__active_spectrum_parameters), parameters['index'], dict(self.__active_settings))
                 # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
                 self.scan_parameters = acquisition_handler.scan_frame_parameters
                 acquisition_handler.run(parameters['frames'])
+                # If we shift each slice we need to save the current state after each sequence
+                if self.__active_settings['shift_each_sequence_slice']:
+                    self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
         except Exception as e:
             self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
             import traceback

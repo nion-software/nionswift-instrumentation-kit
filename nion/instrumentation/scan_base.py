@@ -668,8 +668,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             camera_readout_size_squeezed = (camera_readout_size.width,)
             axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2])
         elif camera_frame_parameters.get("processing") == "sum_masked":
-            camera_readout_size_squeezed = (len(camera_frame_parameters.get("active_masks", [0])),)
-            axes_descriptor = ScanHardwareSource.AxesDescriptor([2], None, [0, 1])
+            camera_readout_size_squeezed = (max(len(camera_frame_parameters.get("active_masks", [])), 1),)
+            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [2], [0, 1])
         else:
             camera_readout_size_squeezed = tuple(camera_readout_size)
             axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2, 3])
