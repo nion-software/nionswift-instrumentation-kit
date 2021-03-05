@@ -684,10 +684,10 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                             break
                     self.assertIsNotNone(si_data_item)
                     if len(masks) > 1:
-                        self.assertTrue(si_data_item.is_sequence)
+                        self.assertEqual(si_data_item.collection_dimension_count, 1)
                         self.assertEqual((len(masks), 4, 4), si_data_item.data_shape)
                     else:
-                        self.assertFalse(si_data_item.is_sequence)
+                        self.assertEqual(si_data_item.collection_dimension_count, 0)
                         self.assertEqual((4, 4), si_data_item.data_shape)
                     metadata = si_data_item.metadata
                     self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context

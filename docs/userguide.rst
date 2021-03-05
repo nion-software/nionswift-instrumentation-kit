@@ -87,6 +87,9 @@ The right dropdown menu lets you select between different output styles for the 
 - *MultiEELS Spectra:* Also bins the camera frames in y-direction but additionally calibrates the returned data
   in e\ :sup:`-`\ /eV/s. If you are not acquiring a spectrum image, this mode will also create one additional data
   item that contains all acquired spectra as multiple line plots (see image below for an example).
+- *Virtual Detectors (Only available if the selected camera supports this mode.):* Multiplies all camera frames with a
+  mask and sums them. This will result in an image with only one value per virtual detector and scan pixel.
+  This mode can only be used for acquiring synchronized scans.
 
 The plug-in will always create one result data item per line in the configuration table. If *frames* is larger than 1,
 the corresponding result data item will be a stack of the data type that is configured via the dropdown menu.
@@ -110,6 +113,8 @@ The checkboxes in the bottom row allow you to configure how the data will be ret
 - *Auto dark subtraction* will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data.
   Make sure *Blanker control name* is set correctly, otherwise this mode will fail. Note that this settings has no effect for spectrum images as it will always be deactivated in this mode.
 - *Sum frames* will sum all frames that were acquired for each spectrum (as specified by the column *frames* in the main window). If this is off, the plug-in will return a stack for each spectrum.
+- *Apply shift for each sequence slice* will shift each frame in a synchronized acquisition by the amount specified in the main window ("Offset" field). Note that when this setting is active,
+  the first frame of the sequence will not be shifted. This setting only has an effect on synchronized acquisitions.
 
 .. _multiple-shift-acquire-panel:
 

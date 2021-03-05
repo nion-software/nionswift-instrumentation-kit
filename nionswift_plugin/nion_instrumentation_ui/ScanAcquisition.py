@@ -104,6 +104,11 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             is_sequence = axes_descriptor.sequence_axes is not None
             collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
             datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
+            # This is for the case of one virtual detector, where we squeeze the length-1 axis
+            if collection_dimension_count == 1:
+                expected_ndim = int(is_sequence) + collection_dimension_count + datum_dimension_count
+                if expected_ndim > len(data_shape):
+                    collection_dimension_count = 0
             data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
             data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         data_item.dimensional_calibrations = scan_calibrations + data_calibrations
@@ -139,9 +144,12 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         assert len(axes_order) == len(data_shape)
 
         data_shape = numpy.array(data_shape)[axes_order].tolist()
+        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
         is_sequence = axes_descriptor.sequence_axes is not None
-        if is_sequence and data_shape[0] == 1:
-            data_shape = data_shape[1:]
+        if collection_dimension_count == 1:
+            collection_axis = 1 if is_sequence else 0
+            if data_shape[collection_axis] == 1:
+                data_shape.pop(collection_axis)
 
         return axes_order, data_shape
 
@@ -173,12 +181,20 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             else:
                 dst_slice += (dest_sub_area.slice[index],)
 
-        if is_sequence and data.shape[0] == 1:
-            data = numpy.squeeze(data, axis=0)
-            dimensional_calibrations = dimensional_calibrations[1:]
-            src_slice = src_slice[1:]
-            dst_slice = dst_slice[1:]
-            is_sequence = False
+        # This is to make virtual detector data look sensible: If only one virtual detector is defined the data should
+        # not have a length-1 collection axis
+        if collection_dimension_count == 1:
+            collection_axis = 1 if is_sequence else 0
+            if data.shape[collection_axis] == 1:
+                data = numpy.squeeze(data, axis=collection_axis)
+                dimensional_calibrations = dimensional_calibrations[1:]
+                src_slice = list(src_slice)
+                src_slice.pop(collection_axis)
+                src_slice = tuple(src_slice)
+                dst_slice = list(dst_slice)
+                dst_slice.pop(collection_axis)
+                dst_slice = tuple(dst_slice)
+                collection_dimension_count = 0
         data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
 
         data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
