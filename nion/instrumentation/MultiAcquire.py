@@ -766,6 +766,9 @@ class MultiAcquireController:
         self.abort_event.clear()
         if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
             self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+            # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
+            # we still want to go back to the initial value of the control, so we "back up" the zero point here
+            self.zeros['x_start'] = self.zeros['x']
         self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
         try:
             for parameters in self.__active_spectrum_parameters:
@@ -786,6 +789,10 @@ class MultiAcquireController:
             raise
         finally:
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'spectrum image'})
+            # When each frame was shifted we want to use the backed up initial value when shifting back to zero so
+            # that we can actually go fully back to the start.
+            if 'x_start' in self.zeros:
+                self.zeros['x'] = self.zeros['x_start']
             self.shift_x(0)
             if hasattr(self, 'scan_parameters'):
                 delattr(self, 'scan_parameters')
