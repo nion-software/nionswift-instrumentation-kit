@@ -218,7 +218,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if data_shape[collection_axis] == 1:
                 data_shape.pop(collection_axis)
 
-        return axes_order, data_shape
+        return axes_order, tuple(data_shape)
 
     def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
         scan_calibrations = grab_sync_info.scan_calibrations
@@ -333,7 +333,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
         frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
-        data_shape_and_dtype = (data_and_metadata.data_shape, data_and_metadata.data_dtype)
+        data_shape_and_dtype = (data_shape, data_and_metadata.data_dtype)
         data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, collection_dimension_count, datum_dimension_count)
         if frames > 1 and not sum_frames:
             if self.__multi_acquire_settings['shift_each_sequence_slice']:
