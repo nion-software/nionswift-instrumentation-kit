@@ -449,12 +449,12 @@ class SISequenceAcquisitionHandler:
         self.scan_data_channel = scan_data_channel
         self.scan_frame_parameters = scan_frame_parameters
         self.__si_sequence_behavior = si_sequence_behavior or SISequenceBehavior(None, None, None, None)
-        self.is_canceled = False
+        self.abort_event = threading.Event()
         self.finish_fn: typing.Optional[typing.Callable[[], None]] = None
 
     def run(self, number_frames: int):
         for frame in range(number_frames):
-            if self.is_canceled:
+            if self.abort_event.is_set():
                 break
             self.camera_data_channel.current_frames_index = frame
             self.scan_data_channel.current_frames_index = frame
@@ -772,9 +772,12 @@ class MultiAcquireController:
         self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
         try:
             for parameters in self.__active_spectrum_parameters:
+                if self.abort_event.is_set():
+                    break
                 if not self.__active_settings['shift_each_sequence_slice']:
                     self.shift_x(parameters['offset_x'])
                 acquisition_handler = get_acquisition_handler_fn(list(self.__active_spectrum_parameters), parameters['index'], dict(self.__active_settings))
+                acquisition_handler.abort_event = self.abort_event
                 # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
                 self.scan_parameters = acquisition_handler.scan_frame_parameters
                 acquisition_handler.run(parameters['frames'])
