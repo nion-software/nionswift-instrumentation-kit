@@ -151,7 +151,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if data_shape[collection_axis] == 1:
                 data_shape.pop(collection_axis)
 
-        return axes_order, data_shape
+        return axes_order, tuple(data_shape)
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
         # This method is always called with a collection of 1d or 2d data. Re-order axes as required and remove length-1-axes.
@@ -202,7 +202,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                                                                   data_and_metadata.metadata, None,
                                                                   data_descriptor, None,
                                                                   None)
-        data_metadata = DataAndMetadata.DataMetadata((tuple(data_shape), data_and_metadata.data_dtype),
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, data_and_metadata.data_dtype),
                                                      data_and_metadata.intensity_calibration,
                                                      data_and_metadata.dimensional_calibrations,
                                                      metadata=data_and_metadata.metadata,
