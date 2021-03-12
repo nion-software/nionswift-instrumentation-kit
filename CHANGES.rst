@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.4 (2021-03-12)
+-------------------
+- Compatibility with nionui 0.5.0, nionswift 0.15.5.
+- Fix issue with large SI's in wrong storage format (ndata vs h5py).
+
 0.19.3 (2021-01-17)
 -------------------
 - Add ability to pass some metadata from camera to final synchronized acquisition data. Temporary.
