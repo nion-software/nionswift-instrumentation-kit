@@ -8,39 +8,16 @@ from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 
 
-class CameraFrameDataStream(Acquisition.DataStream):
-    """Provide a single data stream.
-    """
-    def __init__(self, count: int, shape: Acquisition.ShapeType, channel: Acquisition.Channel):
-        super().__init__()
-        self.count = count
-        self.shape = tuple(shape)
-        self.channel = channel
-        self.index = 0
-        self.data = numpy.random.randn(self.count, *self.shape)
-
-    @property
-    def is_finished(self) -> bool:
-        return self.index == self.count
-
-    def send_next(self) -> None:
-        assert self.index < self.count
-        # data metadata describes the data being sent from this stream: shape, data type, and descriptor
-        data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.shape))
-        data_metadata = DataAndMetadata.DataMetadata((self.shape, float), data_descriptor=data_descriptor)
-        # data slice describes what slice of the data chunk being sent is valid. here, the entire frame is valid.
-        source_data_slice = (slice(0, 1),) + tuple(slice(None) for s in self.shape)
-        dest_data_slice = (slice(self.index, self.index + 1),) + tuple(slice(None) for s in self.shape)
-        # send the data with a count of one. this requires padding the data chunk with an index axis.
-        data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata,
-                                                            self.data[self.index:self.index + 1], source_data_slice,
-                                                            dest_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
-        self.data_available_event.fire(data_stream_event)
-        self.index += 1
-
-
 class ScanDataStream(Acquisition.DataStream):
     """Provide a data stream for one scan with the given channel.
+
+    count is the number of frames to generate.
+
+    length is the length (number of samples) in each frame.
+
+    channels are the list of channels to generate.
+
+    partial is the size of each chunk of data (number of samples) to send at once.
     """
     def __init__(self, count: int, length: int, channels: typing.Sequence[Acquisition.Channel], partial: int):
         super().__init__()
@@ -79,16 +56,24 @@ class ScanDataStream(Acquisition.DataStream):
             self.partial_index = new_index
 
 
-class ScanFrameDataStream(Acquisition.DataStream):
-    """Provide a single data stream.
+class FrameDataStream(Acquisition.DataStream):
+    """Provide a single data stream frame by frame.
+
+    count is the number of frames to generate.
+
+    shape is the shape of each frame.
+
+    channel is the channel on which to send the data.
+
+    partial is the size of each chunk of data (number of samples) to send at once.
     """
-    def __init__(self, count: int, shape: Acquisition.ShapeType, channel: Acquisition.Channel, partial_height: int):
+    def __init__(self, count: int, shape: Acquisition.ShapeType, channel: Acquisition.Channel, partial_height: typing.Optional[int] = None):
         super().__init__()
         assert len(shape) == 2
         self.count = count
         self.shape = tuple(shape)
         self.channel = channel
-        self.partial_height = partial_height
+        self.partial_height = partial_height or shape[0]
         self.index = 0
         self.partial = 0
         self.data = numpy.random.randn(self.count, *self.shape)
@@ -129,7 +114,7 @@ class TestAcquisitionClass(unittest.TestCase):
 
     def test_camera_sequence_acquisition(self):
         sequence_len = 4
-        data_stream = CameraFrameDataStream(sequence_len, (2, 2), 0)
+        data_stream = FrameDataStream(sequence_len, (2, 2), 0)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
         with maker.ref():
@@ -140,7 +125,7 @@ class TestAcquisitionClass(unittest.TestCase):
     def test_camera_collection_acquisition(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan
         collection_shape = (4, 3)
-        data_stream = CameraFrameDataStream(numpy.product(collection_shape), (2, 2), 0)
+        data_stream = FrameDataStream(numpy.product(collection_shape), (2, 2), 0)
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
@@ -152,7 +137,7 @@ class TestAcquisitionClass(unittest.TestCase):
 
     def test_scan_sequence_acquisition(self):
         sequence_len = 4
-        data_stream = ScanFrameDataStream(sequence_len, (4, 4), 0, 2)
+        data_stream = FrameDataStream(sequence_len, (4, 4), 0, 2)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
         with maker.ref():
@@ -164,7 +149,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # in this case the collector is acting only to arrange the data, not to provide any scan.
         # the scan data is hard coded to produce a scan.
         collection_shape = (5, 3)
-        data_stream = ScanFrameDataStream(numpy.product(collection_shape), (4, 4), 0, 2)
+        data_stream = FrameDataStream(numpy.product(collection_shape), (4, 4), 0, 2)
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
@@ -227,7 +212,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
         scan_data_stream = ScanDataStream(1, numpy.product(scan_shape), [0, 1], scan_shape[1])
-        camera_data_stream = CameraFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
+        camera_data_stream = FrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
         summed_data_stream = Acquisition.SummedDataStream(camera_data_stream, axis=0)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
@@ -252,7 +237,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
-        camera_data_stream = CameraFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
+        camera_data_stream = FrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
         summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
@@ -270,7 +255,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
         scan_data_stream = ScanDataStream(1, numpy.product(scan_shape), [0, 1], scan_shape[1])
-        camera_data_stream = CameraFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
+        camera_data_stream = FrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
         summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
@@ -297,7 +282,7 @@ class TestAcquisitionClass(unittest.TestCase):
         sequence_len = 4
         scan_shape = (8, 8)
         scan_data_stream = ScanDataStream(sequence_len, numpy.product(scan_shape), [0, 1], scan_shape[1])
-        camera_data_stream = CameraFrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), 2)
+        camera_data_stream = FrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), 2)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
