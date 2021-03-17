@@ -115,6 +115,31 @@ The checkboxes in the bottom row allow you to configure how the data will be ret
 
 Using the Multiple Shift Acquire Panel
 --------------------------------------
+This plugin allows you to acquire a stack of spectra with energy offsets between each frame. A spectrum stack of a chosen number of frames can be acquired, have the dark reference subtracted, and then aligned through automatic cross-correlation and summed. The integration time for each frame is taken from the current set-up for the camera. The plug-in returns a spectrum stack, the aligned and summed spectra, and a line profile over a cropped region of the aligned and summed spectra.
+
+Main Window
+^^^^^^^^^^^
+
+The main control panel for the plug-in can be found in the "Window" menu.
+
+.. image:: resources/multiple_shift_eels_acquire_main_window.png
+   :width: 350
+
+The control panel allows the following options for the user:
+
+- Dropdown menu: The camera to use for the stack is chosen by the drop-down menu (in the image shown, "uSim EELS Camera" is chosen). 
+
+- *Number of frames:* allows the user to choose the number of frames to acquire and sum by entering a positive integer into the textbox.
+
+- *Energy offset/frame* allows the user to enter a number (integer or decimal) in the "Energy offset/frame" textbox: each successive spectrum will be offset by the input value in eV. If 0, no energy offset will be applied and the camera will not pause between acquisitions.
+
+- *Apply dark reference?* allows the user to choose whether or not a dark reference should be applied to the acquired spectra. If the box is ticked, the program will apply a dark reference; if the box is not ticked, no dark reference will be applied to the acquired data (for example, this might be desirable when acquiring a dark reference to save or to characterize the detector response). The dark reference to be applied may be acquired (averaging over the same number of frames given in *Number of frames*) or loaded from a file, depending on whether a path to a valid file is given in the *Dark reference file:* text entry box.
+
+- *Apply cross-correlation?* is a checkbox that allows the user to choose whether or not the spectrum stack will be aligned before summing. If the box is ticked, the cross-correlation of each spectrum will be calculated relative to the first spectrum, and the stack will be aligned and then summed. If the box is not ticked, no cross-correlation will be calculated and the stack will not be aligned before summing (*e.g.* desirable when acquiring a dark reference or detector response).
+
+- *Dark reference file:* is a text entry box that allows the user to provide a filepath to a saved file that holds data representing the dark reference to be applied. It is the user's responsibility to make sure that the dark reference was acquired with the same acquisition time as the stack. If no file is provided or the file does not hold valid data, and the *Apply dark reference?* box is ticked, then a dark reference will be acquired automatically after blanking the beam. If the *Apply dark reference?* box is unticked, any file included in this box will be ignored and no dark reference will be applied.
+
+- *Sleep time* allows the user to enter a positive number. The detector will pause for this number of seconds in between frames if a non-zero energy offset is given, to allow the afterglow from the previous frame to die away. If a dark reference is acquired, the detector will also pause for this number of seconds after blanking the beam and before acquiring dark reference frames.
 
 .. _acquisition-recorder-panel:
 
