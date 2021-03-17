@@ -41,13 +41,13 @@ class ScanDataStream(Acquisition.DataStream):
         data_metadata = DataAndMetadata.DataMetadata(((), float), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         new_index = min(self.partial_index + self.partial, self.length)
+        new_count = new_index - self.partial_index
         source_data_slice = (slice(self.partial_index, new_index),)
-        dest_data_slice = (slice(self.partial_index + self.index * self.length, new_index + self.index * self.length),)
-        # send the data with no count. this is required when using partial.
         state = Acquisition.DataStreamStateEnum.PARTIAL if new_index < self.length else Acquisition.DataStreamStateEnum.COMPLETE
         for channel in self.channels:
-            data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata, self.data[channel][self.index],
-                                                                source_data_slice, dest_data_slice, state)
+            data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata,
+                                                                self.data[channel][self.index], new_count,
+                                                                source_data_slice, state)
             self.data_available_event.fire(data_stream_event)
         if state == Acquisition.DataStreamStateEnum.COMPLETE:
             self.partial_index = 0
@@ -89,13 +89,12 @@ class FrameDataStream(Acquisition.DataStream):
         data_metadata = DataAndMetadata.DataMetadata((self.shape, float), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         new_partial = min(self.partial + self.partial_height, self.shape[0])
-        source_data_slice = (slice(0, 1),) + (slice(self.partial, new_partial), slice(None))
-        dest_data_slice = (slice(self.index, self.index + 1),) + (slice(self.partial, new_partial), slice(None))
+        source_data_slice = (slice(self.partial, new_partial), slice(None))
         # send the data with no count. this is required when using partial.
         state = Acquisition.DataStreamStateEnum.PARTIAL if new_partial < self.shape[0] else Acquisition.DataStreamStateEnum.COMPLETE
         data_stream_event = Acquisition.DataStreamEventArgs(self, self.channel, data_metadata,
-                                                            self.data[self.index:self.index + 1], source_data_slice,
-                                                            dest_data_slice, state)
+                                                            self.data[self.index], None,
+                                                            source_data_slice, state)
         self.data_available_event.fire(data_stream_event)
         if state == Acquisition.DataStreamStateEnum.PARTIAL:
             self.partial = new_partial
