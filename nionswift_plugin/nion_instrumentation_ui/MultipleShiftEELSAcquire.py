@@ -39,7 +39,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
     """
         Provides access to the AutoSTEM objects. AutoSTEM refers to the
-        overall microscope system of cameras, instruments, and 
+        overall microscope system of cameras, instruments, and
         algorithms used to control them.
     """
 
@@ -48,7 +48,8 @@ class AcquireController(metaclass=Utility.Singleton):
         self.__acquire_thread = None
 
     def start_threaded_acquire_and_sum(self, stem_controller, camera,
-                                       number_frames, sleep_time, dark_ref,
+                                       number_frames, energy_offset,
+                                       sleep_time, dark_ref,
                                        cross_cor, document_controller,
                                        final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
@@ -72,7 +73,7 @@ class AcquireController(metaclass=Utility.Singleton):
             if task_object is not None:
                 task_object.update_progress(_("Pausing..."), None)
             time.sleep(sleep_time)
-            # Initialize the dark sum and loop through the number of 
+            # Initialize the dark sum and loop through the number of
             # desired frames
             dark_sum = None
             for frame_index in range(number_frames):
@@ -96,6 +97,7 @@ class AcquireController(metaclass=Utility.Singleton):
             return dark_sum
 
         def acquire_series(number_frames,
+                           energy_offset,
                            dark_ref=None,
                            task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
@@ -111,7 +113,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
             reference_energy = stem_controller.GetVal(energy_adjust_control)
 
-            # loop through the frames and fill in the empty stack from the 
+            # loop through the frames and fill in the empty stack from the
             # camera
             if energy_offset == 0.:
                 for frame_index in range(number_frames):
@@ -133,20 +135,21 @@ class AcquireController(metaclass=Utility.Singleton):
             else:
                 for frame_index in range(number_frames):
                     set_offset_energy(energy_offset, 1)
-                    # use next frame to start to make sure we're getting a 
+                    # use next frame to start to make sure we're getting a
                     # frame with the new energy offset
-                    image_stack_data[frame_index] = (
-                        camera.get_next_xdatas_to_start()[0].data)
-                else:
-                    # grab the following frames
-                    image_stack_data[frame_index] = (
-                        camera.get_next_xdatas_to_finish()[0].data)
-                if task_object is not None:
-                    # Update the task panel with the progress
-                    task_object.update_progress(
-                        _("Grabbing EELS data frame {}.").format(
-                            frame_index + 1),
-                        (frame_index + 1, number_frames), None)
+                    if frame_index == 0:
+                        image_stack_data[frame_index] = (
+                            camera.get_next_xdatas_to_start()[0].data)
+                    else:
+                        # grab the following frames
+                        image_stack_data[frame_index] = (
+                            camera.get_next_xdatas_to_finish()[0].data)
+                    if task_object is not None:
+                        # Update the task panel with the progress
+                        task_object.update_progress(
+                            _("Grabbing EELS data frame {}.").format(
+                                frame_index + 1),
+                            (frame_index + 1, number_frames), None)
 
             # Blank the beam
             stem_controller.SetValWait(blank_control, 1.0, 200)
@@ -171,7 +174,7 @@ class AcquireController(metaclass=Utility.Singleton):
                                                 sleep_time,
                                                 task_object)
                 else:
-                    # User has not provided a dark reference file, so a 
+                    # User has not provided a dark reference file, so a
                     # dark reference will be acquired
                     dark_sum = acquire_dark(number_frames,
                                             sleep_time,
@@ -258,7 +261,7 @@ class AcquireController(metaclass=Utility.Singleton):
                 document_controller.document_model.get_display_item_for_data_item(
                     data_item))
             display_item.add_graphic(crop_region)
-            eels_data_item = document_controller.document_model.get_projection_new(display_item, crop_region)
+            eels_data_item = document_controller.document_model.get_projection_new(display_item, display_item.data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
                 eels_display_item = (
@@ -270,14 +273,18 @@ class AcquireController(metaclass=Utility.Singleton):
 
             document_controller.workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
 
-        def acquire_stack_and_sum(number_frames, dark_ref, cross_cor,
-                                  document_controller, final_layout_fn):
+        def acquire_stack_and_sum(number_frames, energy_offset, dark_ref,
+                                  cross_cor, document_controller,
+                                  final_layout_fn):
             # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(
                     _("Multiple Shift EELS Acquire"), "table") as task:
                 # acquire the stack. it will be added to the document by
                 # queueing to the main thread at the end of this method.
-                stack_data_item = acquire_series(number_frames, dark_ref, task)
+                stack_data_item = acquire_series(number_frames,
+                                                 energy_offset,
+                                                 dark_ref,
+                                                 task)
                 stack_data_item.title = _("Spectrum Stack")
 
                 # align and sum the stack
@@ -344,7 +351,9 @@ class AcquireController(metaclass=Utility.Singleton):
 
         # create and start the thread.
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum,
-                                                 args=(number_frames, dark_ref,
+                                                 args=(number_frames,
+                                                       energy_offset,
+                                                       dark_ref,
                                                        cross_cor,
                                                        document_controller,
                                                        final_layout_fn))
@@ -370,6 +379,10 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             properties={"width": 30})
         self.number_frames.text = "30"
         # TODO: how to get text to align right?
+        self.energy_offset = self.ui.create_line_edit_widget(
+            properties={"width": 50})
+        self.energy_offset.text = "0"
+
         self.dark_ref_choice = self.ui.create_check_box_widget()
         self.cross_cor_choice = self.ui.create_check_box_widget()
         self.cross_cor_choice.checked = True
@@ -392,6 +405,11 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         dialog_row_f.add(ui.create_label_widget(_("Number of frames: ")))
         dialog_row_f.add(self.number_frames)
         dialog_row_f.add_stretch()
+
+        dialog_row_e = ui.create_row_widget()
+        dialog_row_e.add(ui.create_label_widget(_("Energy offset/frame: ")))
+        dialog_row_e.add(self.energy_offset)
+        dialog_row_e.add_stretch()
 
         # Row in dialog for dark reference and cross correlation check-boxes
         dialog_row_d = ui.create_row_widget()
@@ -422,8 +440,12 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
         self.acquire_button.on_clicked = lambda: self.acquire(
             int(self.number_frames.text),
+            float(self.energy_offset.text),
             int(self.sleep_time.text),
-            str(self.dark_file.text))
+            str(self.dark_file.text),
+            bool(self.dark_ref_choice.checked),
+            bool(self.cross_cor_choice.checked)
+            )
 
         # create a column in the dialog box
         properties["margin"] = 6
@@ -433,6 +455,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         # Add the rows to the created column
         column.add(camera_row)
         column.add(dialog_row_f)
+        column.add(dialog_row_e)
         column.add(dialog_row_d)
         column.add(dialog_row_df)
         column.add(dialog_row_s)
@@ -448,7 +471,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.__eels_camera_choice = None
         super().close()
 
-    def acquire(self, number_frames, energy_offset, sleep_time, dark_file):
+    def acquire(self, number_frames, energy_offset, sleep_time, dark_file,
+                dark_ref_choice, cross_cor_choice):
         if number_frames <= 0:
             return
         # Function to set up and start acquisition
@@ -461,7 +485,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             # start the EELS acquisition
             eels_camera.start_playing()
             stem_controller = Registry.get_component("stem_controller")
-            if self.dark_ref_choice.checked is False:
+            if dark_ref_choice is False:
                 # dark reference is undesired
                 dark_ref = None
             elif not dark_file:
@@ -470,7 +494,6 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             else:
                 # Dark reference is desired and a file is provided
                 dark_ref = dark_file
-            cross_cor = self.cross_cor_choice.checked
             AcquireController().start_threaded_acquire_and_sum(
                 stem_controller,
                 eels_camera,
@@ -478,7 +501,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 energy_offset,
                 sleep_time,
                 dark_ref,
-                cross_cor,
+                cross_cor_choice,
                 self.document_controller,
                 functools.partial(self.set_final_layout))
 
