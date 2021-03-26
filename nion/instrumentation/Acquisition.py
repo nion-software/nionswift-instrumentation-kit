@@ -271,29 +271,63 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.data_available_event = Event.Event()
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
         self.__sequence_count = sequence_count
-        self.__sequence_index = 0
+        self.__sequence_counts: typing.Dict[Channel, int] = dict()
+        self.__sequence_indexes: typing.Dict[Channel, int] = dict()
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
+        """Return the channels for this data stream."""
         return tuple()
 
     @property
     def is_finished(self) -> bool:
-        """Used for testing. Return true if stream is finished."""
-        return self.__sequence_index == self.__sequence_count
+        """Return true if stream is finished.
+
+        The stream is finished if all channels have sent the number of items in their sequence.
+        """
+        return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.channels)
 
     def send_next(self) -> None:
         """Used for testing. Send next data."""
         if not self.is_finished:
-            assert self.__sequence_index < self.__sequence_count
+            for channel in self.channels:
+                assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
             self._send_next()
 
     def _send_next(self) -> None:
-        """Used for testing. Send next data."""
+        """Used for testing. Send next data. Subclasses can override as required."""
         pass
 
-    def _sequence_next(self) -> None:
-        self.__sequence_index += 1
+    def _sequence_next(self, channel: Channel, n: int = 1) -> None:
+        """Move the sequence for channel forward by n. Subclasses can override."""
+        assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
+        self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
+
+    def start_stream(self, count: int) -> None:
+        """Restart a sequence of acquisitions."""
+        for channel in self.channels:
+            assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
+            self.__sequence_counts[channel] = count
+            self.__sequence_indexes[channel] = 0
+        self._start_stream(count)
+
+    def _start_stream(self, count: int) -> None:
+        """Restart a sequence of acquisitions.
+
+        Subclasses can override to pass along to contained data streams.
+        """
+        pass
+
+    def advance(self) -> None:
+        """Advance the acquisition. Must be called repeatedly until finished."""
+        self._advance()
+
+    def _advance(self) -> None:
+        """Advance the acquisition. Must be called repeatedly until finished.
+
+        Subclasses can override to pass along to contained data streams or handle advancement.
+        """
+        pass
 
 
 class CollectedDataStream(DataStream):
@@ -311,6 +345,7 @@ class CollectedDataStream(DataStream):
         self.__collection_calibrations = tuple(calibrations)
         self.__indexes: typing.Dict[Channel, int] = dict()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
+        self.__last_state = DataStreamStateEnum.COMPLETE
 
     def about_to_delete(self) -> None:
         self.__listener.close()
@@ -323,12 +358,11 @@ class CollectedDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
-    @property
-    def is_finished(self) -> bool:
-        return self.__data_stream.is_finished
-
     def _send_next(self) -> None:
         return self.__data_stream.send_next()
+
+    def _start_stream(self, count: int) -> None:
+        self.__data_stream.start_stream(numpy.product(self.__collection_shape, dtype=numpy.int64))
 
     def _get_new_data_descriptor(self, data_metadata):
         # subclasses can override this method to provide different collection shapes.
@@ -426,6 +460,15 @@ class CollectedDataStream(DataStream):
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
                 self.__indexes[channel] = (index + 1) % collection_count
 
+        self.__last_state = new_state
+        if self.__last_state == DataStreamStateEnum.COMPLETE:
+            self._sequence_next(channel)
+
+    def _advance(self) -> None:
+        self.__data_stream.advance()
+        if not self.is_finished and self.__last_state == DataStreamStateEnum.COMPLETE:
+            self.__data_stream.start_stream(numpy.product(self.__collection_shape, dtype=numpy.int64))
+
 
 class SequenceDataStream(CollectedDataStream):
     """Collect a data stream into a sequence of datums.
@@ -480,6 +523,14 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.send_next()
 
+    def _start_stream(self, count: int) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.start_stream(count)
+
+    def _advance(self) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.advance()
+
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.print()
         self.data_available_event.fire(data_stream_event)
@@ -514,6 +565,12 @@ class FramedDataStream(DataStream):
 
     def _send_next(self) -> None:
         self.__data_stream.send_next()
+
+    def _start_stream(self, count: int) -> None:
+        self.__data_stream.start_stream(count)
+
+    def _advance(self) -> None:
+        self.__data_stream.advance()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data[channel]
@@ -601,3 +658,23 @@ class SummedDataStream(FramedDataStream):
 class DataStreamToDataAndMetadata(FramedDataStream):
     def __init__(self, data_stream: DataStream):
         super().__init__(data_stream)
+
+    def active_context(self) -> typing.ContextManager:
+        class ContextManager:
+            def __init__(self, item: DataStreamToDataAndMetadata):
+                self.__item = item
+
+            def __enter__(self):
+                self.__item.start_stream(1)
+                return self
+
+            def __exit__(self, type, value, traceback):
+                pass
+
+        return ContextManager(self)
+
+    def acquire(self) -> None:
+        with self.active_context():
+            while not self.is_finished:
+                self.send_next()
+                self.advance()
