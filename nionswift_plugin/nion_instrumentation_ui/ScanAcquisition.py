@@ -22,6 +22,7 @@ from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import Facade
+from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
@@ -49,6 +50,7 @@ def create_and_display_data_item(document_window, data_and_metadata: DataAndMeta
 
     # update the session id
     data_item._data_item.session_id = document_window.library._document_model.session_id
+    data_item._data_item.session_metadata = ApplicationData.get_session_metadata_dict()
 
     # set the title
     channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name", data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name", "Data"))
@@ -113,6 +115,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         data_item_metadata["hardware_source"] = copy.deepcopy(grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(grab_sync_info.scan_metadata)
         data_item.metadata = data_item_metadata
+        data_item.session_metadata = ApplicationData.get_session_metadata_dict()
         return data_item
 
     @property

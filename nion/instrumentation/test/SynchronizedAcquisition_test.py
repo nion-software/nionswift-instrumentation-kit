@@ -10,6 +10,7 @@ import uuid
 from nion.data import DataAndMetadata
 from nion.swift import Application
 from nion.swift import Facade
+from nion.swift.model import ApplicationData
 from nion.swift.model import HardwareSource
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
@@ -333,6 +334,31 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.line_time_us"))
             self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
+    def test_grab_sync_info_has_proper_session_metadata(self):
+        with self.__test_context() as test_context:
+            ApplicationData.get_session_metadata_model().microscopist = "Ned Flanders"
+
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.size = 4, 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller._wait()
+            document_controller.periodic()
+
+            for data_item in document_model.data_items:
+                self.assertEqual("Ned Flanders", Metadata.get_metadata_value(data_item, "stem.session.microscopist"))
+
+            # self.assertEqual("Ned Flanders", data_item.session_metadata["microscopist"])
 
     def test_partial_acquisition_has_proper_metadata(self):
 

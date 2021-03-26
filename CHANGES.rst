@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.5 (UNRELEASED)
+-------------------
+- Synchronized acquisition now attached session metadata to resulting data items.
+
 0.19.4 (2021-03-12)
 -------------------
 - Compatibility with nionui 0.5.0, nionswift 0.15.5.

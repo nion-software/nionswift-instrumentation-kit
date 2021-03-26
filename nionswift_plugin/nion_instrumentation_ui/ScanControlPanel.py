@@ -1013,7 +1013,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                     result_display_panel.request_focus()
             document_controller.queue_task(perform)
 
-        open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/sliders_icon_24.png"), "png"))
+        sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
+        assert sliders_icon_24_png is not None
+        open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png"))
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
         simulate_button = ui.create_push_button_widget(_("Simulate"))
