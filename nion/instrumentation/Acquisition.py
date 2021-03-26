@@ -127,6 +127,24 @@ def index_slice(n: int) -> slice:
     return slice(n, n + 1)
 
 
+def offset_slice(s: slice, n: int) -> slice:
+    """Add n to start/stop of slice s."""
+    return slice(s.start + n, s.stop + n, s.step)
+
+
+def slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
+    assert slices[0].start is not None
+    assert slices[0].stop is not None
+    assert len(slices) == len(shape)
+    result_shape = list()
+    for slice, l in zip(slices, shape):
+        if slice.start is not None and slice.stop is not None:
+            result_shape.append(slice.stop - slice.start)
+        else:
+            result_shape.append(l)
+    return tuple(result_shape)
+
+
 def better_ravel_index(index: ShapeType, shape: ShapeType) -> int:
     # ravel index only works for indexes less than the dimension size.
     # this version gives the index for indexes at the dimension size too.
@@ -247,18 +265,35 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     The stream may trigger other events in addition to data available events.
     """
-    def __init__(self):
+
+    def __init__(self, sequence_count: int = 1):
         super().__init__()
         self.data_available_event = Event.Event()
+        # sequence counts are used for acquiring a sequence of frames controlled by the upstream
+        self.__sequence_count = sequence_count
+        self.__sequence_index = 0
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return tuple()
 
     @property
     def is_finished(self) -> bool:
-        """Return true if stream is finished."""
-        return True
+        """Used for testing. Return true if stream is finished."""
+        return self.__sequence_index == self.__sequence_count
 
     def send_next(self) -> None:
         """Used for testing. Send next data."""
+        if not self.is_finished:
+            assert self.__sequence_index < self.__sequence_count
+            self._send_next()
+
+    def _send_next(self) -> None:
+        """Used for testing. Send next data."""
         pass
+
+    def _sequence_next(self) -> None:
+        self.__sequence_index += 1
 
 
 class CollectedDataStream(DataStream):
@@ -283,6 +318,17 @@ class CollectedDataStream(DataStream):
         self.__data_stream.remove_ref()
         self.__data_stream = None
         super().about_to_delete()
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return self.__data_stream.channels
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__data_stream.is_finished
+
+    def _send_next(self) -> None:
+        return self.__data_stream.send_next()
 
     def _get_new_data_descriptor(self, data_metadata):
         # subclasses can override this method to provide different collection shapes.
@@ -341,6 +387,7 @@ class CollectedDataStream(DataStream):
             assert index + count <= collection_count
             assert count > 0
             if count == 1:
+                # a single data chunk has been provided.
                 # if the count is one, add new dimensions of length one for the collection shape and form
                 # the new slice with indexes of 0 for each collection dimension and full slices for the remaining
                 # dimensions.
@@ -351,6 +398,7 @@ class CollectedDataStream(DataStream):
                 self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                 self.__indexes[channel] = (index + count) % collection_count
             else:
+                # multiple data chunks have been provided.
                 # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
                 # start by calculating the start/stop rows. reshape the data into collection shape and add a slice
                 # for the rows and full slices for the remaining dimensions.
@@ -388,10 +436,11 @@ class SequenceDataStream(CollectedDataStream):
         super().__init__(data_stream, (count,), (calibration,))
 
     def _get_new_data_descriptor(self, data_metadata):
-        # scalar data is not supported
+        # scalar data is not supported. and the data must not be a sequence already.
+        assert not data_metadata.is_sequence
         assert data_metadata.datum_dimension_count > 0
 
-        # new data descriptor is a collection
+        # new data descriptor is a sequence
         collection_dimension_count = data_metadata.collection_dimension_count
         datum_dimension_count = data_metadata.datum_dimension_count
         return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
@@ -416,6 +465,21 @@ class CombinedDataStream(DataStream):
         self.__data_streams = typing.cast(typing.List, None)
         super().about_to_delete()
 
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        channels: typing.List[Channel] = list()
+        for data_stream in self.__data_streams:
+            channels.extend(data_stream.channels)
+        return tuple(channels)
+
+    @property
+    def is_finished(self) -> bool:
+        return all(data_stream.is_finished for data_stream in self.__data_streams)
+
+    def _send_next(self) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.send_next()
+
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.print()
         self.data_available_event.fire(data_stream_event)
@@ -426,6 +490,7 @@ class FramedDataStream(DataStream):
 
     This is useful when finalizing data or when processing needs the full frame before proceeding.
     """
+
     def __init__(self, data_stream: DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
@@ -440,10 +505,14 @@ class FramedDataStream(DataStream):
         self.__data_stream = None
 
     @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return self.__data_stream.channels
+
+    @property
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    def send_next(self) -> None:
+    def _send_next(self) -> None:
         self.__data_stream.send_next()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
