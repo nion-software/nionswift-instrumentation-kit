@@ -992,7 +992,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
     class PartialData:
-        def __init__(self, xdata: numpy.ndarray, is_complete: bool, is_canceled: bool, valid_rows: typing.Optional[int] = None):
+        def __init__(self, xdata: DataAndMetadata.DataAndMetadata, is_complete: bool, is_canceled: bool, valid_rows: typing.Optional[int] = None):
             self.xdata = xdata
             self.is_complete = is_complete
             self.is_canceled = is_canceled

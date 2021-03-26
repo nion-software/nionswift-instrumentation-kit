@@ -13,17 +13,13 @@ import threading
 import time
 import typing
 import uuid
-import weakref
-
-# third party libraries
-import numpy
 
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import Core
 from nion.instrumentation import camera_base
-from nion.instrumentation import stem_controller
+from nion.instrumentation import stem_controller as stem_controller_module
 from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
@@ -34,9 +30,6 @@ from nion.utils import Registry
 
 _ = gettext.gettext
 
-SubscanState = stem_controller.SubscanState
-LineScanState = stem_controller.LineScanState
-DriftCorrectionSettings = stem_controller.DriftCorrectionSettings
 
 class ScanFrameParameters(dict):
     def __init__(self, *args, **kwargs):
@@ -122,7 +115,7 @@ class ScanFrameParameters(dict):
                ("\nchannel override: " + str(self.channel_override) if self.channel_override is not None else "")
 
 
-def update_scan_properties(properties: typing.MutableMapping, scan_frame_parameters: ScanFrameParameters, scan_id_str: str) -> None:
+def update_scan_properties(properties: typing.MutableMapping, scan_frame_parameters: ScanFrameParameters, scan_id_str: typing.Optional[str]) -> None:
     if scan_id_str:
         properties["scan_id"] = scan_id_str
     properties["center_x_nm"] = float(scan_frame_parameters.get("center_x_nm", 0.0))
@@ -223,8 +216,8 @@ class SynchronizedScanBehaviorInterface:
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller_: stem_controller.STEMController, scan_hardware_source, device,
-                 hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, scan_hardware_source: ScanHardwareSource,
+                 device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
                  channel_ids: typing.List[str], display_name: str):
         # channel_ids is the channel id for each acquired channel
         # for instance, there may be 4 possible channels (0-3, a-d) and acquisition from channels 1,2
@@ -233,14 +226,14 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__stem_controller = stem_controller_
         self.hardware_source_id = hardware_source_id
         self.__device = device
-        self.__weak_scan_hardware_source = weakref.ref(scan_hardware_source)
+        self.__scan_hardware_source = scan_hardware_source
         self.__is_continuous = is_continuous
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
         self.__frame_number = None
-        self.__scan_id = None
-        self.__last_scan_id = None
+        self.__scan_id: typing.Optional[uuid.UUID] = None
+        self.__last_scan_id: typing.Optional[uuid.UUID] = None
         self.__fixed_scan_id = uuid.UUID(frame_parameters["scan_id"]) if "scan_id" in frame_parameters else None
         self.__pixels_to_skip = 0
         self.__channel_ids = channel_ids
@@ -258,7 +251,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
             return False
-        self.__weak_scan_hardware_source()._enter_scanning_state()
+        self.__scan_hardware_source._enter_scanning_state()
         if not any(self.__device.channels_enabled):
             return False
         self._resume_acquisition()
@@ -302,7 +295,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             time.sleep(0.01)
         self.__frame_number = None
         self.__scan_id = self.__fixed_scan_id
-        self.__weak_scan_hardware_source()._exit_scanning_state()
+        self.__scan_hardware_source._exit_scanning_state()
 
     def _acquire_data_elements(self):
 
@@ -440,7 +433,7 @@ def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rec
 
 def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback_pixels: int,
                        scan_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
-                       data_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
+                       data_calibrations: DataAndMetadata.CalibrationListType,
                        data_intensity_calibration: typing.Optional[Calibration.Calibration],
                        metadata: typing.Mapping) -> DataAndMetadata.DataAndMetadata:
     data_shape = uncropped_xdata.data_shape
@@ -453,14 +446,14 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
     dimensional_calibrations = tuple(scan_calibrations) + tuple(data_calibrations)
     return DataAndMetadata.new_data_and_metadata(data, data_intensity_calibration,
                                                  dimensional_calibrations,
-                                                 metadata, None,
+                                                 dict(metadata), None,
                                                  uncropped_xdata.data_descriptor, None,
                                                  None)
 
 
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller.STEMController, device, hardware_source_id: str, display_name: str):
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, device, hardware_source_id: str, display_name: str):
         super().__init__(hardware_source_id, display_name)
 
         self.features["is_scanning"] = True
@@ -496,7 +489,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.add_data_channel(subscan_channel_id, subscan_channel_name)
         self.add_data_channel("drift", _("Drift"))
 
-        self.__last_idle_position = None  # used for testing
+        self.__last_idle_position: typing.Optional[Geometry.FloatPoint] = None  # used for testing
 
         # configure the initial profiles from the device
         self.__profiles = list()
@@ -508,13 +501,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__acquisition_task = None
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
-        self.__task_queue = queue.Queue()
+        self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
         self.__latest_values_lock = threading.RLock()
-        self.__latest_values = dict()
+        self.__latest_values: typing.Dict[int, dict] = dict()
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
-        self.__camera_hardware_source = None
+        self.__camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, None)
         self.__grab_synchronized_is_scanning = False
         self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
         self.acquisition_state_changed_event = Event.Event()
@@ -566,11 +559,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 traceback.print_stack()
 
     @property
-    def scan_context(self) -> stem_controller.ScanContext:
+    def scan_context(self) -> stem_controller_module.ScanContext:
         return self.__stem_controller.scan_context
 
     @property
-    def stem_controller(self) -> stem_controller.STEMController:
+    def stem_controller(self) -> stem_controller_module.STEMController:
         return self.__stem_controller
 
     @property
@@ -646,7 +639,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                    "axes_descriptor"])
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
-
+        channel_modifier: typing.Optional[str]
         scan_max_area = 2048 * 2048
         if scan_frame_parameters.get("subscan_pixel_size"):
             scan_param_height = int(scan_frame_parameters["subscan_pixel_size"][0])
@@ -670,6 +663,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
+        camera_readout_size_squeezed: typing.Tuple[int, ...]
         if camera_frame_parameters.get("processing") == "sum_project":
             camera_readout_size_squeezed = (camera_readout_size.width,)
             axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2])
@@ -694,7 +688,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
         data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
 
-        camera_metadata = dict()
+        camera_metadata: typing.Dict[str, typing.Any] = dict()
         camera.update_camera_properties(camera_metadata, camera_frame_parameters)
 
         scan_metadata = dict()
@@ -702,7 +696,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         scan_metadata["hardware_source_id"] = self.hardware_source_id
         update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, ScanFrameParameters(scan_frame_parameters), uuid.UUID(scan_frame_parameters["scan_id"]), dict())
 
-        instrument_metadata = dict()
+        instrument_metadata: typing.Dict[str, typing.Any] = dict()
         update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
 
         return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
@@ -782,6 +776,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 # xdata is the full data and includes flyback pixels. crop the flyback pixels in the
                                 # next line, but retain other metadata.
                                 valid_rows = partial_data_info.valid_rows
+                                assert valid_rows is not None
                                 src_top_row = last_valid_rows
                                 metadata = copy.deepcopy(uncropped_xdata.metadata)
                                 # this is a hack to prevent some of the potentially misleading metadata
@@ -797,7 +792,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                                 metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
                                 metadata["scan"]["valid_rows"] = section_rect[0][0] + valid_rows
-                                partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations, data_calibrations, data_intensity_calibration, metadata)
+                                partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
+                                                                   data_calibrations, data_intensity_calibration,
+                                                                   metadata)
                                 if camera_data_channel and valid_rows > 0:
                                     data_channel_state = "complete" if is_complete and is_last_section else "partial"
                                     data_channel_data_and_metadata = partial_xdata
@@ -815,7 +812,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                 if is_complete:
                                     break
                                 # otherwise, acquire the next section and continue
-                                update_period = camera_data_channel._update_period if hasattr(camera_data_channel, "_update_period") else 1.0
+                                update_period = getattr(camera_data_channel, "_update_period", 1.0)
                                 partial_data_info = camera_hardware_source.acquire_synchronized_continue(update_period=update_period)
                                 is_complete = partial_data_info.is_complete
                                 is_canceled = partial_data_info.is_canceled
@@ -835,7 +832,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                             metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                             metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
                             metadata["scan"]["valid_rows"] = scan_frame_parameters["size"][1]
-                            section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations, data_calibrations, data_intensity_calibration, metadata)
+                            section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
+                                                               data_calibrations, data_intensity_calibration, metadata)
                             data_and_metadata_list.append(section_xdata)
                             scan_data_list_list.append([scan_data[section_rect.slice] for scan_data in scan_data_list])
                         else:
@@ -914,19 +912,19 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__device.flyback_pixels
 
     @property
-    def subscan_state(self) -> SubscanState:
+    def subscan_state(self) -> stem_controller_module.SubscanState:
         return self.__stem_controller.subscan_state
 
     @property
     def subscan_enabled(self) -> bool:
-        return self.__stem_controller.subscan_state == stem_controller.SubscanState.ENABLED
+        return self.__stem_controller.subscan_state == stem_controller_module.SubscanState.ENABLED
 
     @subscan_enabled.setter
     def subscan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.subscan_state = stem_controller.SubscanState.ENABLED
+            self.__stem_controller.subscan_state = stem_controller_module.SubscanState.ENABLED
         else:
-            self.__stem_controller.subscan_state = stem_controller.SubscanState.DISABLED
+            self.__stem_controller.subscan_state = stem_controller_module.SubscanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
@@ -946,28 +944,24 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller.subscan_rotation = value
 
     @property
-    def line_scan_state(self) -> LineScanState:
+    def line_scan_state(self) -> stem_controller_module.LineScanState:
         return self.__stem_controller.line_scan_state
 
     @property
     def line_scan_enabled(self) -> bool:
-        return self.__stem_controller.line_scan_state == stem_controller.LineScanState.ENABLED
+        return self.__stem_controller.line_scan_state == stem_controller_module.LineScanState.ENABLED
 
     @line_scan_enabled.setter
     def line_scan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.line_scan_state = stem_controller.LineScanState.ENABLED
+            self.__stem_controller.line_scan_state = stem_controller_module.LineScanState.ENABLED
         else:
-            self.__stem_controller.line_scan_state = stem_controller.LineScanState.DISABLED
+            self.__stem_controller.line_scan_state = stem_controller_module.LineScanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
         return self.__stem_controller.line_scan_vector
-
-    @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
-        self.__stem_controller.line_scan_region = value
 
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Tuple[int, int]) -> None:
         scan_context = self.scan_context
@@ -1016,7 +1010,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
             # if subscan enabled, ensure there is a subscan region
-            if self.__stem_controller.subscan_state == stem_controller.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
+            if self.__stem_controller.subscan_state == stem_controller_module.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
                 self.__stem_controller.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
                 self.__stem_controller.subscan_rotation = 0.0
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
@@ -1036,7 +1030,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __line_scan_state_changed(self, name: str) -> None:
         if name == "line_scan_state":
             # if line scan enabled, ensure there is a line scan region
-            if self.__stem_controller.line_scan_state == stem_controller.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
+            if self.__stem_controller.line_scan_state == stem_controller_module.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
                 self.__stem_controller.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters, False)
@@ -1073,11 +1067,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller.drift_rotation = value
 
     @property
-    def drift_settings(self) -> DriftCorrectionSettings:
+    def drift_settings(self) -> stem_controller_module.DriftCorrectionSettings:
         return self.__stem_controller.drift_settings
 
     @drift_settings.setter
-    def drift_settings(self, value: DriftCorrectionSettings) -> None:
+    def drift_settings(self, value: stem_controller_module.DriftCorrectionSettings) -> None:
         self.__stem_controller.drift_settings = value
 
     @property
@@ -1101,10 +1095,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def calculate_drift_lines(self, width: int, frame_time: float) -> int:
         if self.drift_valid:
-            assert isinstance(self.drift_settings.interval_units, stem_controller.DriftIntervalUnit)
-            if self.drift_settings.interval_units == stem_controller.DriftIntervalUnit.FRAME:
+            assert isinstance(self.drift_settings.interval_units, stem_controller_module.DriftIntervalUnit)
+            if self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.FRAME:
                 lines = max(1, math.ceil(self.drift_settings.interval / width))
-            elif self.drift_settings.interval_units == stem_controller.DriftIntervalUnit.TIME:
+            elif self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.TIME:
                 lines = max(1, math.ceil(self.drift_settings.interval / frame_time / width))
             else:
                 lines = self.drift_settings.interval
@@ -1427,8 +1421,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
                     # create the 'data_element' in the format that must be returned from this method
                     # '_data_element' is the format returned from the Device.
-                    data_element = {"metadata": dict()}
-                    instrument_metadata = dict()
+                    data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
+                    instrument_metadata: typing.Dict[str, typing.Any] = dict()
                     update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
                     if instrument_metadata:
                         data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
@@ -1475,9 +1469,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             else:
                 # pass magic value to position to default position which may be top left or center depending on configuration.
                 self.__device.set_idle_position_by_percentage(-1.0, -1.0)
-            self.__last_idle_position = -1.0, -1.0
+            self.__last_idle_position = Geometry.FloatPoint(x=-1.0, y=-1.0)
 
-    def _get_last_idle_position_for_test(self):
+    def _get_last_idle_position_for_test(self) -> typing.Optional[Geometry.FloatPoint]:
         return self.__last_idle_position
 
     @property
@@ -1558,12 +1552,13 @@ class InstrumentController(abc.ABC):
     def handle_tilt_click(self, **kwargs) -> None: pass
 
 
-def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: InstrumentController, scan_device) -> None:
+def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: stem_controller_module.STEMController, scan_device) -> None:
     if instrument_controller:
         # give the instrument controller opportunity to add properties
-        if callable(getattr(instrument_controller, "get_autostem_properties", None)):
+        get_autostem_properties_fn = getattr(instrument_controller, "get_autostem_properties", None)
+        if callable(get_autostem_properties_fn):
             try:
-                autostem_properties = instrument_controller.get_autostem_properties()
+                autostem_properties = get_autostem_properties_fn()
                 stem_properties.update(autostem_properties)
             except Exception as e:
                 pass
@@ -1587,8 +1582,7 @@ def run():
                 stem_controller = Registry.get_component("stem_controller")
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
-                from nion.instrumentation import stem_controller
-                stem_controller = stem_controller.STEMController()
+                stem_controller = stem_controller_module.STEMController()
             scan_hardware_source = ScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
             if hasattr(component, "priority"):
                 scan_hardware_source.priority = component.priority
