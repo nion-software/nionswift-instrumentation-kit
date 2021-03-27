@@ -115,6 +115,7 @@ from nion.utils import ReferenceCounting
 
 ShapeType = typing.Sequence[int]
 SliceType = typing.Sequence[slice]
+SliceListType = typing.Sequence[SliceType]
 Channel = typing.Union[str, int]
 
 
@@ -259,11 +260,16 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     Future versions may include the ability to collect multiple data streams into lists, tables, or structures.
 
-    The stream communicates by a series of data available events which update data and state.
+    The stream generates a series of data available events which can be used to update data and state in listeners.
 
-    The stream can be controlled with a controller.
+    The stream is controlled by calls to start_stream and advance_stream and the current state can be determined with
+    is_finished.
 
-    The stream may trigger other events in addition to data available events.
+    The stream includes the concept of a sequence of acquisition. The length of the sequence gets updated in calls
+    to start_stream.
+
+    Subclasses may override channels, is_finished, _send_next (for testing), _sequence_next, _start_stream, and
+    _advance_stream.
     """
 
     def __init__(self, sequence_count: int = 1):
@@ -318,11 +324,11 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         pass
 
-    def advance(self) -> None:
+    def advance_stream(self) -> None:
         """Advance the acquisition. Must be called repeatedly until finished."""
-        self._advance()
+        self._advance_stream()
 
-    def _advance(self) -> None:
+    def _advance_stream(self) -> None:
         """Advance the acquisition. Must be called repeatedly until finished.
 
         Subclasses can override to pass along to contained data streams or handle advancement.
@@ -336,16 +342,24 @@ class CollectedDataStream(DataStream):
     The data is formed into a collection by resending it reshaped into the
     collection with additional slice information. No data is copied during
     reshaping.
+
+    Optionally pass in a list of sub-slices to break collection into sections.
     """
 
-    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]):
+    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], sub_slices: typing.Optional[SliceListType] = None):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
+        self.__listener = data_stream.data_available_event.listen(self.__data_available)
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
+        self.__collection_sub_slices = [tuple(sub_slice) for sub_slice in sub_slices] if sub_slices else [tuple(slice(0, length) for length in self.__collection_shape)]
+        self.__collection_sub_slice_index = 0
+        # indexes track the destination of the next data within the collection.
         self.__indexes: typing.Dict[Channel, int] = dict()
-        self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        self.__last_state = DataStreamStateEnum.COMPLETE
+        # sub-slice indexes track the destination of the next data within the current slice.
+        self.__sub_slice_indexes: typing.Dict[Channel, int] = dict()
+        # needs starts tracks whether the downstream data stream needs a start call.
+        self.__needs_starts: typing.Dict[Channel, bool] = dict()
 
     def about_to_delete(self) -> None:
         self.__listener.close()
@@ -362,7 +376,11 @@ class CollectedDataStream(DataStream):
         return self.__data_stream.send_next()
 
     def _start_stream(self, count: int) -> None:
-        self.__data_stream.start_stream(numpy.product(self.__collection_shape, dtype=numpy.int64))
+        collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
+        collection_sub_slice_length = numpy.product(slice_shape(collection_sub_slice, self.__collection_shape), dtype=numpy.int64)
+        self.__sub_slice_indexes.clear()
+        self.__needs_starts.clear()
+        self.__data_stream.start_stream(collection_sub_slice_length)
 
     def _get_new_data_descriptor(self, data_metadata):
         # subclasses can override this method to provide different collection shapes.
@@ -413,61 +431,81 @@ class CollectedDataStream(DataStream):
 
         # send out the new data stream event.
         index = self.__indexes.get(channel, 0)
+        sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
+        collection_rank = len(self.__collection_shape)
+        collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
+        collection_sub_slice_shape = tuple(slice_shape(collection_sub_slice, self.__collection_shape))
+        collection_sub_slice_length = int(numpy.product(collection_sub_slice_shape, dtype=numpy.int64))
+        collection_sub_slice_row_length = int(numpy.product(collection_sub_slice_shape[1:], dtype=numpy.int64))
         if count is not None:
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
-            assert count == 1 or count % int(numpy.product(self.__collection_shape[1:], dtype=numpy.int64)) == 0
+            assert count == 1 or count % collection_sub_slice_row_length == 0
             assert count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
             assert index + count <= collection_count
             assert count > 0
+            next_index = index + count
+            next_sub_slice_index = sub_slice_index + count
             if count == 1:
                 # a single data chunk has been provided.
                 # if the count is one, add new dimensions of length one for the collection shape and form
                 # the new slice with indexes of 0 for each collection dimension and full slices for the remaining
                 # dimensions.
                 old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
-                new_source_data = old_source_data.reshape((1,) * len(self.__collection_shape) + old_source_data.shape[1:])
-                new_source_slice = (index_slice(0), ) * len(self.__collection_shape) + (slice(None),) * (len(old_source_data.shape) - 1)
+                new_source_data = old_source_data.reshape((1,) * collection_rank + old_source_data.shape[1:])
+                new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
                 self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-                self.__indexes[channel] = (index + count) % collection_count
+                self.__indexes[channel] = next_index % collection_count
+                self.__sub_slice_indexes[channel] = next_sub_slice_index
+                self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
             else:
                 # multiple data chunks have been provided.
                 # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
                 # start by calculating the start/stop rows. reshape the data into collection shape and add a slice
                 # for the rows and full slices for the remaining dimensions.
-                slice_start = better_unravel_index(index, self.__collection_shape)[0]
-                slice_stop = better_unravel_index(index + count, self.__collection_shape)[0]
+                collection_slice_offset = better_unravel_index(ravel_slice_start(collection_sub_slice, self.__collection_shape), self.__collection_shape)[0]
+                slice_offset = self.__indexes.get(channel, 0) // collection_sub_slice_row_length
+                slice_start = better_unravel_index(index, self.__collection_shape)[0] - collection_slice_offset - slice_offset
+                slice_stop = better_unravel_index(index + count, self.__collection_shape)[0] - collection_slice_offset - slice_offset
                 assert slice_stop <= self.__collection_shape[0]
                 old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
-                new_source_data = data_stream_event.source_data.reshape((count,) + self.__collection_shape[1:] + old_source_data.shape[1:])
+                source_slice_length = numpy.product(slice_shape(data_stream_event.source_slice, old_source_data.shape), dtype=numpy.int64)
+                row_count = source_slice_length // collection_sub_slice_row_length
+                new_source_data = old_source_data.reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
                 new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
                 self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-                self.__indexes[channel] = (index + count) % collection_count
+                self.__indexes[channel] = next_index % collection_count
+                self.__sub_slice_indexes[channel] = next_sub_slice_index
+                self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
         else:
             # incoming data is partial
             # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
             # remaining dimensions. add dimensions for collection dimensions to the new source data.
-            new_source_slice = (index_slice(0), ) * len(self.__collection_shape) + tuple(data_stream_event.source_slice)
-            new_source_data = data_stream_event.source_data.reshape((1,) * len(self.__collection_shape) + data_stream_event.source_data.shape)
+            new_source_slice = (index_slice(0), ) * collection_rank + tuple(data_stream_event.source_slice)
+            new_source_data = data_stream_event.source_data.reshape((1,) * collection_rank + data_stream_event.source_data.shape)
             # new state is complete if data chunk is complete and it will put us at the end of our collection.
-            if index + 1 == collection_count and data_stream_event.state == DataStreamStateEnum.COMPLETE:
-                new_state = DataStreamStateEnum.COMPLETE
-            else:
-                new_state = DataStreamStateEnum.PARTIAL
-            self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+            new_state = DataStreamStateEnum.PARTIAL
+            next_index = index
+            next_sub_slice_index = sub_slice_index
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
-                self.__indexes[channel] = (index + 1) % collection_count
+                next_index += 1
+                next_sub_slice_index += 1
+                if next_index == collection_count:
+                    new_state = DataStreamStateEnum.COMPLETE
+            self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+            self.__indexes[channel] = next_index % collection_count
+            self.__sub_slice_indexes[channel] = next_sub_slice_index
+            self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
 
-        self.__last_state = new_state
-        if self.__last_state == DataStreamStateEnum.COMPLETE:
+        if new_state == DataStreamStateEnum.COMPLETE:
             self._sequence_next(channel)
 
-    def _advance(self) -> None:
-        self.__data_stream.advance()
-        if not self.is_finished and self.__last_state == DataStreamStateEnum.COMPLETE:
-            self.__data_stream.start_stream(numpy.product(self.__collection_shape, dtype=numpy.int64))
+    def _advance_stream(self) -> None:
+        self.__data_stream.advance_stream()
+        if not self.is_finished and all(self.__needs_starts.get(channel, True) for channel in self.channels):
+            self._start_stream(0)  # 0 is just a placeholder here
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -527,9 +565,9 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.start_stream(count)
 
-    def _advance(self) -> None:
+    def _advance_stream(self) -> None:
         for data_stream in self.__data_streams:
-            data_stream.advance()
+            data_stream.advance_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.print()
@@ -569,8 +607,8 @@ class FramedDataStream(DataStream):
     def _start_stream(self, count: int) -> None:
         self.__data_stream.start_stream(count)
 
-    def _advance(self) -> None:
-        self.__data_stream.advance()
+    def _advance_stream(self) -> None:
+        self.__data_stream.advance_stream()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data[channel]
@@ -677,4 +715,4 @@ class DataStreamToDataAndMetadata(FramedDataStream):
         with self.active_context():
             while not self.is_finished:
                 self.send_next()
-                self.advance()
+                self.advance_stream()
