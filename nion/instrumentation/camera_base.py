@@ -565,7 +565,9 @@ class Mask:
         self.name = None
         self.uuid = uuid.uuid4()
 
-    def add_layer(self, graphic: Graphics.Graphic, value: typing.Union[float, str], inverted: bool = False):
+    def add_layer(self, graphic: Graphics.Graphic, value: typing.Union[float, numpy.ndarray], inverted: bool = False):
+        if isinstance(value, numpy.ndarray):
+            value = value.tolist()
         self._layers.append({"value": value, "inverted": inverted, "graphic_dict": graphic.mime_data_dict()})
 
     def to_dict(self):
@@ -597,24 +599,24 @@ class Mask:
                 part_mask = graphic.get_mask(data_shape).astype(bool)
                 if inverted:
                     part_mask = numpy.logical_not(part_mask)
-                if value == "grad_x":
-                    if hasattr(graphic, "center"):
-                        center = graphic.center
-                    else:
-                        center = (0.5, 0.5)
-                    center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])
-                    grad = numpy.tile(numpy.linspace(-center_coords[1], center_coords[1], data_shape[1]), (data_shape[0], 1))
-                    mask[part_mask] = grad[part_mask]
-                elif value == "grad_y":
-                    if hasattr(graphic, "center"):
-                        center = graphic.center
-                    else:
-                        center = (0.5, 0.5)
-                    center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])
-                    grad = numpy.tile(numpy.linspace(-center_coords[0], center_coords[0], data_shape[0]), (data_shape[1], 1)).T
-                    mask[part_mask] = grad[part_mask]
-                else:
+                if isinstance(value, (float, int)):
                     mask[part_mask] = value
+                else:
+                    # For backwards compatibility accept "grad_x" and "grad_y" and convert to new general system
+                    if value == "grad_x":
+                        value = [[0, 0], [1, 0]]
+                    elif value == "grad_y":
+                        value = [[0, 1], [0, 0]]
+                    if hasattr(graphic, "center"):
+                        center = graphic.center
+                    else:
+                        center = (0.5, 0.5)
+                    center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])
+                    y, x = numpy.mgrid[:data_shape[0], :data_shape[1]].astype(numpy.float32)
+                    y -= center_coords[0]
+                    x -= center_coords[1]
+                    poly = numpy.polynomial.polynomial.polyval2d(x, y, value)
+                    mask[part_mask] = poly[part_mask]
         return mask
 
     def copy(self) -> 'Mask':
