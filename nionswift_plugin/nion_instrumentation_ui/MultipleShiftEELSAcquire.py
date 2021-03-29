@@ -4,6 +4,7 @@ import gettext
 import logging
 import threading
 import time
+import typing
 
 import numpy
 
@@ -48,17 +49,20 @@ class AcquireController(metaclass=Utility.Singleton):
         self.__acquire_thread = None
 
     def start_threaded_acquire_and_sum(self, stem_controller, camera,
-                                       number_frames, energy_offset,
-                                       sleep_time, 
-                                       dark_ref_enabled,
-                                       dark_ref_data,
-                                       cross_cor, document_controller,
+                                       number_frames: int,
+                                       energy_offset: float,
+                                       sleep_time: int,
+                                       dark_ref_enabled: bool,
+                                       dark_ref_data: typing.Optional[
+                                           numpy.ndarray],
+                                       cross_cor: bool,
+                                       document_controller,
                                        final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
 
-        def set_offset_energy(energy_offset, sleep_time=1):
+        def set_offset_energy(energy_offset: float, sleep_time=1):
             current_energy = stem_controller.GetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the
             # desired value (or until timeout)
@@ -70,7 +74,9 @@ class AcquireController(metaclass=Utility.Singleton):
             # sleep 1 sec to avoid double peaks and ghosting
             time.sleep(sleep_time)
 
-        def acquire_dark(number_frames, sleep_time, task_object=None):
+        def acquire_dark(number_frames: int,
+                         sleep_time: int,
+                         task_object=None):
             # Sleep to allow the afterglow to die away
             if task_object is not None:
                 task_object.update_progress(_("Pausing..."), None)
@@ -98,10 +104,10 @@ class AcquireController(metaclass=Utility.Singleton):
                         (frame_index + 1, number_frames), None)
             return dark_sum
 
-        def acquire_series(number_frames,
-                           energy_offset,
-                           dark_ref_enabled,
-                           dark_ref_data,
+        def acquire_series(number_frames: int,
+                           energy_offset: float,
+                           dark_ref_enabled: bool,
+                           dark_ref_data: typing.Optional[numpy.ndarray],
                            task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
@@ -194,7 +200,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
             return image_stack_data_item
 
-        def align_stack(stack, task_object=None):
+        def align_stack(stack: numpy.ndarray, task_object=None):
             # Calculate cross-correlation of the image stack
             number_frames = stack.shape[0]
             if task_object is not None:
@@ -265,9 +271,13 @@ class AcquireController(metaclass=Utility.Singleton):
 
             document_controller.workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
 
-        def acquire_stack_and_sum(number_frames, energy_offset,
-                                  dark_ref_enabled, dark_ref_data,
-                                  cross_cor, document_controller,
+        def acquire_stack_and_sum(number_frames: int,
+                                  energy_offset: float,
+                                  dark_ref_enabled: bool,
+                                  dark_ref_data: typing.Optional[
+                                      numpy.ndarray],
+                                  cross_cor: bool,
+                                  document_controller,
                                   final_layout_fn):
             # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(
@@ -466,8 +476,13 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.__eels_camera_choice = None
         super().close()
 
-    def acquire(self, number_frames, energy_offset, sleep_time, 
-                dark_ref_choice, dark_file, cross_cor_choice):
+    def acquire(self,
+                number_frames: int,
+                energy_offset: float,
+                sleep_time: int,
+                dark_ref_choice: bool,
+                dark_file: str,
+                cross_cor_choice: bool):
         if number_frames <= 0:
             return
         # Function to set up and start acquisition
