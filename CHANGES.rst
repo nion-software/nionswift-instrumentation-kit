@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.4 (unreleased)
+-------------------
+- Add virtual detector option to MultiAcquire.
+- Add option to apply shift for each frame in MultiAcquire.
+
 0.19.3 (2021-01-17)
 -------------------
 - Add ability to pass some metadata from camera to final synchronized acquisition data. Temporary.
