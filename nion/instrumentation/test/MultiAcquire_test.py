@@ -108,6 +108,48 @@ class TestMultiAcquire(unittest.TestCase):
         self.assertEqual(len(data_dict['data_element_list']), len(parameters))
         self.assertAlmostEqual(progress, 1.0, places=1)
 
+    def test_acquire_multi_eels_spectrum_applies_shift_for_each_frame(self):
+        settings = {'x_shifter': 'C10', 'blanker': 'C_Blank',
+                    'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
+                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                    'use_multi_eels_calibration': False, 'shift_each_sequence_slice': True}
+        parameters = [{'index': 0, 'offset_x': 1e-7, 'exposure_ms': 5, 'frames': 5},
+                      {'index': 1, 'offset_x': -1e-7, 'exposure_ms': 8, 'frames': 3},
+                      {'index': 2, 'offset_x': 1e-6, 'exposure_ms': 16, 'frames': 1}]
+        total_acquisition_time = 0.0
+        for parms in parameters:
+            # the simulator cant go super fast, so make sure we give it enough time
+            total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)*1e-3
+            # add some extra overhead time
+            total_acquisition_time += 0.15
+            total_acquisition_time += settings['x_shift_delay']*2
+        total_acquisition_time += settings['x_shift_delay']*2
+        total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
+        stem_controller, camera = self._get_stem_controller_and_camera(is_eels=True)
+        multi_acquire = self._set_up_multi_acquire(settings, parameters, stem_controller)
+        multi_acquire.camera = camera
+        # enable binning for speed
+        frame_parameters = multi_acquire.camera.get_current_frame_parameters()
+        frame_parameters['binning'] = 8
+        multi_acquire.camera.set_current_frame_parameters(frame_parameters)
+        progress = 0
+        def update_progress(minimum, maximum, value):
+            nonlocal progress
+            progress = minimum + value/maximum
+        progress_event_listener = multi_acquire.progress_updated_event.listen(update_progress)
+        t0 = time.time()
+        data_dict = multi_acquire.acquire_multi_eels_spectrum()
+        elapsed = time.time() - t0
+        progress_event_listener.close()
+
+        self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+        self.assertEqual(len(data_dict['data_element_list']), len(parameters))
+        self.assertAlmostEqual(progress, 1.0, places=1)
+        self.assertAlmostEqual(data_dict['data_element_list'][0]['metadata']['instrument']['defocus'], 9e-7)
+        self.assertAlmostEqual(data_dict['data_element_list'][1]['metadata']['instrument']['defocus'], 7e-7)
+        self.assertAlmostEqual(data_dict['data_element_list'][2]['metadata']['instrument']['defocus'], 7e-7)
+        self.assertAlmostEqual(stem_controller.GetVal('C10'), 5e-7)
+
     def test_data_intensity_scale_is_correct_for_summed_frames(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,

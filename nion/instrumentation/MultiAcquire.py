@@ -20,6 +20,7 @@ from nion.data import DataAndMetadata, Calibration
 from nion.data import xdata_1_0 as xd
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
+from nion.swift.model import ImportExportManager
 from nion.swift import Facade
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
@@ -611,15 +612,19 @@ class MultiAcquireController:
             return
         time.sleep(self.__active_settings['blanker_delay'])
 
-    def __calculate_total_acquisition_time(self, spectrum_parameters, settings, scan_parameters=None):
+    def __calculate_total_acquisition_time(self, spectrum_parameters, settings, scan_parameters=None, include_shift_delay=False):
         total_time = 0
         if scan_parameters is not None:
             scan_size = scan_parameters['size']
         else:
             scan_size = (1, 1)
         for parameters in spectrum_parameters:
-            total_time += scan_size[1] * parameters['frames'] * parameters['exposure_ms']
-        total_time *= scan_size[0]
+            total_time += scan_size[1] * scan_size[0] * parameters['frames'] * parameters['exposure_ms']
+            if include_shift_delay:
+                if settings['shift_each_sequence_slice']:
+                    total_time += settings['x_shift_delay'] * parameters['frames'] * 1000
+                else:
+                    total_time += settings['x_shift_delay'] * 1000
         if settings['auto_dark_subtract']:
             total_time *= 2
         return total_time
@@ -630,8 +635,8 @@ class MultiAcquireController:
 
     def get_total_acquisition_time(self):
         scan_parameters = self.scan_controller.get_current_frame_parameters() if self.scan_controller else None
-        acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, None) * 0.001
-        si_acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, scan_parameters) * 0.001
+        acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, None, True) * 0.001
+        si_acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, scan_parameters, True) * 0.001
         if self.settings['auto_dark_subtract']:
             # Auto dark subtract has no effect for acquire SI, so correct the total acquisition time
             si_acquisition_time *= 0.5
@@ -671,18 +676,53 @@ class MultiAcquireController:
             data_dict_list = []
             if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
                 self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+                # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
+                # we still want to go back to the initial value of the control, so we "back up" the zero point here
+                self.zeros['x_start'] = self.zeros['x']
             start_frame_parameters = self.camera.get_current_frame_parameters()
 
             for parameters in self.__active_spectrum_parameters:
                 if self.abort_event.is_set():
                     break
-                self.shift_x(parameters['offset_x'])
+
                 frame_parameters = self.camera.get_current_frame_parameters()
                 frame_parameters['exposure_ms'] =  parameters['exposure_ms']
                 frame_parameters['processing'] = self.__active_settings['processing']
                 self.camera.set_current_frame_parameters(frame_parameters)
-                self.camera.acquire_sequence_prepare(parameters['frames'])
-                data_element = self.camera.acquire_sequence(parameters['frames'])
+                if self.__active_settings['shift_each_sequence_slice']:
+                    data_element = None
+                    for i in range(parameters['frames']):
+                        if i > 0:
+                            self.shift_x(parameters['offset_x'])
+                            # If we shift each slice we need to save the current state after each frame
+                            self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+                        xdata_list = self.camera.grab_next_to_start()
+                        data_element = ImportExportManager.create_data_element_from_extended_data(xdata_list[0])
+                        if i == 0:
+                            if self.__active_settings['processing'] == 'sum_project':
+                                shape = (parameters['frames'], data_element['data'].shape[-1])
+                            else:
+                                shape = (parameters['frames'],) + data_element['data'].shape
+                            data = numpy.empty(shape, dtype=data_element['data'].dtype)
+                        if self.__active_settings['processing'] == 'sum_project' and data_element['data'].ndim == 2:
+                            data[i] = numpy.sum(data_element['data'], axis=0)
+                            if 'spatial_calibrations' in data_element:
+                                data_element['spatial_calibrations'] = [data_element['spatial_calibrations'][-1],]
+                        else:
+                            data[i] = data_element['data']
+                        self.increment_progress_counter(parameters['exposure_ms'])
+                    if data_element:
+                        data_element['data'] = data
+                        if 'spatial_calibrations' in data_element:
+                            data_element['spatial_calibrations'] = [dict(),] + data_element['spatial_calibrations']
+                        data_element = [data_element]
+
+                else:
+                    self.shift_x(parameters['offset_x'])
+                    self.camera.acquire_sequence_prepare(parameters['frames'])
+                    data_element = self.camera.acquire_sequence(parameters['frames'])
+                    self.increment_progress_counter(parameters['frames'] * parameters['exposure_ms'])
+
                 if data_element:
                     data_element = data_element[0]
                 else:
@@ -715,8 +755,6 @@ class MultiAcquireController:
                                        exposure_s / _number_frames)
                     data_element['intensity_calibration'] = {'offset': 0, 'scale': intensity_scale, 'units': 'e/eV/s'}
 
-                self.increment_progress_counter(parameters['frames']*parameters['exposure_ms'])
-
                 if self.__active_settings['auto_dark_subtract']:
                     self.blank_beam()
                     self.camera.acquire_sequence_prepare(parameters['frames'])
@@ -745,6 +783,10 @@ class MultiAcquireController:
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'single spectrum'})
             if start_frame_parameters:
                 self.camera.set_current_frame_parameters(start_frame_parameters)
+            # When each frame was shifted we want to use the backed up initial value when shifting back to zero so
+            # that we can actually go fully back to the start.
+            if 'x_start' in self.zeros:
+                self.zeros['x'] = self.zeros['x_start']
             self.shift_x(0)
 
         data_element_list = []

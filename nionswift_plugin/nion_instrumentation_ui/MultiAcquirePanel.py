@@ -98,6 +98,7 @@ class MultiAcquirePanelDelegate:
         self.__progress_updated_event_listener = None
         self.__settings_changed_event_listener = None
         self.__settings_changed_event_listener_2 = None
+        self.__settings_changed_event_listener_3 = None
         self.__component_registered_event_listener = None
         self.__component_unregistered_event_listener = None
         self.__scan_frame_parameters_changed_event_listener = None
@@ -162,6 +163,9 @@ class MultiAcquirePanelDelegate:
         if self.__settings_changed_event_listener_2:
             self.__settings_changed_event_listener_2.close()
             self.__settings_changed_event_listener_2 = None
+        if self.__settings_changed_event_listener_3:
+            self.__settings_changed_event_listener_3.close()
+            self.__settings_changed_event_listener_3 = None
         if self.__component_registered_event_listener:
             self.__component_registered_event_listener.close()
             self.__component_registered_event_listener = None
@@ -453,14 +457,15 @@ class MultiAcquirePanelDelegate:
         camera_choice_row.add(self.binning_choice_combo_box)
         camera_choice_row.add_stretch()
         camera_choice_row.add_spacing(10)
-        camera_choice_row._widget.add(settings_widget)
-        camera_choice_row.add_spacing(10)
         camera_choice_row._widget.add(help_widget)
+        camera_choice_row.add_spacing(10)
+        camera_choice_row._widget.add(settings_widget)
         camera_choice_row.add_spacing(10)
         self.update_camera_list()
         self.update_current_camera()
         self.__settings_changed_event_listener = self.multi_acquire_controller.settings.settings_changed_event.listen(self.update_current_camera)
         self.__settings_changed_event_listener_2 = self.multi_acquire_controller.settings.settings_changed_event.listen(self.update_binning_combo_box)
+
         def component_changed(component, component_types):
             if 'camera_hardware_source' in component_types:
                 self.update_camera_list()
@@ -477,14 +482,28 @@ class MultiAcquirePanelDelegate:
         parameter_description_row.add_spacing(5)
         parameter_description_row.add(ui.create_label_widget('#'))
         parameter_description_row.add_spacing(20)
-        parameter_description_row.add(ui.create_label_widget('Offset'))
-        parameter_description_row.add_spacing(36)
+        offset_label = ui.create_label_widget('Offset')
+        parameter_description_row.add(offset_label)
         parameter_description_row.add_stretch()
         parameter_description_row.add(ui.create_label_widget('Exposure (ms)'))
         parameter_description_row.add_stretch()
-        parameter_description_row.add(ui.create_label_widget('Frames'))
-        parameter_description_row.add_spacing(5)
         parameter_description_row.add_stretch()
+        parameter_description_row.add_stretch()
+        frames_label = ui.create_label_widget('Frames')
+        parameter_description_row.add(frames_label)
+        parameter_description_row.add_stretch()
+
+        def update_offset_label():
+            if self.multi_acquire_controller.settings['shift_each_sequence_slice']:
+                offset_label.text = 'Offset (per frame)  '
+            else:
+                offset_label.text = 'Offset                   '
+            if self.multi_acquire_controller.settings['sum_frames']:
+                frames_label.text = 'Frames (summed)'
+            else:
+                frames_label.text = 'Frames              '
+        update_offset_label()
+        self.__settings_changed_event_listener_3 = self.multi_acquire_controller.settings.settings_changed_event.listen(update_offset_label)
 
         add_remove_parameters_row = ui.create_row_widget()
         add_parameters_button = ui.create_push_button_widget('+')
@@ -613,10 +632,8 @@ class MultiAcquirePanelDelegate:
             acquisition_time, si_acquisition_time = self.multi_acquire_controller.get_total_acquisition_time()
             time_str = self.__format_time_string(acquisition_time)
             si_time_str = self.__format_time_string(si_acquisition_time)
-            #def update():
             self.time_estimate_label.text = time_str
             self.si_time_estimate_label.text = si_time_str
-            #self.__api.queue_task(update)
 
     def create_parameter_line(self, spectrum_parameters):
         row = self.ui.create_row_widget()
@@ -721,7 +738,7 @@ class MultiAcquirePanelDelegate:
                 x_shift_delay_field = self.ui.create_line_edit_widget(properties={'min-width': 40})
                 auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction')
                 sum_frames_checkbox = self.ui.create_check_box_widget('Sum frames')
-                shift_each_checkbox = self.ui.create_check_box_widget('Apply shift for each sequence slice')
+                shift_each_checkbox = self.ui.create_check_box_widget('Apply shift for each frame')
                 blanker_label = self.ui.create_label_widget('Blanker control name: ')
                 blanker_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 blanker_delay_label = self.ui.create_label_widget('Blanker delay (s): ')
