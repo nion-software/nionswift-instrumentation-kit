@@ -49,7 +49,9 @@ class AcquireController(metaclass=Utility.Singleton):
 
     def start_threaded_acquire_and_sum(self, stem_controller, camera,
                                        number_frames, energy_offset,
-                                       sleep_time, dark_ref,
+                                       sleep_time, 
+                                       dark_ref_enabled,
+                                       dark_ref_data,
                                        cross_cor, document_controller,
                                        final_layout_fn):
         if self.__acquire_thread and self.__acquire_thread.is_alive():
@@ -98,7 +100,8 @@ class AcquireController(metaclass=Utility.Singleton):
 
         def acquire_series(number_frames,
                            energy_offset,
-                           dark_ref=None,
+                           dark_ref_enabled,
+                           dark_ref_data,
                            task_object=None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
@@ -154,27 +157,16 @@ class AcquireController(metaclass=Utility.Singleton):
             # Blank the beam
             stem_controller.SetValWait(blank_control, 1.0, 200)
             # load dark ref file
-            if dark_ref is not None:
+            if dark_ref_enabled:
                 # User desires a dark reference to be applied
-                if dark_ref:
-                    # User has provided a path to a dark reference file
-                    # load dark reference data
-                    dark_data = (
-                        ImportExportManager.ImportExportManager().read_data_items(
-                            None, dark_ref))
-                    if dark_data is not None:
-                        # the file contains dark data to use
-                        if task_object is not None:
-                            task_object.update_progress(
-                                _("Applying dark reference"), None)
-                        dark_sum = dark_data[0].data
-                    else:
-                        # if the filepath is bad and no file is imported
-                        dark_sum = acquire_dark(number_frames,
-                                                sleep_time,
-                                                task_object)
+                if dark_ref_data is not None:
+                    # User has provided a valid dark reference file
+                    if task_object is not None:
+                        task_object.update_progress(
+                            _("Applying dark reference"), None)
+                    dark_sum = dark_ref_data
                 else:
-                    # User has not provided a dark reference file, so a
+                    # User has not provided a valid dark reference, so a
                     # dark reference will be acquired
                     dark_sum = acquire_dark(number_frames,
                                             sleep_time,
@@ -273,7 +265,8 @@ class AcquireController(metaclass=Utility.Singleton):
 
             document_controller.workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
 
-        def acquire_stack_and_sum(number_frames, energy_offset, dark_ref,
+        def acquire_stack_and_sum(number_frames, energy_offset,
+                                  dark_ref_enabled, dark_ref_data,
                                   cross_cor, document_controller,
                                   final_layout_fn):
             # grab the document model and workspace for convenience
@@ -283,7 +276,8 @@ class AcquireController(metaclass=Utility.Singleton):
                 # queueing to the main thread at the end of this method.
                 stack_data_item = acquire_series(number_frames,
                                                  energy_offset,
-                                                 dark_ref,
+                                                 dark_ref_enabled,
+                                                 dark_ref_data,
                                                  task)
                 stack_data_item.title = _("Spectrum Stack")
 
@@ -353,7 +347,8 @@ class AcquireController(metaclass=Utility.Singleton):
         self.__acquire_thread = threading.Thread(target=acquire_stack_and_sum,
                                                  args=(number_frames,
                                                        energy_offset,
-                                                       dark_ref,
+                                                       dark_ref_enabled,
+                                                       dark_ref_data,
                                                        cross_cor,
                                                        document_controller,
                                                        final_layout_fn))
@@ -442,8 +437,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             int(self.number_frames.text),
             float(self.energy_offset.text),
             int(self.sleep_time.text),
-            str(self.dark_file.text),
             bool(self.dark_ref_choice.checked),
+            str(self.dark_file.text),
             bool(self.cross_cor_choice.checked)
             )
 
@@ -471,8 +466,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.__eels_camera_choice = None
         super().close()
 
-    def acquire(self, number_frames, energy_offset, sleep_time, dark_file,
-                dark_ref_choice, cross_cor_choice):
+    def acquire(self, number_frames, energy_offset, sleep_time, 
+                dark_ref_choice, dark_file, cross_cor_choice):
         if number_frames <= 0:
             return
         # Function to set up and start acquisition
@@ -486,21 +481,27 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             eels_camera.start_playing()
             stem_controller = Registry.get_component("stem_controller")
             if dark_ref_choice is False:
-                # dark reference is undesired
-                dark_ref = None
-            elif not dark_file:
-                # Dark reference is desired, but no file is provided
-                dark_ref = False
+                # Dark reference is undesired
+                dark_ref_data = None
             else:
-                # Dark reference is desired and a file is provided
-                dark_ref = dark_file
+                # Dark reference is desired: import from the file given, if
+                # the import does not succeed (file does not exist or no path
+                # was given), then set dark_ref_data to None
+                dark_ref_import = (
+                    ImportExportManager.ImportExportManager().read_data_items(
+                        None, dark_file))
+                if dark_ref_import:
+                    dark_ref_data = dark_ref_import[0].data
+                else:
+                    dark_ref_data = None
             AcquireController().start_threaded_acquire_and_sum(
                 stem_controller,
                 eels_camera,
                 number_frames,
                 energy_offset,
                 sleep_time,
-                dark_ref,
+                dark_ref_choice,
+                dark_ref_data,
                 cross_cor_choice,
                 self.document_controller,
                 functools.partial(self.set_final_layout))
