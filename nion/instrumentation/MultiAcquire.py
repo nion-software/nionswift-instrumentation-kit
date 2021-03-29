@@ -692,6 +692,8 @@ class MultiAcquireController:
                 if self.__active_settings['shift_each_sequence_slice']:
                     data_element = None
                     for i in range(parameters['frames']):
+                        if self.abort_event.is_set():
+                            break
                         if i > 0:
                             self.shift_x(parameters['offset_x'])
                             # If we shift each slice we need to save the current state after each frame

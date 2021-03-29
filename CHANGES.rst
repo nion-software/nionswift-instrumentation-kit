@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.19.6 (UNRELEASED)
+-------------------
+- Add virtual detector option to MultiAcquire.
+- Add option to apply shift for each frame in MultiAcquire.
+
 0.19.5 (2021-04-12)
 -------------------
 - Improve multiple shift EELS acquire by allowing disabling of dark subtraction and alignment.

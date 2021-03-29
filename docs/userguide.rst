@@ -113,8 +113,12 @@ The checkboxes in the bottom row allow you to configure how the data will be ret
 - *Auto dark subtraction* will blank the beam after the acquisition is finished and repeat it (with the exact same settings). This data will be then be used as dark images for the actual data.
   Make sure *Blanker control name* is set correctly, otherwise this mode will fail. Note that this settings has no effect for spectrum images as it will always be deactivated in this mode.
 - *Sum frames* will sum all frames that were acquired for each spectrum (as specified by the column *frames* in the main window). If this is off, the plug-in will return a stack for each spectrum.
-- *Apply shift for each sequence slice* will shift each frame in a synchronized acquisition by the amount specified in the main window ("Offset" field). Note that when this setting is active,
-  the first frame of the sequence will not be shifted. This setting only has an effect on synchronized acquisitions.
+- *Apply shift for each frame* will shift each frame in a synchronized acquisition by the amount specified in the main window ("Offset" field). Note that when this setting is active,
+  the first frame of the sequence will not be shifted. So if you set "Offset" to "1" and "Frames" to "3" the first frame will not be shifted, the second will be shifted by "1" and the
+  third frame will be shifted by "2". If you add another line of spectrum parameters in the main window, the first frame in the second line will be shifted by the same amount than the
+  last frame of the previous line. So starting with the example here, the first frame of the second parameters line would also be shifted by "2". If "Offset" for the second line is
+  "-1" and "Frames" is also "3", the second frame would be shifted by "1" and the third frame of the second line would be shifted by "0" again. This behavior allows to implement
+  acquisition patterns that move back and forth between two end points.
 
 .. _multiple-shift-acquire-panel:
 
