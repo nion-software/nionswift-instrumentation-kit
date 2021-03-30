@@ -678,6 +678,38 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
+    def test_scan_acquisition_controller_with_rect_4d(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+            scan_specifier.size = 4, 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.NONE)
+            scan_acquisition_controller._wait()
+
+            document_controller.periodic()
+            si_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title:
+                    si_data_item = data_item
+                    break
+            self.assertIsNotNone(si_data_item)
+            self.assertEqual((4, 4, 128, 512), si_data_item.data_shape)
+            metadata = si_data_item.metadata
+            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
+            self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
     def test_scan_acquisition_controller_sum_masked(self):
         masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
         for masks in masks_list:
