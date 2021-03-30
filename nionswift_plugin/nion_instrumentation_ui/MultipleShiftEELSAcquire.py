@@ -389,6 +389,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.energy_offset.text = "0"
 
         self.dark_ref_choice = self.ui.create_check_box_widget()
+        self.dark_ref_choice.checked = True
         self.cross_cor_choice = self.ui.create_check_box_widget()
         self.cross_cor_choice.checked = True
         self.dark_file = self.ui.create_line_edit_widget(
@@ -448,7 +449,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             float(self.energy_offset.text),
             int(self.sleep_time.text),
             bool(self.dark_ref_choice.checked),
-            str(self.dark_file.text),
+            '',  # stand-in dark reference
+#            str(self.dark_file.text),
             bool(self.cross_cor_choice.checked)
             )
 
@@ -462,7 +464,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         column.add(dialog_row_f)
         column.add(dialog_row_e)
         column.add(dialog_row_d)
-        column.add(dialog_row_df)
+#        column.add(dialog_row_df)
         column.add(dialog_row_s)
         column.add(dialog_row_a)
         column.add_stretch()
