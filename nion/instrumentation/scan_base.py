@@ -451,6 +451,37 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
                                                  None)
 
 
+class SynchronizedScanControl:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource):
+        self.__scan_hardware_source = scan_hardware_source
+        self.__camera_hardware_source = camera_hardware_source
+        self.__stem_controller = scan_hardware_source.stem_controller
+        self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
+        self.__grab_synchronized_is_scanning = True
+        self.__scan_hardware_source.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+        self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
+        self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
+
+    @property
+    def is_aborted(self) -> bool:
+        return self.__grab_synchronized_aborted
+
+    def abort(self) -> None:
+        if self.__grab_synchronized_is_scanning:
+            # if the state is scanning, the thread could be stuck on acquire sequence or
+            # stuck on scan.grab. cancel both here.
+            self.__camera_hardware_source.acquire_sequence_cancel()
+            self.__scan_hardware_source.abort_recording()
+        # and set the flag for misbehaving acquire_sequence return values.
+        self.__grab_synchronized_aborted = True
+
+    def close(self) -> None:
+        self.__scan_hardware_source.set_record_frame_parameters(self.__old_record_parameters)
+        self.__stem_controller._exit_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
+        self.__grab_synchronized_is_scanning = False
+        self.__scan_hardware_source.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+
+
 class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, stem_controller_: stem_controller_module.STEMController, device, hardware_source_id: str, display_name: str):
@@ -507,9 +538,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
-        self.__camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, None)
-        self.__grab_synchronized_is_scanning = False
-        self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
+        self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
         self.acquisition_state_changed_event = Event.Event()
 
     def close(self):
@@ -712,178 +741,164 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None) -> GrabSynchronizedResult:
         camera_frame_parameters = camera_base.CameraFrameParameters(camera_frame_parameters)
         camera_hardware_source = camera
-        self.__camera_hardware_source = camera_hardware_source
+        scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
+        scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
+        self.__grab_synchronized_control = SynchronizedScanControl(self, camera_hardware_source)
         try:
-            self.__stem_controller._enter_synchronized_state(self, camera=camera_hardware_source)
-            self.__grab_synchronized_is_scanning = True
-            self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
-            old_record_parameters = self.get_record_frame_parameters()
-            scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
-            scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
-            try:
-                scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
-                if scan_info.is_subscan:
-                    scan_frame_parameters["subscan_pixel_size"] = tuple(scan_info.scan_size)
-                else:
-                    scan_frame_parameters["size"] = tuple(scan_info.scan_size)
-                self.__device.prepare_synchronized_scan(scan_frame_parameters, camera_exposure_ms=camera_frame_parameters["exposure_ms"])
-                flyback_pixels = self.__device.flyback_pixels
-                scan_size = scan_info.scan_size
-                scan_param_height, scan_param_width = tuple(scan_size)
-                scan_height = scan_param_height
-                scan_width = scan_param_width + flyback_pixels
-                scan_calibrations = scan_info.scan_calibrations
-                data_calibrations = scan_info.data_calibrations
-                data_intensity_calibration = scan_info.data_intensity_calibration
+            scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            if scan_info.is_subscan:
+                scan_frame_parameters["subscan_pixel_size"] = tuple(scan_info.scan_size)
+            else:
+                scan_frame_parameters["size"] = tuple(scan_info.scan_size)
+            self.__device.prepare_synchronized_scan(scan_frame_parameters, camera_exposure_ms=camera_frame_parameters["exposure_ms"])
+            flyback_pixels = self.__device.flyback_pixels
+            scan_size = scan_info.scan_size
+            scan_param_height, scan_param_width = tuple(scan_size)
+            scan_height = scan_param_height
+            scan_width = scan_param_width + flyback_pixels
+            scan_calibrations = scan_info.scan_calibrations
+            data_calibrations = scan_info.data_calibrations
+            data_intensity_calibration = scan_info.data_intensity_calibration
 
-                # abort the scan to not interfere with setup; and clear the aborted flag
-                self.abort_playing()
-                self.__grab_synchronized_aborted = False
+            # abort the scan to not interfere with setup; and clear the aborted flag
+            self.abort_playing()
 
-                aborted = False
-                data_and_metadata_list = list()  # only used (for return value) if camera_data_channel is None
-                scan_data_list_list = list()
-                section_height = section_height or scan_height
-                section_count = (scan_height + section_height - 1) // section_height
-                for section in range(section_count):
-                    # print(f"************ {section}/{section_count}")
-                    section_rect = Geometry.IntRect.from_tlhw(section * section_height, 0, min(section_height, scan_height - section * section_height), scan_param_width)
-                    if scan_behavior:
-                        adjustments = scan_behavior.prepare_section()
-                        if adjustments.offset_nm:
-                            # offset_nm will be in the context reference frame.
-                            scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(scan_frame_parameters.center_nm) + adjustments.offset_nm)
-                    scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
-                    camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-                    camera_hardware_source.acquire_synchronized_prepare(scan_shape)
+            aborted = False
+            data_and_metadata_list = list()  # only used (for return value) if camera_data_channel is None
+            scan_data_list_list = list()
+            section_height = section_height or scan_height
+            section_count = (scan_height + section_height - 1) // section_height
+            for section in range(section_count):
+                # print(f"************ {section}/{section_count}")
+                section_rect = Geometry.IntRect.from_tlhw(section * section_height, 0, min(section_height, scan_height - section * section_height), scan_param_width)
+                if scan_behavior:
+                    adjustments = scan_behavior.prepare_section()
+                    if adjustments.offset_nm:
+                        # offset_nm will be in the context reference frame.
+                        scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(scan_frame_parameters.center_nm) + adjustments.offset_nm)
+                scan_shape = (section_rect.height, scan_width)  # includes flyback pixels
+                camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+                camera_hardware_source.acquire_synchronized_prepare(scan_shape)
 
-                    # generate frame parameters for the section
-                    section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size, scan_info.fractional_area, scan_info.channel_modifier)
+                # generate frame parameters for the section
+                section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size, scan_info.fractional_area, scan_info.channel_modifier)
 
-                    with contextlib.closing(RecordTask(self, section_frame_parameters)) as scan_task:
-                        is_last_section = section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1]
-                        partial_data_info = camera_hardware_source.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
-                        try:
-                            uncropped_xdata = partial_data_info.xdata
-                            is_complete = partial_data_info.is_complete
-                            is_canceled = partial_data_info.is_canceled
-                            last_valid_rows = 0  # valid rows within section
-                            # this loop is awkward because to make it easy to implement synchronized begin in a backwards
-                            # compatible manner, it must return all of its data on the first call. this means that we need
-                            # to handle the data by sending it to the channel. and this leads to the awkward implementation
-                            # below.
-                            while not is_canceled and not self.__grab_synchronized_aborted:
-                                # xdata is the full data and includes flyback pixels. crop the flyback pixels in the
-                                # next line, but retain other metadata.
-                                valid_rows = partial_data_info.valid_rows
-                                assert valid_rows is not None
-                                src_top_row = last_valid_rows
-                                metadata = copy.deepcopy(uncropped_xdata.metadata)
-                                # this is a hack to prevent some of the potentially misleading metadata
-                                # from getting saved into the synchronized data. while it is acceptable to
-                                # assume that the hardware_source properties will get copied to the final
-                                # metadata for now, camera implementers should be aware that this is likely
-                                # to change behavior in the future. please write tests if you make this
-                                # assumption so that they fail when this behavior is changed.
-                                metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
-                                metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
-                                metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
-                                metadata.setdefault("hardware_source", dict()).update(copy.deepcopy(scan_info.camera_metadata))
-                                metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
-                                metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
-                                metadata["scan"]["valid_rows"] = section_rect[0][0] + valid_rows
-                                partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
-                                                                   data_calibrations, data_intensity_calibration,
-                                                                   metadata)
-                                if camera_data_channel and valid_rows > 0:
-                                    data_channel_state = "complete" if is_complete and is_last_section else "partial"
-                                    data_channel_data_and_metadata = partial_xdata
-                                    # src rect is the area of the section data that will be copied
-                                    partial_size = Geometry.IntSize(height=valid_rows - last_valid_rows, width=section_rect.width)
-                                    src_rect = Geometry.IntRect(Geometry.IntPoint(y=src_top_row), partial_size)
-                                    # dst rect is the destination in the final layout.
-                                    dst_rect = Geometry.IntRect(Geometry.IntPoint(y=last_valid_rows), partial_size) + section_rect.origin
-                                    data_channel_view_id = None
-                                    camera_data_channel.update(data_channel_data_and_metadata, data_channel_state,
-                                                               Geometry.IntSize(h=scan_param_height, w=scan_param_width),
-                                                               dst_rect, src_rect, data_channel_view_id)
-                                    last_valid_rows = valid_rows
-                                # break out if we're complete
-                                if is_complete:
-                                    break
-                                # otherwise, acquire the next section and continue
-                                update_period = getattr(camera_data_channel, "_update_period", 1.0)
-                                partial_data_info = camera_hardware_source.acquire_synchronized_continue(update_period=update_period)
-                                is_complete = partial_data_info.is_complete
-                                is_canceled = partial_data_info.is_canceled
-                                uncropped_xdata = partial_data_info.xdata
-                                # unless it's cancelled or aborted, of course.
-                                if not uncropped_xdata or is_canceled or self.__grab_synchronized_aborted:
-                                    break
-                        finally:
-                            camera_hardware_source.acquire_synchronized_end()
-                        if uncropped_xdata and not is_canceled and not self.__grab_synchronized_aborted:
-                            # not aborted
-                            # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
-                            # quickly. see note below.
-                            scan_data_list = scan_task.grab()
+                with contextlib.closing(RecordTask(self, section_frame_parameters)) as scan_task:
+                    is_last_section = section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1]
+                    partial_data_info = camera_hardware_source.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+                    try:
+                        uncropped_xdata = partial_data_info.xdata
+                        is_complete = partial_data_info.is_complete
+                        is_canceled = partial_data_info.is_canceled
+                        last_valid_rows = 0  # valid rows within section
+                        # this loop is awkward because to make it easy to implement synchronized begin in a backwards
+                        # compatible manner, it must return all of its data on the first call. this means that we need
+                        # to handle the data by sending it to the channel. and this leads to the awkward implementation
+                        # below.
+                        while not is_canceled and not self.__grab_synchronized_control.is_aborted:
+                            # xdata is the full data and includes flyback pixels. crop the flyback pixels in the
+                            # next line, but retain other metadata.
+                            valid_rows = partial_data_info.valid_rows
+                            assert valid_rows is not None
+                            src_top_row = last_valid_rows
                             metadata = copy.deepcopy(uncropped_xdata.metadata)
-                            metadata["hardware_source"] = copy.deepcopy(scan_info.camera_metadata)
+                            # this is a hack to prevent some of the potentially misleading metadata
+                            # from getting saved into the synchronized data. while it is acceptable to
+                            # assume that the hardware_source properties will get copied to the final
+                            # metadata for now, camera implementers should be aware that this is likely
+                            # to change behavior in the future. please write tests if you make this
+                            # assumption so that they fail when this behavior is changed.
+                            metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
+                            metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
+                            metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
+                            metadata.setdefault("hardware_source", dict()).update(copy.deepcopy(scan_info.camera_metadata))
                             metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
                             metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
-                            metadata["scan"]["valid_rows"] = scan_frame_parameters["size"][1]
-                            section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
-                                                               data_calibrations, data_intensity_calibration, metadata)
-                            data_and_metadata_list.append(section_xdata)
-                            scan_data_list_list.append([scan_data[section_rect.slice] for scan_data in scan_data_list])
-                        else:
-                            # aborted
-                            scan_task.cancel()
-                            aborted = True
-                            break
-                if not aborted:
-                    new_scan_data_list = list()
-                    if len(scan_data_list_list) > 0:
-                        for i in range(len(scan_data_list_list[0])):
-                            data_list = [scan_data_list[i] for scan_data_list in scan_data_list_list]
-                            scan_data = Core.function_vstack(data_list) if len(data_list) > 1 else data_list[0]
-                            scan_data._set_metadata(scan_data_list[i].metadata)
-                            new_scan_data_list.append(scan_data)
-                    """
-                    [s1a, s1b, s2c]
-                    [s2a, s2b, s2c]
-                    [s3a, s3b, s3c]
-
-                    [s1a, s2a, s3a], etc.
-                    """
-                    # only return the camera data if camera data channel was not passed in
-                    if not camera_data_channel:
-                        camera_data_and_metadata = Core.function_vstack(data_and_metadata_list) if len(data_and_metadata_list) > 1 else data_and_metadata_list[0]
-                        camera_metadata = data_and_metadata_list[0].metadata
-                        camera_data_and_metadata._set_metadata(camera_metadata)
-                        return new_scan_data_list, [camera_data_and_metadata]
+                            metadata["scan"]["valid_rows"] = section_rect[0][0] + valid_rows
+                            partial_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
+                                                               data_calibrations, data_intensity_calibration,
+                                                               metadata)
+                            if camera_data_channel and valid_rows > 0:
+                                data_channel_state = "complete" if is_complete and is_last_section else "partial"
+                                data_channel_data_and_metadata = partial_xdata
+                                # src rect is the area of the section data (collection dimensions only) that will be copied
+                                partial_size = Geometry.IntSize(height=valid_rows - last_valid_rows, width=section_rect.width)
+                                src_rect = Geometry.IntRect(Geometry.IntPoint(y=src_top_row), partial_size)
+                                # dst rect is the destination in the final layout.
+                                dst_rect = Geometry.IntRect(Geometry.IntPoint(y=last_valid_rows), partial_size) + section_rect.origin
+                                data_channel_view_id = None
+                                camera_data_channel.update(data_channel_data_and_metadata, data_channel_state,
+                                                           Geometry.IntSize(h=scan_param_height, w=scan_param_width),
+                                                           dst_rect, src_rect, data_channel_view_id)
+                                last_valid_rows = valid_rows
+                            # break out of inner loop if we're complete; this will move on to the next section, if any.
+                            if is_complete:
+                                break
+                            # otherwise, acquire the next section and continue
+                            update_period = getattr(camera_data_channel, "_update_period", 1.0)
+                            partial_data_info = camera_hardware_source.acquire_synchronized_continue(update_period=update_period)
+                            is_complete = partial_data_info.is_complete
+                            is_canceled = partial_data_info.is_canceled
+                            uncropped_xdata = partial_data_info.xdata
+                            # unless it's cancelled or aborted, of course.
+                            if not uncropped_xdata or is_canceled or self.__grab_synchronized_control.is_aborted:
+                                break
+                    finally:
+                        camera_hardware_source.acquire_synchronized_end()
+                    if uncropped_xdata and not is_canceled and not self.__grab_synchronized_control.is_aborted:
+                        # not aborted
+                        # the data_element['data'] ndarray may point to low level memory; we need to get it to disk
+                        # quickly. see note below.
+                        scan_data_list = scan_task.grab()
+                        metadata = copy.deepcopy(uncropped_xdata.metadata)
+                        metadata["hardware_source"] = copy.deepcopy(scan_info.camera_metadata)
+                        metadata["scan"] = copy.deepcopy(scan_info.scan_metadata)
+                        metadata["instrument"] = copy.deepcopy(scan_info.instrument_metadata)
+                        metadata["scan"]["valid_rows"] = scan_frame_parameters["size"][1]
+                        section_xdata = crop_and_calibrate(uncropped_xdata, flyback_pixels, scan_calibrations,
+                                                           data_calibrations, data_intensity_calibration, metadata)
+                        data_and_metadata_list.append(section_xdata)
+                        scan_data_list_list.append([scan_data[section_rect.slice] for scan_data in scan_data_list])
                     else:
-                        return new_scan_data_list, []
-                return None
-            finally:
-                self.set_record_frame_parameters(old_record_parameters)
-                self.__stem_controller._exit_synchronized_state(self, camera=camera_hardware_source)
-                self.__grab_synchronized_is_scanning = False
-                self.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
-                logging.debug("end sequence acquisition")
+                        # aborted
+                        scan_task.cancel()
+                        aborted = True
+                        break
+            if not aborted:
+                new_scan_data_list = list()
+                if len(scan_data_list_list) > 0:
+                    for i in range(len(scan_data_list_list[0])):
+                        data_list = [scan_data_list[i] for scan_data_list in scan_data_list_list]
+                        scan_data = Core.function_vstack(data_list) if len(data_list) > 1 else data_list[0]
+                        scan_data._set_metadata(scan_data_list[i].metadata)
+                        new_scan_data_list.append(scan_data)
+                """
+                [s1a, s1b, s2c]
+                [s2a, s2b, s2c]
+                [s3a, s3b, s3c]
+
+                [s1a, s2a, s3a], etc.
+                """
+                # only return the camera data if camera data channel was not passed in
+                if not camera_data_channel:
+                    camera_data_and_metadata = Core.function_vstack(data_and_metadata_list) if len(data_and_metadata_list) > 1 else data_and_metadata_list[0]
+                    camera_metadata = data_and_metadata_list[0].metadata
+                    camera_data_and_metadata._set_metadata(camera_metadata)
+                    return new_scan_data_list, [camera_data_and_metadata]
+                else:
+                    return new_scan_data_list, []
+            return None
         except Exception as e:
             import traceback
             traceback.print_exc()
             raise
+        finally:
+            self.__grab_synchronized_control.close()
+            self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
 
     def grab_synchronized_abort(self) -> None:
-        if self.__grab_synchronized_is_scanning:
-            # if the state is scanning, the thread could be stuck on acquire sequence or
-            # stuck on scan.grab. cancel both here.
-            self.__camera_hardware_source.acquire_sequence_cancel()
-            self.abort_recording()
-        # and set the flag for misbehaving acquire_sequence return values.
-        self.__grab_synchronized_aborted = True
+        if self.__grab_synchronized_control:
+            self.__grab_synchronized_control.abort()
 
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
         return None
@@ -1243,15 +1258,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
-
-    def convert_data_channel_id_to_channel_id(self, data_channel_id: int) -> int:
-        channel_count = self.channel_count
-        for channel_index in range(channel_count):
-            if data_channel_id == self.get_data_channel_state(channel_index)[0]:
-                return channel_index
-            if data_channel_id == self.get_data_channel_state(channel_index + channel_count)[0]:
-                return channel_index
-        assert False
 
     def record_async(self, callback_fn):
         """ Call this when the user clicks the record button. """

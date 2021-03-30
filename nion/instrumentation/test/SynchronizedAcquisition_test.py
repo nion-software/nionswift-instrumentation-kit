@@ -468,6 +468,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                    camera_frame_parameters=camera_frame_parameters,
                                                    camera_data_channel=camera_data_channel,
                                                    section_height=section_height)
+            self.assertTrue(camera_data_channel.updates)
             for partial_update in camera_data_channel.updates:
                 self.assertEqual("counts", partial_update.xdata.intensity_calibration.units)
                 self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[0].units)
