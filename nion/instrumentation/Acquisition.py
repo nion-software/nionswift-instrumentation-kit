@@ -186,7 +186,8 @@ class DataStreamEventArgs:
     data streams in one collector.
 
     The `data_metadata` property describes the data layout, calibrations, metadata,
-    time stamps, etc. of each data chunk.
+    time stamps, etc. of each data chunk. This is not describing the partial data (if partial),
+    but instead is describing the entire data chunk.
 
     A data stream can send data chunks partially or n at a time.
 
@@ -440,7 +441,6 @@ class CollectedDataStream(DataStream):
         if count is not None:
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
-            assert count == 1 or count % collection_sub_slice_row_length == 0
             assert count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
             assert index + count <= collection_count
             assert count > 0
@@ -465,17 +465,54 @@ class CollectedDataStream(DataStream):
                 # start by calculating the start/stop rows. reshape the data into collection shape and add a slice
                 # for the rows and full slices for the remaining dimensions.
                 collection_slice_offset = better_unravel_index(ravel_slice_start(collection_sub_slice, self.__collection_shape), self.__collection_shape)[0]
-                slice_offset = self.__indexes.get(channel, 0) // collection_sub_slice_row_length
-                slice_start = better_unravel_index(index, self.__collection_shape)[0] - collection_slice_offset - slice_offset
-                slice_stop = better_unravel_index(index + count, self.__collection_shape)[0] - collection_slice_offset - slice_offset
-                assert slice_stop <= self.__collection_shape[0]
                 old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
-                source_slice_length = numpy.product(slice_shape(data_stream_event.source_slice, old_source_data.shape), dtype=numpy.int64)
-                row_count = source_slice_length // collection_sub_slice_row_length
-                new_source_data = old_source_data.reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
-                new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
-                new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
-                self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                source_index = 0
+                if index % collection_sub_slice_row_length != 0:
+                    # finish the current row
+                    assert len(self.__collection_shape) == 2
+                    slice_column = index % collection_sub_slice_row_length
+                    slice_width = min(collection_sub_slice_row_length - slice_column, count)
+                    new_source_slice = (slice(0, 1), slice(0, slice_width)) + (slice(None),) * (len(new_shape) - 2)
+                    next_source_index = source_index + slice_width
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, slice_width) + old_source_data.shape[1:])
+                    new_state = DataStreamStateEnum.COMPLETE if index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
+                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    source_index = next_source_index
+                    index += slice_width
+                    count -= slice_width
+                    assert count is not None  # for type checker bug
+                if count // collection_sub_slice_row_length > 0:
+                    # send as many complete rows as possible
+                    slice_offset = index // collection_sub_slice_row_length
+                    slice_start = better_unravel_index(index, self.__collection_shape)[0] - collection_slice_offset - slice_offset
+                    slice_stop = better_unravel_index(index + count, self.__collection_shape)[0] - collection_slice_offset - slice_offset
+                    assert slice_stop <= self.__collection_shape[0]
+                    source_slice_shape = slice_shape(data_stream_event.source_slice, old_source_data.shape)
+                    source_slice_length = source_slice_shape[0]
+                    row_count = source_slice_length // collection_sub_slice_row_length
+                    next_source_index = source_index + row_count * collection_sub_slice_row_length
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
+                    new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
+                    new_state = DataStreamStateEnum.COMPLETE if index + row_count * collection_sub_slice_row_length == collection_count else DataStreamStateEnum.PARTIAL
+                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    source_index = next_source_index
+                    index += row_count * collection_sub_slice_row_length
+                    count -= row_count * collection_sub_slice_row_length
+                    assert count is not None  # for type checker bug
+                if count > 0:
+                    # any remaining count means a partial row
+                    assert len(self.__collection_shape) == 2
+                    assert count < collection_sub_slice_row_length
+                    new_source_slice = (slice(0, 1), slice(0, count)) + (slice(None),) * (len(new_shape) - 2)
+                    next_source_index = source_index + count
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, count) + old_source_data.shape[1:])
+                    new_state = DataStreamStateEnum.PARTIAL  # always partial, otherwise would have been sent in previous section
+                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    # source_index = next_source_index  # no need for this
+                    index += count
+                    count -= count
+                    assert count is not None  # for type checker bug
+                assert count == 0  # everything has been accounted for
                 self.__indexes[channel] = next_index % collection_count
                 self.__sub_slice_indexes[channel] = next_sub_slice_index
                 self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
