@@ -111,6 +111,7 @@ from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import ReferenceCounting
 
 ShapeType = typing.Sequence[int]
@@ -133,7 +134,7 @@ def offset_slice(s: slice, n: int) -> slice:
     return slice(s.start + n, s.stop + n, s.step)
 
 
-def slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
+def get_slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
     assert slices[0].start is not None
     assert slices[0].stop is not None
     assert len(slices) == len(shape)
@@ -144,6 +145,18 @@ def slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
         else:
             result_shape.append(l)
     return tuple(result_shape)
+
+
+def get_slice_rect(slices: SliceType, shape: ShapeType) -> Geometry.IntRect:
+    assert slices[0].start is not None
+    assert slices[0].stop is not None
+    assert len(slices) == len(shape)
+    assert len(slices) == 2
+    top = slices[0].start
+    bottom = slices[0].stop
+    left = slices[1].start if slices[1].start is not None else 0
+    right = slices[1].stop if slices[1].stop is not None else shape[1]
+    return Geometry.IntRect.from_tlbr(top, left, bottom, right)
 
 
 def better_ravel_index(index: ShapeType, shape: ShapeType) -> int:
@@ -250,6 +263,24 @@ class DataStreamEventArgs:
             print("")
 
 
+class DataStreamArgs:
+    def __init__(self, slice: SliceType, shape: ShapeType):
+        self.slice = slice
+        self.shape = shape
+
+    @property
+    def slice_shape(self) -> ShapeType:
+        return get_slice_shape(self.slice, self.shape)
+
+    @property
+    def sequence_count(self) -> int:
+        return numpy.product(self.slice_shape, dtype=numpy.int64)
+
+    @property
+    def slice_rect(self) -> Geometry.IntRect:
+        return get_slice_rect(self.slice, self.shape)
+
+
 class DataStream(ReferenceCounting.ReferenceCounted):
     """Provide a stream of data chunks.
 
@@ -310,15 +341,26 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
         self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
-    def start_stream(self, count: int) -> None:
+    def prepare_stream(self, stream_args: DataStreamArgs) -> None:
+        """Prepare stream."""
+        self._prepare_stream(stream_args)
+
+    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
+        """Prepare a sequence of acquisitions.
+
+        Subclasses can override to pass along to contained data streams.
+        """
+        pass
+
+    def start_stream(self, stream_args: DataStreamArgs) -> None:
         """Restart a sequence of acquisitions."""
         for channel in self.channels:
             assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
-            self.__sequence_counts[channel] = count
+            self.__sequence_counts[channel] = stream_args.sequence_count
             self.__sequence_indexes[channel] = 0
-        self._start_stream(count)
+        self._start_stream(stream_args)
 
-    def _start_stream(self, count: int) -> None:
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
         """Restart a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
@@ -376,12 +418,15 @@ class CollectedDataStream(DataStream):
     def _send_next(self) -> None:
         return self.__data_stream.send_next()
 
-    def _start_stream(self, count: int) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
         collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
-        collection_sub_slice_length = numpy.product(slice_shape(collection_sub_slice, self.__collection_shape), dtype=numpy.int64)
+        self.__data_stream.prepare_stream(DataStreamArgs(collection_sub_slice, self.__collection_shape))
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
         self.__sub_slice_indexes.clear()
         self.__needs_starts.clear()
-        self.__data_stream.start_stream(collection_sub_slice_length)
+        self.__data_stream.start_stream(DataStreamArgs(collection_sub_slice, self.__collection_shape))
 
     def _get_new_data_descriptor(self, data_metadata):
         # subclasses can override this method to provide different collection shapes.
@@ -435,7 +480,7 @@ class CollectedDataStream(DataStream):
         sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
         collection_rank = len(self.__collection_shape)
         collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
-        collection_sub_slice_shape = tuple(slice_shape(collection_sub_slice, self.__collection_shape))
+        collection_sub_slice_shape = tuple(get_slice_shape(collection_sub_slice, self.__collection_shape))
         collection_sub_slice_length = int(numpy.product(collection_sub_slice_shape, dtype=numpy.int64))
         collection_sub_slice_row_length = int(numpy.product(collection_sub_slice_shape[1:], dtype=numpy.int64))
         if count is not None:
@@ -487,7 +532,7 @@ class CollectedDataStream(DataStream):
                     slice_start = better_unravel_index(index, self.__collection_shape)[0] - collection_slice_offset - slice_offset
                     slice_stop = better_unravel_index(index + count, self.__collection_shape)[0] - collection_slice_offset - slice_offset
                     assert slice_stop <= self.__collection_shape[0]
-                    source_slice_shape = slice_shape(data_stream_event.source_slice, old_source_data.shape)
+                    source_slice_shape = get_slice_shape(data_stream_event.source_slice, old_source_data.shape)
                     source_slice_length = source_slice_shape[0]
                     row_count = source_slice_length // collection_sub_slice_row_length
                     next_source_index = source_index + row_count * collection_sub_slice_row_length
@@ -541,8 +586,8 @@ class CollectedDataStream(DataStream):
 
     def _advance_stream(self) -> None:
         self.__data_stream.advance_stream()
-        if not self.is_finished and all(self.__needs_starts.get(channel, True) for channel in self.channels):
-            self._start_stream(0)  # 0 is just a placeholder here
+        if not self.is_finished and all(self.__needs_starts.get(channel, False) for channel in self.channels):
+            self._start_stream(DataStreamArgs((slice(None),), ()))  # empty is just a placeholder here
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -598,9 +643,13 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.send_next()
 
-    def _start_stream(self, count: int) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
         for data_stream in self.__data_streams:
-            data_stream.start_stream(count)
+            data_stream.prepare_stream(stream_args)
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.start_stream(stream_args)
 
     def _advance_stream(self) -> None:
         for data_stream in self.__data_streams:
@@ -641,8 +690,11 @@ class FramedDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _start_stream(self, count: int) -> None:
-        self.__data_stream.start_stream(count)
+    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
+        self.__data_stream.prepare_stream(stream_args)
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        self.__data_stream.start_stream(stream_args)
 
     def _advance_stream(self) -> None:
         self.__data_stream.advance_stream()
@@ -740,7 +792,8 @@ class DataStreamToDataAndMetadata(FramedDataStream):
                 self.__item = item
 
             def __enter__(self):
-                self.__item.start_stream(1)
+                self.__item.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
+                self.__item.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
                 return self
 
             def __exit__(self, type, value, traceback):
