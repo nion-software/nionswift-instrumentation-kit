@@ -219,7 +219,7 @@ class DataStreamEventArgs:
 
     def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
                  source_data: numpy.ndarray, count: typing.Optional[int], source_slice: SliceType,
-                 state: DataStreamStateEnum):
+                 state: DataStreamStateEnum, processing: typing.Optional[DataStreamProcessing] = None):
         self.__print = False
 
         # check data shapes
@@ -254,6 +254,9 @@ class DataStreamEventArgs:
         # the state of data after this event, partial or complete. pass None if not producing partial datums.
         self.state = state
 
+        # the processing already applied
+        self.processing = processing
+
     def print(self) -> None:
         if self.__print:
             print(f"received {self.data_stream} / {self.channel}")
@@ -261,6 +264,9 @@ class DataStreamEventArgs:
             print(f"{self.count}: {self.source_data.shape=} {self.source_slice}")
             print(f"{self.state}")
             print("")
+
+
+DataStreamProcessing = str
 
 
 class DataStreamArgs:
@@ -341,11 +347,11 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
         self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
-    def prepare_stream(self, stream_args: DataStreamArgs) -> None:
+    def prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
         """Prepare stream."""
-        self._prepare_stream(stream_args)
+        self._prepare_stream(stream_args, **kwargs)
 
-    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
         """Prepare a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
@@ -418,7 +424,7 @@ class CollectedDataStream(DataStream):
     def _send_next(self) -> None:
         return self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
         collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
         self.__data_stream.prepare_stream(DataStreamArgs(collection_sub_slice, self.__collection_shape))
 
@@ -473,7 +479,11 @@ class CollectedDataStream(DataStream):
         new_data_metadata = DataAndMetadata.DataMetadata((new_shape, data_metadata.data_dtype),
                                                          data_metadata.intensity_calibration,
                                                          new_dimensional_calibrations,
-                                                         data_descriptor=new_data_descriptor)
+                                                         data_metadata.metadata,
+                                                         data_metadata.timestamp,
+                                                         new_data_descriptor,
+                                                         data_metadata.timezone,
+                                                         data_metadata.timezone_offset)
 
         # send out the new data stream event.
         index = self.__indexes.get(channel, 0)
@@ -645,7 +655,7 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
         for data_stream in self.__data_streams:
             data_stream.prepare_stream(stream_args)
 
@@ -663,11 +673,16 @@ class CombinedDataStream(DataStream):
 
 
 class DataStreamOperator:
+    def __init__(self, processing_id: str):
+        self.processing = processing_id
 
     def process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
         return self._process(data_and_metadata)
 
     def process_multiple(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+        return self._process_multiple(data_and_metadata)
+
+    def _process_multiple(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
         assert data_and_metadata.is_sequence
         result = xd.sequence_join(list(self.process(data_and_metadata[i]) for i in range(data_and_metadata.data_shape[0])))
         result._set_metadata(data_and_metadata.metadata)
@@ -711,8 +726,11 @@ class FramedDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs) -> None:
-        self.__data_stream.prepare_stream(stream_args)
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+        extra = dict()
+        if self.__operator:
+            extra["processing_request"] = self.__operator.processing
+        self.__data_stream.prepare_stream(stream_args, **extra)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__data_stream.start_stream(stream_args)
@@ -808,7 +826,7 @@ class FramedDataStream(DataStream):
                                                                       new_data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            if self.__operator:
+            if self.__operator and data_stream_event.processing != self.__operator.processing:
                 new_data_and_metadata = self.__operator.process_multiple(data_and_metadata)
             else:
                 new_data_and_metadata = data_and_metadata
@@ -835,6 +853,7 @@ class FramedDataStream(DataStream):
 
 class SumOperator(DataStreamOperator):
     def __init__(self, axis: typing.Optional[typing.Union[int, typing.Tuple[int]]] = None):
+        super().__init__("sum")
         self.__axis = axis
 
     def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
