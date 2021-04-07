@@ -292,8 +292,30 @@ class TestAcquisitionClass(unittest.TestCase):
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
         scan_data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
-        camera_data_stream = SingleFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
-        summed_data_stream = Acquisition.SummedDataStream(camera_data_stream, axis=0)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+        combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
+        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        with maker.ref():
+            maker.acquire()
+            expected_scan_shape = scan_shape
+            expected_camera_shape = scan_shape + (2,)
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[0].reshape(expected_scan_shape), maker.get_data(0).data))
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[1].reshape(expected_scan_shape), maker.get_data(1).data))
+            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum(-2).reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(0).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(1).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(2).data_descriptor)
+
+    def test_scan_as_collection_two_channels_and_multi_camera_summed_vertically(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        scan_shape = (8, 8)
+        scan_data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
+        camera_data_stream = MultiFrameDataStream(numpy.product(scan_shape), (2, 2), 2, scan_shape[1])
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
@@ -313,8 +335,8 @@ class TestAcquisitionClass(unittest.TestCase):
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
-        camera_data_stream = SingleFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
-        summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
         with maker.ref():
@@ -329,8 +351,8 @@ class TestAcquisitionClass(unittest.TestCase):
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
         scan_data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
-        camera_data_stream = SingleFrameDataStream(1 * numpy.product(scan_shape), (2, 2), 2)
-        summed_data_stream = Acquisition.SummedDataStream(camera_data_stream)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
