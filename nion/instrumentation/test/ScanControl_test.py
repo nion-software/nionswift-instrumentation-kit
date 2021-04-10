@@ -473,6 +473,36 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source.stop_playing()
             self.assertFalse(is_playing)
 
+    def test_enabling_channel_during_acquisition_results_in_write_delayed_data_item(self):
+        # this ensures that data items freshly created during acquisition don't write repeatedly to disk.
+        # see also test_data_item_created_during_acquisition_is_write_delayed_during_and_not_after
+        with self.__test_context() as test_context:
+            hardware_source = test_context.hardware_source
+            hardware_source.set_channel_enabled(0, True)
+            frame_time = hardware_source.get_current_frame_time()
+            hardware_source.start_playing()
+            try:
+                time.sleep(frame_time * 1.1)
+                test_context.document_controller.periodic()
+                # hardware_source.stop_playing()
+                # time.sleep(frame_time * 1.1)
+                # hardware_source.start_playing()
+                # time.sleep(frame_time * 1.1)
+                # test_context.document_controller.periodic()
+                self.assertEqual(1, len(test_context.document_model.data_items))
+                self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
+                hardware_source.set_channel_enabled(1, True)
+                time.sleep(frame_time * 2.1)
+                test_context.document_controller.periodic()
+                self.assertEqual(2, len(test_context.document_model.data_items))
+                self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
+                self.assertTrue(test_context.document_model.data_items[1].is_write_delayed)
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+                test_context.document_controller.periodic()
+            self.assertFalse(test_context.document_model.data_items[0].is_write_delayed)
+            self.assertFalse(test_context.document_model.data_items[1].is_write_delayed)
+
     def test_disabling_all_channels_during_play_stops_playback(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
