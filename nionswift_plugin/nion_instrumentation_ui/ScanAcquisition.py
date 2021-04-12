@@ -548,7 +548,8 @@ class PanelDelegate:
                 document_controller._document_controller.event_loop.call_soon_threadsafe(update_context)
 
         def scan_context_changed() -> None:
-            update_context()
+            # this can be triggered from a thread, so use call soon to transfer it to the UI thread.
+            document_controller._document_controller.event_loop.call_soon_threadsafe(update_context)
 
         self.__stem_controller_property_listener = None
         self.__scan_context_changed_listener = None
