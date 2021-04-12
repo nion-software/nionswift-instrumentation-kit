@@ -3,7 +3,10 @@ Changelog (nionswift-instrumentation)
 
 0.19.5 (UNRELEASED)
 -------------------
+- Improve multiple shift EELS acquire by allowing disabling of dark subtraction and alignment.
 - Synchronized acquisition now attached session metadata to resulting data items.
+
+Thanks to Isobel Bicket/McMaster University for multiple shift EELS contributions.
 
 0.19.4 (2021-03-12)
 -------------------
