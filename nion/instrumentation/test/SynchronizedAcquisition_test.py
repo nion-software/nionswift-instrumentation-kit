@@ -233,6 +233,39 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             finally:
                 camera_data_channel.stop()
 
+    def test_grab_synchronized_sum_masked_produces_data_of_correct_shape(self):
+        with self.__test_context() as test_context:
+            document_model = test_context.document_model
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 5)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_masked"
+            masks = [camera_base.Mask(), camera_base.Mask(), camera_base.Mask()]
+            camera_frame_parameters.active_masks = masks
+            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters)
+            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
+            camera_data_channel.start()
+            try:
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            finally:
+                camera_data_channel.stop()
+
+            document_controller.periodic()
+            si_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title:
+                    si_data_item = data_item
+                    break
+            self.assertIsNotNone(si_data_item)
+            self.assertEqual((3, 4, 5), si_data_item.data_shape)
+
     def test_grab_rotated_synchronized_eels(self):
         # tests whether rotation was applied, as judged by the resulting metadata
         with self.__test_context() as test_context:
