@@ -119,6 +119,8 @@ SliceType = typing.Sequence[slice]
 SliceListType = typing.Sequence[SliceType]
 Channel = typing.Union[str, int]
 
+ChannelPassThrough: Channel = -1
+
 
 class DataStreamStateEnum(enum.Enum):
     PARTIAL = 1
@@ -219,7 +221,7 @@ class DataStreamEventArgs:
 
     def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
                  source_data: numpy.ndarray, count: typing.Optional[int], source_slice: SliceType,
-                 state: DataStreamStateEnum, processing: typing.Optional[DataStreamProcessing] = None):
+                 state: DataStreamStateEnum):
         self.__print = False
 
         # check data shapes
@@ -257,19 +259,21 @@ class DataStreamEventArgs:
         # the state of data after this event, partial or complete. pass None if not producing partial datums.
         self.state = state
 
-        # the processing already applied
-        self.processing = processing
-
     def print(self, receiver: DataStream) -> None:
         if self.__print:
             print(f"{receiver} received {self.data_stream} / {self.channel}")
             print(f"  {self.data_metadata.data_shape} [{self.data_metadata.data_dtype}] {self.data_metadata.data_descriptor}")
-            print(f"  {self.count}: {self.source_data.shape=} {self.source_slice}")
+            print(f"  {self.count}: {self.source_data.shape} {self.source_slice}")
             print(f"  {self.state}")
             print("")
 
-
-DataStreamProcessing = str
+    def __str__(self) -> str:
+        s = str()
+        s += f"-- received {self.data_stream} / {self.channel}\n"
+        s += f"  {self.data_metadata.data_shape} [{self.data_metadata.data_dtype}] {self.data_metadata.data_descriptor}\n"
+        s += f"  {self.count}: {self.source_data.shape} {self.source_slice}\n"
+        s += f"  {self.state}\n"
+        return s
 
 
 class DataStreamArgs:
@@ -331,17 +335,22 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         return tuple()
 
     @property
+    def input_channels(self) -> typing.Tuple[Channel, ...]:
+        """Return the input channels for this data stream."""
+        return self.channels
+
+    @property
     def is_finished(self) -> bool:
         """Return true if stream is finished.
 
         The stream is finished if all channels have sent the number of items in their sequence.
         """
-        return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.channels)
+        return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
 
     def send_next(self) -> None:
         """Used for testing. Send next data."""
         if not self.is_finished:
-            for channel in self.channels:
+            for channel in self.input_channels:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
             self._send_next()
 
@@ -367,7 +376,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     def start_stream(self, stream_args: DataStreamArgs) -> None:
         """Restart a sequence of acquisitions."""
-        for channel in self.channels:
+        for channel in self.input_channels:
             assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
             self.__sequence_counts[channel] = stream_args.sequence_count
             self.__sequence_indexes[channel] = 0
@@ -448,7 +457,7 @@ class CollectedDataStream(DataStream):
 
     def _advance_stream(self) -> None:
         # this will be repeatedly called during tests, where it serves to restart the stream.
-        if all(self.__needs_starts.get(channel, False) for channel in self.channels):
+        if all(self.__needs_starts.get(channel, False) for channel in self.input_channels):
             if self.__data_stream.is_finished and self.__collection_sub_slice_index < len(self.__collection_sub_slices):
                 self._start_next_sub_stream()
             elif not self.is_finished:
@@ -692,40 +701,124 @@ class CombinedDataStream(DataStream):
         self.data_available_event.fire(data_stream_event)
 
 
+class ChannelData:
+    def __init__(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata):
+        self.channel = channel
+        self.data_and_metadata = data_and_metadata
+
+
 class DataStreamOperator:
-    def __init__(self, processing_id: str):
-        self.processing = processing_id
+    def __init__(self):
+        self.__applied = False
 
-    def process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
-        return self._process(data_and_metadata)
+    def reset(self) -> None:
+        self.__applied = False
 
-    def process_multiple(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
-        return self._process_multiple(data_and_metadata)
+    def apply(self) -> None:
+        self.__applied = True
 
-    def _process_multiple(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+    @property
+    def is_applied(self) -> bool:
+        return self.__applied
+
+    def get_channels(self, input_channels: typing.Sequence[Channel]) -> typing.Sequence[Channel]:
+        return input_channels
+
+    def process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        return self._process(channel_data)
+
+    def process_multiple(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        return self._process_multiple(channel_data)
+
+    def _process_multiple(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        channel = channel_data.channel
+        data_and_metadata = channel_data.data_and_metadata
         assert data_and_metadata.is_sequence
-        result = xd.sequence_join(list(self.process(data_and_metadata[i]) for i in range(data_and_metadata.data_shape[0])))
-        result._set_metadata(data_and_metadata.metadata)
-        result._set_timestamp(data_and_metadata.timestamp)
-        result.timezone = data_and_metadata.timezone
-        result.timezone_offset = data_and_metadata.timezone_offset
-        return result
+        channel_data_list_list = [self.process(ChannelData(channel, data_and_metadata[i])) for i in range(data_and_metadata.data_shape[0])]
+        # ([1, A1], [2, B1], [3, C1]), ([1, A2], [2, B2], [3, C2]), ([1, A3], [2, B3], [3, C3])
+        # ([1, A1/A2/A3], [2, B1/B2/B3], [3, C1/C2/C3])
+        new_channel_data_list = list()
+        for index, new_channel_data in enumerate(channel_data_list_list[0]):
+            new_channel = new_channel_data.channel
+            new_data_and_metadata = xd.sequence_join([cdl[index].data_and_metadata for cdl in channel_data_list_list])
+            new_data_and_metadata._set_metadata(data_and_metadata.metadata)
+            new_data_and_metadata._set_timestamp(data_and_metadata.timestamp)
+            new_data_and_metadata.timezone = data_and_metadata.timezone
+            new_data_and_metadata.timezone_offset = data_and_metadata.timezone_offset
+            new_channel_data_list.append(ChannelData(new_channel, new_data_and_metadata))
+        return new_channel_data_list
 
-    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         raise NotImplementedError()
+
+
+class NullDataStreamOperator(DataStreamOperator):
+    def __init__(self):
+        super().__init__()
+
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        return [channel_data]
+
+
+class CompositeDataStreamOperator(DataStreamOperator):
+    def __init__(self, operator_map: typing.Dict[Channel, DataStreamOperator]):
+        super().__init__()
+        self.__operator_map = operator_map
+
+    def get_channels(self, input_channels: typing.Sequence[Channel]) -> typing.Sequence[Channel]:
+        return list(self.__operator_map.keys())
+
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        channel_data_list = list()
+        for channel, operator in self.__operator_map.items():
+            for new_channel_data in operator.process(channel_data):
+                channel_data_list.append(ChannelData(channel, new_channel_data.data_and_metadata))
+        return channel_data_list
+
+
+class StackedDataStreamOperator(DataStreamOperator):
+    def __init__(self, operators: typing.Sequence[DataStreamOperator]):
+        super().__init__()
+        self.__operators = list(operators)
+
+    @property
+    def operators(self) -> typing.Sequence[DataStreamOperator]:
+        return self.__operators
+
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        data_list = list()
+        for operator in self.__operators:
+            for new_channel_data in operator.process(channel_data):
+                data_list.append(new_channel_data.data_and_metadata[..., numpy.newaxis])
+        new_data = numpy.concatenate(data_list, axis=-1)
+        new_data_and_metadata = DataAndMetadata.new_data_and_metadata(new_data,
+                                                                      data_list[0].intensity_calibration,
+                                                                      data_list[0].dimensional_calibrations,
+                                                                      data_list[0].metadata,
+                                                                      data_list[0].timestamp,
+                                                                      data_list[0].data_descriptor,
+                                                                      data_list[0].timezone,
+                                                                      data_list[0].timezone_offset)
+        return [ChannelData(channel_data.channel, new_data_and_metadata)]
 
 
 class FramedDataStream(DataStream):
     """Change a data stream producing continuous data into one producing frame by frame data.
 
     This is useful when finalizing data or when processing needs the full frame before proceeding.
+
+    Pass an operator to process the resulting frame on any channel before sending it out.
+
+    Pass an operator map to process the resulting frame using multiple operators and send them out on different
+    channels.
     """
 
     def __init__(self, data_stream: DataStream, operator: typing.Optional[DataStreamOperator] = None):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
-        self.__operator = operator
+        self.__operator = operator or NullDataStreamOperator()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
+        # data and indexes use the _incoming_ data channels as keys.
         self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
         self.__indexes: typing.Dict[Channel, int] = dict()
 
@@ -737,6 +830,10 @@ class FramedDataStream(DataStream):
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
+        return tuple(self.__operator.get_channels(self.input_channels))
+
+    @property
+    def input_channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
     @property
@@ -747,10 +844,8 @@ class FramedDataStream(DataStream):
         self.__data_stream.send_next()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
-        extra = dict()
-        if self.__operator:
-            extra["processing_request"] = self.__operator.processing
-        self.__data_stream.prepare_stream(stream_args, **extra)
+        self.__operator.reset()
+        self.__data_stream.prepare_stream(stream_args, operator=self.__operator)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__data_stream.start_stream(stream_args)
@@ -813,24 +908,11 @@ class FramedDataStream(DataStream):
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
                 assert index == flat_shape[0]  # index should be at the end.
                 # processing
-                if self.__operator:
-                    new_data_and_metadata = self.__operator.process(self.__data[data_stream_event.channel])
+                if not self.__operator.is_applied:
+                    for new_channel_data in self.__operator.process(ChannelData(data_stream_event.channel, self.__data[data_stream_event.channel])):
+                        self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
                 else:
-                    new_data_and_metadata = self.__data[data_stream_event.channel]
-                new_data_metadata, new_data = new_data_and_metadata.data_metadata, new_data_and_metadata.data
-                new_count: typing.Optional[int] = None
-                new_source_slice: typing.Tuple[slice, ...]
-                # special case for scalar
-                if new_data_metadata.data_descriptor.expected_dimension_count == 0:
-                    new_data = numpy.array([new_data])
-                    assert len(new_data.shape) == 1
-                    new_count = new_data.shape[0]
-                # form the new slice
-                new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
-                # send the new data chunk
-                new_data_stream_event = DataStreamEventArgs(self, data_stream_event.channel, new_data_metadata, new_data,
-                                                            new_count, new_source_slice, DataStreamStateEnum.COMPLETE)
-                self.data_available_event.fire(new_data_stream_event)
+                    self.__send_data(data_stream_event.channel, self.__data[data_stream_event.channel])
                 self.__indexes[channel] = 0
                 self._sequence_next(channel)
         else:
@@ -852,47 +934,91 @@ class FramedDataStream(DataStream):
                                                                       new_data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            if self.__operator and data_stream_event.processing != self.__operator.processing:
-                new_data_and_metadata = self.__operator.process_multiple(data_and_metadata)
+            if not self.__operator.is_applied:
+                for new_channel_data in self.__operator.process_multiple(ChannelData(data_stream_event.channel, data_and_metadata)):
+                    self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
             else:
-                new_data_and_metadata = data_and_metadata
-            assert new_data_and_metadata.is_sequence
-            new_data_descriptor = DataAndMetadata.DataDescriptor(False,
-                                                                 new_data_and_metadata.collection_dimension_count,
-                                                                 new_data_and_metadata.datum_dimension_count)
-            new_data_metadata = DataAndMetadata.DataMetadata((new_data_and_metadata.data_shape[1:], new_data_and_metadata.data_dtype),
-                                                             new_data_and_metadata.intensity_calibration,
-                                                             new_data_and_metadata.dimensional_calibrations[1:],
-                                                             new_data_and_metadata.metadata,
-                                                             new_data_and_metadata.timestamp,
-                                                             new_data_descriptor,
-                                                             new_data_and_metadata.timezone,
-                                                             new_data_and_metadata.timezone_offset)
-            new_source_slice = (slice(0, count),) + (slice(None),) * len(new_data_and_metadata.data_shape[1:])
-            new_data_stream_event = DataStreamEventArgs(self, data_stream_event.channel, new_data_metadata,
-                                                        new_data_and_metadata.data, count, new_source_slice,
-                                                        DataStreamStateEnum.COMPLETE)
-            self.data_available_event.fire(new_data_stream_event)
+                self.__send_data_multiple(data_stream_event.channel, data_and_metadata, count)
             self.__indexes[channel] = 0
             self._sequence_next(channel, count)
 
+    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
+        new_count: typing.Optional[int] = None
+        new_source_slice: typing.Tuple[slice, ...]
+        # special case for scalar
+        if new_data_metadata.data_descriptor.expected_dimension_count == 0:
+            new_data = numpy.array([new_data])
+            assert len(new_data.shape) == 1
+            new_count = new_data.shape[0]
+        # form the new slice
+        new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
+        # send the new data chunk
+        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, new_data, new_count,
+                                                    new_source_slice, DataStreamStateEnum.COMPLETE)
+        self.data_available_event.fire(new_data_stream_event)
+
+    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+        assert data_and_metadata.is_sequence
+        new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count,
+                                                             data_and_metadata.datum_dimension_count)
+        new_data_metadata = DataAndMetadata.DataMetadata(
+            (data_and_metadata.data_shape[1:], data_and_metadata.data_dtype),
+            data_and_metadata.intensity_calibration,
+            data_and_metadata.dimensional_calibrations[1:],
+            data_and_metadata.metadata,
+            data_and_metadata.timestamp,
+            new_data_descriptor,
+            data_and_metadata.timezone,
+            data_and_metadata.timezone_offset)
+        new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
+        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data_and_metadata.data, count,
+                                                    new_source_slice, DataStreamStateEnum.COMPLETE)
+        self.data_available_event.fire(new_data_stream_event)
+
+
+class Mask:
+    def get_mask_array(self, data_shape: ShapeType) -> numpy.ndarray:
+        raise NotImplementedError
+
+
+AxisType = typing.Union[int, typing.Tuple[int]]
+
 
 class SumOperator(DataStreamOperator):
-    def __init__(self, axis: typing.Optional[typing.Union[int, typing.Tuple[int]]] = None):
-        super().__init__("sum")
+    def __init__(self, axis: typing.Optional[AxisType] = None, mask: typing.Optional[Mask] = None):
+        super().__init__()
         self.__axis = axis
+        self.__mask = mask
 
-    def _process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
+    @property
+    def axis(self) -> typing.Optional[AxisType]:
+        return self.__axis
+
+    @property
+    def mask(self) -> typing.Optional[Mask]:
+        return self.__mask
+
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        data_and_metadata = channel_data.data_and_metadata
         if self.__axis is not None:
-            return xd.sum(data_and_metadata, self.__axis)
+            summed_xdata = data_and_metadata
+            if self.__mask:
+                summed_xdata = summed_xdata * self.__mask.get_mask_array(summed_xdata.data_shape)
+            summed_xdata = xd.sum(summed_xdata, self.__axis)
+            return [ChannelData(channel_data.channel, summed_xdata)]
         else:
-            return DataAndMetadata.new_data_and_metadata(numpy.array(data_and_metadata.data.sum()),
-                                                         intensity_calibration=data_and_metadata.intensity_calibration,
-                                                         data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
-                                                         metadata=data_and_metadata.metadata,
-                                                         timestamp=data_and_metadata.timestamp,
-                                                         timezone=data_and_metadata.timezone,
-                                                         timezone_offset=data_and_metadata.timezone_offset)
+            summed_data = numpy.array(data_and_metadata.data.sum())
+            if self.__mask:
+                summed_data = summed_data * self.__mask.get_mask_array(summed_data.shape)
+            summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
+                                                                 intensity_calibration=data_and_metadata.intensity_calibration,
+                                                                 data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                                 metadata=data_and_metadata.metadata,
+                                                                 timestamp=data_and_metadata.timestamp,
+                                                                 timezone=data_and_metadata.timezone,
+                                                                 timezone_offset=data_and_metadata.timezone_offset)
+            return [ChannelData(channel_data.channel, summed_xdata)]
 
 
 class DataStreamToDataAndMetadata(FramedDataStream):
@@ -919,3 +1045,26 @@ class DataStreamToDataAndMetadata(FramedDataStream):
             while not self.is_finished:
                 self.send_next()
                 self.advance_stream()
+
+
+"""
+Architectural Decision Records.
+
+ADR 2021-04-22. FramedDataStream can have operators that go from one channel to multiple channels, but we will not
+provide support for multiple channels to one channel since that would require passing full generations of data to
+the operator and since data may come in multiple frames at a time, it would require new buffering.
+
+ADR 2021-03-26: CollectedDataStream will be used to break a large acquisition into smaller chunks. Doing this allows
+scan devices to have a uniform view of their collection space. Rejected idea is to have a stacking operator and
+explicitly configure each scan section; rejected because it would be difficult to have parallel scan and camera
+acquisitions and then collect them into a uniform structure.
+
+ADR 2021-02-09: Device and other data streams should be able to produce data in two major ways: partial frame and
+multiple frames at once. All incoming streams need to handle both partial and multiple frames. Rejected using only
+partial or only multiple frames since there are fewer opportunities for optimization if only one is used.
+
+ADR 2021-02-09: Introduce an acquisition pipeline so that the machinery to collect and collate acquisition data from
+devices such as cameras, scans, etc. is abstracted, tested, and optimized independently of the actual acquisition.
+The pipeline mainly consists of a standard architecture for sending data from the device to collection and framing
+objects which organize and process the data.
+"""
