@@ -33,10 +33,14 @@ class ScanDataStream(Acquisition.DataStream):
         self.__partial_length = partial_length
         self.__partial_index = 0
         self.data = {channel: numpy.random.randn(self.__frame_count, self.__scan_length) for channel in channels}
+        self.prepare_count = 0
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return self.__channels
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+        self.prepare_count += 1
 
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
@@ -446,3 +450,4 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(0).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
+            self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)

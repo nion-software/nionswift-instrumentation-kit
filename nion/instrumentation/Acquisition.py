@@ -285,6 +285,9 @@ class DataStreamArgs:
         self.slice = slice
         self.shape = shape
 
+    def __str__(self) -> str:
+        return f"{self!r} {self.slice} {self.shape}"
+
     @property
     def slice_shape(self) -> ShapeType:
         return get_slice_shape(self.slice, self.shape)
@@ -440,10 +443,6 @@ class CollectedDataStream(DataStream):
     def _send_next(self) -> None:
         return self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
-        collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
-        self.__data_stream.prepare_stream(DataStreamArgs(collection_sub_slice, self.__collection_shape))
-
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__collection_sub_slice_index = 0
         self._start_next_sub_stream()
@@ -452,6 +451,7 @@ class CollectedDataStream(DataStream):
         self.__collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
         self.__sub_slice_indexes.clear()
         self.__needs_starts.clear()
+        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
         self.__data_stream.start_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
         self.__collection_sub_slice_index += 1
 
