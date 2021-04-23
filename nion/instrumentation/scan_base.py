@@ -8,6 +8,7 @@ import copy
 import gettext
 import logging
 import math
+import numpy
 import queue
 import threading
 import time
@@ -18,6 +19,7 @@ import uuid
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import Core
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller as stem_controller_module
 from nion.swift.model import HardwareSource
@@ -409,7 +411,9 @@ class RecordTask:
         self.__hardware_source.abort_recording()
 
 
-def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rect: Geometry.IntRect, scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect, channel_modifier: str) -> typing.MutableMapping:
+def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rect: Geometry.IntRect,
+                       scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect,
+                       channel_modifier: typing.Optional[str]) -> typing.MutableMapping:
     section_rect = Geometry.IntRect.make(section_rect)
     section_rect_f = section_rect.to_float_rect()
     subscan_rotation = scan_frame_parameters.get("subscan_rotation", None) or 0.0
@@ -424,7 +428,8 @@ def apply_section_rect(scan_frame_parameters: typing.MutableMapping, section_rec
     section_frame_parameters["subscan_pixel_size"] = tuple(section_rect.size)
     section_frame_parameters["subscan_fractional_size"] = tuple(subscan_fractional_size)
     section_frame_parameters["subscan_fractional_center"] = tuple(subscan_fractional_center)
-    section_frame_parameters["channel_modifier"] = channel_modifier
+    if channel_modifier:
+        section_frame_parameters["channel_modifier"] = channel_modifier
     section_frame_parameters["data_shape_override"] = tuple(scan_size)  # no flyback addition since this is data from scan device
     section_frame_parameters["state_override"] = "complete" if section_rect.bottom == scan_size[0] and section_rect.right == scan_size[1] else "partial"
     section_frame_parameters["top_left_override"] = tuple(section_rect.top_left)
@@ -538,6 +543,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
+        self.__maker = typing.cast(Acquisition.DataStream, None)
         self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
         self.acquisition_state_changed_event = Event.Event()
 
@@ -736,7 +742,345 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     GrabSynchronizedResult = typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]
 
+    class ScanFrameDataStream(Acquisition.DataStream):
+        def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters, camera_exposure_ms: float, scan_behavior: typing.Optional[SynchronizedScanBehaviorInterface] = None):
+            super().__init__()
+            self.__scan_hardware_source = scan_hardware_source
+            self.__scan_frame_parameters = scan_frame_parameters
+            self.__scan_behavior = scan_behavior
+            self.__camera_exposure_ms = camera_exposure_ms
+            self.__enabled_channels = scan_hardware_source.get_enabled_channels()
+            self.__channel_modifier: typing.Optional[str] = None
+            scan_max_area = 2048 * 2048
+            if scan_frame_parameters.get("subscan_pixel_size"):
+                scan_param_height = int(scan_frame_parameters["subscan_pixel_size"][0])
+                scan_param_width = int(scan_frame_parameters["subscan_pixel_size"][1])
+                if scan_param_height * scan_param_width > scan_max_area:
+                    scan_param_height = scan_max_area // scan_param_width
+                fractional_size = Geometry.FloatSize.make(scan_frame_parameters["subscan_fractional_size"])
+                self.__fractional_area = Geometry.FloatRect.from_center_and_size(
+                    Geometry.FloatPoint.make(scan_frame_parameters["subscan_fractional_center"]), fractional_size)
+                is_subscan = True
+                self.__channel_modifier = "subscan"
+            else:
+                scan_param_height = int(scan_frame_parameters["size"][0])
+                scan_param_width = int(scan_frame_parameters["size"][1])
+                if scan_param_height * scan_param_width > scan_max_area:
+                    scan_param_height = scan_max_area // scan_param_width
+                self.__fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5),
+                                                                          Geometry.FloatSize(h=1.0, w=1.0))
+                is_subscan = False
+                self.__channel_modifier = None
+            self.__scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
+            if is_subscan:
+                self.__scan_frame_parameters["subscan_pixel_size"] = tuple(self.__scan_size)
+            else:
+                self.__scan_frame_parameters["size"] = tuple(self.__scan_size)
+            self.__section_rect = Geometry.IntRect.from_tlbr(0, 0, 0, 0)
+            self.__record_task = typing.cast(RecordTask, None)
+
+        def about_to_delete(self) -> None:
+            if self.__record_task:
+                self.__record_task.close()
+                self.__record_task = typing.cast(RecordTask, None)
+
+        @property
+        def scan_size(self) -> Geometry.IntSize:
+            return self.__scan_size
+
+        @property
+        def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+            return tuple(range(len(self.__enabled_channels)))
+
+        def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+            if self.__scan_behavior:
+                adjustments = self.__scan_behavior.prepare_section()
+                if adjustments.offset_nm:
+                    # offset_nm will be in the context reference frame.
+                    self.__scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(self.__scan_frame_parameters.center_nm) + adjustments.offset_nm)
+            self.__scan_hardware_source.abort_playing()
+            self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
+
+        def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+            scan_frame_parameters = self.__scan_frame_parameters
+            scan_size = self.__scan_size
+            section_rect = stream_args.slice_rect
+            section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size,
+                                                          self.__fractional_area, self.__channel_modifier)
+            self.__section_rect = section_rect
+            self.__record_task = RecordTask(self.__scan_hardware_source, section_frame_parameters)
+
+        def _abort_stream(self) -> None:
+            self.__scan_hardware_source.abort_recording()
+
+        def _send_next(self) -> None:
+            if self.__record_task.is_finished:
+                scan_data_list = self.__record_task.grab()
+                for channel, scan_data in enumerate(scan_data_list):
+                    count = self.__section_rect.width * self.__section_rect.height
+                    data_metadata = DataAndMetadata.DataMetadata(((), scan_data.data_dtype),
+                                                                 scan_data.intensity_calibration,
+                                                                 (),
+                                                                 scan_data.metadata,
+                                                                 scan_data.timestamp,
+                                                                 DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                                 scan_data.timezone,
+                                                                 scan_data.timezone_offset)
+                    source_slice = (slice(0, count),)
+                    data_stream_event = Acquisition.DataStreamEventArgs(self,
+                                                                        channel,
+                                                                        data_metadata,
+                                                                        scan_data.data.reshape(-1),
+                                                                        count,
+                                                                        source_slice,
+                                                                        Acquisition.DataStreamStateEnum.COMPLETE)
+                    self.data_available_event.fire(data_stream_event)
+                    self._sequence_next(channel, count)
+
+    class CameraFrameDataStream(Acquisition.DataStream):
+        def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource,
+                     camera_frame_parameters: camera_base.CameraFrameParameters, flyback_pixels: int,
+                     additional_metadata: typing.Optional[typing.Dict] = None):
+            super().__init__()
+            self.__flyback_pixels = flyback_pixels
+            self.__camera_hardware_source = camera_hardware_source
+            self.__camera_frame_parameters = camera_frame_parameters
+            self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
+            self.__additional_metadata = additional_metadata or dict()
+
+        @property
+        def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+            return (999,)
+
+        def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+            scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
+            camera_frame_parameters = self.__camera_frame_parameters
+            camera_frame_parameters.processing = None
+            camera_frame_parameters.active_masks = list()
+            operator = typing.cast(Acquisition.DataStreamOperator, kwargs.get("operator", Acquisition.NullDataStreamOperator()))
+            if isinstance(operator, Acquisition.SumOperator):
+                if operator.axis == 0:
+                    camera_frame_parameters.processing = "sum_project"
+                    operator.apply()
+                else:
+                    camera_frame_parameters.processing = "sum_masked"
+                    operator.apply()
+            elif isinstance(operator, Acquisition.StackedDataStreamOperator) and all(isinstance(o, Acquisition.SumOperator) for o in operator.operators):
+                camera_frame_parameters.processing = "sum_masked"
+                if operator.operators and typing.cast(Acquisition.SumOperator, operator.operators[0]).mask:
+                    camera_frame_parameters.active_masks = [typing.cast(Acquisition.SumOperator, o).mask for o in operator.operators]
+                operator.apply()
+            self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+            self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
+
+        def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+            self.__slice = list(stream_args.slice)
+            self.__shape = list(stream_args.shape)
+            scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
+            self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, scan_shape)
+            self.__last_valid_rows = 0
+
+        def _abort_stream(self) -> None:
+            self.__camera_hardware_source.acquire_sequence_cancel()
+
+        def _send_next(self) -> None:
+            data_calibrations = self.__camera_hardware_source.get_camera_calibrations(self.__camera_frame_parameters)
+            data_intensity_calibration = self.__camera_hardware_source.get_camera_intensity_calibration(self.__camera_frame_parameters)
+            camera_metadata: typing.Dict[str, typing.Any] = dict()
+            self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
+
+            uncropped_xdata = self.__partial_data_info.xdata
+            valid_rows = self.__partial_data_info.valid_rows
+            is_complete = self.__partial_data_info.is_complete
+            is_canceled = self.__partial_data_info.is_canceled
+            assert valid_rows is not None
+            src_top_row = self.__last_valid_rows
+            metadata = copy.deepcopy(uncropped_xdata.metadata)
+            # this is a hack to prevent some of the potentially misleading metadata
+            # from getting saved into the synchronized data. while it is acceptable to
+            # assume that the hardware_source properties will get copied to the final
+            # metadata for now, camera implementers should be aware that this is likely
+            # to change behavior in the future. please write tests if you make this
+            # assumption so that they fail when this behavior is changed.
+            metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
+            metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
+            metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
+            metadata.setdefault("hardware_source", dict()).update(camera_metadata)
+            metadata.update(copy.deepcopy(self.__additional_metadata))
+
+            # TODO: this should be tracked elsewhere than here.
+            metadata["scan"]["valid_rows"] = self.__slice[0].start + valid_rows
+
+            # note: collection calibrations will be added in the collections stream
+            partial_xdata = crop_and_calibrate(uncropped_xdata, self.__flyback_pixels, None,
+                                               data_calibrations, data_intensity_calibration,
+                                               metadata)
+            if valid_rows > 0:
+                data_channel_data_and_metadata = partial_xdata
+                # src rect is the area of the section data (collection dimensions only) that will be copied
+                partial_size = Geometry.IntSize(height=valid_rows - self.__last_valid_rows, width=self.__slice[1].stop - self.__slice[1].start)
+                src_rect = Geometry.IntRect(Geometry.IntPoint(y=src_top_row), partial_size)
+                data_stream_state = Acquisition.DataStreamStateEnum.COMPLETE if is_complete else Acquisition.DataStreamStateEnum.PARTIAL
+                # assumes rows of data
+                assert src_rect.left == 0
+                assert src_rect.right == partial_size.width
+                source_slice = (slice(src_rect.top * partial_size.width, src_rect.bottom * partial_size.width),) + (slice(None),) * len(data_channel_data_and_metadata.datum_dimension_shape)
+                data_metadata = DataAndMetadata.DataMetadata((tuple(data_channel_data_and_metadata.data_metadata.data_shape[2:]), data_channel_data_and_metadata.data_metadata.data_dtype),
+                                                             data_channel_data_and_metadata.intensity_calibration,
+                                                             data_channel_data_and_metadata.dimensional_calibrations[2:],
+                                                             data_channel_data_and_metadata.metadata,
+                                                             data_channel_data_and_metadata.timestamp,
+                                                             DataAndMetadata.DataDescriptor(False, 0, data_channel_data_and_metadata.datum_dimension_count),
+                                                             data_channel_data_and_metadata.timezone,
+                                                             data_channel_data_and_metadata.timezone_offset)
+                channel = 999
+                count = src_rect.height * src_rect.width
+                total_count = numpy.product(data_channel_data_and_metadata.navigation_dimension_shape, dtype=numpy.int64)
+                data = data_channel_data_and_metadata.data.reshape((total_count,) + data_channel_data_and_metadata.datum_dimension_shape)
+                data_stream_event = Acquisition.DataStreamEventArgs(self,
+                                                                    channel,
+                                                                    data_metadata,
+                                                                    data,
+                                                                    count,
+                                                                    source_slice,
+                                                                    data_stream_state)
+                self.data_available_event.fire(data_stream_event)
+                self._sequence_next(channel, count)
+                self.__last_valid_rows = valid_rows
+
+            # otherwise, acquire the next section and continue
+            # update_period = getattr(camera_data_channel, "_update_period", 1.0)
+            if not is_complete:
+                self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue()
+            else:
+                self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
+
+    class ChannelDataStream(Acquisition.DataStream):
+        def __init__(self, data_stream: Acquisition.DataStream, camera_data_channel: typing.Optional[SynchronizedDataChannelInterface], channel: typing.Optional[Acquisition.Channel] = None):
+            super().__init__()
+            self.__data_stream = data_stream.add_ref()
+            self.__camera_data_channel = camera_data_channel
+            self.__channel = channel
+            self.__listener = data_stream.data_available_event.listen(self.__data_available)
+            self.__src_offset = 0
+            self.__dst_offset = 0
+
+        def about_to_delete(self) -> None:
+            self.__listener.close()
+            self.__listener = None
+            self.__data_stream.remove_ref()
+            self.__data_stream = None
+
+        @property
+        def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+            return self.__data_stream.channels
+
+        @property
+        def is_finished(self) -> bool:
+            return self.__data_stream.is_finished
+
+        def _send_next(self) -> None:
+            self.__data_stream.send_next()
+
+        def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+            self.__data_stream.prepare_stream(stream_args)
+
+        def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+            self.__data_stream.start_stream(stream_args)
+            self.__dst_offset = 0
+
+        def _advance_stream(self) -> None:
+            self.__data_stream.advance_stream()
+
+        def __data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+            if self.__channel is None or self.__channel == data_stream_event.channel:
+                data_channel_state = "complete" if data_stream_event.state == Acquisition.DataStreamStateEnum.COMPLETE else "partial"
+                assert data_stream_event.count is None
+                assert not data_stream_event.data_metadata.is_sequence
+                assert data_stream_event.source_slice[1].start is None or data_stream_event.source_slice[1].start == 0
+                if data_stream_event.data_metadata.is_navigable:
+                    collection_shape = data_stream_event.data_metadata.navigation_dimension_shape
+                    data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
+                    data = data_stream_event.source_data
+                    dimensional_calibrations = data_stream_event.data_metadata.dimensional_calibrations
+                    data_descriptor = data_stream_event.data_metadata.data_descriptor
+                else:
+                    collection_shape = data_stream_event.data_metadata.datum_dimension_shape
+                    data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
+                    data = data_stream_event.source_data[..., numpy.newaxis]
+                    dimensional_calibrations = list(data_stream_event.data_metadata.dimensional_calibrations) + [Calibration.Calibration()]
+                    data_descriptor = DataAndMetadata.DataDescriptor(False, data_stream_event.data_metadata.data_descriptor.datum_dimension_count, 1)
+                assert data_stream_event.source_slice[1].stop is None or data_stream_event.source_slice[1].stop == data_shape.width
+                height = data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    width = data_shape[1]
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_offset, 0, height, width)
+                    src_rect = Geometry.IntRect.from_tlhw(data_stream_event.source_slice[0].start, 0, height, width)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect,
+                                                      src_rect, data_channel_view_id)
+                self.__dst_offset += height
+            self.data_available_event.fire(data_stream_event)
+
     def grab_synchronized(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
+                          camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
+                          section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None) -> GrabSynchronizedResult:
+        camera_hardware_source = camera
+        camera_frame_parameters = camera_base.CameraFrameParameters(camera_frame_parameters)
+        scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
+        scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
+        self.__grab_synchronized_control = SynchronizedScanControl(self, camera_hardware_source)
+        try:
+            scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                        camera=camera_hardware_source,
+                                                        camera_frame_parameters=camera_frame_parameters)
+            camera_exposure_ms = camera_frame_parameters["exposure_ms"]
+            # abort the scan to not interfere with setup; and clear the aborted flag
+            scan_data_stream = ScanHardwareSource.ScanFrameDataStream(self, scan_frame_parameters, camera_exposure_ms, scan_behavior)
+            additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
+                                          "instrument": copy.deepcopy(scan_info.instrument_metadata)}
+            camera_data_stream: Acquisition.DataStream = ScanHardwareSource.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters, self.__device.flyback_pixels, additional_camera_metadata)
+            if camera_frame_parameters.get("processing", None) == "sum_project":
+                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.SumOperator(axis=0))
+            elif camera_frame_parameters.get("processing", None) == "sum_masked":
+                active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
+                if active_masks:
+                    operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator(mask=active_mask) for active_mask in active_masks])
+                    camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
+                else:
+                    operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+                    camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
+            data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+            scan_size = scan_data_stream.scan_size
+            section_height = section_height or scan_size.height
+            section_count = (scan_size.height + section_height - 1) // section_height
+            slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+            for section in range(section_count):
+                start = section * section_height
+                stop = min(start + section_height, scan_size.height)
+                slice_list.append((slice(start, stop), slice(0, scan_size.width)))
+            collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+            channel_data_stream = ScanHardwareSource.ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
+            self.__maker = Acquisition.DataStreamToDataAndMetadata(channel_data_stream)
+            with self.__maker.ref():
+                self.__maker.acquire()
+                if not self.__maker.is_aborted:
+                    return ([self.__maker.get_data(0)], [self.__maker.get_data(999)])
+                return None
+        finally:
+            self.__maker = typing.cast(Acquisition.DataStream, None)
+            self.__grab_synchronized_control.close()
+            self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
+
+    def grab_synchronized_old(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None) -> GrabSynchronizedResult:
         camera_frame_parameters = camera_base.CameraFrameParameters(camera_frame_parameters)
@@ -897,10 +1241,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
 
     def grab_synchronized_abort(self) -> None:
-        if self.__grab_synchronized_control:
+        if self.__maker:
+            self.__maker.abort_stream()
+        elif self.__grab_synchronized_control:
             self.__grab_synchronized_control.abort()
 
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
+        if self.__maker:
+            p = self.__maker.progress
+            return p[0] / p[1]
         return None
 
     def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
