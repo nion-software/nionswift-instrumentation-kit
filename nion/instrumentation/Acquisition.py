@@ -331,6 +331,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.__sequence_count = sequence_count
         self.__sequence_counts: typing.Dict[Channel, int] = dict()
         self.__sequence_indexes: typing.Dict[Channel, int] = dict()
+        self.is_aborted = False
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -350,9 +351,26 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
 
+    @property
+    def progress(self) -> typing.Tuple[int, int]:
+        p = self._progress
+        assert p[0] <= p[1]
+        return p
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return 0, 0
+
+    def abort_stream(self) -> None:
+        self._abort_stream()
+        self.is_aborted = True
+
+    def _abort_stream(self) -> None:
+        pass
+
     def send_next(self) -> None:
         """Used for testing. Send next data."""
-        if not self.is_finished:
+        if not self.is_finished and not self.is_aborted:
             for channel in self.input_channels:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
             self._send_next()
@@ -440,12 +458,22 @@ class CollectedDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        p = self.__data_stream.progress
+        count = int(p[1] * numpy.product(self.__collection_shape, dtype=numpy.int64))
+        index = sum(p[1] * self.__indexes.get(k, 0) + p[0] for k in self.channels) // len(self.channels)
+        return index, count
+
     def _send_next(self) -> None:
         return self.__data_stream.send_next()
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__collection_sub_slice_index = 0
         self._start_next_sub_stream()
+
+    def _abort_stream(self) -> None:
+        self.__data_stream.abort_stream()
 
     def _start_next_sub_stream(self) -> None:
         self.__collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
@@ -497,7 +525,7 @@ class CollectedDataStream(DataStream):
         data_metadata = data_stream_event.data_metadata
         count = data_stream_event.count
         channel = data_stream_event.channel
-        collection_count = numpy.product(self.__collection_shape, dtype=numpy.int64)
+        collection_count = int(numpy.product(self.__collection_shape, dtype=numpy.int64))
 
         # get the new data descriptor
         new_data_descriptor = self._get_new_data_descriptor(data_metadata)
@@ -651,7 +679,7 @@ class SequenceDataStream(CollectedDataStream):
 
 
 class CombinedDataStream(DataStream):
-    """Combine multiple streams into a single stream produceing multiple channels.
+    """Combine multiple streams into a single stream producing multiple channels.
 
     Each stream can also produce multiple channels.
     """
@@ -680,6 +708,13 @@ class CombinedDataStream(DataStream):
     def is_finished(self) -> bool:
         return all(data_stream.is_finished for data_stream in self.__data_streams)
 
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        ps = (data_stream.progress for data_stream in self.__data_streams)
+        count = sum(p[1] for p in ps)
+        index = sum(p[0] for p in ps)
+        return index, count
+
     def _send_next(self) -> None:
         for data_stream in self.__data_streams:
             data_stream.send_next()
@@ -691,6 +726,10 @@ class CombinedDataStream(DataStream):
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         for data_stream in self.__data_streams:
             data_stream.start_stream(stream_args)
+
+    def _abort_stream(self) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.abort_stream()
 
     def _advance_stream(self) -> None:
         for data_stream in self.__data_streams:
@@ -840,6 +879,10 @@ class FramedDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return self.__data_stream.progress
+
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
@@ -849,6 +892,9 @@ class FramedDataStream(DataStream):
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__data_stream.start_stream(stream_args)
+
+    def _abort_stream(self) -> None:
+        self.__data_stream.abort_stream()
 
     def _advance_stream(self) -> None:
         self.__data_stream.advance_stream()
@@ -1042,7 +1088,7 @@ class DataStreamToDataAndMetadata(FramedDataStream):
 
     def acquire(self) -> None:
         with self.active_context():
-            while not self.is_finished:
+            while not self.is_finished and not self.is_aborted:
                 self.send_next()
                 self.advance_stream()
 

@@ -26,7 +26,7 @@ class ScanDataStream(Acquisition.DataStream):
         self.__frame_index = 0
         # scan length is total samples in scan shape
         self.__scan_shape = scan_shape
-        self.__scan_length = numpy.product(scan_shape, dtype=numpy.int64)
+        self.__scan_length = int(numpy.product(scan_shape, dtype=numpy.int64))
         # channels
         self.__channels = tuple(channels)
         # partial length is the size of each chunk sent. partial index is the next sample to be sent.
@@ -38,6 +38,10 @@ class ScanDataStream(Acquisition.DataStream):
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return self.__channels
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return self.__partial_index, self.__scan_length
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         self.prepare_count += 1
@@ -98,6 +102,10 @@ class SingleFrameDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
 
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return self.__partial_index, self.__frame_shape[0]
+
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
@@ -148,6 +156,10 @@ class MultiFrameDataStream(Acquisition.DataStream):
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return 0, self.__frame_shape[0]
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         if self.__do_processing:
