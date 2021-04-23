@@ -172,6 +172,37 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_context_size"])
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_size"])
 
+    def test_grab_synchronized_abort(self):
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            camera_data_channel = None
+
+            class TestAbortBehavior(scan_base.SynchronizedScanBehaviorInterface):
+                def __init__(self):
+                    self.__i = 0
+
+                def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
+                    self.__i += 1
+                    if self.__i == 2:
+                        scan_hardware_source.grab_synchronized_abort()
+                    return scan_base.SynchronizedScanBehaviorAdjustments()
+
+            abort_behavior = TestAbortBehavior()
+            scans_and_spectrum_images = scan_hardware_source.grab_synchronized(
+                scan_frame_parameters=scan_frame_parameters,
+                camera=camera_hardware_source,
+                camera_frame_parameters=camera_frame_parameters,
+                camera_data_channel=camera_data_channel,
+                section_height=2,
+                scan_behavior=abort_behavior)
+            self.assertIsNone(scans_and_spectrum_images)
+
     def test_grab_synchronized_basic_eels_followed_by_record(self):
         # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
         # after a synchronized acquisition.
