@@ -106,6 +106,7 @@ from __future__ import annotations
 import enum
 import numpy
 import typing
+import warnings
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
@@ -421,6 +422,17 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         pass
 
+    def finish_stream(self) -> None:
+        """Finish the started acquisition."""
+        self._finish_stream()
+
+    def _finish_stream(self) -> None:
+        """Finish the started acquisition.
+
+        Subclasses can override.
+        """
+        pass
+
 
 class CollectedDataStream(DataStream):
     """Collect a data stream of chunks into a collection of those chunks.
@@ -446,10 +458,13 @@ class CollectedDataStream(DataStream):
         self.__sub_slice_indexes: typing.Dict[Channel, int] = dict()
         # needs starts tracks whether the downstream data stream needs a start call.
         self.__needs_starts: typing.Dict[Channel, bool] = dict()
+        self.__data_stream_started = False
 
     def about_to_delete(self) -> None:
         self.__listener.close()
         self.__listener = None
+        if self.__data_stream_started:
+            warnings.warn("Stream deleted but not finished.", category=RuntimeWarning)
         self.__data_stream.remove_ref()
         self.__data_stream = None
         super().about_to_delete()
@@ -466,6 +481,7 @@ class CollectedDataStream(DataStream):
         return index, count
 
     def _send_next(self) -> None:
+        assert self.__data_stream_started
         return self.__data_stream.send_next()
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
@@ -476,11 +492,15 @@ class CollectedDataStream(DataStream):
         self.__data_stream.abort_stream()
 
     def _start_next_sub_stream(self) -> None:
+        if self.__data_stream_started:
+            self.__data_stream.finish_stream()
+            self.__data_stream_started = False
         self.__collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
         self.__sub_slice_indexes.clear()
         self.__needs_starts.clear()
         self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
         self.__data_stream.start_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
+        self.__data_stream_started = True
         self.__collection_sub_slice_index += 1
 
     def _advance_stream(self) -> None:
@@ -494,6 +514,11 @@ class CollectedDataStream(DataStream):
             self.__data_stream.advance_stream()
         else:
             self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        assert self.__data_stream_started
+        self.__data_stream.finish_stream()
+        self.__data_stream_started = False
 
     def _get_new_data_descriptor(self, data_metadata):
         # subclasses can override this method to provide different collection shapes.
@@ -735,6 +760,10 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.advance_stream()
 
+    def _finish_stream(self) -> None:
+        for data_stream in self.__data_streams:
+            data_stream.finish_stream()
+
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.print(self)
         self.data_available_event.fire(data_stream_event)
@@ -898,6 +927,9 @@ class FramedDataStream(DataStream):
 
     def _advance_stream(self) -> None:
         self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        self.__data_stream.finish_stream()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data[channel]
@@ -1082,7 +1114,7 @@ class DataStreamToDataAndMetadata(FramedDataStream):
                 return self
 
             def __exit__(self, type, value, traceback):
-                pass
+                self.__item.finish_stream()
 
         return ContextManager(self)
 

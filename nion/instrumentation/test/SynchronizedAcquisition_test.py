@@ -133,6 +133,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            # check the acquisition state
+            self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
             # check the data
             self.assertEqual(scans[0].data_shape, spectrum_images[0].data_shape[:-1])
             self.assertEqual(numpy.float32, spectrum_images[0].data_dtype)
@@ -202,6 +204,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 section_height=2,
                 scan_behavior=abort_behavior)
             self.assertIsNone(scans_and_spectrum_images)
+            # check the acquisition state
+            self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
     def test_grab_synchronized_basic_eels_followed_by_record(self):
         # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
@@ -221,6 +225,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.start_recording()
             time.sleep(frame_time * 0.6)
             self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (1024, 1024))
+            # check the acquisition state
+            self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
         with self.__test_context() as test_context:
@@ -242,6 +248,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             finally:
                 camera_data_channel.stop()
+            # check the acquisition state
+            self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
     def test_grab_synchronized_camera_data_channel_basic_sum_masked(self):
         with self.__test_context() as test_context:

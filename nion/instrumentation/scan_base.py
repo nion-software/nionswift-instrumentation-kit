@@ -810,6 +810,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__section_rect = section_rect
             self.__record_task = RecordTask(self.__scan_hardware_source, section_frame_parameters)
 
+        def _finish_stream(self) -> None:
+            if self.__record_task:
+                self.__record_task.close()
+                self.__record_task = typing.cast(RecordTask, None)
+
         def _abort_stream(self) -> None:
             self.__scan_hardware_source.abort_recording()
 
@@ -879,6 +884,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
             self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, scan_shape)
             self.__last_valid_rows = 0
+
+        def _finish_stream(self) -> None:
+            self.__camera_hardware_source.acquire_synchronized_end()
 
         def _abort_stream(self) -> None:
             self.__camera_hardware_source.acquire_sequence_cancel()
@@ -991,6 +999,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         def _advance_stream(self) -> None:
             self.__data_stream.advance_stream()
+
+        def _finish_stream(self) -> None:
+            self.__data_stream.finish_stream()
 
         def __data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
             if self.__channel is None or self.__channel == data_stream_event.channel:
