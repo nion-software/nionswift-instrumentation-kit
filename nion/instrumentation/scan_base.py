@@ -860,9 +860,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
             scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
             camera_frame_parameters = self.__camera_frame_parameters
+            # clear the processing parameters in the original camera frame parameters.
+            # processing will be configured based on the operator kwarg instead.
             camera_frame_parameters.processing = None
             camera_frame_parameters.active_masks = list()
+            # get the operator.
             operator = typing.cast(Acquisition.DataStreamOperator, kwargs.get("operator", Acquisition.NullDataStreamOperator()))
+            # rebuild the low level processing commands using the operator.
             if isinstance(operator, Acquisition.SumOperator):
                 if operator.axis == 0:
                     camera_frame_parameters.processing = "sum_project"
@@ -872,8 +876,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     operator.apply()
             elif isinstance(operator, Acquisition.StackedDataStreamOperator) and all(isinstance(o, Acquisition.SumOperator) for o in operator.operators):
                 camera_frame_parameters.processing = "sum_masked"
-                if operator.operators and typing.cast(Acquisition.SumOperator, operator.operators[0]).mask:
-                    camera_frame_parameters.active_masks = [typing.cast(Acquisition.SumOperator, o).mask for o in operator.operators]
+                operator.apply()
+            elif isinstance(operator, Acquisition.StackedDataStreamOperator) and all(isinstance(o, Acquisition.MaskedSumOperator) for o in operator.operators):
+                camera_frame_parameters.processing = "sum_masked"
+                camera_frame_parameters.active_masks = [typing.cast(Acquisition.MaskedSumOperator, o).mask for o in operator.operators]
                 operator.apply()
             self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
             self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
@@ -1064,7 +1070,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             elif camera_frame_parameters.get("processing", None) == "sum_masked":
                 active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
                 if active_masks:
-                    operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator(mask=active_mask) for active_mask in active_masks])
+                    operator = Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
                     camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
                 else:
                     operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])

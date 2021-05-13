@@ -104,12 +104,13 @@ Devices:
 from __future__ import annotations
 
 import enum
-import numpy
 import typing
 import warnings
 
+import numpy
 from nion.data import Calibration
 from nion.data import DataAndMetadata
+from nion.data import Shape
 from nion.data import xdata_1_0 as xd
 from nion.utils import Event
 from nion.utils import Geometry
@@ -1055,40 +1056,26 @@ class FramedDataStream(DataStream):
         self.data_available_event.fire(new_data_stream_event)
 
 
-class Mask:
-    def get_mask_array(self, data_shape: ShapeType) -> numpy.ndarray:
-        raise NotImplementedError
-
-
 AxisType = typing.Union[int, typing.Tuple[int]]
 
 
 class SumOperator(DataStreamOperator):
-    def __init__(self, axis: typing.Optional[AxisType] = None, mask: typing.Optional[Mask] = None):
+    def __init__(self, *, axis: typing.Optional[AxisType] = None):
         super().__init__()
         self.__axis = axis
-        self.__mask = mask
 
     @property
     def axis(self) -> typing.Optional[AxisType]:
         return self.__axis
 
-    @property
-    def mask(self) -> typing.Optional[Mask]:
-        return self.__mask
-
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         data_and_metadata = channel_data.data_and_metadata
         if self.__axis is not None:
             summed_xdata = data_and_metadata
-            if self.__mask:
-                summed_xdata = summed_xdata * self.__mask.get_mask_array(summed_xdata.data_shape)
             summed_xdata = xd.sum(summed_xdata, self.__axis)
             return [ChannelData(channel_data.channel, summed_xdata)]
         else:
             summed_data = numpy.array(data_and_metadata.data.sum())
-            if self.__mask:
-                summed_data = summed_data * self.__mask.get_mask_array(summed_data.shape)
             summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
                                                                  intensity_calibration=data_and_metadata.intensity_calibration,
                                                                  data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
@@ -1097,6 +1084,28 @@ class SumOperator(DataStreamOperator):
                                                                  timezone=data_and_metadata.timezone,
                                                                  timezone_offset=data_and_metadata.timezone_offset)
             return [ChannelData(channel_data.channel, summed_xdata)]
+
+
+class MaskedSumOperator(DataStreamOperator):
+    def __init__(self, mask: Shape.Mask2DShape):
+        super().__init__()
+        self.__mask = mask
+
+    @property
+    def mask(self) -> Shape.Mask2DShape:
+        return self.__mask
+
+    def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
+        data_and_metadata = channel_data.data_and_metadata
+        reference_frame = data_and_metadata.reference_frame_2d
+        summed_xdata = DataAndMetadata.new_data_and_metadata(numpy.array((data_and_metadata.data * self.__mask.get_mask_data_2d(reference_frame)).sum()),
+                                                             intensity_calibration=data_and_metadata.intensity_calibration,
+                                                             data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                             metadata=data_and_metadata.metadata,
+                                                             timestamp=data_and_metadata.timestamp,
+                                                             timezone=data_and_metadata.timezone,
+                                                             timezone_offset=data_and_metadata.timezone_offset)
+        return [ChannelData(channel_data.channel, summed_xdata)]
 
 
 class DataStreamToDataAndMetadata(FramedDataStream):

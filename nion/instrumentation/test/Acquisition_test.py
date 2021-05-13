@@ -1,10 +1,10 @@
-import contextlib
 import numpy
 import typing
 import unittest
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
+from nion.data import Shape
 from nion.instrumentation import Acquisition
 
 
@@ -362,7 +362,7 @@ class TestAcquisitionClass(unittest.TestCase):
                     self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(1).data_descriptor)
                     self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(2).data_descriptor)
 
-    def test_scan_as_collection_camera_summed_to_scalar(self):
+    def test_scan_as_collection_camera_summed_to_single_scalar(self):
         # scan will produce two data streams of pixels.
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
@@ -375,6 +375,27 @@ class TestAcquisitionClass(unittest.TestCase):
             maker.acquire()
             expected_camera_shape = scan_shape
             self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(2).data_descriptor)
+
+    def test_scan_as_collection_camera_summed_to_single_scalar_in_mask(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        scan_shape = (8, 8)
+        mask1 = Shape.Rectangle.from_tlbr_fractional(0.0, 0.0, 0.5, 0.5)
+        mask2 = Shape.Rectangle.from_tlbr_fractional(0.5, 0.5, 1.0, 1.0)
+        mask = Shape.OrComposite2DShape(mask1, mask2)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.MaskedSumOperator(mask))
+        collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        with maker.ref():
+            maker.acquire()
+            expected_camera_shape = scan_shape
+            mask_data = numpy.zeros((8, 8))
+            mask_data[0:4, 0:4] = 1
+            mask_data[4:8, 4:8] = 1
+            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(2).data))
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(2).data_descriptor)
 
     def test_scan_as_collection_camera_summed_to_two_scalars(self):
@@ -391,6 +412,29 @@ class TestAcquisitionClass(unittest.TestCase):
             expected_camera_shape = scan_shape
             self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(11).data))
             self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(22).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(11).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(22).data_descriptor)
+
+    def test_scan_as_collection_camera_summed_to_two_scalars_in_masks(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        scan_shape = (8, 8)
+        mask1 = Shape.Rectangle.from_tlbr_fractional(0.0, 0.0, 0.5, 0.5)
+        mask2 = Shape.Rectangle.from_tlbr_fractional(0.5, 0.5, 1.0, 1.0)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.CompositeDataStreamOperator({11: Acquisition.MaskedSumOperator(mask1), 22: Acquisition.MaskedSumOperator(mask2)}))
+        collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        with maker.ref():
+            maker.acquire()
+            expected_camera_shape = scan_shape
+            mask_data1 = numpy.zeros((8, 8))
+            mask_data1[0:4, 0:4] = 1
+            mask_data2 = numpy.zeros((8, 8))
+            mask_data2[4:8, 4:8] = 1
+            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data1).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(11).data))
+            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data2).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(22).data))
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(11).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(22).data_descriptor)
 
