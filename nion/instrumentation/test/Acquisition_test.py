@@ -482,6 +482,7 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(0).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
+            self.assertEqual(sequence_len, scan_data_stream.prepare_count)
 
     def test_sequence_grouped_into_sections_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
