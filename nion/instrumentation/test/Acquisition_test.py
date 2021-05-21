@@ -45,6 +45,7 @@ class ScanDataStream(Acquisition.DataStream):
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         self.prepare_count += 1
+        self.__frame_index = 0
 
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
@@ -105,6 +106,9 @@ class SingleFrameDataStream(Acquisition.DataStream):
     @property
     def _progress(self) -> typing.Tuple[int, int]:
         return self.__partial_index, self.__frame_shape[0]
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+        self.__frame_index = 0
 
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
@@ -483,6 +487,8 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
             self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+            p = maker.progress
+            self.assertEqual(p[0], p[1])
 
     def test_sequence_grouped_into_sections_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
@@ -508,3 +514,32 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
             self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
+
+    def test_sequence_of_individually_started_scans_as_collection_two_channels_and_camera(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        sequence_len = 4
+        scan_shape = (8, 8)
+        scan_data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
+        combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
+        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        with maker.ref():
+            maker.acquire()
+            expected_scan_shape = (sequence_len,) + scan_shape
+            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+            # self.assertTrue(numpy.array_equal(scan_data_stream.data[0].reshape(expected_scan_shape), maker.get_data(0).data))
+            # self.assertTrue(numpy.array_equal(scan_data_stream.data[1].reshape(expected_scan_shape), maker.get_data(1).data))
+            # self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertSequenceEqual(expected_scan_shape, maker.get_data(0).data.shape)
+            self.assertSequenceEqual(expected_scan_shape, maker.get_data(1).data.shape)
+            self.assertSequenceEqual(expected_camera_shape, maker.get_data(2).data.shape)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(0).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
+            self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+            p = maker.progress
+            self.assertEqual(p[0], p[1])
