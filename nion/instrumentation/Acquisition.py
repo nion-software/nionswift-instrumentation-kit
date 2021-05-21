@@ -361,7 +361,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     @property
     def _progress(self) -> typing.Tuple[int, int]:
-        return 0, 0
+        return 1, 1
 
     def abort_stream(self) -> None:
         self._abort_stream()
