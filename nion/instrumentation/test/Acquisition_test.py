@@ -4,8 +4,8 @@ import unittest
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
-from nion.data import Shape
 from nion.instrumentation import Acquisition
+from nion.utils import Geometry
 
 
 class ScanDataStream(Acquisition.DataStream):
@@ -190,6 +190,31 @@ class MultiFrameDataStream(Acquisition.DataStream):
         self.data_available_event.fire(data_stream_event)
         self.__frame_index += count
         self._sequence_next(self.__channel, count)
+
+
+class RectangleMask(Acquisition.Mask):
+    def __init__(self, r: Geometry.FloatRect):
+        self.__r = r
+
+    def get_mask_array(self, data_shape: Acquisition.ShapeType) -> numpy.ndarray:
+        ir = Geometry.IntRect.from_tlbr(round(self.__r.top * data_shape[0]),
+                                        round(self.__r.left * data_shape[1]),
+                                        round(self.__r.bottom * data_shape[0]),
+                                        round(self.__r.right * data_shape[1]))
+        mask = numpy.zeros(data_shape)
+        mask[ir.slice] = 1.0
+        return mask
+
+
+class OrMask(Acquisition.Mask):
+    def __init__(self, mask1: Acquisition.Mask, mask2: Acquisition.Mask):
+        self.__mask1 = mask1
+        self.__mask2 = mask2
+
+    def get_mask_array(self, data_shape: Acquisition.ShapeType) -> numpy.ndarray:
+        mask_data1 = self.__mask1.get_mask_array(data_shape)
+        mask_data2 = self.__mask2.get_mask_array(data_shape)
+        return numpy.where(numpy.logical_or(mask_data1, mask_data2), 1.0, 0.0)
 
 
 class TestAcquisitionClass(unittest.TestCase):
@@ -382,9 +407,9 @@ class TestAcquisitionClass(unittest.TestCase):
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
-        mask1 = Shape.Rectangle.from_tlbr_fractional(0.0, 0.0, 0.5, 0.5)
-        mask2 = Shape.Rectangle.from_tlbr_fractional(0.5, 0.5, 1.0, 1.0)
-        mask = Shape.OrComposite2DShape(mask1, mask2)
+        mask1 = RectangleMask(Geometry.FloatRect.from_tlbr(0.0, 0.0, 0.5, 0.5))
+        mask2 = RectangleMask(Geometry.FloatRect.from_tlbr(0.5, 0.5, 1.0, 1.0))
+        mask = OrMask(mask1, mask2)
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.MaskedSumOperator(mask))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
@@ -420,8 +445,8 @@ class TestAcquisitionClass(unittest.TestCase):
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
-        mask1 = Shape.Rectangle.from_tlbr_fractional(0.0, 0.0, 0.5, 0.5)
-        mask2 = Shape.Rectangle.from_tlbr_fractional(0.5, 0.5, 1.0, 1.0)
+        mask1 = RectangleMask(Geometry.FloatRect.from_tlbr(0.0, 0.0, 0.5, 0.5))
+        mask2 = RectangleMask(Geometry.FloatRect.from_tlbr(0.5, 0.5, 1.0, 1.0))
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.CompositeDataStreamOperator({11: Acquisition.MaskedSumOperator(mask1), 22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
