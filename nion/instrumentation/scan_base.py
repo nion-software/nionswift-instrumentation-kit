@@ -460,10 +460,10 @@ class SynchronizedScanControl:
     def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource):
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
+        self.__grab_synchronized_is_scanning = True
         self.__stem_controller = scan_hardware_source.stem_controller
         self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
-        self.__grab_synchronized_is_scanning = True
-        self.__scan_hardware_source.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+        self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
         self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
         self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
 
@@ -484,7 +484,7 @@ class SynchronizedScanControl:
         self.__scan_hardware_source.set_record_frame_parameters(self.__old_record_parameters)
         self.__stem_controller._exit_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
         self.__grab_synchronized_is_scanning = False
-        self.__scan_hardware_source.acquisition_state_changed_event.fire(self.__grab_synchronized_is_scanning)
+        self.__scan_hardware_source.acquisition_state_changed_event.fire(False)
 
 
 class ScanHardwareSource(HardwareSource.HardwareSource):
@@ -1047,6 +1047,25 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.__dst_offset += height
             self.data_available_event.fire(data_stream_event)
 
+    class SynchronizedDataStream(Acquisition.DataStreamToDataAndMetadata):
+        def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
+                     camera_hardware_source: camera_base.CameraHardwareSource):
+            super().__init__(data_stream)
+            self.__scan_hardware_source = scan_hardware_source
+            self.__camera_hardware_source = camera_hardware_source
+            self.__stem_controller = scan_hardware_source.stem_controller
+            self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source,
+                                                             camera=self.__camera_hardware_source)
+            self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
+            self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
+
+        def about_to_delete(self) -> None:
+            self.__scan_hardware_source.set_record_frame_parameters(self.__old_record_parameters)
+            self.__stem_controller._exit_synchronized_state(self.__scan_hardware_source,
+                                                            camera=self.__camera_hardware_source)
+            self.__scan_hardware_source.acquisition_state_changed_event.fire(False)
+            super().about_to_delete()
+
     def grab_synchronized(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None) -> GrabSynchronizedResult:
@@ -1054,39 +1073,38 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         camera_frame_parameters = camera_base.CameraFrameParameters(camera_frame_parameters)
         scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
         scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
-        self.__grab_synchronized_control = SynchronizedScanControl(self, camera_hardware_source)
+        scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                    camera=camera_hardware_source,
+                                                    camera_frame_parameters=camera_frame_parameters)
+        camera_exposure_ms = camera_frame_parameters["exposure_ms"]
+        # abort the scan to not interfere with setup; and clear the aborted flag
+        scan_data_stream = ScanHardwareSource.ScanFrameDataStream(self, scan_frame_parameters, camera_exposure_ms, scan_behavior)
+        additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
+                                      "instrument": copy.deepcopy(scan_info.instrument_metadata)}
+        camera_data_stream: Acquisition.DataStream = ScanHardwareSource.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters, self.__device.flyback_pixels, additional_camera_metadata)
+        if camera_frame_parameters.get("processing", None) == "sum_project":
+            camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.SumOperator(axis=0))
+        elif camera_frame_parameters.get("processing", None) == "sum_masked":
+            active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
+            if active_masks:
+                operator = Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
+                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
+            else:
+                operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
+        data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+        scan_size = scan_data_stream.scan_size
+        section_height = section_height or scan_size.height
+        section_count = (scan_size.height + section_height - 1) // section_height
+        slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+        for section in range(section_count):
+            start = section * section_height
+            stop = min(start + section_height, scan_size.height)
+            slice_list.append((slice(start, stop), slice(0, scan_size.width)))
+        collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+        channel_data_stream = ScanHardwareSource.ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
+        self.__maker = ScanHardwareSource.SynchronizedDataStream(channel_data_stream, self, camera_hardware_source)
         try:
-            scan_info = self.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                        camera=camera_hardware_source,
-                                                        camera_frame_parameters=camera_frame_parameters)
-            camera_exposure_ms = camera_frame_parameters["exposure_ms"]
-            # abort the scan to not interfere with setup; and clear the aborted flag
-            scan_data_stream = ScanHardwareSource.ScanFrameDataStream(self, scan_frame_parameters, camera_exposure_ms, scan_behavior)
-            additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
-                                          "instrument": copy.deepcopy(scan_info.instrument_metadata)}
-            camera_data_stream: Acquisition.DataStream = ScanHardwareSource.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters, self.__device.flyback_pixels, additional_camera_metadata)
-            if camera_frame_parameters.get("processing", None) == "sum_project":
-                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.SumOperator(axis=0))
-            elif camera_frame_parameters.get("processing", None) == "sum_masked":
-                active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
-                if active_masks:
-                    operator = Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
-                    camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
-                else:
-                    operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
-                    camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
-            data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
-            scan_size = scan_data_stream.scan_size
-            section_height = section_height or scan_size.height
-            section_count = (scan_size.height + section_height - 1) // section_height
-            slice_list: typing.List[typing.Tuple[slice, slice]] = list()
-            for section in range(section_count):
-                start = section * section_height
-                stop = min(start + section_height, scan_size.height)
-                slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-            collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
-            channel_data_stream = ScanHardwareSource.ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
-            self.__maker = Acquisition.DataStreamToDataAndMetadata(channel_data_stream)
             with self.__maker.ref():
                 self.__maker.acquire()
                 if not self.__maker.is_aborted:
@@ -1094,8 +1112,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 return None
         finally:
             self.__maker = typing.cast(Acquisition.DataStream, None)
-            self.__grab_synchronized_control.close()
-            self.__grab_synchronized_control = typing.cast(SynchronizedScanControl, None)
 
     def grab_synchronized_old(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,

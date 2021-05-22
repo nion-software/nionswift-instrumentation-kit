@@ -381,7 +381,11 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         pass
 
     def _sequence_next(self, channel: Channel, n: int = 1) -> None:
-        """Move the sequence for channel forward by n. Subclasses can override."""
+        """Move the sequence for channel forward by n.
+
+        Subclasses should call this after they fire a data available event. It is used to
+        keep track of how many items in the sequence have been produced.
+        """
         assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
         self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
@@ -397,7 +401,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         pass
 
     def start_stream(self, stream_args: DataStreamArgs) -> None:
-        """Restart a sequence of acquisitions."""
+        """Restart a sequence of acquisitions. Sets the sequence count for this stream."""
         for channel in self.input_channels:
             assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
             self.__sequence_counts[channel] = stream_args.sequence_count
