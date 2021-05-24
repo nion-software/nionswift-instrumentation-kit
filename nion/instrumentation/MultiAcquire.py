@@ -13,6 +13,7 @@ import functools
 import typing
 import uuid
 import collections
+import typing
 
 # local libraries
 from nion.utils import Event, Geometry
@@ -25,6 +26,7 @@ from nion.swift import Facade
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
+from nion.instrumentation import Acquisition
 from nion.utils import Event
 
 _ = gettext.gettext
@@ -502,8 +504,10 @@ class MultiAcquireController:
         self.__savepath = savepath # or os.path.join(os.path.expanduser('~'), 'MultiAcquire')
         self.load_settings()
         self.load_parameters()
+        self.__grab_synchronized_control = typing.cast(scan_base.SynchronizedScanControl, None)
         self.__settings_changed_event_listener = self.settings.settings_changed_event.listen(self.save_settings)
         self.__spectrum_parameters_changed_event_listener = self.spectrum_parameters.parameters_changed_event.listen(self.save_parameters)
+        self.__maker = typing.cast(Acquisition.DataStream, None)
 
     @property
     def active_settings(self):
@@ -803,7 +807,7 @@ class MultiAcquireController:
                            'settings_list': settings_list}
         return multi_eels_data
 
-    def start_multi_acquire_spectrum_image(self, get_acquisition_handler_fn: typing.Callable[[list, int, dict], SISequenceAcquisitionHandler]):
+    def start_multi_acquire_spectrum_image_old(self, get_acquisition_handler_fn: typing.Callable[[list, int, dict], SISequenceAcquisitionHandler]):
         self.__active_settings = copy.deepcopy(self.settings)
         self.__active_spectrum_parameters = copy.deepcopy(self.spectrum_parameters)
         self.reset_progress_counter()
@@ -843,3 +847,286 @@ class MultiAcquireController:
             self.shift_x(0)
             if hasattr(self, 'scan_parameters'):
                 delattr(self, 'scan_parameters')
+
+    def start_multi_acquire_spectrum_image(self, scan: scan_base.ScanHardwareSource, scan_frame_parameters: dict,
+                                           camera: camera_base.CameraHardwareSource, camera_frame_parameters: dict,
+                                           get_display_data_stream_fn, section_height: int = None,
+                                           scan_behavior: scan_base.SynchronizedScanBehaviorInterface = None):
+        self.__active_settings = copy.deepcopy(self.settings)
+        self.__active_spectrum_parameters = copy.deepcopy(self.spectrum_parameters)
+        self.__grab_synchronized_control = scan_base.SynchronizedScanControl(scan, camera)
+        self.reset_progress_counter()
+        self.abort_event.clear()
+        if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
+            self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+            # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
+            # we still want to go back to the initial value of the control, so we "back up" the zero point here
+            self.zeros['x_start'] = self.zeros['x']
+        self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
+        try:
+            for parameters in self.__active_spectrum_parameters:
+                if self.abort_event.is_set():
+                    break
+                if not self.__active_settings['shift_each_sequence_slice']:
+                    self.shift_x(parameters['offset_x'])
+
+                self.scan_parameters = scan_frame_parameters
+                scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
+                scan_info = scan.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                            camera=camera,
+                                                            camera_frame_parameters=camera_frame_parameters)
+                camera_exposure_ms = parameters["exposure_ms"]
+                camera_frame_parameters['exposure_ms'] = camera_exposure_ms
+                # abort the scan to not interfere with setup; and clear the aborted flag
+                scan_data_stream = scan_base.ScanHardwareSource.ScanFrameDataStream(scan, scan_frame_parameters, camera_exposure_ms, scan_behavior)
+                additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
+                                              "instrument": copy.deepcopy(scan_info.instrument_metadata)}
+                camera_data_stream: Acquisition.DataStream = scan_base.ScanHardwareSource.CameraFrameDataStream(camera, camera_frame_parameters, scan.scan_device.flyback_pixels, additional_camera_metadata)
+                if camera_frame_parameters.get("processing", None) == "sum_project":
+                    camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.SumOperator(axis=0))
+                elif camera_frame_parameters.get("processing", None) == "sum_masked":
+                    active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
+                    if active_masks:
+                        operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator(mask=active_mask) for active_mask in active_masks])
+                        camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
+                    else:
+                        operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+                        camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
+                data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+                scan_size = scan_data_stream.scan_size
+                section_height = section_height or scan_size.height
+                section_count = (scan_size.height + section_height - 1) // section_height
+                slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+                for section in range(section_count):
+                    start = section * section_height
+                    stop = min(start + section_height, scan_size.height)
+                    slice_list.append((slice(start, stop), slice(0, scan_size.width)))
+                collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+
+                multi_acquire = MultiSIDataStream(collector, self.__active_spectrum_parameters, self.__active_settings, parameters['index'], self.shift_x)
+
+                sequence = Acquisition.SequenceDataStream(multi_acquire, parameters['frames'], Calibration.Calibration())
+
+                if callable(get_display_data_stream_fn):
+                    display_data_stream = get_display_data_stream_fn(sequence)
+                    for i, channel_number in enumerate(scan.get_enabled_channels()):
+                        n = scan.data_channels[channel_number].name
+                        display_data_stream.scan_data_items[i].title = f'MultiAcquire ({n}) #{parameters["index"]+1}'
+                    display_data_stream.camera_data_item.title = f'MultiAcquire ({camera.display_name}) #{parameters["index"]+1}'
+                else:
+                    display_data_stream = sequence
+
+                self.__maker = Acquisition.DataStreamToDataAndMetadata(display_data_stream)
+
+                with self.__maker.ref():
+                    self.__maker.acquire()
+
+                # acquisition_handler = get_acquisition_handler_fn(list(self.__active_spectrum_parameters), parameters['index'], dict(self.__active_settings))
+                # acquisition_handler.abort_event = self.abort_event
+                # # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
+                # self.scan_parameters = acquisition_handler.scan_frame_parameters
+                # acquisition_handler.run(parameters['frames'])
+                # If we shift each slice we need to save the current state after each sequence
+                if self.__active_settings['shift_each_sequence_slice']:
+                    self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
+        except Exception as e:
+            self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
+            import traceback
+            traceback.print_stack()
+            self.cancel()
+            raise
+        finally:
+            self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'spectrum image'})
+            self.__maker = typing.cast(Acquisition.DataStream, None)
+            self.__grab_synchronized_control.close()
+            self.__grab_synchronized_control = typing.cast(scan_base.SynchronizedScanControl, None)
+            # When each frame was shifted we want to use the backed up initial value when shifting back to zero so
+            # that we can actually go fully back to the start.
+            if 'x_start' in self.zeros:
+                self.zeros['x'] = self.zeros['x_start']
+            self.shift_x(0)
+            if hasattr(self, 'scan_parameters'):
+                delattr(self, 'scan_parameters')
+
+
+class MultiSIDataStream(Acquisition.DataStream):
+    def __init__(self, data_stream: Acquisition.DataStream, parameters: MultiEELSParameters, settings: MultiEELSSettings,
+                 current_parameters_index: int, shift_fn: typing.Callable[[float], typing.Any] = None):
+        super().__init__(parameters[current_parameters_index]['frames'])
+        self.__data_stream = data_stream
+        self.__parameters = parameters
+        self.__settings = settings
+        self.__current_parameters_index = current_parameters_index
+        self.__shift_fn = shift_fn
+        self.__last_shift = 0.0
+        self.__listener = data_stream.data_available_event.listen(self.data_available_event.fire)
+
+    def about_to_delete(self) -> None:
+        self.__listener.close()
+        self.__listener = None
+
+    @property
+    def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+        return self.__data_stream.channels
+
+    def shift(self, amount: float):
+        if callable(self.__shift_fn):
+            self.__shift_fn(amount)
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        p = self.__data_stream.progress
+        print(f'{self.__class__.__name__}: Progress: {p}')
+        current_time = 0
+        total_time = 0
+        for parameters in self.__parameters:
+            if parameters['index'] <= self.__current_parameters_index:
+                current_time += p[1] * parameters['exposure_ms']
+            total_time += p[1] * parameters['exposure_ms']
+        current_time += p[0] * self.__parameters[self.__current_parameters_index]['exposure_ms']
+        return int(current_time), int(total_time)
+
+    def _abort_stream(self) -> None:
+        self.__data_stream.abort_stream()
+
+    def _send_next(self) -> None:
+        self.__data_stream._send_next()
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        # TODO print(f'Prepare stream: {str(stream_args)}')
+        if self.__settings['shift_each_sequence_slice']:
+            self.shift(self.__last_shift)
+        elif self.__last_shift == 0:
+            self.shift(self.__parameters[self.__current_parameters_index]['offset_x'])
+        self.__last_shift += self.__parameters[self.__current_parameters_index]['offset_x']
+        self.__data_stream.prepare_stream(stream_args)
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        # TODO print(f'Start stream: {str(stream_args)}')
+        self.__data_stream.start_stream(stream_args)
+
+    def _advance_stream(self) -> None:
+        # TODO print('ADVANCE STREAM CALLED')
+        self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        self.__data_stream.finish_stream()
+
+
+class DisplayDataStream(Acquisition.DataStream):
+    def __init__(self, data_stream: Acquisition.DataStream, document_model, document_controller):
+        super().__init__()
+        self.__data_stream = data_stream
+        self.__listener = data_stream.data_available_event.listen(self.__data_available)
+        self.scan_data_items: typing.Sequence[DataItem.DataItem]
+        self.camera_data_item: DataItem.DataItem
+        self.__document_model = document_model
+        self.__document_controller = document_controller
+        self.__data_item_transactions: typing.List[typing.Any] = list()
+        self.__dst_offsets: typing.Dict[Acquisition.Channel, int] = dict()
+        self.__sequence_offsets: typing.Dict[Acquisition.Channel, int] = dict()
+        self.finishes: typing.List[typing.Callable] = list()
+
+    def about_to_delete(self) -> None:
+        self.__listener.close()
+        self.__listener = None
+
+    @property
+    def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+        return self.__data_stream.channels
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return self.__data_stream.progress
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__data_stream.is_finished
+
+    def _send_next(self) -> None:
+        self.__data_stream.send_next()
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+        self.__data_stream.prepare_stream(stream_args)
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        self.camera_data_item.increment_data_ref_count()
+        self.__data_item_transactions.append(self.__document_model.item_transaction(self.camera_data_item))
+        self.__document_model.begin_data_item_live(self.camera_data_item)
+        for item in self.scan_data_items:
+            item.increment_data_ref_count()
+            self.__data_item_transactions.append(self.__document_model.item_transaction(item))
+            self.__document_model.begin_data_item_live(item)
+        self.__data_stream.start_stream(stream_args)
+
+    def _advance_stream(self) -> None:
+        self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        self.__data_stream.finish_stream()
+        for transaction in self.__data_item_transactions:
+            transaction.close()
+        self.__data_item_transactions = list()
+        def run_on_main_thread():
+            self.__document_model.end_data_item_live(self.camera_data_item)
+            self.camera_data_item.decrement_data_ref_count()
+            for item in self.scan_data_items:
+                self.__document_model.end_data_item_live(item)
+                item.decrement_data_ref_count()
+        self.__document_controller.queue_task(run_on_main_thread)
+        for finish in self.finishes:
+            finish()
+
+    def __data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+        # TODO print(data_stream_event.__str__())
+        channel = data_stream_event.channel
+        src_slice = data_stream_event.source_slice
+        data_metadata = data_stream_event.data_metadata
+        data = data_stream_event.source_data
+
+        dst_offset = self.__dst_offsets.get(channel, 0)
+        dst_slice: typing.Tuple
+        if data_metadata.data_descriptor.is_sequence:
+            sequence_offset = self.__sequence_offsets.get(channel, 0)
+            height = src_slice[1].stop - src_slice[1].start
+            dst_slice = (slice(src_slice[0].start + sequence_offset, src_slice[0].stop + sequence_offset),
+                         slice(dst_offset, dst_offset + height), Ellipsis)
+        else:
+            height = src_slice[0].stop - src_slice[0].start
+            dst_slice = (slice(dst_offset, dst_offset + height), Ellipsis)
+
+        self.__dst_offsets[channel] = dst_offset + height
+        max_offset = data_metadata.data_shape[1] if data_metadata.data_descriptor.is_sequence else data_metadata.data_shape[0]
+        if self.__dst_offsets[channel] >= max_offset:
+            self.__dst_offsets[channel] = 0
+            sequence_offset = self.__sequence_offsets.get(channel, 0)
+            self.__sequence_offsets[channel] = sequence_offset + 1
+
+        # TODO print(f'DST SLICE {channel}: {dst_slice}')
+        # TODO print(self.__dst_offsets, self.__sequence_offsets)
+
+
+        if channel == 999: # i.e. camera data
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                      data_metadata.intensity_calibration,
+                                                                      data_metadata.dimensional_calibrations,
+                                                                      data_metadata.metadata,
+                                                                      data_metadata.timestamp,
+                                                                      data_metadata.data_descriptor,
+                                                                      data_metadata.timezone,
+                                                                      data_metadata.timezone_offset)
+            self.__document_model.update_data_item_partial(self.camera_data_item,
+                                                           data_metadata, data_and_metadata, src_slice, dst_slice)
+        else:
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                      data_metadata.intensity_calibration,
+                                                                      data_metadata.dimensional_calibrations,
+                                                                      data_metadata.metadata,
+                                                                      data_metadata.timestamp,
+                                                                      data_metadata.data_descriptor,
+                                                                      data_metadata.timezone,
+                                                                      data_metadata.timezone_offset)
+            self.__document_model.update_data_item_partial(self.scan_data_items[channel],
+                                                            data_metadata, data_and_metadata, src_slice, dst_slice)
+
+        self.data_available_event.fire(data_stream_event)

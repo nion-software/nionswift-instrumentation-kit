@@ -14,7 +14,9 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import camera_base
 from nion.instrumentation import MultiAcquire
+from nion.instrumentation import Acquisition
 from nion.swift.model import ImportExportManager
+from nion.swift.model import DataItem
 from nion.ui import Dialog
 from nion.utils import Registry
 from nion.ui import CanvasItem
@@ -342,6 +344,47 @@ class MultiAcquirePanelDelegate:
                 self.__acquisition_thread.start()
 
         def start_si_clicked():
+            if self.__acquisition_running:
+                self.multi_acquire_controller.cancel()
+                return
+
+            # Camera must be accessed from the UI thread, so do it here and re-use later
+            camera = self.camera
+            self.multi_acquire_controller.stem_controller = self.stem_controller
+            self.multi_acquire_controller.camera = camera
+            self.multi_acquire_controller.scan_controller = self.scan_controller
+
+            def create_display_data_stream(data_stream: Acquisition.DataStream):
+                document_model = self.document_controller._document_controller.document_model
+                display_data_stream = MultiAcquire.DisplayDataStream(data_stream, document_model, self.document_controller)
+                def update_progress(*args, **kwargs):
+                    p = display_data_stream.progress
+                    self.multi_acquire_controller.set_progress_counter(p[0], maximum=p[1])
+                listener = display_data_stream.data_available_event.listen(update_progress)
+                display_data_stream.finishes.append(lambda: listener.close())
+                camera_data_item = DataItem.DataItem(large_format=True)
+                self.document_controller.queue_task(lambda: document_model.append_data_item(camera_data_item))
+                scan_data_items: typing.List[DataItem.DataItem] = list()
+                def queue_append_di(di):
+                    self.document_controller.queue_task(lambda: document_model.append_data_item(di))
+                for channel in data_stream.channels:
+                    if channel != 999:
+                        di = DataItem.DataItem(large_format=True)
+                        scan_data_items.append(di)
+                        queue_append_di(di)
+                display_data_stream.scan_data_items = scan_data_items
+                display_data_stream.camera_data_item = camera_data_item
+                return display_data_stream
+
+            camera_frame_parameters = camera.get_current_frame_parameters()
+            camera_frame_parameters['processing'] = self.multi_acquire_controller.settings['processing']
+            scan_frame_parameters = self.scan_controller.get_current_frame_parameters()
+            self.__acquisition_thread = threading.Thread(target=self.multi_acquire_controller.start_multi_acquire_spectrum_image,
+                                                         args=(self.scan_controller, scan_frame_parameters, camera, camera_frame_parameters, create_display_data_stream))
+            self.__acquisition_thread.start()
+
+
+        def start_si_clicked_old():
             if self.__acquisition_running:
                 self.multi_acquire_controller.cancel()
             else:
