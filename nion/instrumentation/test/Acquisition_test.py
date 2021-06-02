@@ -4,7 +4,7 @@ import unittest
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
-from nion.data import Shape
+# from nion.data import Shape
 from nion.instrumentation import Acquisition
 
 
@@ -194,6 +194,56 @@ class MultiFrameDataStream(Acquisition.DataStream):
         self.data_available_event.fire(data_stream_event)
         self.__frame_index += count
         self._sequence_next(self.__channel, count)
+
+
+class ChangeParameterDataStream(Acquisition.DataStream):
+    """
+    This is an example for a DataStream that you would plug in between a SequenceDataStream and the underlying
+    DataStream so that you can change a parameter for each sequence slice.
+    First it does not work like this (_prepare_stream only gets called once and not for each sequence slice).
+    Second it would be great if we had a better base class to do things like this: Most of the code below just passes
+    through function calls between the encapsulating DataStreams. If you forget one of these calls, the whole system
+    breaks down in a hard-to-debug way. Especially you need to ensure to connect the "data_available_event", which is
+    not obvious. I'd like a "PassThroughDataStream" that you can subclass and only override the methods you actually
+    want to change, otherwise it would be a no-op DataStream.
+    """
+
+    def __init__(self, data_stream: Acquisition.DataStream):
+        super().__init__()
+        self.__data_stream = data_stream
+        self.parameter = 0
+        self.__listener = data_stream.data_available_event.listen(self.data_available_event.fire)
+
+    def about_to_delete(self) -> None:
+        self.__listener.close()
+        self.__listener = None
+
+    @property
+    def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+        return self.__data_stream.channels
+
+    @property
+    def _progress(self) -> typing.Tuple[int, int]:
+        return self.__data_stream.progress
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStream) -> None:
+        self.parameter += 1
+        self.__data_stream.prepare_stream(stream_args)
+
+    def _abort_stream(self) -> None:
+        self.__data_stream.abort_stream()
+
+    def _send_next(self) -> None:
+        self.__data_stream.send_next()
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        self.__data_stream.start_stream(stream_args)
+
+    def _advance_stream(self) -> None:
+        self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        self.__data_stream.finish_stream()
 
 
 class TestAcquisitionClass(unittest.TestCase):
@@ -541,5 +591,36 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
             self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+            p = maker.progress
+            self.assertEqual(p[0], p[1])
+
+    def test_sequence_of_individually_started_scans_as_collection_two_channels_and_camera_with_parameter_change(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        sequence_len = 4
+        scan_shape = (8, 8)
+        scan_data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
+        combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        changer = ChangeParameterDataStream(collector)
+        sequencer = Acquisition.SequenceDataStream(changer, sequence_len)
+        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        with maker.ref():
+            maker.acquire()
+            expected_scan_shape = (sequence_len,) + scan_shape
+            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+            # self.assertTrue(numpy.array_equal(scan_data_stream.data[0].reshape(expected_scan_shape), maker.get_data(0).data))
+            # self.assertTrue(numpy.array_equal(scan_data_stream.data[1].reshape(expected_scan_shape), maker.get_data(1).data))
+            # self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertSequenceEqual(expected_scan_shape, maker.get_data(0).data.shape)
+            self.assertSequenceEqual(expected_scan_shape, maker.get_data(1).data.shape)
+            self.assertSequenceEqual(expected_camera_shape, maker.get_data(2).data.shape)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(0).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
+            self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+            self.assertEqual(sequence_len, changer.parameter)
             p = maker.progress
             self.assertEqual(p[0], p[1])
