@@ -533,3 +533,28 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
             self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
+
+    def test_sequence_split_into_slices_of_scan_as_collection_two_channels_and_camera(self):
+        # scan will produce two data streams of pixels.
+        # camera will produce one stream of frames.
+        # the sequence must make it into two images and a sequence of images.
+        sequence_len = 4
+        scan_shape = (8, 8)
+        scan_data_stream = ScanDataStream(sequence_len, scan_shape, [0, 1], scan_shape[1])
+        camera_data_stream = SingleFrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), 2)
+        combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
+        slices = tuple((slice(i, i + 1),) for i in range(sequence_len))
+        sequencer = Acquisition.SequenceDataStream(collector, sequence_len, sub_slices=slices)
+        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        with maker.ref():
+            maker.acquire()
+            expected_scan_shape = (sequence_len,) + scan_shape
+            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[0].reshape(expected_scan_shape), maker.get_data(0).data))
+            self.assertTrue(numpy.array_equal(scan_data_stream.data[1].reshape(expected_scan_shape), maker.get_data(1).data))
+            self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(2).data))
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(0).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(1).data_descriptor)
+            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(2).data_descriptor)
+            self.assertEqual(sequence_len, scan_data_stream.prepare_count)

@@ -207,6 +207,24 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
+    def test_grab_synchronized_sequence_basic_eels(self):
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+            scan_frame_parameters["size"] = (4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters["processing"] = "sum_project"
+            camera_data_channel = None
+            n = 3
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel, n=n)
+            # check the acquisition state
+            self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
+            self.assertEqual(1, len(scans))
+            self.assertEqual(1, len(spectrum_images))
+            self.assertEqual((3, 4, 4, 512), spectrum_images[0].data_shape)
+
     def test_grab_synchronized_basic_eels_followed_by_record(self):
         # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
         # after a synchronized acquisition.

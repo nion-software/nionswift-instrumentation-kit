@@ -693,8 +693,8 @@ class SequenceDataStream(CollectedDataStream):
 
     This is a subclass of CollectedDataStream.
     """
-    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None):
-        super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),))
+    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None, sub_slices: typing.Optional[SliceListType] = None):
+        super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),), sub_slices)
 
     def _get_new_data_descriptor(self, data_metadata):
         # scalar data is not supported. and the data must not be a sequence already.

@@ -1068,7 +1068,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def grab_synchronized(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
-                          section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None) -> GrabSynchronizedResult:
+                          section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None, n: int = 1) -> GrabSynchronizedResult:
         camera_hardware_source = camera
         camera_frame_parameters = camera_base.CameraFrameParameters(camera_frame_parameters)
         scan_frame_parameters = ScanFrameParameters(scan_frame_parameters)
@@ -1077,7 +1077,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                     camera=camera_hardware_source,
                                                     camera_frame_parameters=camera_frame_parameters)
         camera_exposure_ms = camera_frame_parameters["exposure_ms"]
-        # abort the scan to not interfere with setup; and clear the aborted flag
         scan_data_stream = ScanHardwareSource.ScanFrameDataStream(self, scan_frame_parameters, camera_exposure_ms, scan_behavior)
         additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
                                       "instrument": copy.deepcopy(scan_info.instrument_metadata)}
@@ -1102,6 +1101,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             stop = min(start + section_height, scan_size.height)
             slice_list.append((slice(start, stop), slice(0, scan_size.width)))
         collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+        if n > 1:
+            collector = Acquisition.SequenceDataStream(collector, n)
         channel_data_stream = ScanHardwareSource.ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
         self.__maker = ScanHardwareSource.SynchronizedDataStream(channel_data_stream, self, camera_hardware_source)
         try:
