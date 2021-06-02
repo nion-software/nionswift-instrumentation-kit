@@ -356,10 +356,23 @@ class MultiAcquirePanelDelegate:
 
             def create_display_data_stream(data_stream: Acquisition.DataStream):
                 document_model = self.document_controller._document_controller.document_model
-                display_data_stream = MultiAcquire.DisplayDataStream(data_stream, document_model, self.document_controller)
+                scan_behavior = None
+                if self.multi_acquire_controller.settings['drift_correction_enabled']:
+                    e = threading.Event()
+                    def queue_create_drift_corrector():
+                        nonlocal scan_behavior
+                        scan_behavior = MultiAcquire.MultiSIDriftCorrectionBehavior(document_model, self.scan_controller)
+                        e.set()
+                    self.document_controller.queue_task(queue_create_drift_corrector)
+                    if not e.wait(10):
+                        raise RuntimeError
+
+                display_data_stream = MultiAcquire.DisplayDataStream(data_stream, document_model, self.document_controller,
+                                                                     scan_behavior=scan_behavior)
                 def update_progress(*args, **kwargs):
-                    p = display_data_stream.progress
-                    self.multi_acquire_controller.set_progress_counter(p[0], maximum=p[1])
+                    if args[0].channel == 999:
+                        p = display_data_stream.progress
+                        self.multi_acquire_controller.set_progress_counter(p[0], maximum=p[1])
                 listener = display_data_stream.data_available_event.listen(update_progress)
                 display_data_stream.finishes.append(lambda: listener.close())
                 camera_data_item = DataItem.DataItem(large_format=True)
@@ -770,6 +783,9 @@ class MultiAcquirePanelDelegate:
                 def shift_each_checkbox_changed(check_state):
                     multi_eels_panel.multi_acquire_controller.settings['shift_each_sequence_slice'] = check_state == 'checked'
 
+                def drift_correction_changed(check_state):
+                    multi_eels_panel.multi_acquire_controller.settings['drift_correction_enabled'] = check_state == 'checked'
+
                 column = self.ui.create_column_widget()
                 row1 = self.ui.create_row_widget()
                 row2 = self.ui.create_row_widget()
@@ -782,6 +798,7 @@ class MultiAcquirePanelDelegate:
                 auto_dark_subtract_checkbox = self.ui.create_check_box_widget('Auto dark subtraction')
                 sum_frames_checkbox = self.ui.create_check_box_widget('Sum frames')
                 shift_each_checkbox = self.ui.create_check_box_widget('Apply shift for each frame')
+                drift_correction_checkbox = self.ui.create_check_box_widget('Drift correction')
                 blanker_label = self.ui.create_label_widget('Blanker control name: ')
                 blanker_field = self.ui.create_line_edit_widget(properties={'min-width': 160})
                 blanker_delay_label = self.ui.create_label_widget('Blanker delay (s): ')
@@ -812,6 +829,8 @@ class MultiAcquirePanelDelegate:
                 row3.add_spacing(10)
                 row3.add(shift_each_checkbox)
                 row3.add_spacing(10)
+                row3.add(drift_correction_checkbox)
+                row3.add_spacing(10)
                 row3.add_stretch()
 
                 column.add(row1)
@@ -828,6 +847,7 @@ class MultiAcquirePanelDelegate:
                 auto_dark_subtract_checkbox.on_check_state_changed = auto_dark_subtract_checkbox_changed
                 sum_frames_checkbox.on_check_state_changed = sum_frames_checkbox_changed
                 shift_each_checkbox.on_check_state_changed = shift_each_checkbox_changed
+                drift_correction_checkbox.on_check_state_changed = drift_correction_changed
                 x_shifter_field.on_editing_finished = x_shifter_finished
                 x_shift_delay_field.on_editing_finished = x_shift_delay_finished
                 blanker_field.on_editing_finished = blanker_finished
@@ -840,7 +860,8 @@ class MultiAcquirePanelDelegate:
 
                 self.checkboxes.update({'auto_dark_subtract': auto_dark_subtract_checkbox,
                                         'sum_frames': sum_frames_checkbox,
-                                        'shift_each_sequence_slice': shift_each_checkbox})
+                                        'shift_each_sequence_slice': shift_each_checkbox,
+                                        'drift_correction_enabled': drift_correction_checkbox})
 
                 self.settings_changed()
 

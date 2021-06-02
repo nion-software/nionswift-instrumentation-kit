@@ -5,9 +5,10 @@ import threading
 import unittest
 import time
 import uuid
+import typing
 
-from nion.instrumentation import camera_base, scan_base, stem_controller
-from nion.swift.model import HardwareSource, DocumentModel
+from nion.instrumentation import camera_base, scan_base, stem_controller, Acquisition
+from nion.swift.model import HardwareSource, DocumentModel, DataItem
 from nion.swift import Facade, Application
 from nion.swift.test import TestContext
 from nion.utils import Event
@@ -351,6 +352,8 @@ class TestMultiAcquire(unittest.TestCase):
                 scan_frame_parameters = scan_controller.get_current_frame_parameters()
                 scan_frame_parameters['size'] = scan_size
                 scan_controller.set_current_frame_parameters(scan_frame_parameters)
+                camera_frame_parameters = camera.get_current_frame_parameters()
+                camera_frame_parameters['processing'] = settings['processing']
 
                 multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
                 multi_acquire_controller.scan_controller = scan_controller
@@ -391,15 +394,42 @@ class TestMultiAcquire(unittest.TestCase):
 
                     return handler
 
+                def create_display_data_stream(data_stream: Acquisition.DataStream):
+                    display_data_stream = MultiAcquire.DisplayDataStream(data_stream, document_model, document_controller,
+                                                                         stack_metadata_keys=[['hardware_source', 'defocus']])
+                    def update_progress(*args, **kwargs):
+                        if args[0].channel == 999:
+                            p = display_data_stream.progress
+                            print(f'{p=}')
+                            multi_acquire_controller.set_progress_counter(p[0], maximum=p[1])
+                    listener = display_data_stream.data_available_event.listen(update_progress)
+                    display_data_stream.finishes.append(lambda: listener.close())
+                    camera_data_item = DataItem.DataItem(large_format=True)
+                    document_controller.queue_task(lambda: document_model.append_data_item(camera_data_item))
+                    scan_data_items: typing.List[DataItem.DataItem] = list()
+                    def queue_append_di(di):
+                        document_controller.queue_task(lambda: document_model.append_data_item(di))
+                    for channel in data_stream.channels:
+                        if channel != 999:
+                            di = DataItem.DataItem(large_format=True)
+                            scan_data_items.append(di)
+                            queue_append_di(di)
+                    display_data_stream.scan_data_items = scan_data_items
+                    display_data_stream.camera_data_item = camera_data_item
+                    return display_data_stream
+
                 progress = 0
                 def update_progress(minimum, maximum, value):
                     nonlocal progress
+                    print(f'{minimum=}, {maximum=}, {value=}')
                     progress = minimum + value/maximum
                     document_controller.periodic()
 
                 progress_event_listener = multi_acquire_controller.progress_updated_event.listen(update_progress)
                 cm.callback(progress_event_listener.close)
-                multi_acquire_controller.start_multi_acquire_spectrum_image(get_acquisition_handler_fn)
+                multi_acquire_controller.start_multi_acquire_spectrum_image(scan_controller, scan_frame_parameters,
+                                                                            camera, camera_frame_parameters,
+                                                                            create_display_data_stream)
                 document_controller.periodic()
 
                 self.assertAlmostEqual(progress, 1, places=1)

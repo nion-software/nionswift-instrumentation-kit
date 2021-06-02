@@ -14,6 +14,7 @@ import typing
 import uuid
 import collections
 import typing
+import scipy.ndimage
 
 # local libraries
 from nion.utils import Event, Geometry
@@ -209,7 +210,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         if axes_descriptor.data_axes:
             axes_order.extend(axes_descriptor.data_axes)
 
-        data_shape = tuple(scan_shape) + camera_readout_size
+        data_shape: typing.List[int] = list(scan_shape) + list(camera_readout_size)
 
         assert len(axes_order) == len(data_shape)
 
@@ -300,8 +301,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
         metadata = data_and_metadata.metadata
 
-        src_slice = tuple()
-        dst_slice = tuple()
+        src_slice: typing.Tuple = tuple()
+        dst_slice: typing.Tuple = tuple()
         for index in axes_order:
             if index >= len(sub_area.slice):
                 src_slice += (slice(None),)
@@ -319,12 +320,12 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if data.shape[collection_axis] == 1:
                 data = numpy.squeeze(data, axis=collection_axis)
                 dimensional_calibrations = dimensional_calibrations[1:]
-                src_slice = list(src_slice)
-                src_slice.pop(collection_axis)
-                src_slice = tuple(src_slice)
-                dst_slice = list(dst_slice)
-                dst_slice.pop(collection_axis)
-                dst_slice = tuple(dst_slice)
+                src_slice_ = list(src_slice)
+                src_slice_.pop(collection_axis)
+                src_slice = tuple(src_slice_)
+                dst_slice_ = list(dst_slice)
+                dst_slice_.pop(collection_axis)
+                dst_slice = tuple(dst_slice_)
                 collection_dimension_count = 0
         data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
 
@@ -488,7 +489,8 @@ class MultiAcquireController:
                         {'x_shifter': 'LossMagnetic', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                          'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
-                         'use_multi_eels_calibration': False, 'shift_each_sequence_slice': False})
+                         'use_multi_eels_calibration': False, 'shift_each_sequence_slice': False,
+                         'drift_correction_enabled': False})
         self.stem_controller = stem_controller
         self.camera: camera_base.CameraHardwareSource = None
         self.scan_controller: scan_base.ScanHardwareSource = None
@@ -903,7 +905,7 @@ class MultiAcquireController:
                     slice_list.append((slice(start, stop), slice(0, scan_size.width)))
                 collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
 
-                multi_acquire = MultiSIDataStream(collector, self.__active_spectrum_parameters, self.__active_settings, parameters['index'], self.shift_x)
+                multi_acquire = MultiSIDataStream(collector, self.__active_spectrum_parameters, self.__active_settings, parameters['index'], shift_fn=self.shift_x)
 
                 sequence = Acquisition.SequenceDataStream(multi_acquire, parameters['frames'], Calibration.Calibration())
 
@@ -913,6 +915,8 @@ class MultiAcquireController:
                         n = scan.data_channels[channel_number].name
                         display_data_stream.scan_data_items[i].title = f'MultiAcquire ({n}) #{parameters["index"]+1}'
                     display_data_stream.camera_data_item.title = f'MultiAcquire ({camera.display_name}) #{parameters["index"]+1}'
+                    multi_acquire.scan_behavior = display_data_stream.scan_behavior
+                    scan_data_stream._ScanFrameDataStream__scan_behavior = display_data_stream.scan_behavior
                 else:
                     display_data_stream = sequence
 
@@ -949,9 +953,88 @@ class MultiAcquireController:
                 delattr(self, 'scan_parameters')
 
 
+class MultiSIDriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
+    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource):
+        self.__document_model = document_model
+        self.__scan_hardware_source = scan_hardware_source
+        self.__offset_nm_data = numpy.zeros((3, 0), float)
+        data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
+        if data_item:
+            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+            data_item.set_data_and_metadata(offset_nm_xdata)
+        else:
+            data_item = DataItem.DataItem(self.__offset_nm_data)
+            data_item.title = "Drift Log"
+            self.__document_model.append_data_item(data_item)
+            display_item = self.__document_model.get_display_item_for_data_item(data_item)
+            display_item.display_type = "line_plot"
+            display_item.append_display_data_channel_for_data_item(data_item)
+            display_item.append_display_data_channel_for_data_item(data_item)
+            display_item._set_display_layer_properties(0, label=_("x"))
+            display_item._set_display_layer_properties(1, label=_("y"))
+            display_item._set_display_layer_properties(2, label=_("m"))
+        self.__data_item = data_item
+        self.__drift_correction_xdata: typing.List[DataAndMetadata.DataAndMetadata] = []
+        self.__last_offset_nm = Geometry.FloatSize()
+        self.__cumulative_offset_nm = Geometry.FloatSize()
+        self.__is_first_correction = True
+        self.n = 0
+
+
+    @property
+    def last_scan_xdata(self) -> DataAndMetadata.DataAndMetadata:
+        if self.__drift_correction_xdata:
+            return self.__drift_correction_xdata[-1]
+
+    @last_scan_xdata.setter
+    def last_scan_xdata(self, xdata: DataAndMetadata.DataAndMetadata):
+        self.__drift_correction_xdata.append(xdata)
+        self.n += 1
+        if len(self.__drift_correction_xdata) > 2:
+            self.__drift_correction_xdata.pop(0)
+
+    @property
+    def last_offset_nm(self) -> Geometry.FloatSize:
+        return self.__last_offset_nm
+
+    def reset(self) -> None:
+        self.__last_offset_nm = Geometry.FloatSize()
+        self.__cumulative_offset_nm = Geometry.FloatSize()
+        self.__is_first_correction = True
+
+    def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
+        print('CALLING PREPARE SECTION')
+        # this method must be thread safe
+        # start with the context frame parameters and adjust for the drift region
+        adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
+        if len(self.__drift_correction_xdata) > 1:
+            quality, offset = xd.register_template(self.__drift_correction_xdata[-2], self.__drift_correction_xdata[-1])
+            print(f'{quality=}, {offset=}')
+            offset = Geometry.FloatPoint.make(offset)
+            offset_nm = Geometry.FloatSize(
+                h=self.__drift_correction_xdata[-1].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
+                w=self.__drift_correction_xdata[-1].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+            self.__last_offset_nm = offset_nm
+            self.__cumulative_offset_nm += offset_nm
+            if self.__is_first_correction:
+                adjustments.offset_nm = -2.0 * self.__cumulative_offset_nm
+                self.__is_first_correction = False
+            else:
+                adjustments.offset_nm = -self.__cumulative_offset_nm
+            offset_nm_xy = math.sqrt(pow(offset_nm.height, 2) + pow(offset_nm.width, 2))
+            self.__offset_nm_data = numpy.hstack([self.__offset_nm_data, numpy.array([offset_nm.height, offset_nm.width, offset_nm_xy]).reshape(3, 1)])
+            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+            def update_data_item(offset_nm_xdata: DataAndMetadata.DataAndMetadata) -> None:
+                self.__data_item.set_data_and_metadata(offset_nm_xdata)
+            self.__scan_hardware_source._call_soon(functools.partial(update_data_item, offset_nm_xdata))
+        return adjustments
+
+
+
 class MultiSIDataStream(Acquisition.DataStream):
     def __init__(self, data_stream: Acquisition.DataStream, parameters: MultiEELSParameters, settings: MultiEELSSettings,
-                 current_parameters_index: int, shift_fn: typing.Callable[[float], typing.Any] = None):
+                 current_parameters_index: int, shift_fn: typing.Callable[[float], typing.Any] = None,
+                 scan_behavior: typing.Optional[MultiSIDriftCorrectionBehavior] = None):
         super().__init__(parameters[current_parameters_index]['frames'])
         self.__data_stream = data_stream
         self.__parameters = parameters
@@ -959,7 +1042,9 @@ class MultiSIDataStream(Acquisition.DataStream):
         self.__current_parameters_index = current_parameters_index
         self.__shift_fn = shift_fn
         self.__last_shift = 0.0
-        self.__listener = data_stream.data_available_event.listen(self.data_available_event.fire)
+        self.__listener = data_stream.data_available_event.listen(self.__data_available)
+        self.measure_drift_channel = 0
+        self.scan_behavior = scan_behavior
 
     def about_to_delete(self) -> None:
         self.__listener.close()
@@ -984,6 +1069,7 @@ class MultiSIDataStream(Acquisition.DataStream):
                 current_time += p[1] * parameters['exposure_ms']
             total_time += p[1] * parameters['exposure_ms']
         current_time += p[0] * self.__parameters[self.__current_parameters_index]['exposure_ms']
+        print(f'{self.__current_parameters_index=}')
         return int(current_time), int(total_time)
 
     def _abort_stream(self) -> None:
@@ -993,7 +1079,7 @@ class MultiSIDataStream(Acquisition.DataStream):
         self.__data_stream._send_next()
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        # TODO print(f'Prepare stream: {str(stream_args)}')
+        print(f'Prepare stream: {str(stream_args)}')
         if self.__settings['shift_each_sequence_slice']:
             self.shift(self.__last_shift)
         elif self.__last_shift == 0:
@@ -1006,15 +1092,39 @@ class MultiSIDataStream(Acquisition.DataStream):
         self.__data_stream.start_stream(stream_args)
 
     def _advance_stream(self) -> None:
-        # TODO print('ADVANCE STREAM CALLED')
+        # print('ADVANCE STREAM CALLED')
         self.__data_stream.advance_stream()
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
 
+    def __data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+        # TODO print(data_stream_event.__str__())
+        channel = data_stream_event.channel
+        data_metadata = data_stream_event.data_metadata
+        data = data_stream_event.source_data
+        state = data_stream_event.state
+        metadata = data_metadata.metadata
+        metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__settings))
+        metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__parameters[self.__current_parameters_index])
+        # If the channel that we use for drift correction is done with a frame, send the data to the drift corrector
+        # The drift corrector will take care of tracking which frames to cross-correlate to get the drift
+        if state == Acquisition.DataStreamStateEnum.COMPLETE and channel == self.measure_drift_channel and self.scan_behavior:
+            self.scan_behavior.last_scan_xdata = DataAndMetadata.new_data_and_metadata(data.copy(), # Looks like we need to copy the data here, otherwise it gets overwritten in the next iteration
+                                                                                       intensity_calibration=data_metadata.intensity_calibration,
+                                                                                       dimensional_calibrations=data_metadata.dimensional_calibrations,
+                                                                                       metadata=data_metadata.metadata,
+                                                                                       timestamp=data_metadata.timestamp,
+                                                                                       data_descriptor=data_metadata.data_descriptor,
+                                                                                       timezone=data_metadata.timezone,
+                                                                                       timezone_offset=data_metadata.timezone_offset)
+        self.data_available_event.fire(data_stream_event)
+
 
 class DisplayDataStream(Acquisition.DataStream):
-    def __init__(self, data_stream: Acquisition.DataStream, document_model, document_controller):
+    def __init__(self, data_stream: Acquisition.DataStream, document_model, document_controller,
+                 scan_behavior: typing.Optional[MultiSIDriftCorrectionBehavior] = None,
+                 stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None):
         super().__init__()
         self.__data_stream = data_stream
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
@@ -1026,6 +1136,8 @@ class DisplayDataStream(Acquisition.DataStream):
         self.__dst_offsets: typing.Dict[Acquisition.Channel, int] = dict()
         self.__sequence_offsets: typing.Dict[Acquisition.Channel, int] = dict()
         self.finishes: typing.List[typing.Callable] = list()
+        self.scan_behavior = scan_behavior
+        self.__stack_metadata_keys = stack_metadata_keys
 
     def about_to_delete(self) -> None:
         self.__listener.close()
@@ -1077,6 +1189,42 @@ class DisplayDataStream(Acquisition.DataStream):
         for finish in self.finishes:
             finish()
 
+    def __update_metadata(self, new_metadata: dict, existing_metadata: dict, current_frames_index: int):
+        # This is needed for metadata that changes with each spectrum image in the stack and needs to be preserved.
+        # One usecase is the storage information that comes with virtual detector data that has the full dataset saved
+        # in the background. Currently the camera defines which metadata keys to stack and we copy that information
+        # when setting up the CameraDataChannel
+        if self.__stack_metadata_keys is not None:
+            for key_path in self.__stack_metadata_keys:
+                existing_data = None
+                if isinstance(key_path, str):
+                    key_path = [key_path]
+                sub_dict = existing_metadata
+                for key in key_path:
+                    sub_dict = typing.cast(dict, sub_dict.get(key))
+                    if sub_dict is None:
+                        break
+                else:
+                    existing_data = copy.deepcopy(sub_dict)
+
+                parent = None
+                sub_dict = new_metadata
+                for key in key_path:
+                    parent = sub_dict
+                    sub_dict = typing.cast(dict, sub_dict.get(key))
+                    if sub_dict is None:
+                        break
+                else:
+                    if current_frames_index == 0 and parent is not None:
+                        parent[key_path[-1]] = [sub_dict]
+                    elif existing_data is not None and parent is not None:
+                        if isinstance(existing_data, list):
+                            if len(existing_data) <= current_frames_index:
+                                existing_data.append(copy.deepcopy(sub_dict))
+                            else:
+                                existing_data[current_frames_index] = copy.deepcopy(sub_dict)
+                            parent[key_path[-1]] = existing_data
+
     def __data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         # TODO print(data_stream_event.__str__())
         channel = data_stream_event.channel
@@ -1102,21 +1250,38 @@ class DisplayDataStream(Acquisition.DataStream):
             sequence_offset = self.__sequence_offsets.get(channel, 0)
             self.__sequence_offsets[channel] = sequence_offset + 1
 
-        # TODO print(f'DST SLICE {channel}: {dst_slice}')
+        print(f'DST SLICE {channel}: {dst_slice}')
         # TODO print(self.__dst_offsets, self.__sequence_offsets)
 
-
         if channel == 999: # i.e. camera data
-            data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+            target_data_item = self.camera_data_item
+            if data_metadata.data_descriptor.is_sequence:
+                self.__update_metadata(data_metadata.metadata, self.camera_data_item.metadata, sequence_offset)
+        else:
+            target_data_item = self.scan_data_items[channel]
+
+        if self.scan_behavior and data_stream_event.state == Acquisition.DataStreamStateEnum.COMPLETE and target_data_item.is_sequence:
+            last_frame_data = target_data_item.data[typing.cast(slice, dst_slice[0]).start, ...]
+            last_frame_data[dst_slice[1:]] = data[src_slice]
+            offset = self.scan_behavior.last_offset_nm
+            shifts = []
+            shifts.append(-target_data_item.dimensional_calibrations[1].convert_from_calibrated_size(offset.height))
+            shifts.append(-target_data_item.dimensional_calibrations[2].convert_from_calibrated_size(offset.width))
+            while len(shifts) < len(last_frame_data.shape):
+                shifts.append(0)
+            shifted_last_frame_data = scipy.ndimage.shift(last_frame_data, shifts, order=1)
+            data_descriptor = DataAndMetadata.DataDescriptor(False, data_metadata.data_descriptor.collection_dimension_count, data_metadata.datum_dimension_count)
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(shifted_last_frame_data,
                                                                       data_metadata.intensity_calibration,
-                                                                      data_metadata.dimensional_calibrations,
+                                                                      data_metadata.dimensional_calibrations[1:],
                                                                       data_metadata.metadata,
                                                                       data_metadata.timestamp,
-                                                                      data_metadata.data_descriptor,
+                                                                      data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            self.__document_model.update_data_item_partial(self.camera_data_item,
-                                                           data_metadata, data_and_metadata, src_slice, dst_slice)
+            self.__document_model.update_data_item_partial(target_data_item, data_metadata, data_and_metadata,
+                                                           (Ellipsis,), (dst_slice[0], Ellipsis))
+            target_data_item.data[typing.cast(slice, dst_slice[0]).start, ...] = shifted_last_frame_data
         else:
             data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
                                                                       data_metadata.intensity_calibration,
@@ -1126,7 +1291,7 @@ class DisplayDataStream(Acquisition.DataStream):
                                                                       data_metadata.data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            self.__document_model.update_data_item_partial(self.scan_data_items[channel],
-                                                            data_metadata, data_and_metadata, src_slice, dst_slice)
+            self.__document_model.update_data_item_partial(target_data_item,
+                                                           data_metadata, data_and_metadata, src_slice, dst_slice)
 
         self.data_available_event.fire(data_stream_event)
