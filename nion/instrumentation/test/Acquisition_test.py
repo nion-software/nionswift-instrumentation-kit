@@ -39,10 +39,6 @@ class ScanDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return self.__channels
 
-    @property
-    def _progress(self) -> typing.Tuple[int, int]:
-        return self.__partial_index, self.__scan_length
-
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         self.prepare_count += 1
 
@@ -103,8 +99,8 @@ class SingleFrameDataStream(Acquisition.DataStream):
         return (self.__channel,)
 
     @property
-    def _progress(self) -> typing.Tuple[int, int]:
-        return self.__partial_index, self.__frame_shape[0]
+    def _progress(self) -> float:
+        return self.__partial_index / self.__frame_shape[0]
 
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
@@ -156,10 +152,6 @@ class MultiFrameDataStream(Acquisition.DataStream):
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
-
-    @property
-    def _progress(self) -> typing.Tuple[int, int]:
-        return 0, self.__frame_shape[0]
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         if self.__do_processing:

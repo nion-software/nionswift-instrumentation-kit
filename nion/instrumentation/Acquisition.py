@@ -353,14 +353,12 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
 
     @property
-    def progress(self) -> typing.Tuple[int, int]:
-        p = self._progress
-        assert p[0] <= p[1]
-        return p
+    def progress(self) -> float:
+        return self._progress
 
     @property
-    def _progress(self) -> typing.Tuple[int, int]:
-        return 0, 0
+    def _progress(self) -> float:
+        return 0.0
 
     def abort_stream(self) -> None:
         self._abort_stream()
@@ -478,11 +476,19 @@ class CollectedDataStream(DataStream):
         return self.__data_stream.channels
 
     @property
-    def _progress(self) -> typing.Tuple[int, int]:
+    def _progress(self) -> float:
+        # p will be the progress for the current frame
+        # count is the number of frames in this collection
+        # index is the number of frames completed in this collection, calculated as the minimum progress among incomplete channels
+        # adding p to index will give the number of frames completed plus the fraction of the current one completed
+        # all channels progress simultaneously in a collection; so use the last one for calculation
+        count = numpy.product(self.__collection_shape, dtype=numpy.int64)
         p = self.__data_stream.progress
-        count = int(p[1] * numpy.product(self.__collection_shape, dtype=numpy.int64))
-        index = sum(p[1] * self.__indexes.get(k, 0) + p[0] for k in self.channels) // len(self.channels)
-        return index, count
+        incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
+        if not incomplete_indexes:
+            return 0.0
+        index = min(incomplete_indexes)
+        return (index + p) / count
 
     def _send_next(self) -> None:
         assert self.__data_stream_started
@@ -575,8 +581,10 @@ class CollectedDataStream(DataStream):
                                                          data_metadata.timezone,
                                                          data_metadata.timezone_offset)
 
-        # send out the new data stream event.
-        index = self.__indexes.get(channel, 0)
+        # index for channel should be mod collection_count. the index is allowed to be equal
+        # to collection_count to signal that the channel is complete. this fact is used to
+        # calculate progress. self.__indexes[channel] will get set directly to next_channel below.
+        index = self.__indexes.get(channel, 0) % collection_count
         sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
         collection_rank = len(self.__collection_shape)
         collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
@@ -600,7 +608,7 @@ class CollectedDataStream(DataStream):
                 new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
                 self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-                self.__indexes[channel] = next_index % collection_count
+                self.__indexes[channel] = next_index
                 self.__sub_slice_indexes[channel] = next_sub_slice_index
                 self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
             else:
@@ -660,7 +668,7 @@ class CollectedDataStream(DataStream):
                     count -= count
                     assert count is not None  # for type checker bug
                 assert count == 0  # everything has been accounted for
-                self.__indexes[channel] = next_index % collection_count
+                self.__indexes[channel] = next_index
                 self.__sub_slice_indexes[channel] = next_sub_slice_index
                 self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
             if new_state == DataStreamStateEnum.COMPLETE:
@@ -681,7 +689,7 @@ class CollectedDataStream(DataStream):
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
             self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-            self.__indexes[channel] = next_index % collection_count
+            self.__indexes[channel] = next_index
             self.__sub_slice_indexes[channel] = next_sub_slice_index
             self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
             if new_state == DataStreamStateEnum.COMPLETE:
@@ -738,11 +746,9 @@ class CombinedDataStream(DataStream):
         return all(data_stream.is_finished for data_stream in self.__data_streams)
 
     @property
-    def _progress(self) -> typing.Tuple[int, int]:
-        ps = (data_stream.progress for data_stream in self.__data_streams)
-        count = sum(p[1] for p in ps)
-        index = sum(p[0] for p in ps)
-        return index, count
+    def _progress(self) -> float:
+        # return the average of combined streams progress
+        return sum(data_stream.progress for data_stream in self.__data_streams) / len(self.__data_streams)
 
     def _send_next(self) -> None:
         for data_stream in self.__data_streams:
@@ -913,7 +919,7 @@ class FramedDataStream(DataStream):
         return self.__data_stream.is_finished
 
     @property
-    def _progress(self) -> typing.Tuple[int, int]:
+    def _progress(self) -> float:
         return self.__data_stream.progress
 
     def _send_next(self) -> None:
@@ -1136,11 +1142,21 @@ class DataStreamToDataAndMetadata(FramedDataStream):
 
         return ContextManager(self)
 
+    @property
+    def _progress(self) -> float:
+        return super()._progress if not self.is_finished else 1.0
+
     def acquire(self) -> None:
         with self.active_context():
+            last_progress = 0.0
             while not self.is_finished and not self.is_aborted:
                 self.send_next()
                 self.advance_stream()
+                next_progress = self.progress
+                assert next_progress >= last_progress
+                last_progress = next_progress
+            if self.is_finished:
+                assert self.progress == 1.0
 
 
 """
