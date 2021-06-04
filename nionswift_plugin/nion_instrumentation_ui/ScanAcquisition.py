@@ -33,6 +33,7 @@ from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import ListModel
+
 from . import HardwareSourceChoice
 
 if typing.TYPE_CHECKING:
@@ -88,7 +89,6 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__document_model = document_model
         self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.__data_item_transaction = None
-        self.__data_and_metadata = None
         self.__grab_sync_info = grab_sync_info
 
     def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:

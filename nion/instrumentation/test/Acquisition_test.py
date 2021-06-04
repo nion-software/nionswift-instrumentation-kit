@@ -98,6 +98,9 @@ class SingleFrameDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
 
+    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+        return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype)), 0.1)
+
     @property
     def _progress(self) -> float:
         return self.__partial_index / self.__frame_shape[0]
@@ -152,6 +155,9 @@ class MultiFrameDataStream(Acquisition.DataStream):
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
+
+    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+        return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype)), 0.1)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         if self.__do_processing:

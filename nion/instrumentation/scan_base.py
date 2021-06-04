@@ -857,6 +857,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
             return (999,)
 
+        def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+            data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
+            data_metadata = DataAndMetadata.DataMetadata((data_shape, float))
+            return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
+
         def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
             scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
             camera_frame_parameters = self.__camera_frame_parameters
@@ -988,6 +993,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         @property
         def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
             return self.__data_stream.channels
+
+        def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+            return self.__data_stream.get_info(channel)
 
         @property
         def is_finished(self) -> bool:
