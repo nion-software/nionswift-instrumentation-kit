@@ -421,7 +421,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # the sequence must make it into two images and a sequence of images.
         scan_shape = (8, 8)
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
-        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.CompositeDataStreamOperator({11: Acquisition.SumOperator(), 22: Acquisition.SumOperator()}))
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({11: Acquisition.SumOperator(), 22: Acquisition.SumOperator()}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
         with maker.ref():
@@ -440,7 +440,7 @@ class TestAcquisitionClass(unittest.TestCase):
         mask1 = RectangleMask(Geometry.FloatRect.from_tlbr(0.0, 0.0, 0.5, 0.5))
         mask2 = RectangleMask(Geometry.FloatRect.from_tlbr(0.5, 0.5, 1.0, 1.0))
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
-        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.CompositeDataStreamOperator({11: Acquisition.MaskedSumOperator(mask1), 22: Acquisition.MaskedSumOperator(mask2)}))
+        summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({11: Acquisition.MaskedSumOperator(mask1), 22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.DataStreamToDataAndMetadata(collector)
         with maker.ref():

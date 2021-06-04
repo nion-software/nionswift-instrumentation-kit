@@ -1082,12 +1082,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                       "instrument": copy.deepcopy(scan_info.instrument_metadata)}
         camera_data_stream: Acquisition.DataStream = ScanHardwareSource.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters, self.__device.flyback_pixels, additional_camera_metadata)
         if camera_frame_parameters.get("processing", None) == "sum_project":
-            camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, Acquisition.SumOperator(axis=0))
+            camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
         elif camera_frame_parameters.get("processing", None) == "sum_masked":
             active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
             if active_masks:
                 operator = Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
-                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator)
+                camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
             else:
                 operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
                 camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)

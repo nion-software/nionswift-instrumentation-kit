@@ -103,6 +103,7 @@ Devices:
 """
 from __future__ import annotations
 
+import copy
 import enum
 import typing
 import warnings
@@ -880,6 +881,54 @@ class StackedDataStreamOperator(DataStreamOperator):
         return [ChannelData(channel_data.channel, new_data_and_metadata)]
 
 
+class DataChannel(ReferenceCounting.ReferenceCounted):
+    def __init__(self):
+        super().__init__()
+
+    def about_to_delete(self) -> None:
+        pass
+
+    def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: numpy.ndarray, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        raise NotImplementedError()
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        raise NotImplementedError()
+
+
+class DataAndMetadataDataChannel(DataChannel):
+    def __init__(self):
+        super().__init__()
+        self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
+
+    def __make_data(self, channel: Channel, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataAndMetadata:
+        data_and_metadata = self.__data.get(channel, None)
+        if not data_and_metadata:
+            data = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
+            data_descriptor = data_metadata.data_descriptor
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                      data_metadata.intensity_calibration,
+                                                                      data_metadata.dimensional_calibrations,
+                                                                      data_metadata.metadata,
+                                                                      data_metadata.timestamp,
+                                                                      data_descriptor,
+                                                                      data_metadata.timezone,
+                                                                      data_metadata.timezone_offset)
+            self.__data[channel] = data_and_metadata
+        return data_and_metadata
+
+    def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: numpy.ndarray, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        data_and_metadata = self.__make_data(channel, data_metadata)
+        # copy data
+        data_and_metadata.data.reshape(-1)[dest_slice] = source_data[source_slice].reshape(-1)
+        # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
+        # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
+        # metadata contains in-progress information.
+        data_and_metadata._set_metadata(data_metadata.metadata)
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__data[channel]
+
+
 class FramedDataStream(DataStream):
     """Change a data stream producing continuous data into one producing frame by frame data.
 
@@ -891,13 +940,13 @@ class FramedDataStream(DataStream):
     channels.
     """
 
-    def __init__(self, data_stream: DataStream, operator: typing.Optional[DataStreamOperator] = None):
+    def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
         # data and indexes use the _incoming_ data channels as keys.
-        self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
+        self.__data_channel = (data_channel or DataAndMetadataDataChannel()).add_ref()
         self.__indexes: typing.Dict[Channel, int] = dict()
 
     def about_to_delete(self) -> None:
@@ -905,6 +954,8 @@ class FramedDataStream(DataStream):
         self.__listener = None
         self.__data_stream.remove_ref()
         self.__data_stream = None
+        self.__data_channel.remove_ref()
+        self.__data_channel = None
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -942,7 +993,7 @@ class FramedDataStream(DataStream):
         self.__data_stream.finish_stream()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
-        return self.__data[channel]
+        return self.__data_channel.get_data(channel)
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         # when data arrives, store it into a data item with the same description/shape.
@@ -959,36 +1010,17 @@ class FramedDataStream(DataStream):
 
         if count is None:
             # check to see if data has already been allocated. allocated it if not.
-            data_and_metadata = self.__data.get(data_stream_event.channel, None)
-            if not data_and_metadata:
-                data_metadata = data_stream_event.data_metadata
-                data = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
-                data_descriptor = data_metadata.data_descriptor
-                data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
-                                                                          data_metadata.intensity_calibration,
-                                                                          data_metadata.dimensional_calibrations,
-                                                                          data_metadata.metadata,
-                                                                          data_metadata.timestamp,
-                                                                          data_descriptor,
-                                                                          data_metadata.timezone,
-                                                                          data_metadata.timezone_offset)
-                self.__data[data_stream_event.channel] = data_and_metadata
-            assert data_and_metadata
+            data_metadata = copy.deepcopy(data_stream_event.data_metadata)
             # determine the start/stop indexes. then copy the source data into the destination using
             # flattening to allow for use of simple indexing. then increase the index.
             source_start = ravel_slice_start(source_slice, data_stream_event.source_data.shape)
             source_stop = ravel_slice_stop(source_slice, data_stream_event.source_data.shape)
             source_count = source_stop - source_start
-            flat_shape = (numpy.product(data_and_metadata.data.shape, dtype=numpy.int64),)
+            flat_shape = (numpy.product(data_metadata.data_shape, dtype=numpy.int64),)
             index = self.__indexes.get(channel, 0)
             dest_slice = slice(index, index + source_count)
             assert index + source_count <= flat_shape[0]
-            # copy data
-            data_and_metadata.data.reshape(-1)[dest_slice] = data_stream_event.source_data[source_slice].reshape(-1)
-            # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
-            # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
-            # metadata contains in-progress information.
-            data_and_metadata._set_metadata(data_stream_event.data_metadata.metadata)
+            self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
             # proceed
             index = index + source_count
             self.__indexes[channel] = index
@@ -997,10 +1029,10 @@ class FramedDataStream(DataStream):
                 assert index == flat_shape[0]  # index should be at the end.
                 # processing
                 if not self.__operator.is_applied:
-                    for new_channel_data in self.__operator.process(ChannelData(data_stream_event.channel, self.__data[data_stream_event.channel])):
+                    for new_channel_data in self.__operator.process(ChannelData(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))):
                         self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
                 else:
-                    self.__send_data(data_stream_event.channel, self.__data[data_stream_event.channel])
+                    self.__send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))
                 self.__indexes[channel] = 0
                 self._sequence_next(channel)
         else:
@@ -1124,8 +1156,8 @@ class MaskedSumOperator(DataStreamOperator):
 
 
 class DataStreamToDataAndMetadata(FramedDataStream):
-    def __init__(self, data_stream: DataStream):
-        super().__init__(data_stream)
+    def __init__(self, data_stream: DataStream, *, data_channel: typing.Optional[DataChannel] = None):
+        super().__init__(data_stream, data_channel=data_channel)
 
     def active_context(self) -> typing.ContextManager:
         class ContextManager:
