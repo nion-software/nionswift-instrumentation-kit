@@ -317,7 +317,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
-                if "Spectrum Image" in data_item.title:
+                if "Spectrum Image" in data_item.title and "test" in data_item.title:
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
@@ -728,7 +728,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
-                if "Spectrum Image" in data_item.title:
+                if "Spectrum Image" in data_item.title and "Camera" in data_item.title:
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
@@ -758,7 +758,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
-                if "Spectrum Image" in data_item.title:
+                if "Spectrum Image" in data_item.title and "Camera" in data_item.title:
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
@@ -790,7 +790,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
-                if "Spectrum Image" in data_item.title:
+                if "Spectrum Image" in data_item.title and "Camera" in data_item.title:
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
@@ -822,7 +822,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
-                if "Spectrum Image" in data_item.title:
+                if "Spectrum Image" in data_item.title and "Camera" in data_item.title:
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
@@ -858,7 +858,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     document_controller.periodic()
                     si_data_item = None
                     for data_item in document_model.data_items:
-                        if "Spectrum Image" in data_item.title:
+                        if "Spectrum Image" in data_item.title and "Camera" in data_item.title:
                             si_data_item = data_item
                             break
                     self.assertIsNotNone(si_data_item)

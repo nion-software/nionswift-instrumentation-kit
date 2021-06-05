@@ -8,7 +8,7 @@ import gettext
 import logging
 import math
 import numpy
-import threading
+import time
 import typing
 import uuid
 import collections
@@ -18,6 +18,7 @@ import operator
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -42,33 +43,6 @@ if typing.TYPE_CHECKING:
 _ = gettext.gettext
 
 title_base = _("Spectrum Image")
-
-
-def create_and_display_data_item(document_window, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-    # create the data item; large format if it's a collection
-    data_item = Facade.DataItem(DataItem.DataItem(large_format=data_and_metadata.is_collection))
-    document_window.library._document_model.append_data_item(data_item._data_item)
-
-    # update the session id
-    data_item._data_item.session_id = document_window.library._document_model.session_id
-    data_item._data_item.session_metadata = ApplicationData.get_session_metadata_dict()
-
-    # set the title
-    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name", data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name", "Data"))
-    dimension_str = (" " + " x ".join([str(d) for d in data_and_metadata.collection_dimension_shape])) if data_and_metadata.is_collection else str()
-    data_item.title = f"{title_base}{dimension_str} ({channel_name})"
-
-    # if the last dimension is 1, squeeze the data (1D SI)
-    if data_and_metadata.data_shape[0] == 1:
-        data_and_metadata = xd.squeeze(data_and_metadata)
-
-    # the data item should not have any other 'clients' at this point; so setting the
-    # data and metadata will immediately unload the data (and write to disk). this is important,
-    # because the data (up to this point) can be shared data from the DLL.
-    data_item.set_data_and_metadata(data_and_metadata)
-
-    # now to display it will reload the data (presumably from an HDF5 or similar on-demand format).
-    document_window.display_data_item(data_item)
 
 
 class SequenceState(enum.Enum):
@@ -221,6 +195,69 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             self.__data_item.decrement_data_ref_count()
 
 
+class DataItemDataChannel(Acquisition.DataChannel):
+
+    def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str], grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
+        super().__init__()
+        self.__document_controller = document_controller
+        self.__document_model = document_controller.library._document_model
+        self.__channel_names = dict(channel_names)
+        self.__grab_sync_info = grab_sync_info
+        self.__data_item_map: typing.Dict[Acquisition.Channel, DataItem.DataItem] = dict()
+        self.__data_item_transaction_map: typing.Dict[Acquisition.Channel, DocumentModel.Transaction] = dict()
+
+    def prepare(self, data_stream: Acquisition.DataStream) -> None:
+        for channel in data_stream.channels:
+            data_stream_info = data_stream.get_info(channel)
+            title = f"{title_base} ({self.__channel_names.get(channel, str())})"
+            data_item = self.__create_data_item(data_stream_info.data_metadata, title, self.__grab_sync_info)
+            self.__data_item_map[channel] = data_item
+            data_item.increment_data_ref_count()
+            self.__data_item_transaction_map[channel] = self.__document_model.item_transaction(data_item)
+            self.__document_model.begin_data_item_live(data_item)
+            self.__document_controller.display_data_item(Facade.DataItem(data_item))
+
+    def about_to_delete(self) -> None:
+        for channel in self.__data_item_map.keys():
+            data_item = self.__data_item_map[channel]
+            data_item_transaction = self.__data_item_transaction_map[channel]
+            data_item_transaction.close()
+            self.__document_model.end_data_item_live(data_item)
+            data_item.decrement_data_ref_count()
+        self.__data_item_map.clear()
+        self.__data_item_transaction_map.clear()
+
+    def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__data_item_map[channel].data_and_metadata
+
+    def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        data_item = self.__data_item_map.get(channel, None)
+        if data_item:
+            source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data)
+            self.__document_model.update_data_item_partial(data_item, data_metadata, source_data_and_metadata, source_slice, [dest_slice], flattened_slices=True)
+
+    def __create_data_item(self, data_metadata: DataAndMetadata.DataMetadata, title: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
+        data_shape = data_metadata.data_shape
+        data_descriptor = data_metadata.data_descriptor
+        scan_calibrations = grab_sync_info.scan_calibrations
+        data_calibrations = grab_sync_info.data_calibrations
+        data_intensity_calibration = grab_sync_info.data_intensity_calibration
+        large_format = bool(numpy.prod(data_shape, dtype=numpy.int64) > 2048**2 * 10)
+        data_item = DataItem.DataItem(large_format=large_format)
+        data_item.title = title
+        self.__document_model.append_data_item(data_item)
+        data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
+        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
+        data_item.intensity_calibration = data_intensity_calibration
+        data_item_metadata = data_item.metadata
+        data_item_metadata["instrument"] = copy.deepcopy(grab_sync_info.instrument_metadata)
+        data_item_metadata["hardware_source"] = copy.deepcopy(grab_sync_info.camera_metadata)
+        data_item_metadata["scan"] = copy.deepcopy(grab_sync_info.scan_metadata)
+        data_item.metadata = data_item_metadata
+        data_item.session_metadata = ApplicationData.get_session_metadata_dict()
+        return data_item
+
+
 class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
     def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
         # init with the frame parameters from the synchronized grab
@@ -332,7 +369,7 @@ class ScanAcquisitionController:
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.acquisition_state_changed_event = Event.Event()
-        self.__thread = None
+        self.__task = None
 
     def start(self, processing: ScanAcquisitionProcessing) -> None:
 
@@ -362,10 +399,10 @@ class ScanAcquisitionController:
             camera=camera_hardware_source,
             camera_frame_parameters=camera_frame_parameters)
 
-        camera_data_channel = CameraDataChannel(self.__document_controller.library._document_model, camera_hardware_source.display_name, grab_sync_info)
-        self.__document_controller.display_data_item(Facade.DataItem(camera_data_channel.data_item))
+        channel_names = {c: scan_hardware_source.get_channel_state(c).name for c in scan_hardware_source.get_enabled_channels()}
+        channel_names[999] = camera_hardware_source.display_name
 
-        camera_data_channel.start()
+        data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names, grab_sync_info)
 
         drift_correction_behavior : typing.Optional[DriftCorrectionBehavior] = None
         section_height = None
@@ -373,43 +410,35 @@ class ScanAcquisitionController:
             drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
 
-        def grab_synchronized():
+        self.__scan_acquisition = scan_base.ScanAcquisition(data_channel=data_item_data_channel,
+                                                            scan_hardware_source=scan_hardware_source,
+                                                            scan_frame_parameters=scan_frame_parameters,
+                                                            camera_hardware_source=camera_hardware_source,
+                                                            camera_frame_parameters=camera_frame_parameters,
+                                                            scan_behavior=drift_correction_behavior,
+                                                            section_height=section_height)
+
+        async def grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.scanning)
             try:
-                combined_data = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
-                                                                       camera=camera_hardware_source,
-                                                                       camera_frame_parameters=camera_frame_parameters,
-                                                                       camera_data_channel=camera_data_channel,
-                                                                       scan_behavior=drift_correction_behavior,
-                                                                       section_height=section_height)
-                if combined_data is not None:
-                    scan_data_list, camera_data_list = combined_data
-
-                    def create_and_display_data_item_task():
-                        # this will be executed in UI thread
-                        for data_and_metadata in scan_data_list:
-                            create_and_display_data_item(document_window, data_and_metadata)
-
-                    # queue the task to be executed in UI thread
-                    document_window.queue_task(create_and_display_data_item_task)
+                self.__scan_acquisition.prepare_scan()
+                await self.__scan_acquisition.scan_async()
             finally:
-                def stop_channel():
-                    camera_data_channel.stop()
-
-                document_window.queue_task(stop_channel)
                 self.acquisition_state_changed_event.fire(SequenceState.idle)
+                self.__scan_acquisition.close()
+                self.__scan_acquisition = None
 
-        self.__thread = threading.Thread(target=grab_synchronized)
-        self.__thread.start()
+        self.__task = document_window._document_window.event_loop.create_task(grab_async())
 
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
-        self.__scan_hardware_source._hardware_source.grab_synchronized_abort()
+        self.__scan_acquisition.abort_scan()
 
     # for running tests
     def _wait(self, timeout: float = 60.0) -> None:
-        if self.__thread:
-            self.__thread.join(timeout)
+        start = time.time()
+        while self.__task and not self.__task.done() and time.time() - start < timeout:
+            self.__document_controller._document_window.periodic()
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
