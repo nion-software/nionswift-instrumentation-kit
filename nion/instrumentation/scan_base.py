@@ -1146,8 +1146,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
         if self.__maker:
-            p = self.__maker.progress
-            return p[0] / p[1]
+            return self.__maker.progress
         return None
 
     def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
@@ -1898,6 +1897,12 @@ class ScanAcquisition:
         start = time.time()
         while self.__task and not self.__task.done() and time.time() - start < timeout:
             on_periodic()
+
+    @property
+    def progress(self) -> float:
+        if self.__maker:
+            return self.__maker.progress
+        return 0.0
 
     @property
     def results(self) -> typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]:

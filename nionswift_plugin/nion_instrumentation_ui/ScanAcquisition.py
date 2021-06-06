@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # system imports
+import asyncio
 import copy
 import enum
 import functools
@@ -8,7 +9,6 @@ import gettext
 import logging
 import math
 import numpy
-import time
 import typing
 import uuid
 import collections
@@ -234,6 +234,7 @@ class ScanAcquisitionController:
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
+        self.__scan_acquisition = typing.cast(scan_base.ScanAcquisition, None)
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, processing: ScanAcquisitionProcessing) -> None:
@@ -287,7 +288,7 @@ class ScanAcquisitionController:
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
-            self.__scan_acquisition = None
+            self.__scan_acquisition = typing.cast(scan_base.ScanAcquisition, None)
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 
@@ -297,6 +298,10 @@ class ScanAcquisitionController:
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
         self.__scan_acquisition.abort_scan()
+
+    @property
+    def progress(self) -> float:
+        return self.__scan_acquisition.progress
 
     # for running tests
     def _wait(self, timeout: float = 60.0) -> None:
@@ -365,7 +370,7 @@ class PanelDelegate:
         self.__scan_specifier = ScanSpecifier()
         self.__scan_width = 32  # the width/length of the scan in pixels
         self.__scan_pixels = 0  # the total number of scan pixels
-
+        self.__progress_task = typing.cast(asyncio.Task, None)
         self.__scan_acquisition_preference_panel = None
 
     def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
@@ -478,6 +483,9 @@ class PanelDelegate:
 
         self.__acquire_button = ui.create_push_button_widget(_("Acquire"))
 
+        self.__progress_bar = ui.create_progress_bar_widget()
+        self.__progress_bar.enabled = False
+
         self.__roi_description = ui.create_label_widget()
 
         self.__scan_width_widget = ui.create_line_edit_widget()
@@ -544,7 +552,9 @@ class PanelDelegate:
 
         acquire_sequence_button_row = ui.create_row_widget()
         acquire_sequence_button_row.add(self.__acquire_button)
-        acquire_sequence_button_row.add_stretch()
+        acquire_sequence_button_row.add_spacing(8)
+        acquire_sequence_button_row.add(self.__progress_bar)
+        acquire_sequence_button_row.add_spacing(8)
 
         if self.__scan_hardware_source_choice.hardware_source_count > 1:
             column.add_spacing(8)
@@ -596,17 +606,30 @@ class PanelDelegate:
         def acquisition_state_changed(acquisition_state: SequenceState) -> None:
             self.__acquisition_state = acquisition_state
 
-            async def update_button_text(text: str) -> None:
-                self.__acquire_button.text = text
+            async def update_state(is_idle: bool) -> None:
+                self.__acquire_button.text = _("Acquire") if is_idle else _("Cancel")
+                self.__progress_bar.enabled = not is_idle
                 update_context()  # update the cancel button
+                if is_idle and self.__progress_task:
+                    self.__progress_task.cancel()
+                    self.__progress_task = typing.cast(asyncio.Task, None)
+                    self.__progress_bar.value = 100
+                if not is_idle and not self.__progress_task:
+                    async def update_progress():
+                        while True:
+                            if self.__scan_acquisition_controller:
+                                self.__progress_bar.value = int(100 * self.__scan_acquisition_controller.progress)
+                            await asyncio.sleep(0.25)
+
+                    self.__progress_task = document_controller._document_window.event_loop.create_task(update_progress())
 
             if acquisition_state == SequenceState.idle:
                 self.__scan_acquisition_controller = None
                 self.__acquisition_state_changed_event_listener.close()
                 self.__acquisition_state_changed_event_listener = None
-                document_controller._document_window.event_loop.create_task(update_button_text(_("Acquire")))
+                document_controller._document_window.event_loop.create_task(update_state(True))
             else:
-                document_controller._document_window.event_loop.create_task(update_button_text(_("Cancel")))
+                document_controller._document_window.event_loop.create_task(update_state(False))
 
         def acquire_sequence() -> None:
             if self.__scan_acquisition_controller:
