@@ -4,6 +4,7 @@ import math
 import numpy
 import threading
 import time
+import typing
 import unittest
 import uuid
 
@@ -18,6 +19,7 @@ from nion.ui import TestUI
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import scan_base
@@ -260,12 +262,12 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
-            camera_data_channel.start()
-            try:
-                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
-            finally:
-                camera_data_channel.stop()
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
+                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+            scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
@@ -283,12 +285,12 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
-            camera_data_channel.start()
-            try:
-                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
-            finally:
-                camera_data_channel.stop()
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
+                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+            scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters)
 
     def test_grab_synchronized_sum_masked_produces_data_of_correct_shape(self):
         with self.__test_context() as test_context:
@@ -307,13 +309,12 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            camera_data_channel = ScanAcquisition.CameraDataChannel(document_model, "test", grab_sync_info)
-            camera_data_channel.start()
-            try:
-                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
-            finally:
-                camera_data_channel.stop()
-
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(document_controller),
+                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+            scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters)
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
@@ -452,30 +453,21 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def test_partial_acquisition_has_proper_metadata(self):
 
-        PartialUpdate = collections.namedtuple("PartialUpdate", ["xdata", "state", "scan_shape", "dest_sub_area", "sub_area", "view_id"])
+        class TestDataChannel(ScanAcquisition.DataItemDataChannel):
+            def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str], grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
+                super().__init__(document_controller, channel_names, grab_sync_info)
+                self.__document_model = document_controller.library._document_model
+                self.updates: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
-        class CameraDataChannel(ScanAcquisition.CameraDataChannel):
-            def __init__(self, document_model, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo, update_period: float = 1.0):
-                super().__init__(document_model, channel_name, grab_sync_info)
-                self.__document_model = document_model
-                self._update_period = update_period
-                self.updates = list()
-
-            def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-                super().update(data_and_metadata, state, scan_shape, dest_sub_area, sub_area, view_id)
-                self.__document_model.perform_data_item_updates()
-                self.updates.append(PartialUpdate(
-                    copy.deepcopy(self.data_item.xdata),
-                    state,
-                    scan_shape,
-                    dest_sub_area,
-                    sub_area,
-                    view_id
-                ))
-                # print(f"update {len(self.updates)}")
+            def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray,
+                            source_slice: Acquisition.SliceType, dest_slice: slice,
+                            data_metadata: DataAndMetadata.DataMetadata) -> None:
+                super().update_data(channel, source_data, source_slice, dest_slice, data_metadata)
+                if channel == 999:
+                    self.__document_model.perform_data_item_updates()
+                    self.updates.append(copy.deepcopy(self.get_data_item(channel).xdata))
 
         with self.__test_context() as test_context:
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -487,20 +479,20 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters)
-            camera_data_channel = CameraDataChannel(document_model, "test", grab_sync_info, update_period=0.0)
+            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller), {0: "HAADF", 999: "test"}, grab_sync_info)
             section_height = 5
-            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+            scan_hardware_source.grab_synchronized(data_channel=data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
                                                    camera_frame_parameters=camera_frame_parameters,
-                                                   camera_data_channel=camera_data_channel,
                                                    section_height=section_height)
-            self.assertTrue(camera_data_channel.updates)
-            for partial_update in camera_data_channel.updates:
-                self.assertEqual("counts", partial_update.xdata.intensity_calibration.units)
-                self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[0].units)
-                self.assertEqual("nm", partial_update.xdata.dimensional_calibrations[1].units)
-                self.assertEqual("eV", partial_update.xdata.dimensional_calibrations[2].units)
-                metadata = partial_update.xdata.metadata
+            self.assertTrue(data_channel.updates)
+            for partial_xdata in data_channel.updates:
+                self.assertEqual("counts", partial_xdata.intensity_calibration.units)
+                self.assertEqual("nm", partial_xdata.dimensional_calibrations[0].units)
+                self.assertEqual("nm", partial_xdata.dimensional_calibrations[1].units)
+                self.assertEqual("eV", partial_xdata.dimensional_calibrations[2].units)
+                metadata = partial_xdata.metadata
                 # import pprint; print(pprint.pformat(metadata))
                 self.assertEqual(camera_hardware_source.hardware_source_id, Metadata.get_metadata_value(metadata, "stem.hardware_source.id"))
                 self.assertEqual(camera_hardware_source.display_name, Metadata.get_metadata_value(metadata, "stem.hardware_source.name"))
@@ -524,14 +516,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.line_time_us"))
                 self.assertEqual((6, 6), metadata["scan"]["scan_context_size"])
                 self.assertEqual((6, 6), metadata["scan"]["scan_size"])
-                # camera_metadata = partial_update.xdata.metadata["hardware_source"]
+                # camera_metadata = partial_xdata.metadata["hardware_source"]
                 # self.assertIn("autostem", camera_metadata)
                 # self.assertIn("hardware_source_id", camera_metadata)
                 # self.assertIn("hardware_source_name", camera_metadata)
                 # self.assertIn("exposure", camera_metadata)
                 # self.assertIn("binning", camera_metadata)
                 # self.assertIn("signal_type", camera_metadata)
-                # scan_metadata = partial_update.xdata.metadata["scan_detector"]
+                # scan_metadata = partial_xdata.metadata["scan_detector"]
                 # self.assertIn("autostem", scan_metadata)
                 # self.assertIn("hardware_source_id", scan_metadata)
                 # self.assertIn("hardware_source_name", scan_metadata)

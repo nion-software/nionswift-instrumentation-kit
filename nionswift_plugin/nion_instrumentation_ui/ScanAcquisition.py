@@ -58,143 +58,6 @@ class ScanSpecifier:
         self.drift_interval_lines = 0
 
 
-class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
-    def __init__(self, document_model, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
-        self.__document_model = document_model
-        self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
-        self.__data_item_transaction = None
-        self.__grab_sync_info = grab_sync_info
-
-    def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
-        scan_calibrations = grab_sync_info.scan_calibrations
-        data_calibrations = grab_sync_info.data_calibrations
-        data_intensity_calibration = grab_sync_info.data_intensity_calibration
-        _, data_shape = self.__calculate_axes_order_and_data_shape(grab_sync_info.axes_descriptor, grab_sync_info.scan_size, grab_sync_info.camera_readout_size_squeezed)
-        large_format = bool(numpy.prod(data_shape, dtype=numpy.int64) > 2048**2 * 10)
-        data_item = DataItem.DataItem(large_format=large_format)
-        data_item.title = f"{title_base} ({channel_name})"
-        self.__document_model.append_data_item(data_item)
-        # Only call "reserve_data" for HDF5 backed data items because it causes problems for ndata backed items.
-        if large_format:
-            axes_descriptor = grab_sync_info.axes_descriptor
-            is_sequence = axes_descriptor.sequence_axes is not None
-            collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
-            datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
-            # This is for the case of one virtual detector, where we squeeze the length-1 axis
-            if collection_dimension_count == 1:
-                expected_ndim = int(is_sequence) + collection_dimension_count + datum_dimension_count
-                if expected_ndim > len(data_shape):
-                    collection_dimension_count = 0
-            data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
-            data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
-        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
-        data_item.intensity_calibration = data_intensity_calibration
-        data_item_metadata = data_item.metadata
-        data_item_metadata["instrument"] = copy.deepcopy(grab_sync_info.instrument_metadata)
-        data_item_metadata["hardware_source"] = copy.deepcopy(grab_sync_info.camera_metadata)
-        data_item_metadata["scan"] = copy.deepcopy(grab_sync_info.scan_metadata)
-        data_item.metadata = data_item_metadata
-        data_item.session_metadata = ApplicationData.get_session_metadata_dict()
-        return data_item
-
-    @property
-    def data_item(self) -> DataItem.DataItem:
-        return self.__data_item
-
-    def start(self) -> None:
-        self.__data_item.increment_data_ref_count()
-        self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
-        self.__document_model.begin_data_item_live(self.__data_item)
-
-    def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.ScanHardwareSource.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
-        # axes_descriptor provides the information needed to re-order the axes of the result data approprietly.
-        axes_order = []
-        if axes_descriptor.sequence_axes:
-            axes_order.extend(axes_descriptor.sequence_axes)
-        if axes_descriptor.collection_axes:
-            axes_order.extend(axes_descriptor.collection_axes)
-        if axes_descriptor.data_axes:
-            axes_order.extend(axes_descriptor.data_axes)
-
-        data_shape = tuple(scan_shape) + camera_readout_size
-
-        assert len(axes_order) == len(data_shape)
-
-        data_shape = numpy.array(data_shape)[axes_order].tolist()
-        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
-        is_sequence = axes_descriptor.sequence_axes is not None
-        if collection_dimension_count == 1:
-            collection_axis = 1 if is_sequence else 0
-            if data_shape[collection_axis] == 1:
-                data_shape.pop(collection_axis)
-
-        return axes_order, tuple(data_shape)
-
-    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
-        # This method is always called with a collection of 1d or 2d data. Re-order axes as required and remove length-1-axes.
-
-        axes_descriptor = self.__grab_sync_info.axes_descriptor
-
-        # Calibrations, data descriptor and shape estimates are updated accordingly.
-        dimensional_calibrations = data_and_metadata.dimensional_calibrations
-        data = data_and_metadata.data
-        axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
-        assert len(axes_order) == data.ndim
-        data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
-        dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
-        is_sequence = axes_descriptor.sequence_axes is not None
-        collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
-        datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
-
-        src_slice = tuple()
-        dst_slice = tuple()
-        for index in axes_order:
-            if index >= len(sub_area.slice):
-                src_slice += (slice(None),)
-            else:
-                src_slice += (sub_area.slice[index],)
-            if index >= len(dest_sub_area.slice):
-                dst_slice += (slice(None),)
-            else:
-                dst_slice += (dest_sub_area.slice[index],)
-
-        # This is to make virtual detector data look sensible: If only one virtual detector is defined the data should
-        # not have a length-1 collection axis
-        if collection_dimension_count == 1:
-            collection_axis = 1 if is_sequence else 0
-            if data.shape[collection_axis] == 1:
-                data = numpy.squeeze(data, axis=collection_axis)
-                dimensional_calibrations = dimensional_calibrations[1:]
-                src_slice = list(src_slice)
-                src_slice.pop(collection_axis)
-                src_slice = tuple(src_slice)
-                dst_slice = list(dst_slice)
-                dst_slice.pop(collection_axis)
-                dst_slice = tuple(dst_slice)
-                collection_dimension_count = 0
-        data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
-
-        data_and_metadata = DataAndMetadata.new_data_and_metadata(data, data_and_metadata.intensity_calibration,
-                                                                  dimensional_calibrations,
-                                                                  data_and_metadata.metadata, None,
-                                                                  data_descriptor, None,
-                                                                  None)
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, data_and_metadata.data_dtype),
-                                                     data_and_metadata.intensity_calibration,
-                                                     data_and_metadata.dimensional_calibrations,
-                                                     metadata=data_and_metadata.metadata,
-                                                     data_descriptor=data_descriptor)
-
-        self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
-
-    def stop(self) -> None:
-        if self.__data_item_transaction:
-            self.__data_item_transaction.close()
-            self.__data_item_transaction = None
-            self.__document_model.end_data_item_live(self.__data_item)
-            self.__data_item.decrement_data_ref_count()
-
-
 class DataItemDataChannel(Acquisition.DataChannel):
 
     def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str], grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
@@ -209,7 +72,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
     def prepare(self, data_stream: Acquisition.DataStream) -> None:
         for channel in data_stream.channels:
             data_stream_info = data_stream.get_info(channel)
-            title = f"{title_base} ({self.__channel_names.get(channel, str())})"
+            title = f"{title_base} ({self.__channel_names.get(channel, str(channel))})"
             data_item = self.__create_data_item(data_stream_info.data_metadata, title, self.__grab_sync_info)
             self.__data_item_map[channel] = data_item
             data_item.increment_data_ref_count()
@@ -229,6 +92,9 @@ class DataItemDataChannel(Acquisition.DataChannel):
 
     def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data_item_map[channel].data_and_metadata
+
+    def get_data_item(self, channel: Acquisition.Channel) -> DataItem:
+        return self.__data_item_map[channel]
 
     def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_item = self.__data_item_map.get(channel, None)
@@ -369,7 +235,6 @@ class ScanAcquisitionController:
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.acquisition_state_changed_event = Event.Event()
-        self.__task = None
 
     def start(self, processing: ScanAcquisitionProcessing) -> None:
 
@@ -418,17 +283,16 @@ class ScanAcquisitionController:
                                                             scan_behavior=drift_correction_behavior,
                                                             section_height=section_height)
 
-        async def grab_async():
-            self.acquisition_state_changed_event.fire(SequenceState.scanning)
-            try:
-                self.__scan_acquisition.prepare_scan()
-                await self.__scan_acquisition.scan_async()
-            finally:
-                self.acquisition_state_changed_event.fire(SequenceState.idle)
-                self.__scan_acquisition.close()
-                self.__scan_acquisition = None
 
-        self.__task = document_window._document_window.event_loop.create_task(grab_async())
+        def finish_grab_async():
+            self.acquisition_state_changed_event.fire(SequenceState.idle)
+            self.__scan_acquisition.close()
+            self.__scan_acquisition = None
+
+        self.acquisition_state_changed_event.fire(SequenceState.scanning)
+
+        self.__scan_acquisition.scan_async(event_loop=document_window._document_window.event_loop,
+                                           on_completion=finish_grab_async)
 
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
@@ -436,9 +300,7 @@ class ScanAcquisitionController:
 
     # for running tests
     def _wait(self, timeout: float = 60.0) -> None:
-        start = time.time()
-        while self.__task and not self.__task.done() and time.time() - start < timeout:
-            self.__document_controller._document_window.periodic()
+        self.__scan_acquisition.wait_scan(timeout, on_periodic=self.__document_controller._document_window.periodic)
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
