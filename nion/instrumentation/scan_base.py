@@ -6,6 +6,7 @@ import asyncio
 import collections
 import contextlib
 import copy
+import functools
 import gettext
 import logging
 import math
@@ -780,10 +781,37 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__section_rect = Geometry.IntRect.from_tlbr(0, 0, 0, 0)
             self.__record_task = typing.cast(RecordTask, None)
 
+            self.__lock = threading.RLock()
+            self.__buffers: typing.Dict[Acquisition.Channel, DataAndMetadata] = dict()
+            self.__sent_rows: typing.Dict[Acquisition.Channel, int] = dict()
+            self.__available_rows: typing.Dict[Acquisition.Channel, int] = dict()
+
+            def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+                with self.__lock:
+                    channel = data_channel.index
+                    if scan_hardware_source.channel_count <= data_channel.index < scan_hardware_source.channel_count * 2:
+                        channel -= scan_hardware_source.channel_count
+                    valid_rows = data_and_metadata.metadata.get('hardware_source', dict()).get('valid_rows', 0)
+                    available_rows = self.__available_rows.get(channel, 0)
+                    if valid_rows > available_rows:
+                        if channel not in self.__buffers:
+                            self.__buffers[channel] = copy.deepcopy(data_and_metadata)
+                        buffer = self.__buffers[channel]
+                        assert buffer is not None
+                        buffer.data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
+                        self.__available_rows[channel] = valid_rows
+
+            self.__data_channel_listeners = list()
+            for data_channel in scan_hardware_source.data_channels:
+                self.__data_channel_listeners.append(data_channel.data_channel_updated_event.listen(functools.partial(update_data, data_channel)))
+
         def about_to_delete(self) -> None:
             if self.__record_task:
                 self.__record_task.close()
                 self.__record_task = typing.cast(RecordTask, None)
+            for data_channel_listener in self.__data_channel_listeners:
+                data_channel_listener.close()
+            self.__data_channel_listeners.clear()
 
         @property
         def scan_size(self) -> Geometry.IntSize:
@@ -809,6 +837,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size,
                                                           self.__fractional_area, self.__channel_modifier)
             self.__section_rect = section_rect
+            with self.__lock:
+                self.__buffers.clear()
+                self.__sent_rows.clear()
+                self.__available_rows.clear()
             self.__record_task = RecordTask(self.__scan_hardware_source, section_frame_parameters)
 
         def _finish_stream(self) -> None:
@@ -820,28 +852,37 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__scan_hardware_source.abort_recording()
 
         def _send_next(self) -> None:
-            if self.__record_task.is_finished:
-                scan_data_list = self.__record_task.grab()
-                for channel, scan_data in enumerate(scan_data_list):
-                    count = self.__section_rect.width * self.__section_rect.height
-                    data_metadata = DataAndMetadata.DataMetadata(((), scan_data.data_dtype),
-                                                                 scan_data.intensity_calibration,
-                                                                 (),
-                                                                 scan_data.metadata,
-                                                                 scan_data.timestamp,
-                                                                 DataAndMetadata.DataDescriptor(False, 0, 0),
-                                                                 scan_data.timezone,
-                                                                 scan_data.timezone_offset)
-                    source_slice = (slice(0, count),)
-                    data_stream_event = Acquisition.DataStreamEventArgs(self,
-                                                                        channel,
-                                                                        data_metadata,
-                                                                        scan_data.data.reshape(-1),
-                                                                        count,
-                                                                        source_slice,
-                                                                        Acquisition.DataStreamStateEnum.COMPLETE)
-                    self.data_available_event.fire(data_stream_event)
-                    self._sequence_next(channel, count)
+            with self.__lock:
+                for channel in self.__buffers.keys():
+                    sent_rows = self.__sent_rows.get(channel, 0)
+                    available_rows = self.__available_rows.get(channel, 0)
+                    if sent_rows < available_rows:
+                        scan_data = self.__buffers[channel]
+                        is_complete = available_rows == self.__section_rect.height
+                        # only complete when the record task is finished. this prevents a race condition when restarting.
+                        if not is_complete or (is_complete and self.__record_task.is_finished):
+                            start = self.__section_rect.width * sent_rows
+                            stop = self.__section_rect.width * available_rows
+                            data_metadata = DataAndMetadata.DataMetadata(((), scan_data.data_dtype),
+                                                                         scan_data.intensity_calibration,
+                                                                         (),
+                                                                         scan_data.metadata,
+                                                                         scan_data.timestamp,
+                                                                         DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                                         scan_data.timezone,
+                                                                         scan_data.timezone_offset)
+                            source_slice = (slice(start, stop),)
+                            data_stream_state = Acquisition.DataStreamStateEnum.COMPLETE if is_complete else Acquisition.DataStreamStateEnum.PARTIAL
+                            data_stream_event = Acquisition.DataStreamEventArgs(self,
+                                                                                channel,
+                                                                                data_metadata,
+                                                                                scan_data.data.reshape(-1),
+                                                                                stop - start,
+                                                                                source_slice,
+                                                                                data_stream_state)
+                            self.data_available_event.fire(data_stream_event)
+                            self._sequence_next(channel, stop - start)
+                            self.__sent_rows[channel] = available_rows
 
     class CameraFrameDataStream(Acquisition.DataStream):
         def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource,
