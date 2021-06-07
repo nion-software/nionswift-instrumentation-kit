@@ -1809,7 +1809,7 @@ class ScanAcquisition:
         self.data_channel = data_channel.add_ref() if data_channel else None
         self.n = n
         self.old_move_axis = old_move_axis
-        self.__maker = typing.cast(Acquisition.DataStream, None)
+        self.__maker = typing.cast(ScanHardwareSource.SynchronizedDataStream, None)
         self.__scan_acquisition = typing.cast(ScanAcquisition, None)
         self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
         self.__task = typing.cast(asyncio.Task, None)
@@ -1857,7 +1857,7 @@ class ScanAcquisition:
             start = section * section_height
             stop = min(start + section_height, scan_size.height)
             slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-        collector = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+        collector: Acquisition.DataStream = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
         if not self.old_move_axis and camera_frame_parameters.get("processing", None) == "sum_masked":
             active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
             if active_masks and len(active_masks) > 1:
@@ -1876,7 +1876,7 @@ class ScanAcquisition:
                 if not self.__maker.is_aborted:
                     self.__results = ([self.__maker.get_data(0)], [self.__maker.get_data(999)])
         finally:
-            self.__maker = typing.cast(Acquisition.DataStream, None)
+            self.__maker = typing.cast(ScanHardwareSource.SynchronizedDataStream, None)
 
     def scan_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
         async def grab_async():
