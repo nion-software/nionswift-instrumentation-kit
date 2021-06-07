@@ -194,6 +194,55 @@ def ravel_slice_stop(slices: SliceType, shape: ShapeType) -> int:
     return better_ravel_index(i, shape) - better_ravel_index((1,) * len(slices[:-1]) + (0,), shape)
 
 
+def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typing.Tuple[typing.Tuple[slice]]:
+    start, stop = range_slice.start, range_slice.stop
+    slices: typing.List[typing.Tuple[slice]] = list()
+    # increase the start until the lower dimensions are filled
+    ss: typing.List[slice]
+    for i in reversed(range(0, len(shape))):
+        # print(f"{start=} {stop=}")
+        d = shape[i]
+        dd = numpy.product(shape[i:], dtype=numpy.int64)
+        ddl = numpy.product(shape[i+1:], dtype=numpy.int64)
+        cc = numpy.unravel_index(start, (shape[0] + 1,) + tuple(shape[1:]))
+        c = cc[i]
+        if c % dd != 0:
+            # print(f"{d=} {dd=} {ddl=}")
+            x = min(d - c, (stop - start) // ddl)
+            # print(f"{x=}")
+            ss = list()
+            for xi in range(0, len(shape)):
+                if xi < i:
+                    ss.append(slice(cc[xi],cc[xi]+1))
+                elif xi == i:
+                    ss.append(slice(cc[xi], cc[xi] + x))
+                else:
+                    ss.append(slice(None))
+            # print(tuple(ss))
+            slices.append(tuple(ss))
+            start += x * ddl
+    # fill the lower dimensions until everything up to stop is filled
+    for i in range(0, len(shape)):
+        # print(f"{start=} {stop=}")
+        ddl = numpy.product(shape[i + 1:], dtype=numpy.int64)
+        cc = numpy.unravel_index(start, (shape[0] + 1,) + tuple(shape[1:]))
+        # print(f"{ddl=} {cc=}")
+        x = (stop - start) // ddl
+        if x > 0:
+            ss = list()
+            for xi in range(0, len(shape)):
+                if xi < i:
+                    ss.append(slice(cc[xi],cc[xi]+1))
+                elif xi == i:
+                    ss.append(slice(cc[xi], cc[xi] + x))
+                else:
+                    ss.append(slice(None))
+            # print(tuple(ss))
+            slices.append(tuple(ss))
+            start += x * numpy.product(shape[i + 1:], dtype=numpy.int64)
+    return tuple(slices)
+
+
 class DataStreamEventArgs:
     """Data stream event arguments.
 

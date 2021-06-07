@@ -223,6 +223,27 @@ class TestAcquisitionClass(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def test_unravel_flat_slice(self):
+        test_cases = [
+            ((4, 3, 5), (2, 42)),
+            ((4, 3, 5), (7, 42)),
+            ((4, 3, 5), (5, 42)),
+            ((4, 3, 5), (2, 4)),
+            ((4, 3, 5), (2, 7)),
+            ((4, 3, 5), (2, 17)),
+            ((1, 3, 5), (2, 13)),
+            ((4, 1, 5), (2, 17)),
+            ((4, 3, 5), (0, 60)),
+        ]
+        for shape, range_slice in test_cases:
+            start, stop = range_slice
+            count = stop - start
+            d = numpy.zeros(shape, dtype=int)
+            for s in Acquisition.unravel_flat_slice(slice(start, stop), shape):
+                d[s] = 1
+            self.assertEqual(count, numpy.sum(d))
+            self.assertEqual(count, numpy.sum(d.reshape(-1)[start:stop]))
+
     def test_camera_sequence_acquisition(self):
         sequence_len = 4
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), 0)

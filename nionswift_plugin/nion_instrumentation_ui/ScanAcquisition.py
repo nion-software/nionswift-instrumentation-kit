@@ -100,7 +100,10 @@ class DataItemDataChannel(Acquisition.DataChannel):
         data_item = self.__data_item_map.get(channel, None)
         if data_item:
             source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data)
-            self.__document_model.update_data_item_partial(data_item, data_metadata, source_data_and_metadata, source_slice, [dest_slice], flattened_slices=True)
+            dest_slice_lists = Acquisition.unravel_flat_slice(dest_slice, data_metadata.data_shape)
+            assert len(dest_slice_lists) == 1  # otherwise we need to break up the source slices too. skipping until needed.
+            for dest_slices in dest_slice_lists:
+                self.__document_model.update_data_item_partial(data_item, data_metadata, source_data_and_metadata, source_slice, dest_slices)
 
     def __create_data_item(self, data_metadata: DataAndMetadata.DataMetadata, title: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
         data_shape = data_metadata.data_shape
