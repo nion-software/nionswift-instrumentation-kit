@@ -557,7 +557,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
-        self.__maker = typing.cast(Acquisition.DataStream, None)
         self.acquisition_state_changed_event = Event.Event()
 
     def close(self):
@@ -769,12 +768,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def grab_synchronized_abort(self) -> None:
         if self.__scan_acquisition:
             self.__scan_acquisition.abort_scan()
-        if self.__maker:
-            self.__maker.abort_stream()
 
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
-        if self.__maker:
-            return self.__maker.progress
         return None
 
     def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
