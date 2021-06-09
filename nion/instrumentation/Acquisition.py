@@ -413,7 +413,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     @property
     def progress(self) -> float:
-        return self._progress
+        return self._progress if not self.is_finished else 1.0
 
     @property
     def _progress(self) -> float:
@@ -1111,6 +1111,27 @@ class FramedDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
+    def acquire(self) -> None:
+        """Perform an acquire.
+
+        Performs consistency checks on progress and data.
+        """
+        self.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
+        self.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
+        try:
+            last_progress = 0.0
+            while not self.is_finished and not self.is_aborted:
+                self.send_next()
+                self.advance_stream()
+                next_progress = self.progress
+                assert next_progress >= last_progress
+                last_progress = next_progress
+            if self.is_finished:
+                assert self.progress == 1.0
+                assert all(self.get_info(c).data_metadata.data_shape == self.get_data(c).data_shape for c in self.channels)
+        finally:
+            self.finish_stream()
+
     @property
     def _progress(self) -> float:
         return self.__data_stream.progress
@@ -1402,43 +1423,6 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             return [ChannelData(channel_data.channel, moved_xdata)]
         else:
             return [channel_data]
-
-
-class DataStreamToDataAndMetadata(FramedDataStream):
-    def __init__(self, data_stream: DataStream, *, data_channel: typing.Optional[DataChannel] = None):
-        super().__init__(data_stream, data_channel=data_channel)
-
-    def active_context(self) -> typing.ContextManager:
-        class ContextManager:
-            def __init__(self, item: DataStreamToDataAndMetadata):
-                self.__item = item
-
-            def __enter__(self):
-                self.__item.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
-                self.__item.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
-                return self
-
-            def __exit__(self, type, value, traceback):
-                self.__item.finish_stream()
-
-        return ContextManager(self)
-
-    @property
-    def _progress(self) -> float:
-        return super()._progress if not self.is_finished else 1.0
-
-    def acquire(self) -> None:
-        with self.active_context():
-            last_progress = 0.0
-            while not self.is_finished and not self.is_aborted:
-                self.send_next()
-                self.advance_stream()
-                next_progress = self.progress
-                assert next_progress >= last_progress
-                last_progress = next_progress
-            if self.is_finished:
-                assert self.progress == 1.0
-                assert all(self.get_info(c).data_metadata.data_shape == self.get_data(c).data_shape for c in self.channels)
 
 
 """

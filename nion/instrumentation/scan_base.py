@@ -1777,7 +1777,7 @@ class ChannelDataStream(Acquisition.DataStream):
         self.data_available_event.fire(data_stream_event)
 
 
-class SynchronizedDataStream(Acquisition.DataStreamToDataAndMetadata):
+class SynchronizedDataStream(Acquisition.FramedDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
                  camera_hardware_source: camera_base.CameraHardwareSource,
                  data_channel: typing.Optional[Acquisition.DataChannel]):
@@ -1814,8 +1814,7 @@ class ScanAcquisition:
         self.data_channel = data_channel.add_ref() if data_channel else None
         self.n = n
         self.old_move_axis = old_move_axis
-        self.__maker = typing.cast(Acquisition.DataStreamToDataAndMetadata, None)
-        self.__scan_acquisition = typing.cast(ScanAcquisition, None)
+        self.__maker = typing.cast(Acquisition.FramedDataStream, None)
         self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
         self.__task = typing.cast(asyncio.Task, None)
 
@@ -1886,7 +1885,7 @@ class ScanAcquisition:
                 if not self.__maker.is_aborted:
                     self.__results = ([self.__maker.get_data(0)], [self.__maker.get_data(999)])
         finally:
-            self.__maker = typing.cast(SynchronizedDataStream, None)
+            self.__maker = typing.cast(Acquisition.FramedDataStream, None)
 
     def scan_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
         async def grab_async():

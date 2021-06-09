@@ -248,7 +248,7 @@ class TestAcquisitionClass(unittest.TestCase):
         sequence_len = 4
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), 0)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(0).data))
@@ -259,7 +259,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(numpy.product(collection_shape), (2, 2), 0)
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_shape = collection_shape + maker.get_data(0).data.shape[-len(collection_shape):]
@@ -273,7 +273,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 data_stream = MultiFrameDataStream(numpy.product(collection_shape), (2, 2), 0, count)
                 collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                             [Calibration.Calibration(), Calibration.Calibration()])
-                maker = Acquisition.DataStreamToDataAndMetadata(collector)
+                maker = Acquisition.FramedDataStream(collector)
                 with maker.ref():
                     maker.acquire()
                     expected_shape = collection_shape + maker.get_data(0).data.shape[-len(collection_shape):]
@@ -283,7 +283,7 @@ class TestAcquisitionClass(unittest.TestCase):
         sequence_len = 4
         data_stream = SingleFrameDataStream(sequence_len, (4, 4), 0, 2)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(0).data))
@@ -295,7 +295,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(numpy.product(collection_shape), (4, 4), 0, 2)
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_shape = collection_shape + maker.get_data(0).data.shape[-len(collection_shape):]
@@ -307,7 +307,7 @@ class TestAcquisitionClass(unittest.TestCase):
         scan_shape = (8, 8)
         data_stream = ScanDataStream(1, scan_shape, [0], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_shape = scan_shape
@@ -322,7 +322,7 @@ class TestAcquisitionClass(unittest.TestCase):
             with self.subTest(partial_length=partial_length):
                 data_stream = ScanDataStream(1, scan_shape, [0], 9)
                 collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-                maker = Acquisition.DataStreamToDataAndMetadata(collector)
+                maker = Acquisition.FramedDataStream(collector)
                 with maker.ref():
                     maker.acquire()
                     expected_shape = scan_shape
@@ -338,7 +338,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(sequence_len, scan_shape, [0], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             expected_shape = (sequence_len,) + scan_shape
@@ -351,7 +351,7 @@ class TestAcquisitionClass(unittest.TestCase):
         scan_shape = (8, 8)
         data_stream = ScanDataStream(1, scan_shape, [0, 1], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_shape = scan_shape
@@ -370,7 +370,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_scan_shape = scan_shape
@@ -394,7 +394,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
                 combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
                 collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-                maker = Acquisition.DataStreamToDataAndMetadata(collector)
+                maker = Acquisition.FramedDataStream(collector)
                 with maker.ref():
                     maker.acquire()
                     expected_scan_shape = scan_shape
@@ -414,7 +414,7 @@ class TestAcquisitionClass(unittest.TestCase):
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_camera_shape = scan_shape
@@ -432,7 +432,7 @@ class TestAcquisitionClass(unittest.TestCase):
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.MaskedSumOperator(mask))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_camera_shape = scan_shape
@@ -450,7 +450,7 @@ class TestAcquisitionClass(unittest.TestCase):
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (2, 2), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({11: Acquisition.SumOperator(), 22: Acquisition.SumOperator()}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_camera_shape = scan_shape
@@ -469,7 +469,7 @@ class TestAcquisitionClass(unittest.TestCase):
         camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({11: Acquisition.MaskedSumOperator(mask1), 22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_camera_shape = scan_shape
@@ -493,7 +493,7 @@ class TestAcquisitionClass(unittest.TestCase):
         stacked_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(mask1), Acquisition.MaskedSumOperator(mask2)]))
         collector = Acquisition.CollectedDataStream(stacked_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         move_axis_data_stream = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator())
-        maker = Acquisition.DataStreamToDataAndMetadata(move_axis_data_stream)
+        maker = Acquisition.FramedDataStream(move_axis_data_stream)
         with maker.ref():
             maker.acquire()
             expected_camera_shape = scan_shape
@@ -516,7 +516,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        maker = Acquisition.DataStreamToDataAndMetadata(collector)
+        maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             maker.acquire()
             expected_scan_shape = scan_shape
@@ -539,7 +539,7 @@ class TestAcquisitionClass(unittest.TestCase):
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             expected_scan_shape = (sequence_len,) + scan_shape
@@ -564,7 +564,7 @@ class TestAcquisitionClass(unittest.TestCase):
         scan_slices = [[slice(0, 4), slice(0, 8)], [slice(4, 8), slice(0, 8)]]
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()], scan_slices)
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             expected_scan_shape = (sequence_len,) + scan_shape
@@ -589,7 +589,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         slices = tuple((slice(i, i + 1),) for i in range(sequence_len))
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len, sub_slices=slices)
-        maker = Acquisition.DataStreamToDataAndMetadata(sequencer)
+        maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             maker.acquire()
             expected_scan_shape = (sequence_len,) + scan_shape
