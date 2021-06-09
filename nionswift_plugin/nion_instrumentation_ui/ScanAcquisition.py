@@ -60,12 +60,11 @@ class ScanSpecifier:
 
 class DataItemDataChannel(Acquisition.DataChannel):
 
-    def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str], grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
+    def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str]):
         super().__init__()
         self.__document_controller = document_controller
         self.__document_model = document_controller.library._document_model
         self.__channel_names = dict(channel_names)
-        self.__grab_sync_info = grab_sync_info
         self.__data_item_map: typing.Dict[Acquisition.Channel, DataItem.DataItem] = dict()
         self.__data_item_transaction_map: typing.Dict[Acquisition.Channel, DocumentModel.Transaction] = dict()
 
@@ -73,7 +72,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         for channel in data_stream.channels:
             data_stream_info = data_stream.get_info(channel)
             title = f"{title_base} ({self.__channel_names.get(channel, str(channel))})"
-            data_item = self.__create_data_item(data_stream_info.data_metadata, title, self.__grab_sync_info)
+            data_item = self.__create_data_item(data_stream_info.data_metadata, title)
             self.__data_item_map[channel] = data_item
             data_item.increment_data_ref_count()
             self.__data_item_transaction_map[channel] = self.__document_model.item_transaction(data_item)
@@ -105,24 +104,14 @@ class DataItemDataChannel(Acquisition.DataChannel):
             for dest_slices in dest_slice_lists:
                 self.__document_model.update_data_item_partial(data_item, data_metadata, source_data_and_metadata, source_slice, dest_slices)
 
-    def __create_data_item(self, data_metadata: DataAndMetadata.DataMetadata, title: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
+    def __create_data_item(self, data_metadata: DataAndMetadata.DataMetadata, title: str) -> DataItem.DataItem:
         data_shape = data_metadata.data_shape
         data_descriptor = data_metadata.data_descriptor
-        scan_calibrations = grab_sync_info.scan_calibrations
-        data_calibrations = grab_sync_info.data_calibrations
-        data_intensity_calibration = grab_sync_info.data_intensity_calibration
         large_format = bool(numpy.prod(data_shape, dtype=numpy.int64) > 2048**2 * 10)
         data_item = DataItem.DataItem(large_format=large_format)
         data_item.title = title
         self.__document_model.append_data_item(data_item)
         data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
-        data_item.dimensional_calibrations = scan_calibrations + data_calibrations
-        data_item.intensity_calibration = data_intensity_calibration
-        data_item_metadata = data_item.metadata
-        data_item_metadata["instrument"] = copy.deepcopy(grab_sync_info.instrument_metadata)
-        data_item_metadata["hardware_source"] = copy.deepcopy(grab_sync_info.camera_metadata)
-        data_item_metadata["scan"] = copy.deepcopy(grab_sync_info.scan_metadata)
-        data_item.metadata = data_item_metadata
         data_item.session_metadata = ApplicationData.get_session_metadata_dict()
         return data_item
 
@@ -263,15 +252,10 @@ class ScanAcquisitionController:
 
         camera_frame_parameters["processing"] = processing.value.processing_id
 
-        grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
-            scan_frame_parameters=scan_frame_parameters,
-            camera=camera_hardware_source,
-            camera_frame_parameters=camera_frame_parameters)
-
         channel_names = {c: scan_hardware_source.get_channel_state(c).name for c in scan_hardware_source.get_enabled_channels()}
         channel_names[999] = camera_hardware_source.display_name
 
-        data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names, grab_sync_info)
+        data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names)
 
         drift_correction_behavior : typing.Optional[DriftCorrectionBehavior] = None
         section_height = None

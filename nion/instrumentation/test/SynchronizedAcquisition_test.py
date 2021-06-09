@@ -1,4 +1,3 @@
-import collections
 import copy
 import math
 import numpy
@@ -258,12 +257,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
-                scan_frame_parameters=scan_frame_parameters,
-                camera=camera_hardware_source,
-                camera_frame_parameters=camera_frame_parameters)
             data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
-                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+                                                                         {0: "HAADF", 999: "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -281,12 +276,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_masked"
-            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
-                scan_frame_parameters=scan_frame_parameters,
-                camera=camera_hardware_source,
-                camera_frame_parameters=camera_frame_parameters)
             data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
-                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+                                                                         {0: "HAADF", 999: "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -305,12 +296,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters["processing"] = "sum_masked"
             masks = [camera_base.Mask(), camera_base.Mask(), camera_base.Mask()]
             camera_frame_parameters.active_masks = masks
-            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
-                scan_frame_parameters=scan_frame_parameters,
-                camera=camera_hardware_source,
-                camera_frame_parameters=camera_frame_parameters)
             data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(document_controller),
-                                                                         {0: "HAADF", 999: "test"}, grab_sync_info)
+                                                                         {0: "HAADF", 999: "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -454,8 +441,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
     def test_partial_acquisition_has_proper_metadata(self):
 
         class TestDataChannel(ScanAcquisition.DataItemDataChannel):
-            def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str], grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo):
-                super().__init__(document_controller, channel_names, grab_sync_info)
+            def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str]):
+                super().__init__(document_controller, channel_names)
                 self.__document_model = document_controller.library._document_model
                 self.updates: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
@@ -475,11 +462,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (6, 6)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
-                scan_frame_parameters=scan_frame_parameters,
-                camera=camera_hardware_source,
-                camera_frame_parameters=camera_frame_parameters)
-            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller), {0: "HAADF", 999: "test"}, grab_sync_info)
+            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller), {0: "HAADF", 999: "test"})
             section_height = 5
             scan_hardware_source.grab_synchronized(data_channel=data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,

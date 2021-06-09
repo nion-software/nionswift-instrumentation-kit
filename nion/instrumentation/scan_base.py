@@ -118,6 +118,18 @@ class ScanFrameParameters(dict):
                ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "") +\
                ("\nchannel override: " + str(self.channel_override) if self.channel_override is not None else "")
 
+    def get_scan_calibrations(self) -> typing.Tuple[Calibration.Calibration, ...]:
+        scan_shape = Geometry.IntSize.make(self["size"])
+        center_x_nm = float(self.get("center_x_nm", 0.0))
+        center_y_nm = float(self.get("center_y_nm", 0.0))
+        fov_nm = float(self["fov_nm"])
+        pixel_size_nm = fov_nm / max(scan_shape)
+        scan_calibrations = (
+            Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
+            Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
+        )
+        return scan_calibrations
+
 
 def update_scan_properties(properties: typing.MutableMapping, scan_frame_parameters: ScanFrameParameters, scan_id_str: typing.Optional[str]) -> None:
     if scan_id_str:
@@ -710,16 +722,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             camera_readout_size_squeezed = tuple(camera_readout_size)
             axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2, 3])
 
-        scan_shape = Geometry.IntSize.make(scan_frame_parameters["size"])
-        center_x_nm = float(scan_frame_parameters.get("center_x_nm", 0.0))
-        center_y_nm = float(scan_frame_parameters.get("center_y_nm", 0.0))
-        fov_nm = float(scan_frame_parameters["fov_nm"])
-        pixel_size_nm = fov_nm / max(scan_shape)
-
-        scan_calibrations = (
-            Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
-            Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
-        )
+        scan_calibrations = ScanFrameParameters(scan_frame_parameters).get_scan_calibrations()
 
         data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
         data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
@@ -727,9 +730,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         camera_metadata: typing.Dict[str, typing.Any] = dict()
         camera.update_camera_properties(camera_metadata, camera_frame_parameters)
 
-        scan_metadata = dict()
-        scan_metadata["hardware_source_name"] = self.display_name
-        scan_metadata["hardware_source_id"] = self.hardware_source_id
+        scan_metadata: typing.Dict[str, typing.Any] = dict()
         update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, ScanFrameParameters(scan_frame_parameters), uuid.UUID(scan_frame_parameters["scan_id"]), dict())
 
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
@@ -1813,7 +1814,7 @@ class ScanAcquisition:
         self.data_channel = data_channel.add_ref() if data_channel else None
         self.n = n
         self.old_move_axis = old_move_axis
-        self.__maker = typing.cast(SynchronizedDataStream, None)
+        self.__maker = typing.cast(Acquisition.DataStreamToDataAndMetadata, None)
         self.__scan_acquisition = typing.cast(ScanAcquisition, None)
         self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
         self.__task = typing.cast(asyncio.Task, None)
@@ -1834,13 +1835,18 @@ class ScanAcquisition:
         data_channel = self.data_channel
 
         scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
-        scan_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                    camera=camera_hardware_source,
-                                                    camera_frame_parameters=camera_frame_parameters)
+        scan_uuid = uuid.UUID(scan_frame_parameters["scan_id"])
+
+        scan_metadata: typing.Dict[str, typing.Any] = dict()
+        update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id, scan_hardware_source.display_name, scan_frame_parameters, scan_uuid, dict())
+
+        instrument_metadata: typing.Dict[str, typing.Any] = dict()
+        update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller, scan_hardware_source.scan_device)
+
         camera_exposure_ms = camera_frame_parameters["exposure_ms"]
         scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, camera_exposure_ms, scan_behavior)
-        additional_camera_metadata = {"scan": copy.deepcopy(scan_info.scan_metadata),
-                                      "instrument": copy.deepcopy(scan_info.instrument_metadata)}
+        additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
+                                      "instrument": copy.deepcopy(instrument_metadata)}
         camera_data_stream: Acquisition.DataStream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters, scan_hardware_source.flyback_pixels, additional_camera_metadata)
         if camera_frame_parameters.get("processing", None) == "sum_project":
             camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
@@ -1861,7 +1867,7 @@ class ScanAcquisition:
             start = section * section_height
             stop = min(start + section_height, scan_size.height)
             slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-        collector: Acquisition.DataStream = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_info.scan_calibrations, slice_list)
+        collector: Acquisition.DataStream = Acquisition.CollectedDataStream(data_stream, tuple(scan_size), scan_frame_parameters.get_scan_calibrations(), slice_list)
         if not self.old_move_axis and camera_frame_parameters.get("processing", None) == "sum_masked":
             active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
             if active_masks and len(active_masks) > 1:
