@@ -226,7 +226,7 @@ class ScanAcquisitionController:
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
-        self.__scan_acquisition = typing.cast(scan_base.ScanAcquisition, None)
+        self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, processing: ScanAcquisitionProcessing) -> None:
@@ -263,28 +263,28 @@ class ScanAcquisitionController:
             drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
 
-        self.__scan_acquisition = scan_base.ScanAcquisition(data_channel=data_item_data_channel,
-                                                            scan_hardware_source=scan_hardware_source,
-                                                            scan_frame_parameters=scan_frame_parameters,
-                                                            camera_hardware_source=camera_hardware_source,
-                                                            camera_frame_parameters=camera_frame_parameters,
-                                                            scan_behavior=drift_correction_behavior,
-                                                            section_height=section_height)
-
+        synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
+            scan_hardware_source=scan_hardware_source,
+            scan_frame_parameters=scan_frame_parameters,
+            camera_hardware_source=camera_hardware_source,
+            camera_frame_parameters=camera_frame_parameters,
+            scan_behavior=drift_correction_behavior,
+            section_height=section_height)
+        self.__scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_item_data_channel)
 
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
-            self.__scan_acquisition = typing.cast(scan_base.ScanAcquisition, None)
+            self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 
-        self.__scan_acquisition.scan_async(event_loop=document_window._document_window.event_loop,
-                                           on_completion=finish_grab_async)
+        self.__scan_acquisition.acquire_async(event_loop=document_window._document_window.event_loop,
+                                              on_completion=finish_grab_async)
 
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")
-        self.__scan_acquisition.abort_scan()
+        self.__scan_acquisition.abort_acquire()
 
     @property
     def progress(self) -> float:
@@ -292,7 +292,7 @@ class ScanAcquisitionController:
 
     # for running tests
     def _wait(self, timeout: float = 60.0) -> None:
-        self.__scan_acquisition.wait_scan(timeout, on_periodic=self.__document_controller._document_window.periodic)
+        self.__scan_acquisition.wait_acquire(timeout, on_periodic=self.__document_controller._document_window.periodic)
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size

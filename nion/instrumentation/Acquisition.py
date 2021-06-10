@@ -103,8 +103,10 @@ Devices:
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import enum
+import time
 import typing
 import warnings
 
@@ -410,6 +412,9 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         The stream is finished if all channels have sent the number of items in their sequence.
         """
         return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
+
+    def _acquire_finished(self) -> None:
+        pass
 
     @property
     def progress(self) -> float:
@@ -1111,26 +1116,8 @@ class FramedDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    def acquire(self) -> None:
-        """Perform an acquire.
-
-        Performs consistency checks on progress and data.
-        """
-        self.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
-        self.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
-        try:
-            last_progress = 0.0
-            while not self.is_finished and not self.is_aborted:
-                self.send_next()
-                self.advance_stream()
-                next_progress = self.progress
-                assert next_progress >= last_progress
-                last_progress = next_progress
-            if self.is_finished:
-                assert self.progress == 1.0
-                assert all(self.get_info(c).data_metadata.data_shape == self.get_data(c).data_shape for c in self.channels)
-        finally:
-            self.finish_stream()
+    def _acquire_finished(self) -> None:
+        assert all(self.get_info(c).data_metadata.data_shape == self.get_data(c).data_shape for c in self.channels)
 
     @property
     def _progress(self) -> float:
@@ -1423,6 +1410,145 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             return [ChannelData(channel_data.channel, moved_xdata)]
         else:
             return [channel_data]
+
+
+class ContainerDataStream(DataStream):
+    def __init__(self, data_stream: DataStream):
+        super().__init__()
+        self.__data_stream = data_stream.add_ref()
+        self.__listener = data_stream.data_available_event.listen(self.__data_available)
+
+    def about_to_delete(self) -> None:
+        self.__listener.close()
+        self.__listener = None
+        self.__data_stream.remove_ref()
+        self.__data_stream = None
+
+    @property
+    def data_stream(self) -> DataStream:
+        return self.__data_stream
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return self.__data_stream.channels
+
+    def get_info(self, channel: Channel) -> DataStreamInfo:
+        return self.__data_stream.get_info(channel)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__data_stream.is_finished
+
+    def _acquire_finished(self) -> None:
+        self.__data_stream._acquire_finished()
+
+    @property
+    def _progress(self) -> float:
+        return self.__data_stream.progress
+
+    def _abort_stream(self) -> None:
+        self.__data_stream.abort_stream()
+
+    def _send_next(self) -> None:
+        self.__data_stream.send_next()
+
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+        self.__data_stream.prepare_stream(stream_args, **kwargs)
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        self.__data_stream.start_stream(stream_args)
+
+    def _advance_stream(self) -> None:
+        self.__data_stream.advance_stream()
+
+    def _finish_stream(self) -> None:
+        self.__data_stream.finish_stream()
+
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        self._fire_data_available(data_stream_event)
+
+    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        self.data_available_event.fire(data_stream_event)
+
+
+def acquire(data_stream: DataStream) -> None:
+    """Perform an acquire.
+
+    Performs consistency checks on progress and data.
+    """
+    data_stream.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
+    data_stream.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
+    try:
+        last_progress = 0.0
+        while not data_stream.is_finished and not data_stream.is_aborted:
+            data_stream.send_next()
+            data_stream.advance_stream()
+            next_progress = data_stream.progress
+            assert next_progress >= last_progress
+            last_progress = next_progress
+        if data_stream.is_finished:
+            assert data_stream.progress == 1.0
+            data_stream._acquire_finished()
+    finally:
+        data_stream.finish_stream()
+
+
+class Acquisition:
+    def __init__(self, data_stream: DataStream, *, data_channel: DataChannel = None):
+        self.data_stream = data_stream
+        self.data_channel = data_channel.add_ref() if data_channel else None
+        self.__maker = typing.cast(FramedDataStream, None)
+        self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
+        self.__task = typing.cast(asyncio.Task, None)
+
+    def close(self) -> None:
+        if self.data_channel:
+            self.data_channel.remove_ref()
+
+    def prepare_acquire(self) -> None:
+        data_channel = self.data_channel
+        self.__maker = FramedDataStream(self.data_stream, data_channel=data_channel)
+        if data_channel:
+            data_channel.prepare(self.__maker)
+
+    def acquire(self) -> None:
+        try:
+            with self.__maker.ref():
+                acquire(self.__maker)
+                if not self.__maker.is_aborted:
+                    self.__results = ([self.__maker.get_data(0)], [self.__maker.get_data(999)])
+        finally:
+            self.__maker = typing.cast(FramedDataStream, None)
+
+    def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
+        async def grab_async():
+            try:
+                self.prepare_acquire()
+                await asyncio.get_running_loop().run_in_executor(None, self.acquire)
+            finally:
+                on_completion()
+                self.__task = typing.cast(asyncio.Task, None)
+
+        self.__task = event_loop.create_task(grab_async())
+
+    def abort_acquire(self) -> None:
+        if self.__maker:
+            self.__maker.abort_stream()
+
+    def wait_acquire(self, timeout: float = 60.0, *, on_periodic: typing.Callable[[], None]) -> None:
+        start = time.time()
+        while self.__task and not self.__task.done() and time.time() - start < timeout:
+            on_periodic()
+
+    @property
+    def progress(self) -> float:
+        if self.__maker:
+            return self.__maker.progress
+        return 0.0
+
+    @property
+    def results(self) -> typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return self.__results
 
 
 """
