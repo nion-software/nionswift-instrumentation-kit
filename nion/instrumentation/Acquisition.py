@@ -212,17 +212,18 @@ def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typin
             # print(f"{d=} {dd=} {ddl=}")
             x = min(d - c, (stop - start) // ddl)
             # print(f"{x=}")
-            ss = list()
-            for xi in range(0, len(shape)):
-                if xi < i:
-                    ss.append(slice(cc[xi],cc[xi]+1))
-                elif xi == i:
-                    ss.append(slice(cc[xi], cc[xi] + x))
-                else:
-                    ss.append(slice(None))
-            # print(tuple(ss))
-            slices.append(tuple(ss))
-            start += x * ddl
+            if x > 0:
+                ss = list()
+                for xi in range(0, len(shape)):
+                    if xi < i:
+                        ss.append(slice(cc[xi],cc[xi]+1))
+                    elif xi == i:
+                        ss.append(slice(cc[xi], cc[xi] + x))
+                    else:
+                        ss.append(slice(None))
+                # print(tuple(ss))
+                slices.append(tuple(ss))
+                start += x * ddl
     # fill the lower dimensions until everything up to stop is filled
     for i in range(0, len(shape)):
         # print(f"{start=} {stop=}")

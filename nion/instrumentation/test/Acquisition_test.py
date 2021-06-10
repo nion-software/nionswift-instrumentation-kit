@@ -234,12 +234,15 @@ class TestAcquisitionClass(unittest.TestCase):
             ((1, 3, 5), (2, 13)),
             ((4, 1, 5), (2, 17)),
             ((4, 3, 5), (0, 60)),
+            ((2, 4, 3, 5), (45, 60)),
         ]
         for shape, range_slice in test_cases:
             start, stop = range_slice
             count = stop - start
             d = numpy.zeros(shape, dtype=int)
             for s in Acquisition.unravel_flat_slice(slice(start, stop), shape):
+                for si in s:
+                    assert (si.start is None and si.stop is None) or (si.start < si.stop)
                 d[s] = 1
             self.assertEqual(count, numpy.sum(d))
             self.assertEqual(count, numpy.sum(d.reshape(-1)[start:stop]))
