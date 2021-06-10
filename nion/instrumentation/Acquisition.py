@@ -313,6 +313,9 @@ class DataStreamEventArgs:
         # the state of data after this event, partial or complete. pass None if not producing partial datums.
         self.state = state
 
+        # frame reset trigger. used to tell frames that data is being resent for the same frame.
+        self.reset_frame = False
+
     def print(self, receiver: DataStream) -> None:
         if self.__print:
             print(f"{receiver} received {self.data_stream} / {self.channel}")
@@ -1061,10 +1064,22 @@ class DataAndMetadataDataChannel(DataChannel):
             self.__data[channel] = data_and_metadata
         return data_and_metadata
 
+    def clear_data(self) -> None:
+        self.__data.clear()
+
     def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)
         # copy data
         data_and_metadata.data.reshape(-1)[dest_slice] = source_data[source_slice].reshape(-1)
+        # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
+        # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
+        # metadata contains in-progress information.
+        data_and_metadata._set_metadata(data_metadata.metadata)
+
+    def accumulate_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        data_and_metadata = self.__make_data(channel, data_metadata)
+        # accumulate data
+        data_and_metadata.data.reshape(-1)[dest_slice] += source_data[source_slice].reshape(-1)
         # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
         # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
         # metadata contains in-progress information.
@@ -1168,7 +1183,10 @@ class FramedDataStream(DataStream):
             source_stop = ravel_slice_stop(source_slice, data_stream_event.source_data.shape)
             source_count = source_stop - source_start
             flat_shape = (numpy.product(data_metadata.data_shape, dtype=numpy.int64),)
-            index = self.__indexes.get(channel, 0)
+            if data_stream_event.reset_frame:
+                index = 0
+            else:
+                index = self.__indexes.get(channel, 0)
             dest_slice = slice(index, index + source_count)
             assert index + source_count <= flat_shape[0]
             self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
@@ -1470,6 +1488,81 @@ class ContainerDataStream(DataStream):
 
     def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         self.data_available_event.fire(data_stream_event)
+
+
+class AccumulatedDataStream(ContainerDataStream):
+    """Change a data stream producing a sequence into an accumulated non-sequence.
+    """
+
+    def __init__(self, data_stream: DataStream):
+        super().__init__(data_stream)
+        self.__data_channel = DataAndMetadataDataChannel().add_ref()
+        self.__dest_indexes: typing.Dict[Channel, int] = dict()
+
+    def about_to_delete(self) -> None:
+        self.__data_channel.remove_ref()
+        self.__data_channel = None
+        super().about_to_delete()
+
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+        self.__data_channel.clear_data()
+        super()._prepare_stream(stream_args, **kwargs)
+
+    def get_info(self, channel: Channel) -> DataStreamInfo:
+        data_stream_info = super().get_info(channel)
+        old_data_metadata = data_stream_info.data_metadata
+        data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
+        assert data_descriptor.is_sequence
+        data_descriptor.is_sequence = False
+        data_metadata = DataAndMetadata.DataMetadata(
+            (tuple(old_data_metadata.data_shape[1:]), old_data_metadata.data_dtype),
+            old_data_metadata.intensity_calibration,
+            old_data_metadata.dimensional_calibrations[1:],
+            old_data_metadata.metadata,
+            old_data_metadata.timestamp,
+            data_descriptor,
+            old_data_metadata.timezone,
+            old_data_metadata.timezone_offset
+        )
+        return DataStreamInfo(data_metadata, data_stream_info.duration)
+
+    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        count = data_stream_event.count
+        assert count is None
+        old_data_metadata = data_stream_event.data_metadata
+        data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
+        assert data_descriptor.is_sequence
+        sequence_slice = data_stream_event.source_slice[0]
+        assert sequence_slice.stop - sequence_slice.start == 1
+        data_descriptor.is_sequence = False
+        data_metadata = DataAndMetadata.DataMetadata(
+            (tuple(old_data_metadata.data_shape[1:]), old_data_metadata.data_dtype),
+            old_data_metadata.intensity_calibration,
+            old_data_metadata.dimensional_calibrations[1:],
+            old_data_metadata.metadata,
+            old_data_metadata.timestamp,
+            data_descriptor,
+            old_data_metadata.timezone,
+            old_data_metadata.timezone_offset
+        )
+        channel = data_stream_event.channel
+        dest_count = numpy.product(data_metadata.data_shape, dtype=numpy.int64)
+        sequence_slice_offset = sequence_slice.start * dest_count
+        source_start = ravel_slice_start(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
+        source_stop = ravel_slice_stop(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
+        dest_slice_offest = self.__dest_indexes.get(channel, 0)
+        dest_slice = slice(dest_slice_offest + source_start, dest_slice_offest + source_stop)
+        self.__dest_indexes[channel] = dest_slice.stop % dest_count
+        new_source_slices = unravel_flat_slice(dest_slice, data_metadata.data_shape)
+        assert len(new_source_slices) == 1
+        new_source_slice = new_source_slices[0]
+        self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_slice.start],
+                                            data_stream_event.source_slice[1:], dest_slice, data_metadata)
+        new_data_stream_event = DataStreamEventArgs(self, channel, data_metadata,
+                                                    self.__data_channel.get_data(channel).data, None, new_source_slice,
+                                                    data_stream_event.state)
+        new_data_stream_event.reset_frame = dest_slice.start == 0
+        super()._fire_data_available(new_data_stream_event)
 
 
 def acquire(data_stream: DataStream) -> None:

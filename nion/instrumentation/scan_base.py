@@ -1823,6 +1823,7 @@ def make_synchronized_scan_data_stream(
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
     if n > 1:
         collector = Acquisition.SequenceDataStream(collector, n)
+        collector = Acquisition.AccumulatedDataStream(collector)
     data_stream = ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
     return data_stream
 
