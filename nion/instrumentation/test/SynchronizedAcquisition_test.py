@@ -218,8 +218,11 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            n = 3
-            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel, n=n)
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+                                                                            camera=camera_hardware_source,
+                                                                            camera_frame_parameters=camera_frame_parameters,
+                                                                            camera_data_channel=camera_data_channel,
+                                                                            scan_count=3)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
             self.assertEqual(1, len(scans))

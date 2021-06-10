@@ -747,7 +747,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                           scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None,
-                          n: int = 1) -> GrabSynchronizedResult:
+                          scan_count: int = 1) -> GrabSynchronizedResult:
         synchronized_scan_data_stream = make_synchronized_scan_data_stream(scan_hardware_source=self,
                                                                            scan_frame_parameters=ScanFrameParameters(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
@@ -755,7 +755,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                                            camera_data_channel=camera_data_channel,
                                                                            scan_behavior=scan_behavior,
                                                                            section_height=section_height,
-                                                                           n=n,
+                                                                           scan_count=scan_count,
                                                                            old_move_axis=camera_data_channel is not None)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_channel)
         self.__scan_acquisition = scan_acquisition
@@ -985,9 +985,18 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 lines = max(1, math.ceil(self.drift_settings.interval / width))
             elif self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.TIME:
                 lines = max(1, math.ceil(self.drift_settings.interval / frame_time / width))
-            else:
+            elif self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.LINE:
                 lines = self.drift_settings.interval
+            else:  # drift per scans
+                lines = 0
             return int(lines)
+        return 0
+
+    def calculate_drift_scans(self) -> int:
+        if self.drift_valid:
+            assert isinstance(self.drift_settings.interval_units, stem_controller_module.DriftIntervalUnit)
+            if self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.SCAN:
+                return max(0, int(self.drift_settings.interval))
         return 0
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
@@ -1770,7 +1779,7 @@ def make_synchronized_scan_data_stream(
         camera_hardware_source: camera_base.CameraHardwareSource,
         camera_frame_parameters: camera_base.CameraFrameParameters,
         camera_data_channel: SynchronizedDataChannelInterface = None, section_height: int = None,
-        scan_behavior: SynchronizedScanBehaviorInterface = None, n: int = 1,
+        scan_behavior: SynchronizedScanBehaviorInterface = None, scan_count: int = 1,
         old_move_axis: bool = False) -> Acquisition.DataStream:
 
     scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
@@ -1821,8 +1830,8 @@ def make_synchronized_scan_data_stream(
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 camera_data_stream.channels[0]))
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
-    if n > 1:
-        collector = Acquisition.SequenceDataStream(collector, n)
+    if scan_count > 1:
+        collector = Acquisition.SequenceDataStream(collector, scan_count)
         collector = Acquisition.AccumulatedDataStream(collector)
     data_stream = ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
     return data_stream

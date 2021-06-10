@@ -54,8 +54,10 @@ class ScanSpecifier:
 
     def __init__(self):
         self.scan_context: typing.Optional[stem_controller.ScanContext] = None
+        self.scan_count = 1
         self.size: typing.Optional[typing.Tuple[int, int]] = None
         self.drift_interval_lines = 0
+        self.drift_interval_scans = 0
 
 
 class DataItemDataChannel(Acquisition.DataChannel):
@@ -117,11 +119,13 @@ class DataItemDataChannel(Acquisition.DataChannel):
 
 
 class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
-    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, interval: int = 0):
         # init with the frame parameters from the synchronized grab
         self.__document_model = document_model
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        self.__interval = interval
+        self.__index = 0
         # here we convert those frame parameters to the context
         self.__scan_frame_parameters.subscan_pixel_size = None
         self.__scan_frame_parameters.subscan_fractional_size = None
@@ -153,11 +157,17 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__last_xdata = None
         self.__center_nm = Geometry.FloatSize()
         self.__last_offset_nm = Geometry.FloatSize()
+        self.__index = 0
 
     def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
         # this method must be thread safe
         # start with the context frame parameters and adjust for the drift region
         adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
+        index = self.__index
+        self.__index += 1
+        if self.__interval and (index % self.__interval) != 0:
+            # exit if not on an interval
+            return adjustments
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
         context_size = Geometry.FloatSize.make(frame_parameters.size)
         drift_channel_id = self.__scan_hardware_source.drift_channel_id
@@ -262,6 +272,8 @@ class ScanAcquisitionController:
         if self.__scan_specifier.drift_interval_lines > 0:
             drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
+        elif self.__scan_specifier.drift_interval_scans > 0:
+            drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters, self.__scan_specifier.drift_interval_scans)
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
             scan_hardware_source=scan_hardware_source,
@@ -269,7 +281,8 @@ class ScanAcquisitionController:
             camera_hardware_source=camera_hardware_source,
             camera_frame_parameters=camera_frame_parameters,
             scan_behavior=drift_correction_behavior,
-            section_height=section_height)
+            section_height=section_height,
+            scan_count=self.__scan_specifier.scan_count)
         self.__scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_item_data_channel)
 
         def finish_grab_async():
@@ -304,7 +317,7 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f%s%s" % (num, 'Y', suffix)
 
 
-def calculate_time_size(camera_hardware_source, scan_pixels, camera_width, camera_height, is_summed, exposure_time):
+def calculate_time_size(camera_hardware_source, scan_count, scan_pixels, camera_width, camera_height, is_summed, exposure_time):
     acquire_pixel_count = scan_pixels
     storage_pixel_count = scan_pixels
     camera_frame_parameters = camera_hardware_source.get_frame_parameters(0).as_dict()
@@ -316,7 +329,7 @@ def calculate_time_size(camera_hardware_source, scan_pixels, camera_width, camer
     else:
         storage_memory = storage_pixel_count * camera_height * camera_width * 4
     acquire_sequence_metrics = camera_hardware_source.get_acquire_sequence_metrics(camera_frame_parameters)
-    acquisition_time = acquire_sequence_metrics.get("acquisition_time", exposure_time * acquire_pixel_count)  # in seconds
+    acquisition_time = acquire_sequence_metrics.get("acquisition_time", exposure_time * acquire_pixel_count) * scan_count  # in seconds
     acquisition_memory = acquire_sequence_metrics.get("acquisition_memory", acquire_pixel_count * camera_width * camera_height * 4)  # in bytes
     storage_memory = acquire_sequence_metrics.get("storage_memory", storage_memory)  # in bytes
     if acquisition_time > 3600:
@@ -352,6 +365,7 @@ class PanelDelegate:
         self.__camera_hardware_source_choice = None
         self.__styles_list_model = None
         self.__styles_list_property_model = None
+        self.__scan_count = 1
         self.__camera_width = 0
         self.__camera_height = 0
         self.__scan_specifier = ScanSpecifier()
@@ -388,8 +402,10 @@ class PanelDelegate:
                 self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
                 self.__scan_pixels = scan_length
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
+                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
                 self.__scan_specifier.size = 1, scan_length
                 self.__scan_specifier.drift_interval_lines = 0
+                self.__scan_specifier.drift_interval_scans = 0
                 self.__acquire_button._widget.enabled = True
             elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
                 calibration = scan_context.calibration
@@ -404,11 +420,15 @@ class PanelDelegate:
                 scan_height = int(self.__scan_width * height / width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                drift_scans = scan_hardware_source.calculate_drift_scans()
+                drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
+                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
                 self.__scan_specifier.size = scan_height, scan_width
                 self.__scan_specifier.drift_interval_lines = drift_lines
+                self.__scan_specifier.drift_interval_scans = drift_scans
                 self.__acquire_button._widget.enabled = True
             elif scan_context.is_valid:
                 calibration = scan_context.calibration
@@ -423,20 +443,28 @@ class PanelDelegate:
                 scan_height = int(self.__scan_width * height / width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                drift_scans = scan_hardware_source.calculate_drift_scans()
+                drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
+                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
                 self.__scan_specifier.size = scan_height, scan_width
                 self.__scan_specifier.drift_interval_lines = drift_lines
+                self.__scan_specifier.drift_interval_scans = drift_scans
                 self.__acquire_button._widget.enabled = True
             else:
                 self.__roi_description.text = _("Scan context not active")
                 self.__scan_label_widget.text = None
                 self.__scan_specifier.scan_context = stem_controller.ScanContext()
+                self.__scan_specifier.scan_count = 1
                 self.__scan_specifier.size = None
                 self.__scan_specifier.drift_interval_lines = 0
+                self.__scan_specifier.drift_interval_scans = 0
                 self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
                 self.__scan_pixels = 0
+
+            self.__scan_count_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_count)
 
             self.__scan_width_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_width)
 
@@ -475,6 +503,8 @@ class PanelDelegate:
 
         self.__roi_description = ui.create_label_widget()
 
+        self.__scan_count_widget = ui.create_line_edit_widget()
+
         self.__scan_width_widget = ui.create_line_edit_widget()
 
         self.__exposure_time_widget = ui.create_line_edit_widget()
@@ -504,6 +534,14 @@ class PanelDelegate:
         scan_choice_row.add(ComboBoxWidget(self.__scan_hardware_source_choice.create_combo_box(ui._ui)))
         scan_choice_row.add_spacing(12)
         scan_choice_row.add_stretch()
+
+        scan_count_row = ui.create_row_widget()
+        scan_count_row.add_spacing(12)
+        scan_count_row.add(ui.create_label_widget("Scan Count"))
+        scan_count_row.add_spacing(12)
+        scan_count_row.add(self.__scan_count_widget)
+        scan_count_row.add_spacing(12)
+        scan_count_row.add_stretch()
 
         roi_size_row = ui.create_row_widget()
         roi_size_row.add_spacing(12)
@@ -549,6 +587,8 @@ class PanelDelegate:
         column.add_spacing(8)
         column.add(camera_row)
         column.add_spacing(8)
+        column.add(scan_count_row)
+        column.add_spacing(8)
         column.add(roi_size_row)
         column.add_spacing(8)
         column.add(scan_spacing_pixels_row)
@@ -579,6 +619,16 @@ class PanelDelegate:
             self.__update_estimate()
 
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
+
+        def scan_count_changed(text: str) -> None:
+            scan_count = Converter.IntegerToStringConverter().convert_back(text) if text else 1
+            scan_count = max(scan_count, 1)
+            if scan_count != self.__scan_count:
+                self.__scan_count = scan_count
+                update_context()
+            self.__scan_count_widget.request_refocus()
+
+        self.__scan_count_widget.on_editing_finished = scan_count_changed
 
         def scan_width_changed(text: str) -> None:
             scan_width = Converter.IntegerToStringConverter().convert_back(text) if text else 1
@@ -653,7 +703,7 @@ class PanelDelegate:
             camera_height = self.__camera_height
             is_summed = self.__style_combo_box.current_index == 0
             exposure_time = self.__exposure_time_ms_value_model.value / 1000
-            time_str, size_str = calculate_time_size(camera_hardware_source, self.__scan_pixels, camera_width, camera_height, is_summed, exposure_time)
+            time_str, size_str = calculate_time_size(camera_hardware_source, self.__scan_count, self.__scan_pixels, camera_width, camera_height, is_summed, exposure_time)
             self.__estimate_label_widget.text = "{0} / {1}".format(time_str, size_str)
         else:
             self.__estimate_label_widget.text = None

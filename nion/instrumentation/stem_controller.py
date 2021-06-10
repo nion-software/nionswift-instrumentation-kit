@@ -53,6 +53,7 @@ class DriftIntervalUnit(enum.IntEnum):
     FRAME = 0
     TIME = 1
     LINE = 2
+    SCAN = 3
 
 
 class DriftCorrectionSettings:
