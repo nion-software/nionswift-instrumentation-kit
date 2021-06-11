@@ -1509,7 +1509,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
             if adjustments.offset_nm:
                 # offset_nm will be in the context reference frame.
                 self.__scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(self.__scan_frame_parameters.center_nm) + adjustments.offset_nm)
-        self.__scan_hardware_source.abort_playing()
+        self.__scan_hardware_source.abort_playing(sync_timeout=5.0)
         self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -1562,9 +1562,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
                                                                             stop - start,
                                                                             source_slice,
                                                                             data_stream_state)
-                        self.data_available_event.fire(data_stream_event)
-                        self._sequence_next(channel, stop - start)
-                        self.__sent_rows[channel] = available_rows
+                        if stop - start > 0:
+                            self.data_available_event.fire(data_stream_event)
+                            self._sequence_next(channel, stop - start)
+                            self.__sent_rows[channel] = available_rows
 
 
 class CameraFrameDataStream(Acquisition.DataStream):
