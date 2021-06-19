@@ -765,7 +765,7 @@ class CameraSettings:
 
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: pathlib.Path, camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
+    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(camera.camera_id, camera.camera_name)
 
         # configure the event loop object
