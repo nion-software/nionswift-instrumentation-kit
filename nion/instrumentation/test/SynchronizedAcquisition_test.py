@@ -34,7 +34,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def setUp(self):
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
-        self.camera_exposure = 0.025
 
     def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context(is_eels=is_eels)

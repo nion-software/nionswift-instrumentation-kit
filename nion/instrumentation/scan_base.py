@@ -758,13 +758,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                                            scan_count=scan_count,
                                                                            old_move_axis=camera_data_channel is not None)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_channel)
-        self.__scan_acquisition = scan_acquisition
-        try:
-            scan_acquisition.prepare_acquire()
-            scan_acquisition.acquire()
-        finally:
-            self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
-        return scan_acquisition.results
+        with contextlib.closing(scan_acquisition):
+            self.__scan_acquisition = scan_acquisition
+            try:
+                scan_acquisition.prepare_acquire()
+                scan_acquisition.acquire()
+            finally:
+                self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+            return scan_acquisition.results
 
     def grab_synchronized_abort(self) -> None:
         if self.__scan_acquisition:

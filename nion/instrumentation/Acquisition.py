@@ -1589,7 +1589,7 @@ def acquire(data_stream: DataStream) -> None:
 
 class Acquisition:
     def __init__(self, data_stream: DataStream, *, data_channel: DataChannel = None):
-        self.data_stream = data_stream
+        self.data_stream = data_stream.add_ref()
         self.data_channel = data_channel.add_ref() if data_channel else None
         self.__maker = typing.cast(FramedDataStream, None)
         self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
@@ -1598,6 +1598,7 @@ class Acquisition:
     def close(self) -> None:
         if self.data_channel:
             self.data_channel.remove_ref()
+        self.data_stream.remove_ref()
 
     def prepare_acquire(self) -> None:
         data_channel = self.data_channel
@@ -1633,6 +1634,8 @@ class Acquisition:
         start = time.time()
         while self.__task and not self.__task.done() and time.time() - start < timeout:
             on_periodic()
+            time.sleep(0.05)  # don't take all of the CPU
+        on_periodic()  # one more periodic for clean up
 
     @property
     def progress(self) -> float:
