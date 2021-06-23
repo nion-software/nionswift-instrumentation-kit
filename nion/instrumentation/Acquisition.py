@@ -316,22 +316,6 @@ class DataStreamEventArgs:
         # frame reset trigger. used to tell frames that data is being resent for the same frame.
         self.reset_frame = False
 
-    def print(self, receiver: DataStream) -> None:
-        if self.__print:
-            print(f"{receiver} received {self.data_stream} / {self.channel}")
-            print(f"  {self.data_metadata.data_shape} [{self.data_metadata.data_dtype}] {self.data_metadata.data_descriptor}")
-            print(f"  {self.count}: {self.source_data.shape} {self.source_slice}")
-            print(f"  {self.state}")
-            print("")
-
-    def __str__(self) -> str:
-        s = str()
-        s += f"-- received {self.data_stream} / {self.channel}\n"
-        s += f"  {self.data_metadata.data_shape} [{self.data_metadata.data_dtype}] {self.data_metadata.data_descriptor}\n"
-        s += f"  {self.count}: {self.source_data.shape} {self.source_slice}\n"
-        s += f"  {self.state}\n"
-        return s
-
 
 class DataStreamArgs:
     def __init__(self, slice: SliceType, shape: ShapeType):
@@ -407,6 +391,9 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         return self.channels
 
     def get_info(self, channel: Channel) -> DataStreamInfo:
+        """Return channel info.
+
+        Should only be called with a channel return by channels property."""
         return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
 
     @property
@@ -502,6 +489,17 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         Subclasses can override.
         """
         pass
+
+    def fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        """Fire the data available event."""
+        self._fire_data_available(data_stream_event)
+
+    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        """Fire the data available event.
+
+        Subclasses can override.
+        """
+        self.data_available_event.fire(data_stream_event)
 
 
 class CollectedDataStream(DataStream):
@@ -638,8 +636,6 @@ class CollectedDataStream(DataStream):
         # is restricted to arrive in groups that are multiples of the collection size
         # and cannot overlap the end of a collection chunk.
 
-        data_stream_event.print(self)
-
         # useful variables
         data_metadata = data_stream_event.data_metadata
         count = data_stream_event.count
@@ -691,7 +687,7 @@ class CollectedDataStream(DataStream):
                 new_source_data = old_source_data.reshape((1,) * collection_rank + old_source_data.shape[1:])
                 new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
-                self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                 self.__indexes[channel] = next_index
                 self.__sub_slice_indexes[channel] = next_sub_slice_index
                 self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
@@ -712,7 +708,7 @@ class CollectedDataStream(DataStream):
                     next_source_index = source_index + slice_width
                     new_source_data = old_source_data[source_index:next_source_index].reshape((1, slice_width) + old_source_data.shape[1:])
                     new_state = DataStreamStateEnum.COMPLETE if index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
-                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     source_index = next_source_index
                     index += slice_width
                     count -= slice_width
@@ -733,7 +729,7 @@ class CollectedDataStream(DataStream):
                     new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
                     new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
                     new_state = DataStreamStateEnum.COMPLETE if index + row_count * collection_sub_slice_row_length == collection_count else DataStreamStateEnum.PARTIAL
-                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     source_index = next_source_index
                     index += row_count * collection_sub_slice_row_length
                     count -= row_count * collection_sub_slice_row_length
@@ -746,7 +742,7 @@ class CollectedDataStream(DataStream):
                     next_source_index = source_index + count
                     new_source_data = old_source_data[source_index:next_source_index].reshape((1, count) + old_source_data.shape[1:])
                     new_state = DataStreamStateEnum.PARTIAL  # always partial, otherwise would have been sent in previous section
-                    self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     # source_index = next_source_index  # no need for this
                     index += count
                     count -= count
@@ -772,7 +768,7 @@ class CollectedDataStream(DataStream):
                 next_sub_slice_index += 1
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
-            self.data_available_event.fire(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+            self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
             self.__indexes[channel] = next_index
             self.__sub_slice_indexes[channel] = next_sub_slice_index
             self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
@@ -865,8 +861,7 @@ class CombinedDataStream(DataStream):
             data_stream.finish_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        data_stream_event.print(self)
-        self.data_available_event.fire(data_stream_event)
+        self.fire_data_available(data_stream_event)
 
 
 class ChannelData:
@@ -906,8 +901,6 @@ class DataStreamOperator:
         data_and_metadata = channel_data.data_and_metadata
         assert data_and_metadata.is_sequence
         channel_data_list_list = [self.process(ChannelData(channel, data_and_metadata[i])) for i in range(data_and_metadata.data_shape[0])]
-        # ([1, A1], [2, B1], [3, C1]), ([1, A2], [2, B2], [3, C2]), ([1, A3], [2, B3], [3, C3])
-        # ([1, A1/A2/A3], [2, B1/B2/B3], [3, C1/C2/C3])
         new_channel_data_list = list()
         for index, new_channel_data in enumerate(channel_data_list_list[0]):
             new_channel = new_channel_data.channel
@@ -1116,6 +1109,7 @@ class FramedDataStream(DataStream):
         self.__data_stream = None
         self.__data_channel.remove_ref()
         self.__data_channel = None
+        super().about_to_delete()
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1166,8 +1160,6 @@ class FramedDataStream(DataStream):
         # data is assumed to be partial data. this restriction may be removed in a future
         # version. separate indexes are kept for each channel and represent the next destination
         # for the data.
-
-        data_stream_event.print(self)
 
         # useful variables
         channel = data_stream_event.channel
@@ -1258,7 +1250,7 @@ class FramedDataStream(DataStream):
         # send the new data chunk
         new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, new_data, new_count,
                                                     new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.data_available_event.fire(new_data_stream_event)
+        self.fire_data_available(new_data_stream_event)
 
     def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         assert data_and_metadata.is_sequence
@@ -1276,7 +1268,7 @@ class FramedDataStream(DataStream):
         new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
         new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data_and_metadata.data, count,
                                                     new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.data_available_event.fire(new_data_stream_event)
+        self.fire_data_available(new_data_stream_event)
 
 
 class Mask:
@@ -1442,6 +1434,7 @@ class ContainerDataStream(DataStream):
         self.__listener = None
         self.__data_stream.remove_ref()
         self.__data_stream = None
+        super().about_to_delete()
 
     @property
     def data_stream(self) -> DataStream:
@@ -1484,10 +1477,7 @@ class ContainerDataStream(DataStream):
         self.__data_stream.finish_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        self._fire_data_available(data_stream_event)
-
-    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        self.data_available_event.fire(data_stream_event)
+        self.fire_data_available(data_stream_event)
 
 
 class AccumulatedDataStream(ContainerDataStream):

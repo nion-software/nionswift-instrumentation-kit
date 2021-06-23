@@ -1495,6 +1495,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         for data_channel_listener in self.__data_channel_listeners:
             data_channel_listener.close()
         self.__data_channel_listeners.clear()
+        super().about_to_delete()
 
     @property
     def scan_size(self) -> Geometry.IntSize:
@@ -1564,7 +1565,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
                                                                             source_slice,
                                                                             data_stream_state)
                         if stop - start > 0:
-                            self.data_available_event.fire(data_stream_event)
+                            self.fire_data_available(data_stream_event)
                             self._sequence_next(channel, stop - start)
                             self.__sent_rows[channel] = available_rows
 
@@ -1690,7 +1691,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                 count,
                                                                 source_slice,
                                                                 data_stream_state)
-            self.data_available_event.fire(data_stream_event)
+            self.fire_data_available(data_stream_event)
             self._sequence_next(channel, count)
             self.__last_valid_rows = valid_rows
 

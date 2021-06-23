@@ -59,7 +59,7 @@ class ScanDataStream(Acquisition.DataStream):
             data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
                                                                 new_count, source_data_slice, state)
-            self.data_available_event.fire(data_stream_event)
+            self.fire_data_available(data_stream_event)
             self._sequence_next(channel, new_count)
         # update indexes
         if state == Acquisition.DataStreamStateEnum.COMPLETE:
@@ -118,7 +118,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
         data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata,
                                                             self.data[self.__frame_index], None,
                                                             source_data_slice, state)
-        self.data_available_event.fire(data_stream_event)
+        self.fire_data_available(data_stream_event)
         if state == Acquisition.DataStreamStateEnum.PARTIAL:
             self.__partial_index = new_partial
         else:
@@ -185,7 +185,7 @@ class MultiFrameDataStream(Acquisition.DataStream):
             source_data = source_data.sum(axis=1)
         data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, source_data, count,
                                                             source_data_slice, state)
-        self.data_available_event.fire(data_stream_event)
+        self.fire_data_available(data_stream_event)
         self.__frame_index += count
         self._sequence_next(self.__channel, count)
 
