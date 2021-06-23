@@ -1082,6 +1082,84 @@ class DataAndMetadataDataChannel(DataChannel):
         return self.__data[channel]
 
 
+class FrameCallbacks:
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None: ...
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None: ...
+
+
+class Framer(ReferenceCounting.ReferenceCounted):
+    def __init__(self, data_channel: typing.Optional[DataChannel] = None):
+        super().__init__()
+        # data and indexes use the _incoming_ data channels as keys.
+        self.__data_channel = (data_channel or DataAndMetadataDataChannel()).add_ref()
+        self.__indexes: typing.Dict[Channel, int] = dict()
+
+    def about_to_delete(self) -> None:
+        self.__data_channel.remove_ref()
+        self.__data_channel = None
+        super().about_to_delete()
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__data_channel.get_data(channel)
+
+    def data_available(self, data_stream_event: DataStreamEventArgs, callbacks: FrameCallbacks) -> None:
+        # when data arrives, store it into a data item with the same description/shape.
+        # data is assumed to be partial data. this restriction may be removed in a future
+        # version. separate indexes are kept for each channel and represent the next destination
+        # for the data.
+
+        # useful variables
+        channel = data_stream_event.channel
+        source_slice = data_stream_event.source_slice
+        count = data_stream_event.count
+
+        if count is None:
+            # check to see if data has already been allocated. allocated it if not.
+            data_metadata = copy.deepcopy(data_stream_event.data_metadata)
+            # determine the start/stop indexes. then copy the source data into the destination using
+            # flattening to allow for use of simple indexing. then increase the index.
+            source_start = ravel_slice_start(source_slice, data_stream_event.source_data.shape)
+            source_stop = ravel_slice_stop(source_slice, data_stream_event.source_data.shape)
+            source_count = source_stop - source_start
+            flat_shape = (numpy.product(data_metadata.data_shape, dtype=numpy.int64),)
+            if data_stream_event.reset_frame:
+                index = 0
+            else:
+                index = self.__indexes.get(channel, 0)
+            dest_slice = slice(index, index + source_count)
+            assert index + source_count <= flat_shape[0]
+            self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
+            # proceed
+            index = index + source_count
+            self.__indexes[channel] = index
+            # if the data chunk is complete, perform processing and send out the new data.
+            if data_stream_event.state == DataStreamStateEnum.COMPLETE:
+                assert index == flat_shape[0]  # index should be at the end.
+                callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))
+                self.__indexes[channel] = 0
+        else:
+            # no storage takes place in this case; receiving full frames and sending out full (processed) frames.
+            # add 'sequence' to data descriptor; process it; strip 'sequence' and send it on.
+            data_metadata = data_stream_event.data_metadata
+            data_descriptor = data_metadata.data_descriptor
+            assert not data_descriptor.is_sequence
+            new_data_descriptor = DataAndMetadata.DataDescriptor(True,
+                                                                 data_descriptor.collection_dimension_count,
+                                                                 data_descriptor.datum_dimension_count)
+            new_data = data_stream_event.source_data[data_stream_event.source_slice]
+            new_dimensional_calibrations = (Calibration.Calibration(),) + tuple(data_metadata.dimensional_calibrations)
+            data_and_metadata = DataAndMetadata.new_data_and_metadata(new_data,
+                                                                      data_metadata.intensity_calibration,
+                                                                      new_dimensional_calibrations,
+                                                                      data_metadata.metadata,
+                                                                      data_metadata.timestamp,
+                                                                      new_data_descriptor,
+                                                                      data_metadata.timezone,
+                                                                      data_metadata.timezone_offset)
+            callbacks._send_data_multiple(data_stream_event.channel, data_and_metadata, count)
+            self.__indexes[channel] = 0
+
+
 class FramedDataStream(DataStream):
     """Change a data stream producing continuous data into one producing frame by frame data.
 
@@ -1098,17 +1176,15 @@ class FramedDataStream(DataStream):
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        # data and indexes use the _incoming_ data channels as keys.
-        self.__data_channel = (data_channel or DataAndMetadataDataChannel()).add_ref()
-        self.__indexes: typing.Dict[Channel, int] = dict()
+        self.__framer = Framer(data_channel).add_ref()
 
     def about_to_delete(self) -> None:
         self.__listener.close()
         self.__listener = None
         self.__data_stream.remove_ref()
         self.__data_stream = None
-        self.__data_channel.remove_ref()
-        self.__data_channel = None
+        self.__framer.remove_ref()
+        self.__framer = None
         super().about_to_delete()
 
     @property
@@ -1153,88 +1229,43 @@ class FramedDataStream(DataStream):
         self.__data_stream.finish_stream()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
-        return self.__data_channel.get_data(channel)
+        return self.__framer.get_data(channel)
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        # when data arrives, store it into a data item with the same description/shape.
-        # data is assumed to be partial data. this restriction may be removed in a future
-        # version. separate indexes are kept for each channel and represent the next destination
-        # for the data.
+        self.__framer.data_available(data_stream_event, typing.cast(FrameCallbacks, self))
 
-        # useful variables
-        channel = data_stream_event.channel
-        source_slice = data_stream_event.source_slice
-        count = data_stream_event.count
-
-        if count is None:
-            # check to see if data has already been allocated. allocated it if not.
-            data_metadata = copy.deepcopy(data_stream_event.data_metadata)
-            # determine the start/stop indexes. then copy the source data into the destination using
-            # flattening to allow for use of simple indexing. then increase the index.
-            source_start = ravel_slice_start(source_slice, data_stream_event.source_data.shape)
-            source_stop = ravel_slice_stop(source_slice, data_stream_event.source_data.shape)
-            source_count = source_stop - source_start
-            flat_shape = (numpy.product(data_metadata.data_shape, dtype=numpy.int64),)
-            if data_stream_event.reset_frame:
-                index = 0
-            else:
-                index = self.__indexes.get(channel, 0)
-            dest_slice = slice(index, index + source_count)
-            assert index + source_count <= flat_shape[0]
-            self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
-            # proceed
-            index = index + source_count
-            self.__indexes[channel] = index
-            # if the data chunk is complete, perform processing and send out the new data.
-            if data_stream_event.state == DataStreamStateEnum.COMPLETE:
-                assert index == flat_shape[0]  # index should be at the end.
-                # processing
-                if not self.__operator.is_applied:
-                    for new_channel_data in self.__operator.process(ChannelData(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))):
-                        self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
-                else:
-                    self.__send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))
-                self.__indexes[channel] = 0
-                self._sequence_next(channel)
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        # callback for Framer
+        if not self.__operator.is_applied:
+            for new_channel_data in self.__operator.process(ChannelData(channel, data_and_metadata)):
+                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
         else:
-            # no storage takes place in this case; receiving full frames and sending out full (processed) frames.
-            # add 'sequence' to data descriptor; process it; strip 'sequence' and send it on.
-            data_metadata = data_stream_event.data_metadata
-            data_descriptor = data_metadata.data_descriptor
-            assert not data_descriptor.is_sequence
-            new_data_descriptor = DataAndMetadata.DataDescriptor(True,
-                                                                 data_descriptor.collection_dimension_count,
-                                                                 data_descriptor.datum_dimension_count)
-            new_data = data_stream_event.source_data[data_stream_event.source_slice]
-            new_dimensional_calibrations = (Calibration.Calibration(),) + tuple(data_metadata.dimensional_calibrations)
-            data_and_metadata = DataAndMetadata.new_data_and_metadata(new_data,
-                                                                      data_metadata.intensity_calibration,
-                                                                      new_dimensional_calibrations,
-                                                                      data_metadata.metadata,
-                                                                      data_metadata.timestamp,
-                                                                      new_data_descriptor,
-                                                                      data_metadata.timezone,
-                                                                      data_metadata.timezone_offset)
-            if not self.__operator.is_applied:
-                for new_channel_data in self.__operator.process_multiple(ChannelData(data_stream_event.channel, data_and_metadata)):
-                    self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
-            else:
-                # special case for camera compatibility. cameras should not return empty dimensions.
-                if data_and_metadata.data_shape[-1] == 1:
-                    data_metadata = data_and_metadata.data_metadata
-                    data_and_metadata = DataAndMetadata.new_data_and_metadata(data_and_metadata.data.squeeze(axis=-1),
-                                                                              data_metadata.intensity_calibration,
-                                                                              data_metadata.dimensional_calibrations[:-1],
-                                                                              data_metadata.metadata,
-                                                                              data_metadata.timestamp,
-                                                                              DataAndMetadata.DataDescriptor(data_metadata.data_descriptor.is_sequence,
-                                                                                                             data_metadata.data_descriptor.collection_dimension_count,
-                                                                                                             data_metadata.data_descriptor.datum_dimension_count - 1),
-                                                                              data_metadata.timezone,
-                                                                              data_metadata.timezone_offset)
-                self.__send_data_multiple(data_stream_event.channel, data_and_metadata, count)
-            self.__indexes[channel] = 0
-            self._sequence_next(channel, count)
+            self.__send_data(channel, data_and_metadata)
+        self._sequence_next(channel)
+
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+        # callback for Framer
+        if not self.__operator.is_applied:
+            for new_channel_data in self.__operator.process_multiple(
+                    ChannelData(channel, data_and_metadata)):
+                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
+        else:
+            # special case for camera compatibility. cameras should not return empty dimensions.
+            if data_and_metadata.data_shape[-1] == 1:
+                data_metadata = data_and_metadata.data_metadata
+                data_and_metadata = DataAndMetadata.new_data_and_metadata(data_and_metadata.data.squeeze(axis=-1),
+                                                                          data_metadata.intensity_calibration,
+                                                                          data_metadata.dimensional_calibrations[:-1],
+                                                                          data_metadata.metadata,
+                                                                          data_metadata.timestamp,
+                                                                          DataAndMetadata.DataDescriptor(
+                                                                              data_metadata.data_descriptor.is_sequence,
+                                                                              data_metadata.data_descriptor.collection_dimension_count,
+                                                                              data_metadata.data_descriptor.datum_dimension_count - 1),
+                                                                          data_metadata.timezone,
+                                                                          data_metadata.timezone_offset)
+            self.__send_data_multiple(channel, data_and_metadata, count)
+        self._sequence_next(channel, count)
 
     def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
