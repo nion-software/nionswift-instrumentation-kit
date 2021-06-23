@@ -3,11 +3,14 @@ from __future__ import annotations
 # system imports
 import asyncio
 import copy
+import datetime
 import enum
 import functools
 import gettext
 import logging
 import math
+import threading
+
 import numpy
 import typing
 import uuid
@@ -17,7 +20,6 @@ import operator
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
-from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
@@ -61,6 +63,10 @@ class ScanSpecifier:
 
 
 class DataItemDataChannel(Acquisition.DataChannel):
+    """Acquisition data channel backed by a data item.
+
+    An acquisition data channel receives partial data and must return full data when required.
+    """
 
     def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str]):
         super().__init__()
@@ -71,6 +77,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         self.__data_item_transaction_map: typing.Dict[Acquisition.Channel, DocumentModel.Transaction] = dict()
 
     def prepare(self, data_stream: Acquisition.DataStream) -> None:
+        # prepare will be called on the main thread.
         for channel in data_stream.channels:
             data_stream_info = data_stream.get_info(channel)
             title = f"{title_base} ({self.__channel_names.get(channel, str(channel))})"
@@ -118,56 +125,70 @@ class DataItemDataChannel(Acquisition.DataChannel):
         return data_item
 
 
-class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
-    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, interval: int = 0):
-        # init with the frame parameters from the synchronized grab
+class DriftLogger:
+    """Drift logger to update the drift log with ongoing drift measurements."""
+
+    def __init__(self, document_model: DocumentModel.DocumentModel, drift_compensator: scan_base.DriftCompensator, event_loop: asyncio.AbstractEventLoop):
         self.__document_model = document_model
-        self.__scan_hardware_source = scan_hardware_source
-        self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
-        self.__interval = interval
-        self.__index = 0
-        # here we convert those frame parameters to the context
-        self.__scan_frame_parameters.subscan_pixel_size = None
-        self.__scan_frame_parameters.subscan_fractional_size = None
-        self.__scan_frame_parameters.subscan_fractional_center = None
-        self.__scan_frame_parameters.subscan_rotation = 0.0
-        self.__scan_frame_parameters.channel_override = "drift"
-        self.__last_xdata = None
-        self.__center_nm = Geometry.FloatSize()
-        self.__last_offset_nm = Geometry.FloatSize()
-        self.__offset_nm_data = numpy.zeros((3, 0), float)
-        data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
-        if data_item:
-            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
-            data_item.set_data_and_metadata(offset_nm_xdata)
-        else:
-            data_item = DataItem.DataItem(self.__offset_nm_data)
+        self.__drift_compensator = drift_compensator
+        self.__event_loop = event_loop
+        self.__data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
+        self.__drift_changed_event_listener = drift_compensator.drift_changed_event.listen(self.__drift_changed)
+
+    def close(self) -> None:
+        self.__drift_changed_event_listener.close()
+        self.__drift_changed_event_listener = None
+
+    def __ensure_drift_log_data_item(self) -> None:
+        # must be called on main thread
+        if not self.__data_item:
+            data_item = DataItem.DataItem(self.__drift_compensator.offset_nm_data)
             data_item.title = f"Drift Log"
             self.__document_model.append_data_item(data_item)
             display_item = self.__document_model.get_display_item_for_data_item(data_item)
             display_item.display_type = "line_plot"
             display_item.append_display_data_channel_for_data_item(data_item)
             display_item.append_display_data_channel_for_data_item(data_item)
-            display_item._set_display_layer_properties(0, label=_("x"))
-            display_item._set_display_layer_properties(1, label=_("y"))
-            display_item._set_display_layer_properties(2, label=_("m"))
-        self.__data_item = data_item
+            display_item._set_display_layer_properties(0, label=_("x"), stroke_color=display_item.get_display_layer_property(0, "fill_color"), fill_color=None)
+            display_item._set_display_layer_properties(1, label=_("y"), stroke_color=display_item.get_display_layer_property(1, "fill_color"), fill_color=None)
+            display_item._set_display_layer_properties(2, label=_("m"), stroke_color=display_item.get_display_layer_property(2, "fill_color"), fill_color=None)
+            self.__data_item = data_item
 
-    def reset(self) -> None:
-        self.__last_xdata = None
-        self.__center_nm = Geometry.FloatSize()
-        self.__last_offset_nm = Geometry.FloatSize()
-        self.__index = 0
+    def __update_drift_log_data_item(self, offset_nm_data: numpy.ndarray) -> None:
+        # must be called on main thread
+        # check __drift_changed_event_listener to see if the logger has been closed
+        if self.__drift_changed_event_listener:
+            self.__ensure_drift_log_data_item()
+            assert self.__data_item
+            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+            self.__data_item.set_data_and_metadata(offset_nm_xdata)
 
-    def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
+    def __drift_changed(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
+        offset_nm_data = numpy.copy(self.__drift_compensator.offset_nm_data)
+        self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, offset_nm_data))
+
+
+class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
+    """Drift correction behavior for updating drift at beginning of each synchronized scan section.
+
+    Take a drift scan from the drift region and send it to the drift compensator.
+    """
+
+    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+        # init with the frame parameters from the synchronized grab
+        self.__document_model = document_model
+        self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        # here we convert those frame parameters to the context
+        self.__scan_frame_parameters.subscan_pixel_size = None
+        self.__scan_frame_parameters.subscan_fractional_size = None
+        self.__scan_frame_parameters.subscan_fractional_center = None
+        self.__scan_frame_parameters.subscan_rotation = 0.0
+        self.__scan_frame_parameters.channel_override = "drift"
+
+    def prepare_section(self) -> None:
         # this method must be thread safe
         # start with the context frame parameters and adjust for the drift region
-        adjustments = scan_base.SynchronizedScanBehaviorAdjustments()
-        index = self.__index
-        self.__index += 1
-        if self.__interval and (index % self.__interval) != 0:
-            # exit if not on an interval
-            return adjustments
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
         context_size = Geometry.FloatSize.make(frame_parameters.size)
         drift_channel_id = self.__scan_hardware_source.drift_channel_id
@@ -181,42 +202,10 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
                 # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
-                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + self.__center_nm)
+                drift_compensator = self.__scan_hardware_source.drift_compensator
+                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + drift_compensator.center_nm)
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
-                # new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
-                if self.__last_xdata:
-                    # calculate offset. if data shifts down/right, offset will be negative (register_translation convention).
-                    # offset = Geometry.FloatPoint.make(xd.register_translation(self.__last_xdata, xdatas[0], upsample_factor=10))
-                    quality, offset = xd.register_template(self.__last_xdata, xdatas[0])
-                    offset = Geometry.FloatPoint.make(offset)
-                    offset_nm = Geometry.FloatSize(
-                        h=xdatas[0].dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
-                        w=xdatas[0].dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
-                    # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
-                    # rotate back into context reference frame
-                    offset_nm = offset_nm.rotate(-drift_rotation)
-                    offset_nm -= self.__center_nm  # adjust for center_nm adjustment above
-                    delta_nm = offset_nm - self.__last_offset_nm
-                    self.__last_offset_nm = offset_nm
-                    offset_nm_xy = math.sqrt(pow(offset_nm.height, 2) + pow(offset_nm.width, 2))
-                    self.__offset_nm_data = numpy.hstack([self.__offset_nm_data, numpy.array([offset_nm.height, offset_nm.width, offset_nm_xy]).reshape(3, 1)])
-                    offset_nm_xdata = DataAndMetadata.new_data_and_metadata(self.__offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
-                    def update_data_item(offset_nm_xdata: DataAndMetadata.DataAndMetadata) -> None:
-                        self.__data_item.set_data_and_metadata(offset_nm_xdata)
-                    self.__scan_hardware_source._call_soon(functools.partial(update_data_item, offset_nm_xdata))
-                    # report the difference from the last time we reported, but negative since center_nm positive shifts up/left
-                    adjustments.offset_nm = -delta_nm
-                    self.__center_nm -= delta_nm
-                    # print(f"{self.__last_offset_nm} {adjustments.offset_nm} [{(new_offset - self.__last_offset) * 1E9}] {offset} {frame_parameters.fov_nm}")
-                    if False:  # if offset_nm > drift area / 10?
-                        # retake to provide reference at new offset
-                        frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + adjustments.offset_nm)
-                        self.__scan_frame_parameters.center_nm = frame_parameters.center_nm
-                        xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
-                        new_offset = self.__scan_hardware_source.stem_controller.drift_offset_m
-                else:
-                    self.__last_xdata = xdatas[0]
-        return adjustments
+                drift_compensator.submit(xdatas[0], drift_rotation, wait=True)
 
 
 ProcessingOption = collections.namedtuple("ProcessingOption", ["processing_id", "display_name"])
@@ -237,6 +226,7 @@ class ScanAcquisitionController:
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+        self.__scan_drift_logger = typing.cast(DriftLogger, None)
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, processing: ScanAcquisitionProcessing) -> None:
@@ -267,13 +257,14 @@ class ScanAcquisitionController:
 
         data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names)
 
+        document_model = document_window.library._document_model
+        event_loop = document_window._document_window.event_loop
+
         drift_correction_behavior : typing.Optional[DriftCorrectionBehavior] = None
         section_height = None
         if self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
-        elif self.__scan_specifier.drift_interval_scans > 0:
-            drift_correction_behavior = DriftCorrectionBehavior(document_window.library._document_model, scan_hardware_source, scan_frame_parameters, self.__scan_specifier.drift_interval_scans)
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
             scan_hardware_source=scan_hardware_source,
@@ -284,16 +275,18 @@ class ScanAcquisitionController:
             section_height=section_height,
             scan_count=self.__scan_specifier.scan_count)
         self.__scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_item_data_channel)
+        self.__scan_drift_logger = DriftLogger(document_model, scan_hardware_source.drift_compensator, event_loop)
 
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
             self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+            self.__scan_drift_logger.close()
+            self.__scan_drift_logger = typing.cast(DriftLogger, None)
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 
-        self.__scan_acquisition.acquire_async(event_loop=document_window._document_window.event_loop,
-                                              on_completion=finish_grab_async)
+        self.__scan_acquisition.acquire_async(event_loop=event_loop, on_completion=finish_grab_async)
 
     def cancel(self) -> None:
         logging.debug("abort sequence acquisition")

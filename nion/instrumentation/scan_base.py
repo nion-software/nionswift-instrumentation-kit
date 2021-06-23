@@ -2,7 +2,6 @@ from __future__ import annotations
 
 # standard libraries
 import abc
-import asyncio
 import collections
 import contextlib
 import copy
@@ -20,7 +19,7 @@ import uuid
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
-from nion.data import Core
+from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller as stem_controller_module
@@ -30,6 +29,7 @@ from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.utils import ThreadPool
 
 
 _ = gettext.gettext
@@ -221,13 +221,112 @@ class SynchronizedDataChannelInterface:
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None: ...
 
 
-class SynchronizedScanBehaviorAdjustments:
+class DriftCompensator:
+    """Track drift state.
+
+    Tracks several properties of drift including the acculated
+    """
+
     def __init__(self):
-        self.offset_nm : typing.Optional[Geometry.FloatSize] = None
+        self.__dispatcher = ThreadPool.SingleItemDispatcher()
+
+        self.__lock = threading.RLock()
+        self.__first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
+        self.__current_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
+        self.__rotation = 0.0
+
+        self.__offset_nm_data_lock = threading.RLock()
+        self.__offset_nm_data = numpy.zeros((4, 0), float)
+
+        self.__center_nm = Geometry.FloatSize()
+
+        self.drift_changed_event = Event.Event()
+
+    def close(self) -> None:
+        self.__dispatcher.close()
+        self.__dispatcher = None
+
+    def reset(self) -> None:
+        with self.__lock:
+            self.__first_xdata = None
+            self.__current_xdata = None
+            self.__offset_nm_data = numpy.zeros((4, 0), float)
+            self.__rotation = 0.0
+            self.__center_nm = Geometry.FloatSize()
+
+    @property
+    def center_nm(self) -> Geometry.FloatSize:
+        return self.__center_nm
+
+    @property
+    def offset_nm_data(self) -> numpy.ndarray:
+        with self.__offset_nm_data_lock:
+            return numpy.copy(self.__offset_nm_data)
+
+    @property
+    def offset_nm(self) -> Geometry.FloatSize:
+        with self.__offset_nm_data_lock:
+            if self.__offset_nm_data.shape[-1] > 0:
+                width = self.__offset_nm_data[1][-1]
+                height = self.__offset_nm_data[0][-1]
+            else:
+                width = 0.0
+                height = 0.0
+            return Geometry.FloatSize(height=height, width=width)
+
+    def __append_offset_nm(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
+        offset_nm_xy = math.sqrt(pow(offset_nm.height, 2) + pow(offset_nm.width, 2))
+        with self.__offset_nm_data_lock:
+            self.__offset_nm_data = numpy.hstack(
+                [self.__offset_nm_data, numpy.array([offset_nm.height, offset_nm.width, offset_nm_xy, elapsed_time]).reshape(4, 1)])
+
+    def __calculate(self) -> None:
+        with self.__lock:
+            first_xdata = self.__first_xdata
+            current_xdata = self.__current_xdata
+            rotation = self.__rotation
+
+        if first_xdata and current_xdata:
+            quality, offset = xd.register_template(first_xdata, current_xdata)
+            elapsed_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds()
+            offset = Geometry.FloatPoint.make(offset)
+            offset_nm = Geometry.FloatSize(
+                h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
+                w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+            # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
+            # rotate back into context reference frame
+            offset_nm = offset_nm.rotate(-rotation)
+            with self.__lock:
+                self.__append_offset_nm(offset_nm, elapsed_time)
+                # add the difference from the last time, but negative since center_nm positive shifts up/left
+                self.__center_nm = self.__center_nm - offset_nm
+            self.drift_changed_event.fire(offset_nm, elapsed_time)
+
+    def submit(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, wait: bool = False) -> None:
+        # set first data if it hasn't been set or if rotation has changed.
+        # otherwise set current data and be ready to measure.
+        with self.__lock:
+            if self.__first_xdata and math.isclose(self.__rotation, rotation):
+                self.__current_xdata = copy.deepcopy(xdata)
+            else:
+                self.reset()
+                self.__first_xdata = copy.deepcopy(xdata)
+                self.__rotation = rotation
+            future = self.__dispatcher.dispatch(self.__calculate)
+        if wait:
+            future.result()
 
 
 class SynchronizedScanBehaviorInterface:
-    def prepare_section(self) -> SynchronizedScanBehaviorAdjustments: ...
+    """Define interface for synchronized scan behavior.
+
+    The prepare_section method is called before each section of a synchronized scan. It must be threadsafe.
+
+    Since this is called before each section, it can be used to update the drift compensator
+    which will be applied before each scan.
+    """
+
+    def prepare_section(self) -> None: ...
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
@@ -559,10 +658,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # synchronized acquisition
         self.acquisition_state_changed_event = Event.Event()
 
+        self.drift_compensator = DriftCompensator()
+
+
     def close(self):
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
+        self.drift_compensator.close()
+        self.drift_compensator = None
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
         self.__stem_controller.disconnect_probe_connections()
@@ -1432,6 +1536,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         super().__init__()
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
+        self.__scan_frame_parameters_center_nm = Geometry.FloatPoint.make(scan_frame_parameters.center_nm)
         self.__scan_behavior = scan_behavior
         self.__camera_exposure_ms = camera_exposure_ms
         self.__enabled_channels = scan_hardware_source.get_enabled_channels()
@@ -1507,11 +1612,12 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         if self.__scan_behavior:
-            adjustments = self.__scan_behavior.prepare_section()
-            if adjustments.offset_nm:
-                # offset_nm will be in the context reference frame.
-                self.__scan_frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(self.__scan_frame_parameters.center_nm) + adjustments.offset_nm)
+            self.__scan_behavior.prepare_section()
         self.__scan_hardware_source.abort_playing(sync_timeout=5.0)
+        # update the center_nm of scan parameters by adding the accumulated value from drift to the original value.
+        # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
+        # updated and the accumulated would have to be reset.
+        self.__scan_frame_parameters.center_nm = tuple(self.__scan_frame_parameters_center_nm + self.__scan_hardware_source.drift_compensator.center_nm)
         self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -1703,6 +1809,33 @@ class CameraFrameDataStream(Acquisition.DataStream):
             self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
 
 
+
+class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
+    """A data stream which watches the first channel (HAADF) and sends its frames to the drift compensator"""
+
+    def __init__(self, data_stream: Acquisition.DataStream, drift_compensator: DriftCompensator, drift_rotation: float):
+        super().__init__(data_stream)
+        self.__drift_compensator = drift_compensator
+        self.__drift_rotation = drift_rotation
+        self.__channel = sorted(data_stream.channels)[0]
+        self.__framer = Acquisition.Framer()
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        super()._start_stream(stream_args)
+        self.__drift_compensator.reset()
+
+    def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+        if self.__channel == data_stream_event.channel:
+            self.__framer.data_available(data_stream_event, typing.cast(Acquisition.FrameCallbacks, self))
+        super()._fire_data_available(data_stream_event)
+
+    def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        self.__drift_compensator.submit(data_and_metadata, self.__drift_rotation)
+
+    def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+        pass
+
+
 class ChannelDataStream(Acquisition.ContainerDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, camera_data_channel: typing.Optional[SynchronizedDataChannelInterface], channel: typing.Optional[Acquisition.Channel] = None):
         super().__init__(data_stream)
@@ -1832,11 +1965,18 @@ def make_synchronized_scan_data_stream(
         if active_masks and len(active_masks) > 1:
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 camera_data_stream.channels[0]))
+    # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
     if scan_count > 1:
+        # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
+        collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_compensator, scan_hardware_source.drift_rotation)
+        # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
+        # AccumulateDataStream sums the successive frames in each channel
         collector = Acquisition.AccumulatedDataStream(collector)
+    # the optional ChannelDataStream updates the camera data channel for the stream matching 999
     data_stream = ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
+    # return the top level stream
     return data_stream
 
 

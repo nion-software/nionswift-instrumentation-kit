@@ -110,11 +110,10 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 def __init__(self):
                     self.__i = 0
 
-                def prepare_section(self) -> scan_base.SynchronizedScanBehaviorAdjustments:
+                def prepare_section(self) -> None:
                     self.__i += 1
                     if self.__i == 2:
                         scan_hardware_source.grab_synchronized_abort()
-                    return scan_base.SynchronizedScanBehaviorAdjustments()
 
             abort_behavior = TestAbortBehavior()
             scans_and_spectrum_images = scan_hardware_source.grab_synchronized(
@@ -550,25 +549,30 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
+            drift_compensator = scan_hardware_source.drift_compensator
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
-            self.assertIsNone(drift_correction_behavior.prepare_section().offset_nm)
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            self.assertEqual(0.0, drift_compensator.offset_nm.width)
+            self.assertEqual(0.0, drift_compensator.offset_nm.height)
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
             stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
             stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
             self.assertTrue(abs(offset_nm.height) < 0.1)
             stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
@@ -579,6 +583,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
+            drift_compensator = scan_hardware_source.drift_compensator
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
@@ -587,20 +592,24 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
-            self.assertIsNone(drift_correction_behavior.prepare_section().offset_nm)
+            self.assertEqual(0.0, drift_compensator.offset_nm.width)
+            self.assertEqual(0.0, drift_compensator.offset_nm.height)
             # offset will be rotated into the context reference frame
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
             stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
             stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)
             self.assertTrue(abs(offset_nm.height) < 0.1)
             stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
-            offset_nm = drift_correction_behavior.prepare_section().offset_nm
+            drift_correction_behavior.prepare_section()
+            offset_nm = drift_compensator.offset_nm
             dist_nm = math.sqrt(pow(offset_nm.width, 2) + pow(offset_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(offset_nm.width) < 2.1)

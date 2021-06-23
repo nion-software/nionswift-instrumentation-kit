@@ -1020,19 +1020,27 @@ class StackedDataStreamOperator(DataStreamOperator):
 
 
 class DataChannel(ReferenceCounting.ReferenceCounted):
+    """Acquisition data channel.
+
+    An acquisition data channel receives partial data and must return full data when required.
+    """
     def __init__(self):
         super().__init__()
 
     def about_to_delete(self) -> None:
+        # about_to_delete will be called on the main thread.
         pass
 
     def prepare(self, data_stream: DataStream) -> None:
+        # prepare will be called on the main thread.
         pass
 
     def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        # update_data will be called on an acquisition thread.
         raise NotImplementedError()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        # get_data may be called on an acquisition thread or the main thread.
         raise NotImplementedError()
 
 
