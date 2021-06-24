@@ -420,7 +420,7 @@ class TestScanControlClass(unittest.TestCase):
             frame_time = scan_hardware_source.get_current_frame_time()
             scan_hardware_source.start_playing()
             try:
-                time.sleep(frame_time * 1.1)
+                time.sleep(frame_time * 2.1)
                 test_context.document_controller.periodic()
                 self.assertEqual(1, len(test_context.document_model.data_items))
                 self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
