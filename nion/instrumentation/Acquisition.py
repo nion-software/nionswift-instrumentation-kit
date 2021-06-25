@@ -1075,7 +1075,13 @@ class DataAndMetadataDataChannel(DataChannel):
         # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
         # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
         # metadata contains in-progress information.
+        data_and_metadata._set_data_descriptor(data_metadata.data_descriptor)
+        data_and_metadata._set_intensity_calibration(data_metadata.intensity_calibration)
+        data_and_metadata._set_dimensional_calibrations(data_metadata.dimensional_calibrations)
         data_and_metadata._set_metadata(data_metadata.metadata)
+        data_and_metadata._set_timestamp(data_metadata.timestamp)
+        data_and_metadata.timezone = data_metadata.timezone
+        data_and_metadata.timezone_offset = data_metadata.timezone_offset
 
     def accumulate_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)

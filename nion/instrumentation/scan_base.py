@@ -5,6 +5,7 @@ import abc
 import collections
 import contextlib
 import copy
+import datetime
 import functools
 import gettext
 import logging
@@ -221,24 +222,34 @@ class SynchronizedDataChannelInterface:
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None: ...
 
 
-class DriftCompensator:
+class DriftTracker:
     """Track drift state.
 
-    Tracks several properties of drift including the acculated
-    """
+    Tracks several properties of drift including the accumulated drift and rate of drift.
 
+    Reset the tracker by calling reset.
+
+    Drift is tracked as a difference from the first data item. This has the obvious limitation of requiring drift to
+    be no larger than approximately 1/2 the field of view over the course of acquisition.
+
+    An extension to this class would be to separate the drift algorithm into its own class and allow it to be
+    configured.
+    """
     def __init__(self):
+        # dispatcher is used to calculate drift offsets on a thread
         self.__dispatcher = ThreadPool.SingleItemDispatcher()
 
+        # the lock controls access to the fields below
         self.__lock = threading.RLock()
+
+        #  The current data item is used for the delta calculation only.
         self.__first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.__current_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.__rotation = 0.0
 
-        self.__offset_nm_data_lock = threading.RLock()
-        self.__offset_nm_data = numpy.zeros((4, 0), float)
+        self.__drift_data_frame = numpy.zeros((4, 0), float)
 
-        self.__center_nm = Geometry.FloatSize()
+        self.__total_delta_nm = Geometry.FloatSize()
 
         self.drift_changed_event = Event.Event()
 
@@ -250,35 +261,72 @@ class DriftCompensator:
         with self.__lock:
             self.__first_xdata = None
             self.__current_xdata = None
-            self.__offset_nm_data = numpy.zeros((4, 0), float)
+            self.__drift_data_frame = numpy.zeros((4, 0), float)
             self.__rotation = 0.0
-            self.__center_nm = Geometry.FloatSize()
+            self.__total_delta_nm = Geometry.FloatSize()
 
     @property
-    def center_nm(self) -> Geometry.FloatSize:
-        return self.__center_nm
+    def measurement_count(self) -> int:
+        with self.__lock:
+            return self.__drift_data_frame.shape[-1]
 
     @property
-    def offset_nm_data(self) -> numpy.ndarray:
-        with self.__offset_nm_data_lock:
-            return numpy.copy(self.__offset_nm_data)
+    def total_delta_nm(self) -> Geometry.FloatSize:
+        return self.__total_delta_nm
 
     @property
-    def offset_nm(self) -> Geometry.FloatSize:
-        with self.__offset_nm_data_lock:
-            if self.__offset_nm_data.shape[-1] > 0:
-                width = self.__offset_nm_data[1][-1]
-                height = self.__offset_nm_data[0][-1]
+    def drift_data_frame(self) -> numpy.ndarray:
+        with self.__lock:
+            return numpy.copy(self.__drift_data_frame)
+
+    @property
+    def last_delta_nm(self) -> Geometry.FloatSize:
+        with self.__lock:
+            if self.measurement_count > 0:
+                width = self.__drift_data_frame[1][-1]
+                height = self.__drift_data_frame[0][-1]
             else:
                 width = 0.0
                 height = 0.0
             return Geometry.FloatSize(height=height, width=width)
 
-    def __append_offset_nm(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
-        offset_nm_xy = math.sqrt(pow(offset_nm.height, 2) + pow(offset_nm.width, 2))
-        with self.__offset_nm_data_lock:
-            self.__offset_nm_data = numpy.hstack(
-                [self.__offset_nm_data, numpy.array([offset_nm.height, offset_nm.width, offset_nm_xy, elapsed_time]).reshape(4, 1)])
+    @property
+    def _last_entry_utc_time(self) -> datetime.datetime:
+        if self.__first_xdata:
+            # self.__first_xdata.timestamp is utc datetime, so just use 'fromtimestamp' to get utc POSIX timestamp
+            return datetime.datetime.fromtimestamp(self.__first_xdata.timestamp.timestamp() + numpy.sum(self.__drift_data_frame[3]))
+        else:
+            return datetime.datetime.utcnow()
+
+    def get_drift_rate(self, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
+        """Return the drift rate over the last n measurements."""
+        n = 3 if n is None else n
+        assert n > 0
+        with self.__lock:
+            if self.measurement_count > 0:
+                assert self.__first_xdata
+                n = min(n, self.measurement_count)
+                recent_offset = Geometry.FloatSize(h=numpy.sum(self.__drift_data_frame[0][-n:]), w=numpy.sum(self.__drift_data_frame[1][-n:]))
+                recent_time = numpy.sum(self.__drift_data_frame[3][-n:])
+                return recent_offset / recent_time
+            return Geometry.FloatSize()
+
+    def predict_drift(self, utc_time: datetime.datetime, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
+        """Predict total drift (nm) at utc_time."""
+        with self.__lock:
+            future_delta_nm = Geometry.FloatSize()
+            if self.__drift_data_frame.shape[-1] > 0:
+                assert self.__first_xdata
+                last_entry_timestamp = self.__first_xdata.timestamp.timestamp() + numpy.sum(self.__drift_data_frame[3])
+                delta_timestamp = utc_time.timestamp() - last_entry_timestamp
+                future_delta_nm = delta_timestamp * self.get_drift_rate(n=n)
+            return self.__total_delta_nm + future_delta_nm
+
+    def __append_drift(self, delta_nm: Geometry.FloatSize, delta_time: float) -> None:
+        offset_nm_xy = math.sqrt(pow(delta_nm.height, 2) + pow(delta_nm.width, 2))
+        with self.__lock:
+            self.__drift_data_frame = numpy.hstack(
+                [self.__drift_data_frame, numpy.array([delta_nm.height, delta_nm.width, offset_nm_xy, delta_time]).reshape(4, 1)])
 
     def __calculate(self) -> None:
         with self.__lock:
@@ -286,23 +334,26 @@ class DriftCompensator:
             current_xdata = self.__current_xdata
             rotation = self.__rotation
 
-        if first_xdata and current_xdata:
-            quality, offset = xd.register_template(first_xdata, current_xdata)
-            elapsed_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds()
-            offset = Geometry.FloatPoint.make(offset)
-            offset_nm = Geometry.FloatSize(
-                h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
-                w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
-            # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
-            # rotate back into context reference frame
-            offset_nm = offset_nm.rotate(-rotation)
-            with self.__lock:
-                self.__append_offset_nm(offset_nm, elapsed_time)
+            if first_xdata and current_xdata:
+                quality, offset = xd.register_template(first_xdata, current_xdata)
+                delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds() - numpy.sum(self.__drift_data_frame[3])
+                assert delta_time > 0.0
+                offset = Geometry.FloatPoint.make(offset)
+                delta_nm = Geometry.FloatSize(
+                    h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
+                    w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+                # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
+                # rotate back into context reference frame
+                delta_nm = delta_nm.rotate(-rotation)
+                self.__append_drift(delta_nm, delta_time)
                 # add the difference from the last time, but negative since center_nm positive shifts up/left
-                self.__center_nm = self.__center_nm - offset_nm
-            self.drift_changed_event.fire(offset_nm, elapsed_time)
+                self.__total_delta_nm = self.__total_delta_nm + delta_nm
 
-    def submit(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, wait: bool = False) -> None:
+        # this call is not under lock - so recheck the condition upon which we fire the event.
+        if first_xdata and current_xdata:
+            self.drift_changed_event.fire(delta_nm, delta_time)
+
+    def submit_image(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, wait: bool = False) -> None:
         # set first data if it hasn't been set or if rotation has changed.
         # otherwise set current data and be ready to measure.
         with self.__lock:
@@ -326,7 +377,7 @@ class SynchronizedScanBehaviorInterface:
     which will be applied before each scan.
     """
 
-    def prepare_section(self) -> None: ...
+    def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None: ...
 
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
@@ -658,15 +709,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # synchronized acquisition
         self.acquisition_state_changed_event = Event.Event()
 
-        self.drift_compensator = DriftCompensator()
-
+        self.drift_tracker = DriftTracker()
 
     def close(self):
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
-        self.drift_compensator.close()
-        self.drift_compensator = None
+        self.drift_tracker.close()
+        self.drift_tracker = None
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
         self.__stem_controller.disconnect_probe_connections()
@@ -1532,12 +1582,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
 
 class ScanFrameDataStream(Acquisition.DataStream):
-    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters, camera_exposure_ms: float, scan_behavior: typing.Optional[SynchronizedScanBehaviorInterface] = None):
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters,
+                 camera_exposure_ms: float, camera_data_stream: CameraFrameDataStream,
+                 scan_behavior: typing.Optional[SynchronizedScanBehaviorInterface] = None):
         super().__init__()
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__scan_frame_parameters_center_nm = Geometry.FloatPoint.make(scan_frame_parameters.center_nm)
         self.__scan_behavior = scan_behavior
+        self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
         self.__enabled_channels = scan_hardware_source.get_enabled_channels()
         self.__channel_modifier: typing.Optional[str] = None
@@ -1617,7 +1670,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # update the center_nm of scan parameters by adding the accumulated value from drift to the original value.
         # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
         # updated and the accumulated would have to be reset.
-        self.__scan_frame_parameters.center_nm = tuple(self.__scan_frame_parameters_center_nm + self.__scan_hardware_source.drift_compensator.center_nm)
+        drift_tracker = self.__scan_hardware_source.drift_tracker
+        camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead
+        delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+        self.__scan_frame_parameters.center_nm = tuple(self.__scan_frame_parameters_center_nm - delta_nm)
         self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -1686,6 +1742,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__camera_frame_parameters = camera_frame_parameters
         self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
         self.__additional_metadata = additional_metadata or dict()
+        self.__camera_sequence_overheads: typing.List[float] = list()
+        self.camera_sequence_overhead = 0.0
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
@@ -1697,6 +1755,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+        start = time.perf_counter()
         scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         camera_frame_parameters = self.__camera_frame_parameters
         # clear the processing parameters in the original camera frame parameters.
@@ -1722,13 +1781,21 @@ class CameraFrameDataStream(Acquisition.DataStream):
             operator.apply()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
+        self.__camera_sequence_overheads.append(time.perf_counter() - start)
+        while len(self.__camera_sequence_overheads) > 4:
+            self.__camera_sequence_overheads.pop(0)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        start = time.perf_counter()
         self.__slice = list(stream_args.slice)
         self.__shape = list(stream_args.shape)
         scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, scan_shape)
         self.__last_valid_rows = 0
+        self.__camera_sequence_overheads.append(time.perf_counter() - start)
+        while len(self.__camera_sequence_overheads) > 4:
+            self.__camera_sequence_overheads.pop(0)
+        self.camera_sequence_overhead = sum(self.__camera_sequence_overheads) / (len(self.__camera_sequence_overheads) / 2)
 
     def _finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_synchronized_end()
@@ -1813,16 +1880,16 @@ class CameraFrameDataStream(Acquisition.DataStream):
 class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
     """A data stream which watches the first channel (HAADF) and sends its frames to the drift compensator"""
 
-    def __init__(self, data_stream: Acquisition.DataStream, drift_compensator: DriftCompensator, drift_rotation: float):
+    def __init__(self, data_stream: Acquisition.DataStream, drift_tracker: DriftTracker, drift_rotation: float):
         super().__init__(data_stream)
-        self.__drift_compensator = drift_compensator
+        self.__drift_tracker = drift_tracker
         self.__drift_rotation = drift_rotation
         self.__channel = sorted(data_stream.channels)[0]
         self.__framer = Acquisition.Framer()
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         super()._start_stream(stream_args)
-        self.__drift_compensator.reset()
+        self.__drift_tracker.reset()
 
     def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel == data_stream_event.channel:
@@ -1830,7 +1897,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super()._fire_data_available(data_stream_event)
 
     def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        self.__drift_compensator.submit(data_and_metadata, self.__drift_rotation)
+        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, wait=True)
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
@@ -1930,25 +1997,25 @@ def make_synchronized_scan_data_stream(
                                  scan_hardware_source.scan_device)
 
     camera_exposure_ms = camera_frame_parameters["exposure_ms"]
-    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, camera_exposure_ms,
-                                           scan_behavior)
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
                                   "instrument": copy.deepcopy(instrument_metadata)}
-    camera_data_stream: Acquisition.DataStream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
-                                                                       scan_hardware_source.flyback_pixels,
-                                                                       additional_camera_metadata)
+    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
+                                               scan_hardware_source.flyback_pixels, additional_camera_metadata)
+    processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.get("processing", None) == "sum_project":
-        camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
     elif camera_frame_parameters.get("processing", None) == "sum_masked":
         active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
         if active_masks:
             operator = Acquisition.StackedDataStreamOperator(
                 [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
-            camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
         else:
             operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
-            camera_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=operator)
-    combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
+    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, camera_exposure_ms,
+                                           camera_data_stream, scan_behavior)
+    combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, processed_camera_data_stream])
     scan_size = scan_data_stream.scan_size
     section_height = section_height or scan_size.height
     section_count = (scan_size.height + section_height - 1) // section_height
@@ -1964,12 +2031,12 @@ def make_synchronized_scan_data_stream(
         active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
         if active_masks and len(active_masks) > 1:
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
-                camera_data_stream.channels[0]))
+                processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
-        collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_compensator, scan_hardware_source.drift_rotation)
+        collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         # AccumulateDataStream sums the successive frames in each channel

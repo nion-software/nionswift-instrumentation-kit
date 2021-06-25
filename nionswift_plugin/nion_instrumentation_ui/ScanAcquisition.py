@@ -128,12 +128,12 @@ class DataItemDataChannel(Acquisition.DataChannel):
 class DriftLogger:
     """Drift logger to update the drift log with ongoing drift measurements."""
 
-    def __init__(self, document_model: DocumentModel.DocumentModel, drift_compensator: scan_base.DriftCompensator, event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, document_model: DocumentModel.DocumentModel, drift_tracker: scan_base.DriftTracker, event_loop: asyncio.AbstractEventLoop):
         self.__document_model = document_model
-        self.__drift_compensator = drift_compensator
+        self.__drift_tracker = drift_tracker
         self.__event_loop = event_loop
         self.__data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
-        self.__drift_changed_event_listener = drift_compensator.drift_changed_event.listen(self.__drift_changed)
+        self.__drift_changed_event_listener = drift_tracker.drift_changed_event.listen(self.__drift_changed)
 
     def close(self) -> None:
         self.__drift_changed_event_listener.close()
@@ -142,7 +142,9 @@ class DriftLogger:
     def __ensure_drift_log_data_item(self) -> None:
         # must be called on main thread
         if not self.__data_item:
-            data_item = DataItem.DataItem(self.__drift_compensator.offset_nm_data)
+            drift_data_frame = self.__drift_tracker.drift_data_frame
+            delta_nm_data = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+            data_item = DataItem.DataItem(delta_nm_data)
             data_item.title = f"Drift Log"
             self.__document_model.append_data_item(data_item)
             display_item = self.__document_model.get_display_item_for_data_item(data_item)
@@ -154,18 +156,19 @@ class DriftLogger:
             display_item._set_display_layer_properties(2, label=_("m"), stroke_color=display_item.get_display_layer_property(2, "fill_color"), fill_color=None)
             self.__data_item = data_item
 
-    def __update_drift_log_data_item(self, offset_nm_data: numpy.ndarray) -> None:
+    def __update_drift_log_data_item(self, delta_nm_data: numpy.ndarray) -> None:
         # must be called on main thread
         # check __drift_changed_event_listener to see if the logger has been closed
         if self.__drift_changed_event_listener:
             self.__ensure_drift_log_data_item()
             assert self.__data_item
-            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(offset_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
+            offset_nm_xdata = DataAndMetadata.new_data_and_metadata(delta_nm_data, intensity_calibration=Calibration.Calibration(units="nm"))
             self.__data_item.set_data_and_metadata(offset_nm_xdata)
 
     def __drift_changed(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
-        offset_nm_data = numpy.copy(self.__drift_compensator.offset_nm_data)
-        self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, offset_nm_data))
+        drift_data_frame = self.__drift_tracker.drift_data_frame
+        delta_nm_data = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+        self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, delta_nm_data))
 
 
 class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
@@ -186,7 +189,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
 
-    def prepare_section(self) -> None:
+    def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
         # this method must be thread safe
         # start with the context frame parameters and adjust for the drift region
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
@@ -202,10 +205,12 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
                 frame_parameters.subscan_rotation = drift_rotation
                 # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
-                drift_compensator = self.__scan_hardware_source.drift_compensator
-                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) + drift_compensator.center_nm)
+                drift_tracker = self.__scan_hardware_source.drift_tracker
+                utc_time = utc_time or datetime.datetime.utcnow()
+                delta_nm = drift_tracker.predict_drift(utc_time)
+                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) - delta_nm)
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
-                drift_compensator.submit(xdatas[0], drift_rotation, wait=True)
+                drift_tracker.submit_image(xdatas[0], drift_rotation, wait=True)
 
 
 ProcessingOption = collections.namedtuple("ProcessingOption", ["processing_id", "display_name"])
@@ -275,7 +280,7 @@ class ScanAcquisitionController:
             section_height=section_height,
             scan_count=self.__scan_specifier.scan_count)
         self.__scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_item_data_channel)
-        self.__scan_drift_logger = DriftLogger(document_model, scan_hardware_source.drift_compensator, event_loop)
+        self.__scan_drift_logger = DriftLogger(document_model, scan_hardware_source.drift_tracker, event_loop)
 
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
