@@ -356,9 +356,9 @@ class ScanControlStateController:
         channel_count = self.__scan_hardware_source.channel_count
         self.__channel_enabled = [False] * channel_count
         for channel_index in range(channel_count):
-            channel_id, name, enabled = self.__scan_hardware_source.get_channel_state(channel_index)
-            self.__channel_state_changed(channel_index, channel_id, name, enabled)
-            self.__channel_enabled[channel_index] = enabled
+            channel_state = self.__scan_hardware_source.get_channel_state(channel_index)
+            self.__channel_state_changed(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
+            self.__channel_enabled[channel_index] = channel_state.enabled
         self.__update_buttons()
         if self.on_profiles_changed:
             profile_items = list(ScanControlStateController.profiles.items())

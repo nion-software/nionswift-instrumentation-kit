@@ -179,7 +179,7 @@ def better_ravel_index(index: ShapeType, shape: ShapeType) -> int:
 def better_unravel_index(index: int, shape: ShapeType) -> ShapeType:
     # ravel index only works for indexes less than the dimension size.
     # this version gives the index for indexes at the dimension size too.
-    return numpy.unravel_index(index, (shape[0] + 1,) + tuple(shape[1:]))
+    return typing.cast(ShapeType, numpy.unravel_index(index, (shape[0] + 1,) + tuple(shape[1:])))
 
 
 def ravel_slice_start(slices: SliceType, shape: ShapeType) -> int:
@@ -196,9 +196,9 @@ def ravel_slice_stop(slices: SliceType, shape: ShapeType) -> int:
     return better_ravel_index(i, shape) - better_ravel_index((1,) * len(slices[:-1]) + (0,), shape)
 
 
-def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typing.Tuple[typing.Tuple[slice]]:
+def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typing.Tuple[typing.Tuple[slice, ...], ...]:
     start, stop = range_slice.start, range_slice.stop
-    slices: typing.List[typing.Tuple[slice]] = list()
+    slices: typing.List[typing.Tuple[slice, ...]] = list()
     # increase the start until the lower dimensions are filled
     ss: typing.List[slice]
     for i in reversed(range(0, len(shape))):

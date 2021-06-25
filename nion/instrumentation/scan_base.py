@@ -5,6 +5,7 @@ import abc
 import collections
 import contextlib
 import copy
+import dataclasses
 import datetime
 import functools
 import gettext
@@ -1003,7 +1004,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
         return self.__stem_controller.line_scan_vector
 
-    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Tuple[int, int]) -> None:
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]]) -> None:
         scan_context = self.scan_context
         if scan_context.is_valid:
             frame_parameters.size = tuple(scan_context.size)
@@ -1260,7 +1261,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def channel_count(self) -> int:
         return len(self.__device.channels_enabled)
 
-    def get_channel_state(self, channel_index):
+    def get_channel_state(self, channel_index) -> ChannelState:
         channels_enabled = self.__device.channels_enabled
         assert 0 <= channel_index < len(channels_enabled)
         name = self.__device.get_channel_name(channel_index)
@@ -1281,12 +1282,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_data_channel_state(self, channel_index) -> typing.Tuple[str, str, bool]:
         # channel indexes larger than then the channel count will be subscan channels
         if channel_index < self.channel_count:
-            channel_id, name, enabled = self.get_channel_state(channel_index)
-            return channel_id, name, enabled if not self.subscan_enabled else False
+            channel_state = self.get_channel_state(channel_index)
+            return channel_state.channel_id, channel_state.name, channel_state.enabled if not self.subscan_enabled else False
         elif channel_index < self.channel_count * 2:
-            channel_id, name, enabled = self.get_channel_state(channel_index - self.channel_count)
-            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_id, name)
-            return subscan_channel_id, subscan_channel_name, enabled if self.subscan_enabled else False
+            channel_state = self.get_channel_state(channel_index - self.channel_count)
+            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_state.channel_id, channel_state.name)
+            return subscan_channel_id, subscan_channel_name, channel_state.enabled if self.subscan_enabled else False
         else:
             return self.data_channels[channel_index].channel_id, self.data_channels[channel_index].name, False
 
@@ -1369,7 +1370,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.stop_playing()
         self.__task_queue.put(channel_states_changed)
 
-    ChannelState = collections.namedtuple("ChannelState", ["channel_id", "name", "enabled"])
+    @dataclasses.dataclass
+    class ChannelState:
+        channel_id: str
+        name: str
+        enabled: bool
 
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
         for channel_index in range(self.channel_count):
@@ -1377,10 +1382,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 return channel_index
         return None
 
-    def __make_channel_id(self, channel_index) -> str:
+    def __make_channel_id(self, channel_index: int) -> str:
         return "abcdefgh"[channel_index]
 
-    def __make_channel_state(self, channel_index, channel_name, channel_enabled) -> ChannelState:
+    def __make_channel_state(self, channel_index: int, channel_name: str, channel_enabled: bool) -> ChannelState:
         return ScanHardwareSource.ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
     def __device_state_changed(self, profile_frame_parameters_list, device_channel_states) -> None:

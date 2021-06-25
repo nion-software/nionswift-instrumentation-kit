@@ -199,6 +199,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         drift_rotation = self.__scan_hardware_source.drift_rotation
         if drift_channel_id is not None and drift_region is not None:
             drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
+            assert drift_channel_index is not None
             frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4)
             if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
                 frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
@@ -260,7 +261,7 @@ class ScanAcquisitionController:
         channel_names = {c: scan_hardware_source.get_channel_state(c).name for c in scan_hardware_source.get_enabled_channels()}
         channel_names[999] = camera_hardware_source.display_name
 
-        data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names)
+        data_item_data_channel = DataItemDataChannel(self.__document_controller, typing.cast(typing.Mapping[Acquisition.Channel, str], channel_names))
 
         document_model = document_window.library._document_model
         event_loop = document_window._document_window.event_loop
