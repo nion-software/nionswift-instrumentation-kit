@@ -160,7 +160,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing()
             try:
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(2))
-                time.sleep(self.exposure * 0.1)
+                time.sleep(self.exposure * 1.1)
                 hardware_source.set_selected_profile_index(1)
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(1))
             finally:
