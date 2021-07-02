@@ -337,6 +337,7 @@ class DriftTracker:
 
             if first_xdata and current_xdata:
                 quality, offset = xd.register_template(first_xdata, current_xdata)
+                # print(f"cc quality {quality}")
                 delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds() - numpy.sum(self.__drift_data_frame[3])
                 assert delta_time > 0.0
                 offset = Geometry.FloatPoint.make(offset)
@@ -349,6 +350,7 @@ class DriftTracker:
                 self.__append_drift(delta_nm, delta_time)
                 # add the difference from the last time, but negative since center_nm positive shifts up/left
                 self.__total_delta_nm = self.__total_delta_nm + delta_nm
+                # print(f"drift rate {self.get_drift_rate()}")
 
         # this call is not under lock - so recheck the condition upon which we fire the event.
         if first_xdata and current_xdata:
@@ -1678,6 +1680,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         drift_tracker = self.__scan_hardware_source.drift_tracker
         camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead
         delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+        # print(f"predicted {delta_nm} [overhead {int(camera_sequence_overhead * 1000)}ms]")
         self.__scan_frame_parameters.center_nm = tuple(self.__scan_frame_parameters_center_nm - delta_nm)
         self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
 
