@@ -1869,8 +1869,11 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                 count,
                                                                 source_slice,
                                                                 data_stream_state)
-            self.fire_data_available(data_stream_event)
-            self._sequence_next(channel, count)
+            # Camera devices are not supposed to report data if they have none,
+            # but check anyway in case camera device isn't entirely compliant.
+            if count > 0:
+                self.fire_data_available(data_stream_event)
+                self._sequence_next(channel, count)
             self.__last_valid_rows = valid_rows
 
         # otherwise, acquire the next section and continue
@@ -1902,7 +1905,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super()._fire_data_available(data_stream_event)
 
     def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, wait=True)
+        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation)
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
