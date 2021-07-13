@@ -825,7 +825,7 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             if channel in data_stream.channels:
                 return data_stream.get_info(channel)
-        assert False
+        assert False, f"No info for channel {channel}"
 
     @property
     def is_finished(self) -> bool:
@@ -1102,16 +1102,19 @@ class FrameCallbacks:
 
 
 class Framer(ReferenceCounting.ReferenceCounted):
-    def __init__(self, data_channel: typing.Optional[DataChannel] = None):
+    def __init__(self, data_channel: DataChannel):
         super().__init__()
         # data and indexes use the _incoming_ data channels as keys.
-        self.__data_channel = (data_channel or DataAndMetadataDataChannel()).add_ref()
+        self.__data_channel = data_channel.add_ref()
         self.__indexes: typing.Dict[Channel, int] = dict()
 
     def about_to_delete(self) -> None:
         self.__data_channel.remove_ref()
         self.__data_channel = None
         super().about_to_delete()
+
+    def prepare(self, data_stream: DataStream) -> None:
+        self.__data_channel.prepare(data_stream)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data_channel.get_data(channel)
@@ -1190,7 +1193,7 @@ class FramedDataStream(DataStream):
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
-        self.__framer = Framer(data_channel).add_ref()
+        self.__framer = Framer(data_channel or DataAndMetadataDataChannel()).add_ref()
 
     def about_to_delete(self) -> None:
         self.__listener.close()
@@ -1241,6 +1244,9 @@ class FramedDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
+
+    def prepare_data_channel(self) -> None:
+        self.__framer.prepare(self)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
@@ -1525,6 +1531,67 @@ class ContainerDataStream(DataStream):
         self.fire_data_available(data_stream_event)
 
 
+class MonitorDataStream(DataStream):
+    """Non-controlling data stream. Monitors data coming out of data stream."""
+
+    def __init__(self, data_stream: DataStream):
+        super().__init__()
+        self.__data_stream = data_stream.add_ref()
+        self.__listener = data_stream.data_available_event.listen(self.__data_available)
+
+    def about_to_delete(self) -> None:
+        self.__listener.close()
+        self.__listener = None
+        self.__data_stream.remove_ref()
+        self.__data_stream = None
+        super().about_to_delete()
+
+    @property
+    def data_stream(self) -> DataStream:
+        return self.__data_stream
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return tuple(c + 10 for c in self.__data_stream.channels)
+
+    def get_info(self, channel: Channel) -> DataStreamInfo:
+        return self.__data_stream.get_info(channel - 10)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__data_stream.is_finished
+
+    def _acquire_finished(self) -> None:
+        pass
+
+    @property
+    def _progress(self) -> float:
+        return self.__data_stream.progress
+
+    def _abort_stream(self) -> None:
+        pass
+
+    def _send_next(self) -> None:
+        pass
+
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+        pass
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        pass
+
+    def _advance_stream(self) -> None:
+        pass
+
+    def _finish_stream(self) -> None:
+        pass
+
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        data_stream_event.channel += 10
+        self.fire_data_available(data_stream_event)
+        data_stream_event.channel -= 10
+
+
 class AccumulatedDataStream(ContainerDataStream):
     """Change a data stream producing a sequence into an accumulated non-sequence.
     """
@@ -1623,32 +1690,28 @@ def acquire(data_stream: DataStream) -> None:
 
 
 class Acquisition:
-    def __init__(self, data_stream: DataStream, *, data_channel: DataChannel = None):
-        self.data_stream = data_stream.add_ref()
-        self.data_channel = data_channel.add_ref() if data_channel else None
-        self.__maker = typing.cast(FramedDataStream, None)
-        self.__results: typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]] = None
+    def __init__(self, data_stream: FramedDataStream):
+        self.__data_stream = data_stream.add_ref()
         self.__task = typing.cast(asyncio.Task, None)
+        self.__is_aborted = False
 
     def close(self) -> None:
-        if self.data_channel:
-            self.data_channel.remove_ref()
-        self.data_stream.remove_ref()
+        if self.__data_stream:
+            self.__data_stream.remove_ref()
+            self.__data_stream = None
 
     def prepare_acquire(self) -> None:
-        data_channel = self.data_channel
-        self.__maker = FramedDataStream(self.data_stream, data_channel=data_channel)
-        if data_channel:
-            data_channel.prepare(self.__maker)
+        # this is called on the main thread. give data channel a chance to prepare.
+        self.__data_stream.prepare_data_channel()
 
     def acquire(self) -> None:
         try:
-            with self.__maker.ref():
-                acquire(self.__maker)
-                if not self.__maker.is_aborted:
-                    self.__results = ([self.__maker.get_data(0)], [self.__maker.get_data(999)])
+            with self.__data_stream.ref():
+                acquire(self.__data_stream)
+                self.__is_aborted = self.__data_stream.is_aborted
         finally:
-            self.__maker = typing.cast(FramedDataStream, None)
+            self.__data_stream.remove_ref()
+            self.__data_stream = typing.cast(FramedDataStream, None)
 
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
         async def grab_async():
@@ -1662,8 +1725,8 @@ class Acquisition:
         self.__task = event_loop.create_task(grab_async())
 
     def abort_acquire(self) -> None:
-        if self.__maker:
-            self.__maker.abort_stream()
+        if self.__data_stream:
+            self.__data_stream.abort_stream()
 
     def wait_acquire(self, timeout: float = 60.0, *, on_periodic: typing.Callable[[], None]) -> None:
         start = time.time()
@@ -1674,13 +1737,13 @@ class Acquisition:
 
     @property
     def progress(self) -> float:
-        if self.__maker:
-            return self.__maker.progress
+        if self.__data_stream:
+            return self.__data_stream.progress
         return 0.0
 
     @property
-    def results(self) -> typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]:
-        return self.__results
+    def is_aborted(self) -> bool:
+        return self.__is_aborted
 
 
 """

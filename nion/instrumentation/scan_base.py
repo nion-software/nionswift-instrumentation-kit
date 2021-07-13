@@ -912,15 +912,19 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                                                                            section_height=section_height,
                                                                            scan_count=scan_count,
                                                                            old_move_axis=camera_data_channel is not None)
-        scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_channel)
-        with contextlib.closing(scan_acquisition):
+        result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_channel)
+        scan_acquisition = Acquisition.Acquisition(result_data_stream)
+        with result_data_stream.ref(), contextlib.closing(scan_acquisition):
+            results: ScanHardwareSource.GrabSynchronizedResult = None
             self.__scan_acquisition = scan_acquisition
             try:
                 scan_acquisition.prepare_acquire()
                 scan_acquisition.acquire()
+                if not scan_acquisition.is_aborted:
+                    results = ([result_data_stream.get_data(0)], [result_data_stream.get_data(999)])
             finally:
                 self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
-            return scan_acquisition.results
+            return results
 
     def grab_synchronized_abort(self) -> None:
         if self.__scan_acquisition:
@@ -1884,7 +1888,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
             self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
 
 
-
 class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
     """A data stream which watches the first channel (HAADF) and sends its frames to the drift compensator"""
 
@@ -1893,7 +1896,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         self.__drift_tracker = drift_tracker
         self.__drift_rotation = drift_rotation
         self.__channel = sorted(data_stream.channels)[0]
-        self.__framer = Acquisition.Framer()
+        self.__framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         super()._start_stream(stream_args)
@@ -2048,7 +2051,9 @@ def make_synchronized_scan_data_stream(
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         # AccumulateDataStream sums the successive frames in each channel
+        monitor = Acquisition.MonitorDataStream(collector)
         collector = Acquisition.AccumulatedDataStream(collector)
+        collector = Acquisition.CombinedDataStream([collector, monitor])
     # the optional ChannelDataStream updates the camera data channel for the stream matching 999
     data_stream = ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
     # return the top level stream

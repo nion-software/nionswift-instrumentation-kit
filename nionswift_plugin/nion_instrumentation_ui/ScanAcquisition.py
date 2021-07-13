@@ -231,6 +231,7 @@ class ScanAcquisitionController:
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
         self.__scan_specifier = copy.deepcopy(scan_specifier)
+        self.__scan_result_data_stream = typing.cast(Acquisition.FramedDataStream, None)
         self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
         self.__scan_drift_logger = typing.cast(DriftLogger, None)
         self.acquisition_state_changed_event = Event.Event()
@@ -280,13 +281,16 @@ class ScanAcquisitionController:
             scan_behavior=drift_correction_behavior,
             section_height=section_height,
             scan_count=self.__scan_specifier.scan_count)
-        self.__scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, data_channel=data_item_data_channel)
+        self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
+        self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
         self.__scan_drift_logger = DriftLogger(document_model, scan_hardware_source.drift_tracker, event_loop)
 
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
             self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+            self.__scan_result_data_stream.remove_ref()
+            self.__scan_result_data_stream = typing.cast(Acquisition.FramedDataStream, None)
             self.__scan_drift_logger.close()
             self.__scan_drift_logger = typing.cast(DriftLogger, None)
 
