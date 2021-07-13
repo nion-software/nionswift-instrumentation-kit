@@ -353,7 +353,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
 
@@ -635,7 +635,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
             si_data_item = None
@@ -665,7 +665,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
             si_data_item = None
@@ -696,7 +696,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
 
             document_controller.periodic()
@@ -728,7 +728,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.NONE)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.NONE, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
 
             document_controller.periodic()
@@ -765,7 +765,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                             Facade.HardwareSource(scan_hardware_source),
                                                                                             Facade.HardwareSource(camera_hardware_source),
                                                                                             scan_specifier)
-                    scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_MASKED)
+                    scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_MASKED, ScanAcquisition.ScanProcessing(True, False))
                     scan_acquisition_controller._wait()
                     document_controller.periodic()
                     si_data_item = None
@@ -800,7 +800,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
-            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             updated_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             for k in list(updated_frame_parameters.keys()):
