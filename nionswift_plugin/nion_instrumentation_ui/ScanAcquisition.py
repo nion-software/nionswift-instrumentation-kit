@@ -3,6 +3,7 @@ from __future__ import annotations
 # system imports
 import asyncio
 import copy
+import dataclasses
 import datetime
 import enum
 import functools
@@ -214,6 +215,12 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 drift_tracker.submit_image(xdatas[0], drift_rotation, wait=True)
 
 
+@dataclasses.dataclass
+class ScanProcessing:
+    include_raw: bool
+    include_summed: bool
+
+
 ProcessingOption = collections.namedtuple("ProcessingOption", ["processing_id", "display_name"])
 
 
@@ -236,7 +243,8 @@ class ScanAcquisitionController:
         self.__scan_drift_logger = typing.cast(DriftLogger, None)
         self.acquisition_state_changed_event = Event.Event()
 
-    def start(self, processing: ScanAcquisitionProcessing) -> None:
+    def start(self, processing: ScanAcquisitionProcessing, scan_processing: ScanProcessing) -> None:
+        assert scan_processing.include_raw or scan_processing.include_summed
 
         document_window = self.__document_controller
 
@@ -283,7 +291,10 @@ class ScanAcquisitionController:
             camera_frame_parameters=camera_frame_parameters,
             scan_behavior=drift_correction_behavior,
             section_height=section_height,
-            scan_count=self.__scan_specifier.scan_count)
+            scan_count=self.__scan_specifier.scan_count,
+            include_raw=scan_processing.include_raw,
+            include_summed=scan_processing.include_summed
+        )
         self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
         self.__scan_drift_logger = DriftLogger(document_model, scan_hardware_source.drift_tracker, event_loop)
@@ -510,6 +521,9 @@ class PanelDelegate:
         self.__roi_description = ui.create_label_widget()
 
         self.__scan_count_widget = ui.create_line_edit_widget()
+        self.__scan_count_widget._widget.set_property("width", 72)
+
+        self.__scan_processing_widget = ui.create_combo_box_widget(items=["Raw", "Sum", "Raw + Sum"])
 
         self.__scan_width_widget = ui.create_line_edit_widget()
 
@@ -546,6 +560,8 @@ class PanelDelegate:
         scan_count_row.add(ui.create_label_widget("Scan Count"))
         scan_count_row.add_spacing(12)
         scan_count_row.add(self.__scan_count_widget)
+        scan_count_row.add_spacing(12)
+        scan_count_row.add(self.__scan_processing_widget)
         scan_count_row.add_spacing(12)
         scan_count_row.add_stretch()
 
@@ -692,7 +708,8 @@ class PanelDelegate:
                 if scan_hardware_source and camera_hardware_source:
                     self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source, self.__scan_specifier)
                     self.__acquisition_state_changed_event_listener = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(acquisition_state_changed)
-                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_item)
+                    scan_processing = ScanProcessing(self.__scan_processing_widget.current_index in (0, 2), self.__scan_processing_widget.current_index in (1, 2))
+                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_item, scan_processing)
 
         self.__acquire_button.on_clicked = acquire_sequence
 
