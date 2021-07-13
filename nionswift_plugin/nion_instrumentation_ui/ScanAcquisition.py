@@ -259,10 +259,13 @@ class ScanAcquisitionController:
 
         camera_frame_parameters["processing"] = processing.value.processing_id
 
-        channel_names = {c: scan_hardware_source.get_channel_state(c).name for c in scan_hardware_source.get_enabled_channels()}
-        channel_names[999] = camera_hardware_source.display_name
+        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+        for c in scan_hardware_source.get_enabled_channels():
+            channel_state = scan_hardware_source.get_channel_state(c)
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_state.channel_id)] = channel_state.name
+        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.display_name
 
-        data_item_data_channel = DataItemDataChannel(self.__document_controller, typing.cast(typing.Mapping[Acquisition.Channel, str], channel_names))
+        data_item_data_channel = DataItemDataChannel(self.__document_controller, channel_names)
 
         document_model = document_window.library._document_model
         event_loop = document_window._document_window.event_loop
