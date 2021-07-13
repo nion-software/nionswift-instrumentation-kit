@@ -921,7 +921,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 scan_acquisition.prepare_acquire()
                 scan_acquisition.acquire()
                 if not scan_acquisition.is_aborted:
-                    results = ([result_data_stream.get_data(0)], [result_data_stream.get_data(999)])
+                    scan_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == self.hardware_source_id]
+                    camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera.hardware_source_id]
+                    results = (scan_results, camera_results)
             finally:
                 self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
             return results
@@ -1638,9 +1640,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
         def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
             with self.__lock:
-                channel = data_channel.index
+                channel_index = data_channel.index
                 if scan_hardware_source.channel_count <= data_channel.index < scan_hardware_source.channel_count * 2:
-                    channel -= scan_hardware_source.channel_count
+                    channel_index -= scan_hardware_source.channel_count
+                channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
                 valid_rows = data_and_metadata.metadata.get("hardware_source", dict()).get("valid_rows", 0)
                 available_rows = self.__available_rows.get(channel, 0)
                 if valid_rows > available_rows:
@@ -1670,7 +1673,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
-        return tuple(range(len(self.__enabled_channels)))
+        return tuple(Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(c)) for c in self.__enabled_channels)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         if self.__scan_behavior:
@@ -1756,7 +1759,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
-        return (999,)
+        return (Acquisition.Channel(self.__camera_hardware_source.hardware_source_id),)
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
@@ -1862,7 +1865,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                          DataAndMetadata.DataDescriptor(False, 0, data_channel_data_and_metadata.datum_dimension_count),
                                                          data_channel_data_and_metadata.timezone,
                                                          data_channel_data_and_metadata.timezone_offset)
-            channel = 999
+            channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
             count = src_rect.height * src_rect.width
             total_count = numpy.product(data_channel_data_and_metadata.navigation_dimension_shape, dtype=numpy.int64)
             data = data_channel_data_and_metadata.data.reshape((total_count,) + data_channel_data_and_metadata.datum_dimension_shape)
@@ -1895,7 +1898,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super().__init__(data_stream)
         self.__drift_tracker = drift_tracker
         self.__drift_rotation = drift_rotation
-        self.__channel = sorted(data_stream.channels)[0]
+        self.__channel = data_stream.channels[0]
         self.__framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -1994,6 +1997,7 @@ def make_synchronized_scan_data_stream(
         camera_frame_parameters: camera_base.CameraFrameParameters,
         camera_data_channel: SynchronizedDataChannelInterface = None, section_height: int = None,
         scan_behavior: SynchronizedScanBehaviorInterface = None, scan_count: int = 1,
+        include_raw: bool = True, include_summed: bool = False,
         old_move_axis: bool = False) -> Acquisition.DataStream:
 
     scan_frame_parameters.setdefault("scan_id", str(uuid.uuid4()))
@@ -2050,12 +2054,17 @@ def make_synchronized_scan_data_stream(
         collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
-        # AccumulateDataStream sums the successive frames in each channel
-        monitor = Acquisition.MonitorDataStream(collector)
-        collector = Acquisition.AccumulatedDataStream(collector)
-        collector = Acquisition.CombinedDataStream([collector, monitor])
+        assert include_raw or include_summed
+        if include_raw and include_summed:
+            # AccumulateDataStream sums the successive frames in each channel
+            monitor = Acquisition.MonitorDataStream(collector, "raw")
+            collector = Acquisition.AccumulatedDataStream(collector)
+            collector = Acquisition.CombinedDataStream([collector, monitor])
+        elif include_summed:
+            collector = Acquisition.AccumulatedDataStream(collector)
+        # include_raw is the default behavior
     # the optional ChannelDataStream updates the camera data channel for the stream matching 999
-    data_stream = ChannelDataStream(collector, camera_data_channel, 999) if camera_data_channel else collector
+    data_stream = ChannelDataStream(collector, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id)) if camera_data_channel else collector
     # return the top level stream
     return data_stream
 

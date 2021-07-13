@@ -121,9 +121,32 @@ from nion.utils import ReferenceCounting
 ShapeType = typing.Sequence[int]
 SliceType = typing.Sequence[slice]
 SliceListType = typing.Sequence[SliceType]
-Channel = typing.Union[str, int]
+ChannelSegment = str
 
-ChannelPassThrough: Channel = -1
+
+class Channel:
+    def __init__(self, *segments: ChannelSegment):
+        self.__segments: typing.List[ChannelSegment] = list(segments)
+
+    def __repr__(self) -> str:
+        return ".".join(self.__segments)
+
+    def __hash__(self):
+        return sum(hash(s) for s in self.__segments)
+
+    def __eq__(self, other):
+        return isinstance(other, self.__class__) and other.segments == self.segments
+
+    @property
+    def segments(self) -> typing.Sequence[str]:
+        return list(self.__segments)
+
+    def join_segment(self, segment: ChannelSegment) -> Channel:
+        return Channel(*(self.__segments + [segment]))
+
+    @property
+    def parent(self) -> Channel:
+        return Channel(*(self.__segments[:-1]))
 
 
 class DataStreamStateEnum(enum.Enum):
@@ -1534,9 +1557,10 @@ class ContainerDataStream(DataStream):
 class MonitorDataStream(DataStream):
     """Non-controlling data stream. Monitors data coming out of data stream."""
 
-    def __init__(self, data_stream: DataStream):
+    def __init__(self, data_stream: DataStream, channel_segment: ChannelSegment):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
+        self.__channel_segment = channel_segment
         self.__listener = data_stream.data_available_event.listen(self.__data_available)
 
     def about_to_delete(self) -> None:
@@ -1552,10 +1576,10 @@ class MonitorDataStream(DataStream):
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
-        return tuple(c + 10 for c in self.__data_stream.channels)
+        return tuple(c.join_segment(self.__channel_segment) for c in self.__data_stream.channels)
 
     def get_info(self, channel: Channel) -> DataStreamInfo:
-        return self.__data_stream.get_info(channel - 10)
+        return self.__data_stream.get_info(channel.parent)
 
     @property
     def is_finished(self) -> bool:
@@ -1587,9 +1611,9 @@ class MonitorDataStream(DataStream):
         pass
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        data_stream_event.channel += 10
+        data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
         self.fire_data_available(data_stream_event)
-        data_stream_event.channel -= 10
+        data_stream_event.channel = data_stream_event.channel.parent
 
 
 class AccumulatedDataStream(ContainerDataStream):

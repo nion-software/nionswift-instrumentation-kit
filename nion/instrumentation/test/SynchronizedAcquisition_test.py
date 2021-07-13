@@ -146,8 +146,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
             self.assertEqual(1, len(scans))
             self.assertEqual(1, len(spectrum_images))
-            self.assertEqual((4, 4, 512), spectrum_images[0].data_shape)  # assumes accumulate for now
-            # self.assertEqual((3, 4, 4, 512), spectrum_images[0].data_shape)
+            # self.assertEqual((4, 4, 512), spectrum_images[0].data_shape)  # assumes accumulate for now
+            self.assertEqual((3, 4, 4, 512), spectrum_images[0].data_shape)
 
     def test_grab_synchronized_basic_eels_followed_by_record(self):
         # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
@@ -172,7 +172,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def test_grab_synchronized_camera_data_channel_basic_use(self):
         with self.__test_context(is_eels=True) as test_context:
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -180,8 +179,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
-                                                                         {0: "HAADF", 999: "test"})
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller), {
+                Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -191,7 +191,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def test_grab_synchronized_camera_data_channel_basic_sum_masked(self):
         with self.__test_context() as test_context:
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -199,8 +198,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_masked"
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller),
-                                                                         {0: "HAADF", 999: "test"})
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller), {
+                Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -219,8 +219,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters["processing"] = "sum_masked"
             masks = [camera_base.Mask(), camera_base.Mask(), camera_base.Mask()]
             camera_frame_parameters.active_masks = masks
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(document_controller),
-                                                                         {0: "HAADF", 999: "test"})
+            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(document_controller), {
+                Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
@@ -373,7 +374,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                             source_slice: Acquisition.SliceType, dest_slice: slice,
                             data_metadata: DataAndMetadata.DataMetadata) -> None:
                 super().update_data(channel, source_data, source_slice, dest_slice, data_metadata)
-                if channel == 999:
+                if channel == Acquisition.Channel(camera_hardware_source.hardware_source_id):
                     self.__document_model.perform_data_item_updates()
                     self.updates.append(copy.deepcopy(self.get_data_item(channel).xdata))
 
@@ -385,7 +386,10 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (6, 6)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller), {0: "HAADF", 999: "test"})
+            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller),
+                                           {Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                                            Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
+
             section_height = 5
             scan_hardware_source.grab_synchronized(data_channel=data_channel,
                                                    scan_frame_parameters=scan_frame_parameters,
