@@ -99,10 +99,10 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.Hard
         self.__hardware_source_changed_listener = hardware_source_choice.hardware_source_changed_event.listen(self.__hardware_source_changed)
         self.__hardware_source_changed(hardware_source_choice.hardware_source)
 
-    def close(self) -> None:
+    def about_to_delete(self) -> None:
         self.__hardware_source_changed_listener.close()
         self.__hardware_source_changed_listener = None
-        super().close()
+        super().about_to_delete()
 
     @property
     def value(self) -> HardwareSourceModule.HardwareSource:
