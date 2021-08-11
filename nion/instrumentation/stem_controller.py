@@ -585,13 +585,21 @@ class GraphicSetController:
             self.__handler._update_graphic(graphic)
 
     def remove_all_graphics(self) -> None:
-        # remove any graphics
+        # remove any graphics, doing it in a way such that all references to the listeners
+        # are out of scope when the graphic is removed from its container via `remove_graphic`.
+        # this ensures the listeners are inactive when `remove_graphic` is called.
+        graphics = list()
         for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
             graphic_property_changed_listener.close()
             remove_region_graphic_event_listener.close()
             display_about_to_be_removed_listener.close()
-            graphic.container.remove_graphic(graphic)
+            graphics.append(graphic)
+            del graphic_property_changed_listener
+            del remove_region_graphic_event_listener
+            del display_about_to_be_removed_listener
         self.__graphic_trackers = list()
+        for graphic in graphics:
+            graphic.container.remove_graphic(graphic)
 
     def __remove_one_graphic(self, graphic_to_remove) -> None:
         graphic_trackers = list()
