@@ -685,3 +685,29 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 2), maker.get_data(channel2).data_descriptor)
             self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
+
+    def test_scan_as_collection_sequential(self):
+        channel = Acquisition.Channel("Cam")
+        sequence_len1 = 4
+        data_stream1 = SingleFrameDataStream(sequence_len1, (2, 2), channel)
+        sequencer1 = Acquisition.SequenceDataStream(data_stream1, sequence_len1)
+        sequence_len2 = 8
+        data_stream2 = SingleFrameDataStream(sequence_len2, (2, 2), channel)
+        sequencer2 = Acquisition.SequenceDataStream(data_stream2, sequence_len2)
+        maker = Acquisition.FramedDataStream(Acquisition.SequentialDataStream((sequencer1, sequencer2)))
+        with maker.ref():
+            Acquisition.acquire(maker)
+            self.assertTrue(numpy.array_equal(data_stream1.data, maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
+            self.assertTrue(numpy.array_equal(data_stream2.data, maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
+
+    def test_scan_as_collection_sequential_with_reuse(self):
+        channel = Acquisition.Channel("Cam")
+        sequence_len = 4
+        data_stream = SingleFrameDataStream(sequence_len * 2, (2, 2), channel)
+        sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
+        maker = Acquisition.FramedDataStream(Acquisition.SequentialDataStream((sequencer, sequencer)))
+        with maker.ref():
+            Acquisition.acquire(maker)
+            self.assertEqual(2, len(maker.channels))
+            self.assertTrue(numpy.array_equal(data_stream.data[0:4], maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
+            self.assertTrue(numpy.array_equal(data_stream.data[4:8], maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
