@@ -281,7 +281,22 @@ class TestAcquisitionClass(unittest.TestCase):
         maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[-len(collection_shape):]
+            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+
+    def test_camera_collection_acquisition_with_individual_slices(self):
+        # in this case the collector is acting only to arrange the data, not to provide any scan
+        collection_shape = (4, )
+        channel = Acquisition.Channel("0")
+        data_stream = SingleFrameDataStream(numpy.product(collection_shape), (2, 2), channel, partial_height=1)
+        collector_slices = [tuple(Acquisition.index_slice(n) for n in i) for i in numpy.ndindex(*collection_shape)]
+        collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
+                                                    [Calibration.Calibration()],#, Calibration.Calibration()],
+                                                    collector_slices)
+        maker = Acquisition.FramedDataStream(collector)
+        with maker.ref():
+            Acquisition.acquire(maker)
+            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
             self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_camera_collection_acquisition_with_grouping(self):
@@ -296,7 +311,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 maker = Acquisition.FramedDataStream(collector)
                 with maker.ref():
                     Acquisition.acquire(maker)
-                    expected_shape = collection_shape + maker.get_data(channel).data.shape[-len(collection_shape):]
+                    expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
                     self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_scan_sequence_acquisition(self):
@@ -320,7 +335,7 @@ class TestAcquisitionClass(unittest.TestCase):
         maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[-len(collection_shape):]
+            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
             self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_scan_as_collection(self):

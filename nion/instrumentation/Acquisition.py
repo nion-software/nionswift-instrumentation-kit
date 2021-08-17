@@ -546,6 +546,7 @@ class CollectedDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__listener = typing.cast(Event.EventListener, None)
+        assert len(shape) in (1, 2)
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         self.__collection_sub_slices = [tuple(sub_slice) for sub_slice in sub_slices] if sub_slices else [tuple(slice(0, length) for length in self.__collection_shape)]
@@ -596,7 +597,8 @@ class CollectedDataStream(DataStream):
         # adding p to index will give the number of frames completed plus the fraction of the current one completed
         # all channels progress simultaneously in a collection; so use the last one for calculation
         count = numpy.product(self.__collection_shape, dtype=numpy.int64)
-        p = self.__data_stream.progress
+        # only add current progress if we're not about to advance to the next sub slice
+        p = 0.0 if all(self.__needs_starts.get(channel, False) for channel in self.input_channels) else self.__data_stream.progress
         incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
         if not incomplete_indexes:
             return 0.0
@@ -1837,9 +1839,13 @@ def acquire(data_stream: DataStream) -> None:
     try:
         last_progress = 0.0
         while not data_stream.is_finished and not data_stream.is_aborted:
+            # progress checking is for tests and self consistency
+            pre_progress = data_stream.progress
             data_stream.send_next()
+            post_progress = data_stream.progress
             data_stream.advance_stream()
             next_progress = data_stream.progress
+            assert pre_progress <= post_progress <= next_progress
             assert next_progress >= last_progress
             last_progress = next_progress
         if data_stream.is_finished:
