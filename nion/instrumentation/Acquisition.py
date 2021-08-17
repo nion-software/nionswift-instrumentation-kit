@@ -1685,6 +1685,43 @@ class ContainerDataStream(DataStream):
         self.fire_data_available(data_stream_event)
 
 
+class ActionDataStream(ContainerDataStream):
+    """Action data stream. Runs action on each complete frame, passing coordinates."""
+
+    def __init__(self, data_stream: DataStream, fn: typing.Callable[[typing.Sequence[int]], None]):
+        super().__init__(data_stream)
+        self.__fn = fn
+        self.__shape = typing.cast(ShapeType, (0,))
+        self.__index = 0
+        self.__channel_count = len(self.channels)
+        self.__complete_channel_count = 0
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        self.__shape = stream_args.shape
+        self.__index = 0
+        self.__complete_channel_count = self.__channel_count
+        self.__check_action()
+        super()._start_stream(stream_args)
+
+    def __check_action(self) -> None:
+        if not self.is_finished and not self.is_aborted:
+            if self.__complete_channel_count == self.__channel_count:
+                c = better_unravel_index(self.__index, self.__shape)
+                self.__fn(c)
+                self.__index += 1
+                self.__complete_channel_count = 0
+
+    def _advance_stream(self) -> None:
+        self.__check_action()
+        super()._advance_stream()
+
+    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        super()._fire_data_available(data_stream_event)
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE:
+            assert (data_stream_event.count or 1) == 1
+            self.__complete_channel_count += 1
+
+
 class MonitorDataStream(DataStream):
     """Non-controlling data stream. Monitors data coming out of data stream."""
 
