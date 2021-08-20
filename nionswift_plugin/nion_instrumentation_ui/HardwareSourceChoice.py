@@ -4,65 +4,45 @@ import typing
 
 # local libraries
 from nion.swift.model import HardwareSource as HardwareSourceModule
+from nion.ui import UserInterface
 from nion.utils import Binding
 from nion.utils import Event
 from nion.utils import Model
 from nion.utils import Stream
+from nion.utils.ReferenceCounting import weak_partial
+
+
+class PersistentStorageInterface:
+    def get_persistent_string(self, key: str, default_value: str=None) -> str: ...
+    def set_persistent_string(self, key: str, value: str) -> None: ...
 
 
 class HardwareSourceChoice:
-    def __init__(self, ui, hardware_source_key, filter=None):
-
-        self.hardware_sources_model = Model.PropertyModel(list())
-        self.hardware_source_index_model = Model.PropertyModel()
-
+    def __init__(self, storage: PersistentStorageInterface, hardware_source_key: str, filter: typing.Optional[typing.Callable[[HardwareSourceModule.HardwareSource], bool]]=None):
+        self.__storage = storage
+        self.hardware_source_key = hardware_source_key
+        self.hardware_sources_model = Model.PropertyModel[typing.List[HardwareSourceModule.HardwareSource]](list())
+        self.hardware_source_index_model = Model.PropertyModel[int](0)
         self.hardware_source_changed_event = Event.Event()
+        self.__filter = filter or (lambda x: True)
+        self.__hardware_source_added_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_added_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
+        self.__hardware_source_removed_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_removed_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
+        self.__rebuild_hardware_source_list(self.hardware_source)
 
-        filter = filter if filter is not None else lambda x: True
-
-        def rebuild_hardware_source_list():
-            # keep selected item the same
-            old_index = self.hardware_source_index_model.value
-            old_hardware_source = self.hardware_sources_model.value[old_index] if old_index is not None else None
-            items = list()
-            for hardware_source in HardwareSourceModule.HardwareSourceManager().hardware_sources:
-                if filter(hardware_source):
-                    items.append(hardware_source)
-            self.hardware_sources_model.value = sorted(items, key=operator.attrgetter("display_name"))
-            new_index = None
-            for index, hardware_source in enumerate(self.hardware_sources_model.value):
-                if hardware_source == old_hardware_source:
-                    new_index = index
-                    break
-            new_index = new_index if new_index is not None else 0 if len(self.hardware_sources_model.value) > 0 else None
-            self.hardware_source_index_model.value = new_index
-            self.hardware_source_changed_event.fire(self.hardware_source)
-
-        self.__hardware_source_added_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_added_event.listen(lambda h: rebuild_hardware_source_list())
-        self.__hardware_source_removed_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_removed_event.listen(lambda h: rebuild_hardware_source_list())
-
-        rebuild_hardware_source_list()
-
-        hardware_source_id = ui.get_persistent_string(hardware_source_key)
-
+        hardware_source_id = storage.get_persistent_string(hardware_source_key)
         new_index = None
-        for index, hardware_source in enumerate(self.hardware_sources_model.value):
+        hardware_sources = self.hardware_sources_model.value or list()
+        for index, hardware_source in enumerate(hardware_sources):
             if hardware_source.hardware_source_id == hardware_source_id:
                 new_index = index
                 break
-        new_index = new_index if new_index is not None else 0 if len(self.hardware_sources_model.value) > 0 else None
+        new_index = new_index if new_index is not None else 0 if len(hardware_sources) > 0 else None
         self.hardware_source_index_model.value = new_index
         self.hardware_source_changed_event.fire(self.hardware_source)
 
-        def update_current_hardware_source(key):
-            if key == "value":
-                hardware_source_id = self.hardware_sources_model.value[self.hardware_source_index_model.value].hardware_source_id
-                ui.set_persistent_string(hardware_source_key, hardware_source_id)
-                self.hardware_source_changed_event.fire(self.hardware_source)
+        self.__property_changed_event_listener = self.hardware_source_index_model.property_changed_event.listen(weak_partial(HardwareSourceChoice.__update_current_hardware_source, self))
 
-        self.__property_changed_event_listener = self.hardware_source_index_model.property_changed_event.listen(update_current_hardware_source)
-
-    def close(self):
+    def close(self) -> None:
         self.__hardware_source_added_event_listener.close()
         self.__hardware_source_added_event_listener = None
         self.__hardware_source_removed_event_listener.close()
@@ -72,19 +52,51 @@ class HardwareSourceChoice:
 
     @property
     def hardware_source_count(self) -> int:
-        return len(self.hardware_sources_model.value)
+        hardware_sources = self.hardware_sources_model.value or list()
+        return len(hardware_sources)
 
     @property
-    def hardware_source(self):
-        index = self.hardware_source_index_model.value
-        hardware_sources = self.hardware_sources_model.value
-        return hardware_sources[index] if (index is not None and 0 <= index < len(hardware_sources)) else None
+    def hardware_sources(self) -> typing.Sequence[HardwareSourceModule.HardwareSource]:
+        return self.hardware_sources_model.value or list()
 
-    def create_combo_box(self, ui):
+    @property
+    def hardware_source(self) -> HardwareSourceModule.HardwareSource:
+        index = self.hardware_source_index_model.value or 0
+        hardware_sources = self.hardware_sources_model.value or list()
+        return hardware_sources[index] if 0 <= index < len(hardware_sources) else None
+
+    def create_combo_box(self, ui: UserInterface.UserInterface) -> UserInterface.ComboBoxWidget:
         combo_box = ui.create_combo_box_widget(self.hardware_sources_model.value, item_getter=operator.attrgetter("display_name"))
         combo_box.bind_items(Binding.PropertyBinding(self.hardware_sources_model, "value"))
         combo_box.bind_current_index(Binding.PropertyBinding(self.hardware_source_index_model, "value"))
         return combo_box
+
+    def __rebuild_hardware_source_list(self, h: HardwareSourceModule.HardwareSource) -> None:
+        # keep selected item the same
+        old_index = self.hardware_source_index_model.value or 0
+        hardware_sources = self.hardware_sources_model.value or list()
+        old_hardware_source = hardware_sources[old_index] if 0 <= old_index < len(hardware_sources) else None
+        items = list()
+        for hardware_source in HardwareSourceModule.HardwareSourceManager().hardware_sources:
+            if self.__filter(hardware_source):
+                items.append(hardware_source)
+        self.hardware_sources_model.value = sorted(items, key=operator.attrgetter("display_name"))
+        new_index = None
+        for index, hardware_source in enumerate(self.hardware_sources_model.value):
+            if hardware_source == old_hardware_source:
+                new_index = index
+                break
+        new_index = new_index if new_index is not None else 0 if len(self.hardware_sources_model.value) > 0 else None
+        self.hardware_source_index_model.value = new_index
+        self.hardware_source_changed_event.fire(self.hardware_source)
+
+    def __update_current_hardware_source(self, key: str) -> None:
+        if key == "value":
+            hardware_sources = self.hardware_sources_model.value or list()
+            index = self.hardware_source_index_model.value or 0
+            hardware_source_id = hardware_sources[index].hardware_source_id
+            self.__storage.set_persistent_string(self.hardware_source_key, hardware_source_id)
+            self.hardware_source_changed_event.fire(self.hardware_source)
 
 
 class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.HardwareSource]):
