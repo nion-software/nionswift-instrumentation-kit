@@ -1,5 +1,8 @@
 import contextlib
 import copy
+import os
+import pathlib
+import shutil
 import threading
 import time
 import typing
@@ -17,6 +20,7 @@ from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import stem_controller
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 
@@ -1465,6 +1469,23 @@ class TestScanControlClass(unittest.TestCase):
             test_context.document_model = test_context.document_controller.document_model
             document_model = test_context.document_model
             self.assertFalse(document_model.display_items[0].graphics)
+
+    def test_acquisition_preferences(self):
+        dir = pathlib.Path.cwd() / "__Test"
+        if dir.exists():
+            shutil.rmtree(dir)
+        os.makedirs(dir)
+        file_path = dir / pathlib.Path("test.json")
+        try:
+            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(file_path)
+            acquisition_preferences._append_item("control_customizations", AcquisitionPreferences.ControlCustomizationSchema.create(None, {"control_id": "blanker", "device_control_id": "BLANK", "delay": 0.05}))
+            acquisition_preferences._append_item("control_customizations", AcquisitionPreferences.ControlCustomizationSchema.create(None, {"control_id": "defocus", "device_control_id": "C10", "delay": 0.05}))
+            acquisition_preferences.control_customizations[0].delay = 0.03
+            acquisition_preferences._remove_item("control_customizations", acquisition_preferences.control_customizations[0])
+            acquisition_preferences.control_customizations[0].uuid = uuid.uuid4()
+        finally:
+            if dir.exists():
+                shutil.rmtree(dir)
 
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded
