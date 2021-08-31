@@ -18,9 +18,9 @@ class PersistentStorageInterface:
 
 
 class HardwareSourceChoice:
-    def __init__(self, storage: PersistentStorageInterface, hardware_source_key: str, filter: typing.Optional[typing.Callable[[HardwareSourceModule.HardwareSource], bool]]=None):
-        self.__storage = storage
-        self.hardware_source_key = hardware_source_key
+    def __init__(self, choice_model: Model.PropertyModel[str],
+                 filter: typing.Optional[typing.Callable[[HardwareSourceModule.HardwareSource], bool]] = None):
+        self.__choice_model = choice_model
         self.hardware_sources_model = Model.PropertyModel[typing.List[HardwareSourceModule.HardwareSource]](list())
         self.hardware_source_index_model = Model.PropertyModel[int](0)
         self.hardware_source_changed_event = Event.Event()
@@ -29,7 +29,7 @@ class HardwareSourceChoice:
         self.__hardware_source_removed_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_removed_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
         self.__rebuild_hardware_source_list(self.hardware_source)
 
-        hardware_source_id = storage.get_persistent_string(hardware_source_key)
+        hardware_source_id = choice_model.value
         new_index = None
         hardware_sources = self.hardware_sources_model.value or list()
         for index, hardware_source in enumerate(hardware_sources):
@@ -95,7 +95,7 @@ class HardwareSourceChoice:
             hardware_sources = self.hardware_sources_model.value or list()
             index = self.hardware_source_index_model.value or 0
             hardware_source_id = hardware_sources[index].hardware_source_id
-            self.__storage.set_persistent_string(self.hardware_source_key, hardware_source_id)
+            self.__choice_model.value = hardware_source_id
             self.hardware_source_changed_event.fire(self.hardware_source)
 
 

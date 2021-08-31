@@ -2,6 +2,7 @@
 import gettext
 import threading
 import time
+import typing
 
 # third part imports
 import numpy
@@ -13,6 +14,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
+from nion.ui import UserInterface as UserInterfaceModule
 from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Model
@@ -203,6 +205,7 @@ class PanelDelegate:
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
         self.__controller = None
+        self.__scan_hardware_source_choice_model = None
         self.__scan_hardware_source_choice = None
         self.__scan_hardware_source = None
         self.__state_changed_listener = None
@@ -213,7 +216,8 @@ class PanelDelegate:
         # this method may be called more than once.
         self.__controller = Controller()
 
-        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
+        self.__scan_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_hardware_source_id")
+        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
 
         column = ui.create_column_widget()
 
@@ -325,6 +329,9 @@ class PanelDelegate:
         if self.__scan_hardware_source_choice:
             self.__scan_hardware_source_choice.close()
             self.__scan_hardware_source_choice = None
+        if self.__scan_hardware_source_choice_model:
+            self.__scan_hardware_source_choice_model.close()
+            self.__scan_hardware_source_choice_model = None
         self.__controller.close()
         self.__controller = None
 

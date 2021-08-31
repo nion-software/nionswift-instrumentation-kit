@@ -372,11 +372,10 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
         ui = document_controller.ui
 
+        self.__eels_camera_choice_model = ui.create_persistent_string_model("eels_camera_hardware_source_id")
         self.__eels_camera_choice = HardwareSourceChoice.HardwareSourceChoice(
-            ui,
-            "eels_camera_hardware_source_id",
-            lambda hardware_source: hardware_source.features.get(
-                "is_eels_camera"))
+            self.__eels_camera_choice_model,
+            lambda hardware_source: hardware_source.features.get("is_eels_camera"))
 
         # Define the entry and checkbox widgets for the dialog box
         # TODO: how to get text to align right?
@@ -476,6 +475,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
     def close(self):
         self.__eels_camera_choice.close()
         self.__eels_camera_choice = None
+        self.__eels_camera_choice_model.close()
+        self.__eels_camera_choice_model = None
         super().close()
 
     def acquire(self,

@@ -9,8 +9,6 @@ import enum
 import functools
 import gettext
 import logging
-import math
-import threading
 
 import numpy
 import typing
@@ -30,6 +28,7 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.typeshed import API_1_0 as API
 from nion.typeshed import UI_1_0 as UserInterface
+from nion.ui import UserInterface as UserInterfaceModule
 from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Event
@@ -378,7 +377,9 @@ class PanelDelegate:
         self.__camera_hardware_changed_event_listener = None
         self.__scan_hardware_changed_event_listener = None
         self.__exposure_time_ms_value_model = None
+        self.__scan_hardware_source_choice_model = None
         self.__scan_hardware_source_choice = None
+        self.__camera_hardware_source_choice_model = None
         self.__camera_hardware_source_choice = None
         self.__styles_list_model = None
         self.__styles_list_property_model = None
@@ -389,14 +390,14 @@ class PanelDelegate:
         self.__scan_width = 32  # the width/length of the scan in pixels
         self.__scan_pixels = 0  # the total number of scan pixels
         self.__progress_task = typing.cast(asyncio.Task, None)
-        self.__scan_acquisition_preference_panel = None
 
     def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
         stem_controller_ = typing.cast(stem_controller.STEMController, Registry.get_component("stem_controller"))
 
-        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_scanning"))
-        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(ui._ui, "scan_acquisition_camera_hardware_source_id", lambda hardware_source: hardware_source.features.get("is_camera"))
-        self.__scan_acquisition_preference_panel = ScanAcquisitionPreferencePanel(self.__scan_hardware_source_choice, self.__camera_hardware_source_choice)
+        self.__scan_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_hardware_source_id")
+        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+        self.__camera_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_camera_hardware_source_id")
+        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
 
         self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
@@ -782,12 +783,15 @@ class PanelDelegate:
         if self.__scan_hardware_source_choice:
             self.__scan_hardware_source_choice.close()
             self.__scan_hardware_source_choice = None
+        if self.__scan_hardware_source_choice_model:
+            self.__scan_hardware_source_choice_model.close()
+            self.__scan_hardware_source_choice_model = None
         if self.__camera_hardware_source_choice:
             self.__camera_hardware_source_choice.close()
             self.__camera_hardware_source_choice = None
-        if self.__scan_acquisition_preference_panel:
-            # PreferencesDialog.PreferencesManager().unregister_preference_pane(self.__scan_acquisition_preference_panel)
-            self.__scan_acquisition_preference_panel = None
+        if self.__camera_hardware_source_choice_model:
+            self.__camera_hardware_source_choice_model.close()
+            self.__camera_hardware_source_choice_model = None
         if self.__stem_controller_property_listener:
             self.__stem_controller_property_listener.close()
             self.__stem_controller_property_listener = None
@@ -804,25 +808,6 @@ class PanelDelegate:
         if self.__styles_list_property_model:
             self.__styles_list_property_model.close()
             self.__styles_list_property_model = None
-
-
-class ScanAcquisitionPreferencePanel:
-    def __init__(self, scan_hardware_source_choice, other_hardware_source_choice):
-        self.identifier = "scan_acquisition"
-        self.label = _("Spectrum Imaging / 4d Scan Acquisition")
-        self.__scan_hardware_source_choice = scan_hardware_source_choice
-        self.__camera_hardware_source_choice = other_hardware_source_choice
-
-    def build(self, ui, **kwargs):
-        scan_hardware_source_combo_box = self.__scan_hardware_source_choice.create_combo_box(ui)
-        other_hardware_source_combo_box = self.__camera_hardware_source_choice.create_combo_box(ui)
-        row = ui.create_row_widget()
-        row.add(ui.create_label_widget(_("Scan Device")))
-        row.add_spacing(12)
-        row.add(scan_hardware_source_combo_box)
-        row.add_spacing(12)
-        row.add(other_hardware_source_combo_box)
-        return row
 
 
 class ScanAcquisitionExtension:
