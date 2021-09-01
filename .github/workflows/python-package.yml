@@ -44,6 +44,8 @@ jobs:
         # use mypy -p to work around mypy issue 8944
         mypy --namespace-packages --ignore-missing-imports --follow-imports=silent \
           -p nion.instrumentation.Acquisition \
+          -p nion.instrumentation.DataChannel \
+          -p nion.instrumentation.DriftTracker \
           -p nion.instrumentation.scan_base \
           -p nion.instrumentation.stem_controller \
           -p nionswift_plugin.nion_instrumentation_ui.HardwareSourceChoice \

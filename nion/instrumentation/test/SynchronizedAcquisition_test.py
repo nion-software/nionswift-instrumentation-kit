@@ -16,6 +16,8 @@ from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.instrumentation import Acquisition
+from nion.instrumentation import DataChannel
+from nion.instrumentation import DriftTracker
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation.test import AcquisitionTestContext
@@ -179,7 +181,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller), {
+            data_item_data_channel = DataChannel.DataItemDataChannel(test_context.document_model, "data", {
                 Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                 Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
@@ -198,7 +200,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_masked"
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(test_context.document_controller), {
+            data_item_data_channel = DataChannel.DataItemDataChannel(test_context.document_model, "data", {
                 Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                 Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
@@ -219,7 +221,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters["processing"] = "sum_masked"
             masks = [camera_base.Mask(), camera_base.Mask(), camera_base.Mask()]
             camera_frame_parameters.active_masks = masks
-            data_item_data_channel = ScanAcquisition.DataItemDataChannel(Facade.DocumentWindow(document_controller), {
+            data_item_data_channel = DataChannel.DataItemDataChannel(document_model, "Spectrum Image", {
                 Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                 Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
             scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
@@ -364,10 +366,10 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def test_partial_acquisition_has_proper_metadata(self):
 
-        class TestDataChannel(ScanAcquisition.DataItemDataChannel):
-            def __init__(self, document_controller, channel_names: typing.Mapping[Acquisition.Channel, str]):
-                super().__init__(document_controller, channel_names)
-                self.__document_model = document_controller.library._document_model
+        class TestDataChannel(DataChannel.DataItemDataChannel):
+            def __init__(self, document_model, channel_names: typing.Mapping[Acquisition.Channel, str]):
+                super().__init__(document_model, "test", channel_names)
+                self.__document_model = document_model
                 self.updates: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
             def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray,
@@ -386,7 +388,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (6, 6)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
-            data_channel = TestDataChannel(Facade.DocumentWindow(test_context.document_controller),
+            data_channel = TestDataChannel(test_context.document_model,
                                            {Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                                             Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
 
@@ -461,7 +463,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
@@ -487,7 +489,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -528,7 +530,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -559,7 +561,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
@@ -595,7 +597,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_rotation = rotation
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = ScanAcquisition.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             # offset will be rotated into the context reference frame
