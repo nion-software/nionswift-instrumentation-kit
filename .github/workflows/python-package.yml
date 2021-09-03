@@ -49,6 +49,7 @@ jobs:
           -p nion.instrumentation.DriftTracker \
           -p nion.instrumentation.scan_base \
           -p nion.instrumentation.stem_controller \
+          -p nionswift_plugin.nion_instrumentation_ui.AcquisitionPanel \
           -p nionswift_plugin.nion_instrumentation_ui.HardwareSourceChoice \
           -p nionswift_plugin.nion_instrumentation_ui.ScanAcquisition \
           -p nionswift_plugin.nion_instrumentation_ui.ScanControlPanel

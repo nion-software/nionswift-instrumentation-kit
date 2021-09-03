@@ -1,6 +1,7 @@
 import logging
 import pathlib
 
+from . import AcquisitionPanel
 from . import CameraControlPanel
 from . import ScanControlPanel
 from . import ScanAcquisition
