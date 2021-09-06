@@ -378,7 +378,7 @@ class ComboBoxHandler:
 
     def __init__(self, title: str, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
-                 selection_storage_model: Model.PropertyModel):
+                 selection_storage_model: Model.PropertyModel, combo_only: bool = False):
         self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
         self.sorted_items.sort_key = sort_key
         if filter:
@@ -411,7 +411,10 @@ class ComboBoxHandler:
         u = Declarative.DeclarativeUI()
         component_type_combo = u.create_combo_box(items_ref="@binding(item_list.value)",
                                                   current_index="@binding(selected_index_model.value)")
-        self.ui_view = u.create_row(u.create_label(text=title), component_type_combo, u.create_stretch(), spacing=8)
+        if combo_only:
+            self.ui_view = component_type_combo
+        else:
+            self.ui_view = u.create_row(u.create_label(text=title), component_type_combo, u.create_stretch(), spacing=8)
 
     def close(self) -> None:
         self.__selected_component_index_listener.close()
@@ -572,7 +575,7 @@ units_multiplier = {
 
 class SeriesControlHandler:
 
-    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: Schema.Entity):
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: Schema.Entity, label: typing.Optional[str]):
         self.__control_customization = control_customization
         self.control_values = control_values
         self.count_converter = Converter.IntegerToStringConverter()
@@ -582,14 +585,15 @@ class SeriesControlHandler:
                                                                         units_multiplier[control_description.units],
                                                                         "{:.1f}")
         u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_row(
-            u.create_spacing(20),
-            u.create_line_edit(text="@binding(control_values.count, converter=count_converter)", width=90),
-            u.create_line_edit(text="@binding(control_values.start_value, converter=value_converter)", width=90),
-            u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90),
-            u.create_stretch(),
-            spacing=8
-        )
+        row_items = list()
+        row_items.append(u.create_spacing(20))
+        if label is not None:
+            row_items.append(u.create_label(text=label, width=28))
+        row_items.append(u.create_line_edit(text="@binding(control_values.count, converter=count_converter)", width=90))
+        row_items.append(u.create_line_edit(text="@binding(control_values.start_value, converter=value_converter)", width=90))
+        row_items.append(u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90))
+        row_items.append(u.create_stretch())
+        self.ui_view = u.create_row(*row_items, spacing=8)
 
     def get_control_info(self) -> typing.Tuple[float, float, int]:
         control_description = self.__control_customization.control_description
@@ -666,7 +670,7 @@ class SeriesAcquireHandler(AcquireHandler):
             control_id = control_customization.control_id
             assert control_id not in self.__control_handlers
             control_values = get_control_values(self.configuration, "control_values_list", control_customization)
-            self.__control_handlers[control_id] = SeriesControlHandler(control_customization, control_values)
+            self.__control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, None)
             return self.__control_handlers[control_id]
         return None
 
@@ -709,12 +713,26 @@ class TableauAcquireHandler(AcquireHandler):
                                                       operator.attrgetter("name"),
                                                       ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
                                                       operator.attrgetter("control_id"),
-                                                      self.__selection_storage_model)
+                                                      self.__selection_storage_model, True)
+        self.__axis_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "axis_id")
+        stem_controller = Registry.get_component("stem_controller")
+        assert stem_controller
+        self._axis_row_handler = ComboBoxHandler(_("Axis"), stem_controller,
+                                                 "axis_descriptions", operator.attrgetter("display_name"),
+                                                 ListModel.PredicateFilter(lambda x: True),
+                                                 operator.attrgetter("axis_id"), self.__axis_storage_model, True)
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
-            u.create_component_instance(identifier="combo_box_row"),
+            u.create_row(
+                u.create_label(text=_("Control")),
+                u.create_component_instance(identifier="combo_box_row"),
+                u.create_label(text=_("Axis")),
+                u.create_component_instance(identifier="axis_row"),
+                u.create_stretch(),
+                spacing=8),
             u.create_row(
                 u.create_spacing(20),
+                u.create_spacing(28),
                 u.create_label(text=_("Count"), width=90),
                 u.create_label(text=_("Start"), width=90),
                 u.create_label(text=_("Step"), width=90),
@@ -744,19 +762,21 @@ class TableauAcquireHandler(AcquireHandler):
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
         if component_id == "combo_box_row":
             return self._combo_box_row_handler
+        if component_id == "axis_row":
+            return self._axis_row_handler
         if component_id == "y-control":
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             control_id = control_customization.control_id
             assert control_id not in self.__y_control_handlers
             control_values = get_control_values(self.configuration, "y_control_values_list", control_customization, 0)
-            self.__y_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values)
+            self.__y_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "Y")
             return self.__y_control_handlers[control_id]
         if component_id == "x-control":
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             control_id = control_customization.control_id
             assert control_id not in self.__x_control_handlers
             control_values = get_control_values(self.configuration, "x_control_values_list", control_customization, 1)
-            self.__x_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values)
+            self.__x_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "X")
             return self.__x_control_handlers[control_id]
         return None
 
@@ -767,22 +787,26 @@ class TableauAcquireHandler(AcquireHandler):
             x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
             y_control_handler = self.__y_control_handlers.get(control_customization.control_id)
             if x_control_handler and y_control_handler and data_stream:
+                axis_id = self.__axis_storage_model.value
                 y_start, y_step, height = y_control_handler.get_control_info()
                 x_start, x_step, width = x_control_handler.get_control_info()
                 if width > 1 or height > 1:
                     def action(control_customization: AcquisitionPreferences.ControlCustomization,
                                device_map: typing.Mapping[str, DeviceController],
                                starts: typing.Sequence[float], steps: typing.Sequence[float],
-                               index: typing.Sequence[int]) -> None:
+                               axis_id: str, index: typing.Sequence[int]) -> None:
                         control_description = control_customization.control_description
                         assert control_description
                         device_controller = device_map.get(control_description.device_id)
                         if device_controller:
-                            axes = ("y", "x")
+                            axis: typing.Optional[stem_controller.AxisType] = ("x", "y")
+                            for axis_description in typing.cast(STEMDeviceController, device_map["stem"]).stem_controller.axis_descriptions:
+                                if axis_id == axis_description.axis_id:
+                                    axis = axis_description.axis_type
                             values = [start + step * i for start, step, i in zip(starts, steps, index)]
-                            device_controller.set_values(control_customization, values, axes)
+                            device_controller.set_values(control_customization, values, axis)
 
-                    action_fn = weak_partial(action, control_customization, device_map, [y_start, x_start], [y_step, x_step])
+                    action_fn = weak_partial(action, control_customization, device_map, [y_start, x_start], [y_step, x_step], axis_id)
                     data_stream = Acquisition.CollectedDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
                                                                  (height, width), (Calibration.Calibration(), Calibration.Calibration()))
         return data_stream, _("Tableau"), channel_names
@@ -1352,6 +1376,7 @@ Schema.entity("acquisition_method_component_series_acquire", AcquisitionMethodSc
 # TableauAcquireHandler
 Schema.entity("acquisition_method_component_tableau_acquire", AcquisitionMethodSchema, None, {
     "control_id": Schema.prop(Schema.STRING),
+    "axis_id": Schema.prop(Schema.STRING),
     "x_control_values_list": Schema.array(Schema.component(ControlValuesSchema)),
     "y_control_values_list": Schema.array(Schema.component(ControlValuesSchema)),
 })
@@ -1575,25 +1600,26 @@ class AcquisitionPanel(Panel.Panel):
 
 class DeviceController(abc.ABC):
     @abc.abstractmethod
-    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axes: typing.Optional[typing.Tuple[str, str]] = None) -> None: ...
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None: ...
 
 
 class STEMDeviceController(DeviceController):
     def __init__(self):
-        stem_controller = Registry.get_component('stem_controller')
-        assert stem_controller
-        self.stem_controller = stem_controller
+        stem_controller_component = Registry.get_component('stem_controller')
+        assert stem_controller_component
+        self.stem_controller = typing.cast(stem_controller.STEMController, stem_controller_component)
 
-    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axes: typing.Optional[typing.Tuple[str, str]] = None) -> None:
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
         assert control_description
         if control_description.control_type == "1d":
             self.stem_controller.SetValAndConfirm(control_customization.device_control_id, values[0], 1.0, 5000)
             time.sleep(control_customization.delay)
         elif control_description.control_type == "2d":
-            assert axes is not None
-            self.stem_controller.SetValAndConfirm(control_customization.device_control_id + "." + axes[0], values[0], 1.0, 5000)
-            self.stem_controller.SetValAndConfirm(control_customization.device_control_id + "." + axes[1], values[1], 1.0, 5000)
+            assert axis is not None
+            self.stem_controller.SetVal2DAndConfirm(control_customization.device_control_id,
+                                                    Geometry.FloatPoint(y=values[0], x=values[1]), 1.0, 5000,
+                                                    axis=axis)
             time.sleep(control_customization.delay)
 
 
@@ -1602,7 +1628,7 @@ class CameraDeviceController(DeviceController):
         self.camera_hardware_source = camera_hardware_source
         self.camera_frame_parameters = camera_frame_parameters
 
-    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axes: typing.Optional[typing.Tuple[str, str]] = None) -> None:
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
         assert control_description
         if control_customization.control_id == "exposure":
@@ -1614,7 +1640,7 @@ class ScanDeviceController(DeviceController):
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
 
-    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axes: typing.Optional[typing.Tuple[str, str]] = None) -> None:
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
         assert control_description
         if control_customization.control_id == "field_of_view":
