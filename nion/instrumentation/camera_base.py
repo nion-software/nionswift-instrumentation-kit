@@ -982,6 +982,17 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def get_expected_dimensions(self, binning):
         return self.__camera.get_expected_dimensions(binning)
 
+    def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
+        if self.__signal_type == "eels":
+            if camera_frame_parameters.processing == "sum_project":
+                return _("EELS")
+            else:
+                return _("EELS Image")
+        elif self.__signal_type == "ronchigram":
+            return _("Ronchigram")
+        else:
+            return _("Camera Data")
+
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
@@ -1122,7 +1133,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
             x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
             return (y_calibration, x_calibration)
-
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
         return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")

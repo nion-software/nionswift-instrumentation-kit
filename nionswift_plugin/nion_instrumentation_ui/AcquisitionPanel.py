@@ -455,11 +455,6 @@ class StackedComponentHandler:
                 component_entity = entity_type.create() if entity_type else None
                 if component_entity:
                     configuration._append_item(components_key, component_entity)
-                    print(f"created {component_id}: {component_entity}")
-                else:
-                    print(f"no component {component_id}: {component_entity}")
-            else:
-                print(f"found {component_id}: {component_entity}")
             component = component_factory(document_controller, component_entity)
             self.__components.append_item(component)
 
@@ -517,7 +512,7 @@ class StackedComponentHandler:
 
 class AcquireHandler(ComponentHandler):
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
         raise NotImplementedError()
 
 
@@ -531,8 +526,8 @@ class BasicAcquireHandler(AcquireHandler):
             spacing=8
         )
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
-        return data_stream, str()
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
+        return data_stream, str(), channel_names
 
 
 class SequenceAcquireHandler(AcquireHandler):
@@ -553,12 +548,12 @@ class SequenceAcquireHandler(AcquireHandler):
             spacing=8
         )
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
         width = max(1, self.configuration.count) if self.configuration.count else 1
         if width > 1:
-            return Acquisition.SequenceDataStream(data_stream, width), _("Sequence")
+            return Acquisition.SequenceDataStream(data_stream, width), _("Sequence"), channel_names
         else:
-            return data_stream, _("Sequence")
+            return data_stream, _("Sequence"), channel_names
 
 
 units_multiplier = {
@@ -675,7 +670,7 @@ class SeriesAcquireHandler(AcquireHandler):
             return self.__control_handlers[control_id]
         return None
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
         item = self._combo_box_row_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
@@ -696,7 +691,7 @@ class SeriesAcquireHandler(AcquireHandler):
 
                     action_fn = weak_partial(action, control_customization, device_map, [start], [step])
                     data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), width)
-        return data_stream, _("Series")
+        return data_stream, _("Series"), channel_names
 
 
 class TableauAcquireHandler(AcquireHandler):
@@ -765,7 +760,7 @@ class TableauAcquireHandler(AcquireHandler):
             return self.__x_control_handlers[control_id]
         return None
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
         item = self._combo_box_row_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
@@ -790,7 +785,7 @@ class TableauAcquireHandler(AcquireHandler):
                     action_fn = weak_partial(action, control_customization, device_map, [y_start, x_start], [y_step, x_step])
                     data_stream = Acquisition.CollectedDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
                                                                  (height, width), (Calibration.Calibration(), Calibration.Calibration()))
-        return data_stream, _("Tableau")
+        return data_stream, _("Tableau"), channel_names
 
 
 class MultiAcquireEntryHandler:
@@ -850,7 +845,7 @@ class MultipleAcquireHandler(AcquireHandler):
     def remove(self, widget: UserInterfaceModule.Widget) -> None:
         self.configuration._remove_item("sections", self.configuration._get_array_item("sections", -1))
 
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController]) -> typing.Tuple[Acquisition.DataStream, str]:
+    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
         assert AcquisitionPreferences.acquisition_preferences
         data_streams: typing.List[Acquisition.DataStream] = list()
         for item in self.configuration.sections:
@@ -859,8 +854,6 @@ class MultipleAcquireHandler(AcquireHandler):
                                           control_customization in AcquisitionPreferences.acquisition_preferences.control_customizations}
             stem_value_controller = device_map.get("stem")
             camera_value_controller = device_map.get("camera")
-            assert stem_value_controller
-            assert camera_value_controller
             control_customization_energy_offset = control_customizations_map["energy_offset"]
             control_customization_exposure = control_customizations_map["exposure"]
             assert control_customization_energy_offset
@@ -871,17 +864,20 @@ class MultipleAcquireHandler(AcquireHandler):
             assert control_description_exposure
 
             def action(offset_value: float, exposure_value: float, index: typing.Sequence[int]) -> None:
-                assert stem_value_controller
-                assert camera_value_controller
-                stem_value_controller.set_values(control_customization_energy_offset, [offset_value])
-                camera_value_controller.set_values(control_customization_exposure, [exposure_value])
+                if stem_value_controller:
+                    stem_value_controller.set_values(control_customization_energy_offset, [offset_value])
+                if camera_value_controller:
+                    camera_value_controller.set_values(control_customization_exposure, [exposure_value])
 
             action_fn = functools.partial(action,
                                           multi_acquire_entry.offset * control_description_energy_offset.multiplier,
                                           multi_acquire_entry.exposure * control_description_exposure.multiplier)
             data_streams.append(Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), max(1, multi_acquire_entry.count)))
 
-        return Acquisition.SequentialDataStream(data_streams), _("Spectrum Image")
+        sequential_data_stream = Acquisition.SequentialDataStream(data_streams)
+        for index, channel in enumerate(sequential_data_stream.channels):
+            channel_names[channel] = " ".join((f"{str(index + 1)} / {str(len(sequential_data_stream.channels))}", channel_names[Acquisition.Channel(*channel.segments[1:])]))
+        return sequential_data_stream, _("Multiple"), channel_names
 
 
 Registry.register_component(BasicAcquireHandler, {"acquisition-method-component-factory"})
@@ -1052,11 +1048,13 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
             include_summed=False
         )
 
+        op = _("Synchronized")
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():
             channel_state = scan_hardware_source.get_channel_state(c)
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_state.channel_id)] = channel_state.name
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.display_name
+            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
+        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
 
         drift_tracker = scan_hardware_source.drift_tracker
 
@@ -1210,7 +1208,7 @@ class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
                                                                             operator=operator)
 
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.display_name
+        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
 
         device_map: typing.Dict[str, DeviceController] = dict()
         device_map["stem"] = STEMDeviceController()
@@ -1289,7 +1287,8 @@ class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():
             channel_state = scan_hardware_source.get_channel_state(c)
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_state.channel_id)] = channel_state.name
+            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
 
         device_map: typing.Dict[str, DeviceController] = dict()
         device_map["stem"] = STEMDeviceController()
@@ -1519,7 +1518,7 @@ class AcquisitionController:
             self.__acquisition.abort_acquire()
         else:
             data_stream, channel_names, drift_tracker, device_map = self.__acquisition_device_component.current_item._handle_acquire()
-            data_stream, title_base = self.__acquisition_method_component.current_item.enclose(data_stream, device_map)
+            data_stream, title_base, channel_names = self.__acquisition_method_component.current_item.enclose(data_stream, device_map, channel_names)
             self._acquire_data_stream(data_stream, title_base, channel_names, drift_tracker)
 
     def _acquire_data_stream(self,

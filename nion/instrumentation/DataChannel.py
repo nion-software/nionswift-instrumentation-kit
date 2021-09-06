@@ -32,7 +32,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         for channel in data_stream.channels:
             data_stream_info = data_stream.get_info(channel)
             if self.__title_base:
-                title = f"{self.__title_base} ({self.__channel_names.get(channel, str(channel))})"
+                title = f"{self.__title_base} {self.__channel_names.get(channel, str(channel))}"
             else:
                 title = f"{self.__channel_names.get(channel, str(channel))}"
             data_item = self.__create_data_item(data_stream_info.data_metadata, title)
