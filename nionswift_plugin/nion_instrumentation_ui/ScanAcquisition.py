@@ -109,8 +109,9 @@ class ScanAcquisitionController:
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():
             channel_state = scan_hardware_source.get_channel_state(c)
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_state.channel_id)] = channel_state.name
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.display_name
+            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
+        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
 
         document_model = document_window.library._document_model
         event_loop = document_window._document_window.event_loop
