@@ -65,6 +65,16 @@ class DriftCorrectionSettings:
 AxisType = typing.Tuple[str, str]
 
 
+class AxisDescription:
+    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str):
+        self.axis_id = axis_id
+        self.axis_type = (axis1, axis2)
+        self.display_name = display_name
+
+    def __str__(self) -> str:
+        return self.display_name
+
+
 class ScanContext:
     def __init__(self):
         self.size = None
@@ -452,6 +462,10 @@ class STEMController(Observable.Observable):
         value pairs to the dict-path.
         """
         pass
+
+    @property
+    def axis_descriptions(self) -> typing.Sequence[AxisDescription]:
+        return list()
 
     # end instrument API
 
