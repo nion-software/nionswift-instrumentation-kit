@@ -463,9 +463,9 @@ class ComponentHandler:
 class ComboBoxHandler:
     """Combine a label and combo box; and facilitate storing the selected item using an item identifier."""
 
-    def __init__(self, title: str, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
+    def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
-                 selection_storage_model: Model.PropertyModel, combo_only: bool = False):
+                 selection_storage_model: Model.PropertyModel):
         self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
         self.sorted_items.sort_key = sort_key
         if filter:
@@ -498,10 +498,7 @@ class ComboBoxHandler:
         u = Declarative.DeclarativeUI()
         component_type_combo = u.create_combo_box(items_ref="@binding(item_list.value)",
                                                   current_index="@binding(selected_index_model.value)")
-        if combo_only:
-            self.ui_view = component_type_combo
-        else:
-            self.ui_view = u.create_row(u.create_label(text=title), component_type_combo, u.create_stretch(), spacing=8)
+        self.ui_view = component_type_combo
 
     def close(self) -> None:
         self.__selected_component_index_listener.close()
@@ -521,7 +518,7 @@ class ComboBoxHandler:
         return self.sorted_items.items[index]
 
 
-class StackedComponentHandler:
+class ComponentComboBoxHandler:
 
     def __init__(self, component_base: str, title: str, configuration: AcquisitionConfiguration, component_id_key: str, components_key: str):
         self.__component_name = component_base
@@ -549,22 +546,26 @@ class StackedComponentHandler:
             self.__components.append_item(component)
 
         # this gets closed by the declarative machinery
-        self._combo_box_row_handler = ComboBoxHandler(title, self.__components, "items",
-                                                      operator.attrgetter("display_name"), None,
-                                                      operator.attrgetter("component_id"),
-                                                      self.__selected_component_id_model)
+        self._combo_box_handler = ComboBoxHandler(self.__components, "items", operator.attrgetter("display_name"),
+                                                  None, operator.attrgetter("component_id"),
+                                                  self.__selected_component_id_model)
 
         # this is merely a reference and does not need to be closed
-        self.selected_item_value_stream = self._combo_box_row_handler.selected_item_value_stream
+        self.selected_item_value_stream = self._combo_box_handler.selected_item_value_stream
 
         # TODO: listen for components being registered/unregistered
 
         u = Declarative.DeclarativeUI()
-        component_type_row = u.create_component_instance(identifier="combo_box_row")
+        component_type_row = u.create_row(
+            u.create_label(text=title),
+            u.create_component_instance(identifier="combo_box"),
+            u.create_stretch(),
+            spacing=8
+        )
         component_page = u.create_stack(
-            items="_combo_box_row_handler.sorted_items.items",
+            items="_combo_box_handler.sorted_items.items",
             item_component_id=self.__component_name,
-            current_index="@binding(_combo_box_row_handler.selected_index_model.value)",
+            current_index="@binding(_combo_box_handler.selected_index_model.value)",
             size_policy_vertical="preferred"
         )
         self.ui_view = u.create_column(component_type_row, component_page, spacing=8, size_policy_vertical="maximum")
@@ -578,13 +579,13 @@ class StackedComponentHandler:
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
         if component_id == self.__component_name:
             return item
-        if component_id == "combo_box_row":
-            return self._combo_box_row_handler
+        if component_id == "combo_box":
+            return self._combo_box_handler
         return None
 
     @property
     def current_item(self) -> typing.Any:
-        return self._combo_box_row_handler.current_item
+        return self._combo_box_handler.current_item
 
 
 class AcquireHandler(ComponentHandler):
@@ -705,15 +706,20 @@ class SeriesAcquireHandler(AcquireHandler):
         self.configuration = configuration
         self.__control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
-        self._combo_box_row_handler = ComboBoxHandler(_("Control"), AcquisitionPreferences.acquisition_preferences,
-                                                      "control_customizations",
-                                                      operator.attrgetter("name"),
-                                                      ListModel.PredicateFilter(lambda x: x.control_description.control_type == "1d"),
-                                                      operator.attrgetter("control_id"),
-                                                      self.__selection_storage_model)
+        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+                                                          "control_customizations",
+                                                          operator.attrgetter("name"),
+                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "1d"),
+                                                          operator.attrgetter("control_id"),
+                                                          self.__selection_storage_model)
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
-            u.create_component_instance(identifier="combo_box_row"),
+            u.create_row(
+                u.create_label(text=_("Control")),
+                u.create_component_instance(identifier="control_combo_box"),
+                u.create_stretch(),
+                spacing=8
+            ),
             u.create_row(
                 u.create_spacing(20),
                 u.create_label(text=_("Count"), width=90),
@@ -723,9 +729,9 @@ class SeriesAcquireHandler(AcquireHandler):
                 spacing=8
             ),
             u.create_stack(
-                items="_combo_box_row_handler.sorted_items.items",
+                items="_control_combo_box_handler.sorted_items.items",
                 item_component_id="series-control",
-                current_index="@binding(_combo_box_row_handler.selected_index_model.value)",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
                 size_policy_vertical="preferred"
             ),
             spacing=8
@@ -737,8 +743,8 @@ class SeriesAcquireHandler(AcquireHandler):
         super().close()
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
-        if component_id == "combo_box_row":
-            return self._combo_box_row_handler
+        if component_id == "control_combo_box":
+            return self._control_combo_box_handler
         if component_id == "series-control":
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             control_id = control_customization.control_id
@@ -749,7 +755,7 @@ class SeriesAcquireHandler(AcquireHandler):
         return None
 
     def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        item = self._combo_box_row_handler.selected_item_value_stream.value
+        item = self._control_combo_box_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             control_handler = self.__control_handlers.get(control_customization.control_id)
@@ -782,26 +788,28 @@ class TableauAcquireHandler(AcquireHandler):
         self.__x_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
         self.__y_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
-        self._combo_box_row_handler = ComboBoxHandler(_("Control"), AcquisitionPreferences.acquisition_preferences,
-                                                      "control_customizations",
-                                                      operator.attrgetter("name"),
-                                                      ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
-                                                      operator.attrgetter("control_id"),
-                                                      self.__selection_storage_model, True)
+        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+                                                          "control_customizations",
+                                                          operator.attrgetter("name"),
+                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
+                                                          operator.attrgetter("control_id"),
+                                                          self.__selection_storage_model)
         self.__axis_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "axis_id")
         stem_controller = Registry.get_component("stem_controller")
         assert stem_controller
-        self._axis_row_handler = ComboBoxHandler(_("Axis"), stem_controller,
-                                                 "axis_descriptions", operator.attrgetter("display_name"),
-                                                 ListModel.PredicateFilter(lambda x: True),
-                                                 operator.attrgetter("axis_id"), self.__axis_storage_model, True)
+        self._axis_combo_box_handler = ComboBoxHandler(stem_controller, "axis_descriptions",
+                                                       operator.attrgetter("display_name"), None,
+                                                       operator.attrgetter("axis_id"), self.__axis_storage_model)
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_row(
                 u.create_label(text=_("Control")),
-                u.create_component_instance(identifier="combo_box_row"),
+                u.create_component_instance(identifier="control_combo_box"),
+                u.create_stretch(),
+                spacing=8),
+            u.create_row(
                 u.create_label(text=_("Axis")),
-                u.create_component_instance(identifier="axis_row"),
+                u.create_component_instance(identifier="axis_combo_box"),
                 u.create_stretch(),
                 spacing=8),
             u.create_row(
@@ -814,15 +822,15 @@ class TableauAcquireHandler(AcquireHandler):
                 spacing=8
             ),
             u.create_stack(
-                items="_combo_box_row_handler.sorted_items.items",
+                items="_control_combo_box_handler.sorted_items.items",
                 item_component_id="x-control",
-                current_index="@binding(_combo_box_row_handler.selected_index_model.value)",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
                 size_policy_vertical="preferred"
             ),
             u.create_stack(
-                items="_combo_box_row_handler.sorted_items.items",
+                items="_control_combo_box_handler.sorted_items.items",
                 item_component_id="y-control",
-                current_index="@binding(_combo_box_row_handler.selected_index_model.value)",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
                 size_policy_vertical="preferred"
             ),
             spacing=8
@@ -834,10 +842,10 @@ class TableauAcquireHandler(AcquireHandler):
         super().close()
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
-        if component_id == "combo_box_row":
-            return self._combo_box_row_handler
-        if component_id == "axis_row":
-            return self._axis_row_handler
+        if component_id == "control_combo_box":
+            return self._control_combo_box_handler
+        if component_id == "axis_combo_box":
+            return self._axis_combo_box_handler
         if component_id == "y-control":
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             control_id = control_customization.control_id
@@ -855,7 +863,7 @@ class TableauAcquireHandler(AcquireHandler):
         return None
 
     def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        item = self._combo_box_row_handler.selected_item_value_stream.value
+        item = self._control_combo_box_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
             x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
@@ -1504,16 +1512,16 @@ class AcquisitionController:
         assert acquisition_configuration
 
         # these get closed by the declarative machinery
-        self.__acquisition_method_component = StackedComponentHandler("acquisition-method-component",
-                                                                      _("Acquisition Method"),
-                                                                      acquisition_configuration,
-                                                                      "acquisition_method_component_id",
-                                                                      "acquisition_method_components")
-        self.__acquisition_device_component = StackedComponentHandler("acquisition-device-component",
-                                                                      _("Acquisition Device"),
-                                                                      acquisition_configuration,
-                                                                      "acquisition_device_component_id",
-                                                                      "acquisition_device_components")
+        self.__acquisition_method_component = ComponentComboBoxHandler("acquisition-method-component",
+                                                                       _("Acquisition Method"),
+                                                                       acquisition_configuration,
+                                                                       "acquisition_method_component_id",
+                                                                       "acquisition_method_components")
+        self.__acquisition_device_component = ComponentComboBoxHandler("acquisition-device-component",
+                                                                       _("Acquisition Device"),
+                                                                       acquisition_configuration,
+                                                                       "acquisition_device_component_id",
+                                                                       "acquisition_device_components")
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
