@@ -125,7 +125,7 @@ class ScanAcquisitionController:
         drift_correction_behavior : typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
         section_height = None
         if self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(

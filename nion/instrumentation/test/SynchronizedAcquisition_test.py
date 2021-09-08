@@ -450,7 +450,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
     def test_grab_synchronized_basic_eels_with_drift_correction(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
@@ -463,7 +462,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
@@ -489,7 +488,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -530,7 +529,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters["processing"] = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -553,7 +552,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
     def test_drift_corrector(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
@@ -561,7 +559,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
@@ -587,7 +585,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
     def test_drift_corrector_with_drift_sub_area_rotation(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
-            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
@@ -597,7 +594,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_rotation = rotation
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             # offset will be rotated into the context reference frame

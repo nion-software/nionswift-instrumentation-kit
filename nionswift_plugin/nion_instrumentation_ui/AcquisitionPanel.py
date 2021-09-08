@@ -329,6 +329,7 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
     """
     def __init__(self, camera_hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource], scan_hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource], scan_width_model: Model.PropertyModel[int], event_loop: asyncio.AbstractEventLoop):
         super().__init__()
+        self.__event_loop = event_loop
         self.__camera_hardware_source_stream = camera_hardware_source_stream.add_ref()
         self.__scan_hardware_source_stream = scan_hardware_source_stream.add_ref()
         self.__scan_width_model = scan_width_model
@@ -374,11 +375,11 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
     def __stem_controller_property_changed(self, key: str) -> None:
         # this can be triggered from a thread, so use call soon to transfer it to the UI thread.
         if key in ("subscan_state", "subscan_region", "subscan_rotation", "line_scan_state", "line_scan_vector", "drift_channel_id", "drift_region", "drift_settings"):
-            asyncio.get_event_loop().call_soon_threadsafe(self.__update_context)
+            self.__event_loop.call_soon_threadsafe(self.__update_context)
 
     def __scan_context_changed(self) -> None:
         # this can be triggered from a thread, so use call soon to transfer it to the UI thread.
-        asyncio.get_event_loop().call_soon_threadsafe(self.__update_context)
+        self.__event_loop.call_soon_threadsafe(self.__update_context)
 
     def __update_context(self) -> None:
         maybe_camera_hardware_source = self.__camera_hardware_source_stream.value
@@ -449,8 +450,7 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
 
 
 class ComponentHandler:
-    def __init__(self, document_controller: DocumentController.DocumentController, display_name: str):
-        self._document_controller = document_controller
+    def __init__(self, display_name: str):
         self.display_name = display_name
 
     def __str__(self) -> str:
@@ -523,7 +523,7 @@ class ComboBoxHandler:
 
 class StackedComponentHandler:
 
-    def __init__(self, document_controller: DocumentController.DocumentController, component_base: str, title: str, configuration: AcquisitionConfiguration, component_id_key: str, components_key: str):
+    def __init__(self, component_base: str, title: str, configuration: AcquisitionConfiguration, component_id_key: str, components_key: str):
         self.__component_name = component_base
         self.__component_factory_name = f"{component_base}-factory"
         self.__components = ListModel.ListModel[ComponentHandler]()
@@ -545,7 +545,7 @@ class StackedComponentHandler:
                 component_entity = entity_type.create() if entity_type else None
                 if component_entity:
                     configuration._append_item(components_key, component_entity)
-            component = component_factory(document_controller, component_entity)
+            component = component_factory(component_entity)
             self.__components.append_item(component)
 
         # this gets closed by the declarative machinery
@@ -557,16 +557,7 @@ class StackedComponentHandler:
         # this is merely a reference and does not need to be closed
         self.selected_item_value_stream = self._combo_box_row_handler.selected_item_value_stream
 
-        def component_registered(component, component_types: typing.Set[str]) -> None:
-            if self.__component_factory_name in component_types:
-                self.__components.append_item(component(document_controller))
-
-        def component_unregistered(component, component_types: typing.Set[str]) -> None:
-            if self.__component_factory_name in component_types:
-                self.__components.remove_item(self.__components.items.index(component))
-
-        self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
-        self.__component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
+        # TODO: listen for components being registered/unregistered
 
         u = Declarative.DeclarativeUI()
         component_type_row = u.create_component_instance(identifier="combo_box_row")
@@ -581,10 +572,6 @@ class StackedComponentHandler:
     def close(self) -> None:
         self.__selected_component_id_model.close()
         self.__selected_component_id_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
-        self.__component_registered_listener.close()
-        self.__component_registered_listener = typing.cast(Event.EventListener, None)
-        self.__component_unregistered_listener.close()
-        self.__component_unregistered_listener = typing.cast(Event.EventListener, None)
         self.__components.close()
         self.__components = typing.cast(ListModel.ListModel[ComponentHandler], None)
 
@@ -609,8 +596,8 @@ class AcquireHandler(ComponentHandler):
 class BasicAcquireHandler(AcquireHandler):
     component_id = "basic-acquire"
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, _("Basic Acquire"))
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Basic Acquire"))
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             spacing=8
@@ -623,8 +610,8 @@ class BasicAcquireHandler(AcquireHandler):
 class SequenceAcquireHandler(AcquireHandler):
     component_id = "sequence-acquire"
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, _("Sequence Acquire"))
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Sequence Acquire"))
         self.configuration = configuration
         self.count_converter = Converter.IntegerToStringConverter()
         u = Declarative.DeclarativeUI()
@@ -712,8 +699,8 @@ def get_control_values(configuration: Schema.Entity, control_values_list_key: st
 class SeriesAcquireHandler(AcquireHandler):
     component_id = "series-acquire"
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, _("Series Acquire"))
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Series Acquire"))
         assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         self.__control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
@@ -788,8 +775,8 @@ class SeriesAcquireHandler(AcquireHandler):
 class TableauAcquireHandler(AcquireHandler):
     component_id = "tableau-acquire"
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, _("Tableau Acquire"))
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Tableau Acquire"))
         assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         self.__x_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
@@ -919,8 +906,8 @@ class MultiAcquireEntryHandler:
 class MultipleAcquireHandler(AcquireHandler):
     component_id = "multiple-acquire"
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, _("Multiple Acquire"))
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Multiple Acquire"))
         self.configuration = configuration
         if len(self.configuration.sections) == 0:
             self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
@@ -1008,8 +995,8 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
     component_id = "synchronized-scan"
     display_name = _("Synchronized Scan")
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, SynchronizedScanAcquisitionComponentHandler.display_name)
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(SynchronizedScanAcquisitionComponentHandler.display_name)
         self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_device_id")
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
@@ -1143,7 +1130,7 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         drift_correction_behavior: typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
         section_height: typing.Optional[int] = None
         if scan_context_description.drift_interval_lines > 0:
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(self._document_controller.document_model, scan_hardware_source, scan_frame_parameters)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             section_height = scan_context_description.drift_interval_lines
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
@@ -1240,8 +1227,8 @@ class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
     component_id = "camera"
     display_name = _("Camera")
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, CameraAcquisitionComponentHandler.display_name)
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(CameraAcquisitionComponentHandler.display_name)
         self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_device_id")
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
@@ -1330,8 +1317,8 @@ class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
     component_id = "scan"
     display_name = _("Scan")
 
-    def __init__(self, document_controller: DocumentController.DocumentController, configuration: Schema.Entity):
-        super().__init__(document_controller, ScanAcquisitionComponentHandler.display_name)
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(ScanAcquisitionComponentHandler.display_name)
         self.__scan_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "scan_device_id")
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
         u = Declarative.DeclarativeUI()
@@ -1516,21 +1503,13 @@ class AcquisitionController:
         self.document_controller = document_controller
         assert acquisition_configuration
 
-        # these two models store the selected component id
-        self.__acquisition_method_component_model = document_controller.ui.create_persistent_string_model(
-            "panel.acquisition.method")
-        self.__acquisition_device_component_model = document_controller.ui.create_persistent_string_model(
-            "panel.acquisition.device")
-
         # these get closed by the declarative machinery
-        self.__acquisition_method_component = StackedComponentHandler(self.document_controller,
-                                                                      "acquisition-method-component",
+        self.__acquisition_method_component = StackedComponentHandler("acquisition-method-component",
                                                                       _("Acquisition Method"),
                                                                       acquisition_configuration,
                                                                       "acquisition_method_component_id",
                                                                       "acquisition_method_components")
-        self.__acquisition_device_component = StackedComponentHandler(self.document_controller,
-                                                                      "acquisition-device-component",
+        self.__acquisition_device_component = StackedComponentHandler("acquisition-device-component",
                                                                       _("Acquisition Device"),
                                                                       acquisition_configuration,
                                                                       "acquisition_device_component_id",
@@ -1617,10 +1596,6 @@ class AcquisitionController:
         self.progress_value_model = typing.cast(Model.PropertyModel[int], None)
         self.button_text_model.close()
         self.button_text_model = typing.cast(Model.StreamValueModel, None)
-        self.__acquisition_method_component_model.close()
-        self.__acquisition_method_component_model = typing.cast(Model.PropertyModel[str], None)
-        self.__acquisition_device_component_model.close()
-        self.__acquisition_device_component_model = typing.cast(Model.PropertyModel[str], None)
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         if self.__acquisition:

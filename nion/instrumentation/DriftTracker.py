@@ -74,9 +74,8 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
     Take a drift scan from the drift region and send it to the drift compensator.
     """
 
-    def __init__(self, document_model: DocumentModel.DocumentModel, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
         # init with the frame parameters from the synchronized grab
-        self.__document_model = document_model
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
         # here we convert those frame parameters to the context
