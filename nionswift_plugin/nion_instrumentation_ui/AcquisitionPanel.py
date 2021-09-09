@@ -62,6 +62,752 @@ from . import HardwareSourceChoice
 
 _ = gettext.gettext
 
+# define SI units used in this module
+units_multiplier = {
+    "": 1,
+    "nm": 1E9,
+    "um": 1E6,
+    "mm": 1E3,
+    "m": 1,
+    "eV": 1,
+    "meV": 1E3,
+    "ns": 1E9,
+    "us": 1E6,
+    "ms": 1E3,
+    "s": 1,
+}
+
+
+class ComponentHandler:
+    """Define an interface for component handler to be used with component combo box handler."""
+
+    def __init__(self, display_name: str):
+        self.display_name = display_name
+
+    def __str__(self) -> str:
+        return self.display_name
+
+    def close(self) -> None:
+        pass
+
+
+class ComboBoxHandler:
+    """Declarative component handler for combo box based on observable list.
+
+    Also facilitate reading/writing the selected item identifier from/to a property model.
+
+    container is the containing object; items_key is the key within that object. The property associated with
+    the key should be an observable list.
+
+    sort_key and filter are used to order and limit the entries.
+
+    id_getter and selection_storage_model are used to read/write the selected item identifier.
+    """
+
+    def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
+                 filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
+                 selection_storage_model: Model.PropertyModel):
+        # create a filtered list model with the sort key and filter key.
+        self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
+        self.sorted_items.sort_key = sort_key
+        if filter:
+            self.sorted_items.filter = filter
+
+        # create an observable property model based on the sorted items.
+        self.item_list = ListModel.ListPropertyModel(self.sorted_items)
+
+        # create an index model for the combo box.
+        self.selected_index_model = Model.PropertyModel[int](0)
+
+        # create a value stream for the selected item. this is useful in cases where other UI items
+        # need to adjust themselves based on the selected value.
+        self.selected_item_value_stream = Stream.ValueStream().add_ref()
+
+        # update the selected item. this function should not refer to self.
+        def update_selected_item(c: ListModel.ListPropertyModel, index_model: Model.PropertyModel[int],
+                                 v: Stream.ValueStream, k: str) -> None:
+            index = index_model.value or 0
+            item = c.value[index] if 0 <= index < len(c.value) else None
+            v.value = item
+            if item:
+                selection_storage_model.value = id_getter(item)
+
+        self.__selected_component_index_listener = self.selected_index_model.property_changed_event.listen(
+            functools.partial(update_selected_item, self.item_list, self.selected_index_model,
+                              self.selected_item_value_stream))
+
+        # read the identifier from storage and match it to an item and make that item the selected one
+        selected_item_id = selection_storage_model.value
+        for index, item in enumerate(self.sorted_items.items or list()):
+            if id_getter(item) == selected_item_id:
+                self.selected_index_model.value = index
+
+        update_selected_item(self.item_list, self.selected_index_model, self.selected_item_value_stream, "value")
+
+        # build the UI
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_combo_box(items_ref="@binding(item_list.value)",
+                                          current_index="@binding(selected_index_model.value)")
+
+    def close(self) -> None:
+        self.__selected_component_index_listener.close()
+        self.__selected_component_index_listener = typing.cast(Event.EventListener, None)
+        self.selected_item_value_stream.remove_ref()
+        self.selected_item_value_stream = typing.cast(Stream.ValueStream, None)
+        self.selected_index_model.close()
+        self.selected_index_model = typing.cast(Model.PropertyModel[int], None)
+        self.item_list.close()
+        self.item_list = typing.cast(ListModel.ListPropertyModel, None)
+        self.sorted_items.close()
+        self.sorted_items = typing.cast(ListModel.FilteredListModel, None)
+
+    @property
+    def current_item(self) -> typing.Any:
+        index = self.selected_index_model.value or 0
+        return self.sorted_items.items[index]
+
+
+class ComponentComboBoxHandler:
+    """Declarative component handler for a set of registry components.
+
+    Also facilitate reading/writing the component instances and selected item identifier from/to an entity.
+
+    component-base is a string to use for locating the registry components. the component-base + "-factory"
+    is used to find the components. individual components are identified by have component-base as their
+    prefix.
+
+    title is used to label the combo box.
+
+    configuration is a schema entity with properties of component_id_key (a string used to read/write the current
+    component identifier) and components_key (a string used to maintain the list of component instances).
+    """
+
+    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str):
+        # store these values for bookkeeping
+        self.__component_name = component_base
+        self.__component_factory_name = f"{component_base}-factory"
+
+        # create a list model for the component handlers
+        self.__components = ListModel.ListModel[ComponentHandler]()
+
+        # and a model to store the selected component id. this is a property model based on observing
+        # the component_id_key of the configuration entity.
+        self.__selected_component_id_model = Model.PropertyChangedPropertyModel[str](configuration, component_id_key)
+
+        # make a map from each component id to the associated component.
+        component_map: typing.Dict[str, Schema.Entity] = dict()
+        for component_entity in configuration._get_array_items(components_key):
+            component_map[component_entity.entity_type.entity_id] = component_entity
+
+        # construct the components.
+        # put this above combo box so the selection gets made correctly from existing items
+        # iterate through the components, creating them. look for a corresponding entry
+        # in the component_map, creating a new entity if it doesn't exist. then assign the
+        # entity to the component.
+        for component_factory in Registry.get_components_by_type(self.__component_factory_name):
+            component_id = f"{component_base}-{component_factory.component_id}".replace("-", "_")
+            component_entity = component_map.get(component_id)
+            if not component_entity:
+                entity_type = Schema.get_entity_type(component_id)
+                component_entity = entity_type.create() if entity_type else None
+                if component_entity:
+                    configuration._append_item(components_key, component_entity)
+            component = component_factory(component_entity)
+            self.__components.append_item(component)
+
+        # make a combo box handler.
+        # this gets closed by the declarative machinery.
+        self._combo_box_handler = ComboBoxHandler(self.__components, "items", operator.attrgetter("display_name"),
+                                                  None, operator.attrgetter("component_id"),
+                                                  self.__selected_component_id_model)
+
+        # create a value stream for the selected item. this is useful in cases where other UI items
+        # need to adjust themselves based on the selected value.
+        # this is merely a reference and does not need to be closed.
+        self.selected_item_value_stream = self._combo_box_handler.selected_item_value_stream
+
+        # TODO: listen for components being registered/unregistered
+
+        u = Declarative.DeclarativeUI()
+        component_type_row = u.create_row(
+            u.create_label(text=title),
+            u.create_component_instance(identifier="combo_box"),
+            u.create_stretch(),
+            spacing=8
+        )
+        component_page = u.create_stack(
+            items="_combo_box_handler.sorted_items.items",
+            item_component_id=self.__component_name,
+            current_index="@binding(_combo_box_handler.selected_index_model.value)",
+            size_policy_vertical="preferred"
+        )
+        self.ui_view = u.create_column(component_type_row, component_page, spacing=8, size_policy_vertical="maximum")
+
+    def close(self) -> None:
+        self.__selected_component_id_model.close()
+        self.__selected_component_id_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__components.close()
+        self.__components = typing.cast(ListModel.ListModel[ComponentHandler], None)
+
+    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
+        if component_id == self.__component_name:
+            return item
+        if component_id == "combo_box":
+            return self._combo_box_handler
+        return None
+
+    @property
+    def current_item(self) -> typing.Any:
+        return self._combo_box_handler.current_item
+
+
+@dataclasses.dataclass
+class AcquisitionMethodResult:
+    """Define result values for acquire handler apply function.
+
+    data_stream is the result data stream.
+    title_base is the base name for titles describing the acquire handler. may be empty, but not None.
+    channel_names is a mapping from each acquisition channel to a display name.
+    """
+    data_stream: Acquisition.DataStream
+    title_base: str
+    channel_names: typing.Dict[Acquisition.Channel, str]
+
+
+class AcquisitionMethodComponentHandler(ComponentHandler):
+    """Define methods for acquisition method components."""
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        raise NotImplementedError()
+
+
+class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
+    """Basic acquisition method - single acquire from acquisition device with no options.
+
+    Produces a data stream directly from the acquisition device.
+    """
+
+    component_id = "basic-acquire"
+
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Basic Acquire"))
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            spacing=8
+        )
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        return AcquisitionMethodResult(data_stream, str(), channel_names)
+
+
+class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
+    """Sequence acquisition method - a sequence of acquires from acquisition device with no options.
+
+    Produces a data stream that is a sequence of the acquisition device data stream.
+
+    The configuration entity should have an integer 'count' field.
+    """
+
+    component_id = "sequence-acquire"
+
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Sequence Acquire"))
+        self.configuration = configuration
+        self.count_converter = Converter.IntegerToStringConverter()
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            u.create_row(
+                u.create_label(text=_("Count")),
+                u.create_line_edit(text="@binding(configuration.count, converter=count_converter)", width=90),
+                u.create_stretch(),
+                spacing=8
+            ),
+            spacing=8
+        )
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        width = max(1, self.configuration.count) if self.configuration.count else 1
+        if width > 1:
+            return AcquisitionMethodResult(Acquisition.SequenceDataStream(data_stream, width), _("Sequence"), channel_names)
+        else:
+            return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
+
+
+@dataclasses.dataclass
+class ControlValuesRange:
+    """Description of the range of values to apply to a control."""
+    count: int
+    start: float
+    step: float
+
+
+class SeriesControlHandler:
+    """Declarative component handler for count/start/step control UI.
+
+    control_customization is the control being controlled.
+
+    control_values is an entity with fields for control_id, count, start_value, and step_value.
+
+    label is an optional UI label for the row.
+    """
+
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: Schema.Entity, label: typing.Optional[str]):
+        self.__control_customization = control_customization
+        self.control_values = control_values
+        self.count_converter = Converter.IntegerToStringConverter()
+        control_description = control_customization.control_description
+        assert control_description
+        self.value_converter = Converter.PhysicalValueToStringConverter(control_description.units,
+                                                                        units_multiplier[control_description.units],
+                                                                        "{:.1f}")
+        u = Declarative.DeclarativeUI()
+        row_items = list()
+        # the widths and spacing are typically duplicated in the header; so take care when changing to change the
+        # headers too.
+        row_items.append(u.create_spacing(20))
+        if label is not None:
+            row_items.append(u.create_label(text=label, width=28))
+        row_items.append(u.create_line_edit(text="@binding(control_values.count, converter=count_converter)", width=90))
+        row_items.append(u.create_line_edit(text="@binding(control_values.start_value, converter=value_converter)", width=90))
+        row_items.append(u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90))
+        row_items.append(u.create_stretch())
+        self.ui_view = u.create_row(*row_items, spacing=8)
+
+    def get_control_values_range(self) -> ControlValuesRange:
+        """Return control info (count, start, step)."""
+        control_description = self.__control_customization.control_description
+        assert control_description
+        count = max(1, self.control_values.count) if self.control_values.count else 1
+        start = (self.control_values.start_value or 0)
+        step = (self.control_values.step_value or 0)
+        return ControlValuesRange(count, start * control_description.multiplier, step * control_description.multiplier)
+
+
+def get_control_values(configuration: Schema.Entity, control_values_list_key: str, control_customization: AcquisitionPreferences.ControlCustomization, value_index: typing.Optional[int] = None) -> Schema.Entity:
+    """Extract the control values for the control customization from the configuration under control_values_list_key.
+
+    The value_index can be used to index into the default value for the control, if required.
+    """
+    control_id = control_customization.control_id
+    # make a reverse map from control_id's in the configuration to control_values.
+    m = dict()
+    for c in configuration._get_array_items(control_values_list_key):
+        m[c.control_id] = c
+    # lookup existing control values in the map matching the control customization.
+    control_values = m.get(control_id)
+    # if no control values, create a new set.
+    if not control_values:
+        control_description = control_customization.control_description
+        assert control_description
+        value = control_description.default_value
+        control_values = ControlValuesSchema.create(None, {"control_id": control_id, "count": 1,
+                                                           "start_value": value[value_index] if value_index is not None else value,
+                                                           "step_value": 0.0})
+        configuration._append_item(control_values_list_key, control_values)
+    return control_values
+
+
+class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
+    """Series acquisition method - a sequence of acquires from acquisition device with a changing parameter.
+
+    Produces a data stream that is a sequence of the acquisition device data stream.
+
+    The configuration entity should have a field for control_id and control_values_list. The control values list
+    should have entities with fields for control_id, count, start_value, step_value. There should be one entry in
+    the control values list for each possible control.
+    """
+
+    component_id = "series-acquire"
+
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Series Acquire"))
+        assert AcquisitionPreferences.acquisition_preferences
+        self.configuration = configuration
+        # the control UI is constructed as a stack with one item for each control_id.
+        # the control_handlers is a map from the control_id to the SeriesControlHandler
+        # for the control.
+        self.__control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
+        # the selection storage model is a property model made by observing the control_id in the configuration.
+        self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
+        # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
+        # by looking at control customizations. only 1d controls are presented.
+        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+                                                          "control_customizations",
+                                                          operator.attrgetter("name"),
+                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "1d"),
+                                                          operator.attrgetter("control_id"),
+                                                          self.__selection_storage_model)
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            u.create_row(
+                u.create_label(text=_("Control")),
+                u.create_component_instance(identifier="control_combo_box"),
+                u.create_stretch(),
+                spacing=8
+            ),
+            u.create_row(
+                u.create_spacing(20),
+                u.create_label(text=_("Count"), width=90),
+                u.create_label(text=_("Start"), width=90),
+                u.create_label(text=_("Step"), width=90),
+                u.create_stretch(),
+                spacing=8
+            ),
+            u.create_stack(
+                items="_control_combo_box_handler.sorted_items.items",
+                item_component_id="series-control",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
+                size_policy_vertical="preferred"
+            ),
+            spacing=8
+        )
+
+    def close(self) -> None:
+        self.__selection_storage_model.close()
+        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__control_handlers = typing.cast(typing.Dict[str, SeriesControlHandler], None)
+        super().close()
+
+    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
+        if component_id == "control_combo_box":
+            return self._control_combo_box_handler
+        if component_id == "series-control":
+            # make a SeriesControlHandler for each control and store it into the control_handlers map.
+            # control_customization is the dynamic customization of a static control_description.
+            # control_values specify a series of values to be used during acquisition: count, start, step.
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            control_id = control_customization.control_id
+            assert control_id not in self.__control_handlers
+            control_values = get_control_values(self.configuration, "control_values_list", control_customization)
+            self.__control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, None)
+            return self.__control_handlers[control_id]
+        return None
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        # start by getting the selected control customization from the UI.
+        item = self._control_combo_box_handler.selected_item_value_stream.value
+        if item:
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            # get the associated control handler that was created in created_handler and used within the stack
+            # of control handlers declarative components.
+            control_handler = self.__control_handlers.get(control_customization.control_id)
+            if control_handler and data_stream:
+                # get the control values range from the control handler.
+                control_values_range = control_handler.get_control_values_range()
+                if control_values_range.count > 1:
+                    # define an action function to apply control values during acquisition
+                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
+                               device_map: typing.Mapping[str, DeviceController],
+                               starts: typing.Sequence[float], steps: typing.Sequence[float],
+                               index: typing.Sequence[int]) -> None:
+                        # look up the device controller in the device_map using the device_id in the control description
+                        control_description = control_customization.control_description
+                        assert control_description
+                        device_controller = device_map.get(control_description.device_id)
+                        if device_controller:
+                            # calculate the current value (in each dimension) and send the result to the
+                            # device controller. the device controller may be a camera, scan, or stem device
+                            # controller.
+                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
+                            device_controller.set_values(control_customization, values)
+
+                    # configure the action function and data stream using weak_partial to carefully control ref counts
+                    action_fn = weak_partial(action, control_customization, device_map, [control_values_range.start], [control_values_range.step])
+                    data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), control_values_range.count)
+        return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
+
+
+class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
+    """Tableau acquisition method - a grid of acquires from acquisition device with a changing 2d parameter.
+
+    Produces a data stream that is a 2d collection of the acquisition device data stream.
+
+    The configuration entity should have a field for control_id, axis_id, x_control_values_list, and
+    y_control_values_list. The control values lists should have entities with fields for control_id, count, start_value,
+    step_value. There should be one entry in each control values list for each possible control.
+    """
+
+    component_id = "tableau-acquire"
+
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Tableau Acquire"))
+        assert AcquisitionPreferences.acquisition_preferences
+        self.configuration = configuration
+        # the control UIs are constructed as a stack with one item for each control_id.
+        # the control_handlers is a map from the control_id to the SeriesControlHandler
+        # for the control.
+        self.__x_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
+        self.__y_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
+        # the selection storage model is a property model made by observing the control_id in the configuration.
+        self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
+        # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
+        # by looking at control customizations. only 2d controls are presented.
+        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+                                                          "control_customizations",
+                                                          operator.attrgetter("name"),
+                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
+                                                          operator.attrgetter("control_id"),
+                                                          self.__selection_storage_model)
+        # the axis storage model is a property model made by observing the axis_id in the configuration.
+        self.__axis_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "axis_id")
+        stem_controller = Registry.get_component("stem_controller")
+        assert stem_controller
+        # the axis combo box handler gives a choice of which axis to use. the axes are sourced from the stem controller.
+        self._axis_combo_box_handler = ComboBoxHandler(stem_controller, "axis_descriptions",
+                                                       operator.attrgetter("display_name"), None,
+                                                       operator.attrgetter("axis_id"), self.__axis_storage_model)
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            u.create_row(
+                u.create_label(text=_("Control")),
+                u.create_component_instance(identifier="control_combo_box"),
+                u.create_stretch(),
+                spacing=8),
+            u.create_row(
+                u.create_label(text=_("Axis")),
+                u.create_component_instance(identifier="axis_combo_box"),
+                u.create_stretch(),
+                spacing=8),
+            u.create_row(
+                u.create_spacing(20),
+                u.create_spacing(28),
+                u.create_label(text=_("Count"), width=90),
+                u.create_label(text=_("Start"), width=90),
+                u.create_label(text=_("Step"), width=90),
+                u.create_stretch(),
+                spacing=8
+            ),
+            u.create_stack(
+                items="_control_combo_box_handler.sorted_items.items",
+                item_component_id="x-control",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
+                size_policy_vertical="preferred"
+            ),
+            u.create_stack(
+                items="_control_combo_box_handler.sorted_items.items",
+                item_component_id="y-control",
+                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
+                size_policy_vertical="preferred"
+            ),
+            spacing=8
+        )
+
+    def close(self) -> None:
+        self.__selection_storage_model.close()
+        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        super().close()
+
+    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
+        if component_id == "control_combo_box":
+            return self._control_combo_box_handler
+        if component_id == "axis_combo_box":
+            return self._axis_combo_box_handler
+        if component_id == "y-control":
+            # make a SeriesControlHandler for each y-control and store it into the control_handlers map.
+            # control_customization is the dynamic customization of a static control_description.
+            # control_values specify a series of values to be used during acquisition: count, start, step.
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            control_id = control_customization.control_id
+            assert control_id not in self.__y_control_handlers
+            control_values = get_control_values(self.configuration, "y_control_values_list", control_customization, 0)
+            self.__y_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "Y")
+            return self.__y_control_handlers[control_id]
+        if component_id == "x-control":
+            # make a SeriesControlHandler for each x-control and store it into the control_handlers map.
+            # control_customization is the dynamic customization of a static control_description.
+            # control_values specify a series of values to be used during acquisition: count, start, step.
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            control_id = control_customization.control_id
+            assert control_id not in self.__x_control_handlers
+            control_values = get_control_values(self.configuration, "x_control_values_list", control_customization, 1)
+            self.__x_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "X")
+            return self.__x_control_handlers[control_id]
+        return None
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        # start by getting the selected control customization from the UI.
+        item = self._control_combo_box_handler.selected_item_value_stream.value
+        if item:
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            # get the associated control handlers that were created in created_handler and used within the stack
+            # of control handlers declarative components.
+            x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
+            y_control_handler = self.__y_control_handlers.get(control_customization.control_id)
+            if x_control_handler and y_control_handler and data_stream:
+                # get the axis and control values ranges from the control handlers.
+                axis_id = self.__axis_storage_model.value
+                y_control_values_range = y_control_handler.get_control_values_range()
+                x_control_values_range = x_control_handler.get_control_values_range()
+                if x_control_values_range.count > 1 or y_control_values_range.count > 1:
+                    # define an action function to apply control values during acquisition
+                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
+                               device_map: typing.Mapping[str, DeviceController],
+                               starts: typing.Sequence[float], steps: typing.Sequence[float],
+                               axis_id: str, index: typing.Sequence[int]) -> None:
+                        # look up the device controller in the device_map using the device_id in the control description
+                        control_description = control_customization.control_description
+                        assert control_description
+                        device_controller = device_map.get(control_description.device_id)
+                        if device_controller:
+                            # resolve the axis for the 2d control
+                            axis: typing.Optional[stem_controller.AxisType] = ("x", "y")
+                            for axis_description in typing.cast(STEMDeviceController,
+                                                                device_map["stem"]).stem_controller.axis_descriptions:
+                                if axis_id == axis_description.axis_id:
+                                    axis = axis_description.axis_type
+                            # calculate the current value (in each dimension) and send the result to the
+                            # device controller. the device controller may be a camera, scan, or stem device
+                            # controller.
+                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
+                            device_controller.set_values(control_customization, values, axis)
+
+                    # configure the action function and data stream using weak_partial to carefully control ref counts
+                    action_fn = weak_partial(action, control_customization, device_map,
+                                             [y_control_values_range.start, x_control_values_range.start],
+                                             [y_control_values_range.step, x_control_values_range.step], axis_id)
+                    data_stream = Acquisition.CollectedDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
+                                                                  (y_control_values_range.count, x_control_values_range.count), (
+                                                                      Calibration.Calibration(),
+                                                                      Calibration.Calibration()))
+        return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
+
+
+class MultiAcquireEntryHandler:
+    """Declarative component handler for a section in a multiple acquire method component."""
+
+    def __init__(self, container: typing.Any, item: Schema.Entity):
+        self.offset_converter = Converter.PhysicalValueToStringConverter("eV", units_multiplier["eV"], "{:.0f}")
+        self.exposure_converter = Converter.PhysicalValueToStringConverter("ms", units_multiplier["ms"], "{:.1f}")
+        self.count_converter = Converter.IntegerToStringConverter()
+        self.item = item
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_row(
+            u.create_line_edit(text="@binding(item.offset, converter=offset_converter)", width=100),
+            u.create_line_edit(text="@binding(item.exposure, converter=exposure_converter)", width=100),
+            u.create_line_edit(text="@binding(item.count, converter=count_converter)", width=100),
+            u.create_stretch(),
+            spacing=8
+        )
+
+
+class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
+    """Multiple acquisition method - a sequential set of acquires from acquisition device with a control and exposure.
+
+    Currently the control is always energy offset.
+
+    Produces multiple data streams that are sequences of the acquisition device data stream.
+
+    The configuration entity should have a list of sections where each section is an entity with offset, exposure,
+    and count fields.
+    """
+
+    component_id = "multiple-acquire"
+
+    def __init__(self, configuration: Schema.Entity):
+        super().__init__(_("Multiple Acquire"))
+        self.configuration = configuration
+        # ensure that there are always a few example sections.
+        if len(self.configuration.sections) == 0:
+            self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
+            self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 10.0, "exposure": 0.01, "count": 3}))
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            u.create_row(
+                u.create_label(text=_("Offset"), width=100),
+                u.create_label(text=_("Exposure"), width=100),
+                u.create_label(text=_("Frames"), width=100),
+                u.create_stretch(),
+                spacing=8
+            ),
+            u.create_column(items="configuration.sections", item_component_id="section", spacing=8),
+            u.create_row(
+                u.create_push_button(text="+", on_clicked="add"),
+                u.create_push_button(text="-", on_clicked="remove"),
+                u.create_stretch(),
+                spacing=8
+            ),
+        )
+
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
+        if component_id == "section":
+            assert container is not None
+            assert item is not None
+            return MultiAcquireEntryHandler(container, item)
+        return None
+
+    def add(self, widget: UserInterfaceModule.Widget) -> None:
+        # handle add section request. always adds a new section with offset=0, exposure=1ms, count=2.
+        self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
+
+    def remove(self, widget: UserInterfaceModule.Widget) -> None:
+        # handle remove section request. always removes the last section.
+        self.configuration._remove_item("sections", self.configuration._get_array_item("sections", -1))
+
+    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        assert AcquisitionPreferences.acquisition_preferences
+        # define a list of data streams that will be acquired sequentially.
+        data_streams: typing.List[Acquisition.DataStream] = list()
+        # create a map from control_id to the control customization.
+        control_customizations_map = {control_customization.control_id: control_customization for
+                                      control_customization in
+                                      AcquisitionPreferences.acquisition_preferences.control_customizations}
+        # grab the stem and camera device controllers from the device map.
+        stem_value_controller = device_map.get("stem")
+        camera_value_controller = device_map.get("camera")
+        # grab the control customizations and descriptions for energy offset and exposure
+        control_customization_energy_offset = control_customizations_map["energy_offset"]
+        control_customization_exposure = control_customizations_map["exposure"]
+        assert control_customization_energy_offset
+        assert control_customization_exposure
+        control_description_energy_offset = control_customization_energy_offset.control_description
+        control_description_exposure = control_customization_exposure.control_description
+        assert control_description_energy_offset
+        assert control_description_exposure
+        # for each section, build the data stream.
+        for item in self.configuration.sections:
+            # define an action function to apply control values during acquisition
+            def action(offset_value: float, exposure_value: float, index: typing.Sequence[int]) -> None:
+                if stem_value_controller:
+                    stem_value_controller.set_values(control_customization_energy_offset, [offset_value])
+                if camera_value_controller:
+                    camera_value_controller.set_values(control_customization_exposure, [exposure_value])
+
+            # configure the action function and data stream using weak_partial to carefully control ref counts
+            multi_acquire_entry = typing.cast(Schema.Entity, item)
+            action_fn = functools.partial(action,
+                                          multi_acquire_entry.offset * control_description_energy_offset.multiplier,
+                                          multi_acquire_entry.exposure * control_description_exposure.multiplier)
+            data_streams.append(Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
+                                                               max(1, multi_acquire_entry.count)))
+
+        # create a sequential data stream from the section data streams.
+        sequential_data_stream = Acquisition.SequentialDataStream(data_streams)
+        # the sequential data stream will emit channels of the form n.sub-channel. add a name for each of those
+        # channels. do this by getting the name of the sub channel and constructing a new name for n.sub_channel
+        # for each index.
+        for channel in sequential_data_stream.channels:
+            channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}",
+                                               channel_names[Acquisition.Channel(*channel.segments[1:])]))
+        return AcquisitionMethodResult(sequential_data_stream, _("Multiple"), channel_names)
+
+
+# register each component as an acquisition method component factory.
+Registry.register_component(BasicAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
+Registry.register_component(SequenceAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
+Registry.register_component(SeriesAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
+Registry.register_component(TableauAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
+Registry.register_component(MultipleAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
+
 
 class HardwareSourceHandler(Observable.Observable):
     """A declarative component handler for a hardware source choice combo box.
@@ -201,107 +947,27 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
                 self.notify_property_changed("channel_descriptions")
 
 
-class CameraExposureValueStream(Stream.ValueStream[float]):
-    """A value stream of the camera exposure of the latest values of a hardware source stream.
+@dataclasses.dataclass
+class AcquisitionDeviceResult:
+    """Define result values for acquisition device component build function.
 
-    Listens to the hardware_source_stream for changes. And then listens to the current hardware source
-    for parameter changes. Sends out new exposure_time_ms values when changed.
-
-    Always uses profile 0 for camera exposure.
+    data_stream is the result data stream.
+    channel_names is a mapping from each acquisition channel to a display name.
+    drift_tracker is an optional drift tracker, if used.
+    device_map is a mapping from device_id to a DeviceController.
     """
-    def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource]):
-        super().__init__()
-        self.__hardware_source_stream = hardware_source_stream.add_ref()
-        # use weak_partial to avoid self reference and facilitate no-close.
-        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(
-            weak_partial(CameraExposureValueStream.__hardware_source_stream_changed, self))
-        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
-        self.__hardware_source_stream_changed(hardware_source_stream.value)
-
-    def about_to_delete(self) -> None:
-        if self.__frame_parameters_changed_listener:
-            self.__frame_parameters_changed_listener.close()
-            self.__frame_parameters_changed_listener = None
-        self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = None
-        self.__hardware_source_stream.remove_ref()
-        super().about_to_delete()
-
-    def __hardware_source_stream_changed(self, hardware_source: HardwareSource.HardwareSource) -> None:
-        # when the hardware source choice changes, update the frame parameters listener.
-        if self.__frame_parameters_changed_listener:
-            self.__frame_parameters_changed_listener.close()
-            self.__frame_parameters_changed_listener = None
-        if hardware_source and hardware_source.features.get("is_camera"):
-            camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
-            # use weak_partial to avoid self reference and facilitate no-close.
-            self.__frame_parameters_changed_listener = camera_hardware_source.frame_parameters_changed_event.listen(
-                weak_partial(CameraExposureValueStream.__frame_parameters_changed, self, camera_hardware_source))
-
-    def __frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
-        if profile_index == 0:
-            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
-
-    @property
-    def exposure_time_ms(self) -> float:
-        return self.value if self.value else 0.0
-
-    @exposure_time_ms.setter
-    def exposure_time_ms(self, exposure_time_ms: float) -> None:
-        if exposure_time_ms and exposure_time_ms > 0:
-            hardware_source = self.__hardware_source_stream.value
-            if hardware_source:
-                frame_parameters = hardware_source.get_frame_parameters(0)
-                frame_parameters.exposure_ms = exposure_time_ms
-                hardware_source.set_frame_parameters(0, frame_parameters)
+    data_stream: Acquisition.DataStream
+    channel_names: typing.Dict[Acquisition.Channel, str]
+    drift_tracker: typing.Optional[scan_base.DriftTracker]
+    device_map: typing.Dict[str, DeviceController]
 
 
-class CameraDetailsHandler(Observable.Observable):
-    """A declarative component handler for a row describing a camera device.
+class AcquisitionDeviceComponentHandler(ComponentHandler):
+    """Define methods for acquisition device components."""
 
-    The hardware_source_choice parameter is the associated hardware source choice.
-    """
-
-    def __init__(self, hardware_source_choice: HardwareSourceChoice.HardwareSourceChoice):
-        super().__init__()
-
-        # the exposure value stream gives the stream of exposure values from the hardware source choice
-        self.exposure_value_stream = CameraExposureValueStream(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice)).add_ref()
-        # the exposure model converts the exposure value stream to a property model that supports binding.
-        self.exposure_model = Model.StreamValueModel(self.exposure_value_stream)
-        # the exposure value converter converts the exposure value to a string and back in the line edit.
-        self.exposure_value_converter = Converter.PhysicalValueToStringConverter("ms", 1, "{:.1f}")
-
-        # need to explicitly watch the exposure model for a value change from the UI so that it can update the exposure
-        # value stream. this is a hack; check whether there is a better way when encountering this code in the future -
-        # something like standardized support for setting values in the value streams.
-        self.__exposure_model_listener = self.exposure_model.property_changed_event.listen(weak_partial(CameraDetailsHandler.__exposure_changed, self))
-
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_row(
-            u.create_stack(
-                u.create_row(
-                    u.create_label(text=_("Camera Exposure Time")),
-                    u.create_line_edit(text="@binding(exposure_model.value, converter=exposure_value_converter)", width=80),
-                    u.create_stretch(),
-                    spacing=8
-                )
-            ),
-            u.create_stretch()
-        )
-
-    def close(self) -> None:
-        self.__exposure_model_listener.close()
-        self.__exposure_model_listener = typing.cast(Event.EventListener, None)
-        self.exposure_model.close()
-        self.exposure_model = typing.cast(Model.StreamValueModel, None)
-        self.exposure_value_stream.remove_ref()
-        self.exposure_value_stream = typing.cast(CameraExposureValueStream, None)
-
-    def __exposure_changed(self, k: str) -> None:
-        if k == "value":
-            self.exposure_value_stream.exposure_time_ms = self.exposure_model.value if self.exposure_model.value else 0.0
+    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+        raise NotImplementedError()
 
 
 @dataclasses.dataclass
@@ -449,582 +1115,173 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
                 self.send_value(SynchronizedScanDescription(context_text, False, scan_text, Geometry.IntSize(), 0))
 
 
-class ComponentHandler:
-    def __init__(self, display_name: str):
-        self.display_name = display_name
+class CameraExposureValueStream(Stream.ValueStream[float]):
+    """A value stream of the camera exposure of the latest values of a hardware source stream.
 
-    def __str__(self) -> str:
-        return self.display_name
+    Listens to the hardware_source_stream for changes. And then listens to the current hardware source
+    for parameter changes. Sends out new exposure_time_ms values when changed.
 
-    def close(self) -> None:
-        pass
+    Always uses profile 0 for camera exposure.
+    """
+    def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource]):
+        super().__init__()
+        self.__hardware_source_stream = hardware_source_stream.add_ref()
+        # use weak_partial to avoid self reference and facilitate no-close.
+        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(
+            weak_partial(CameraExposureValueStream.__hardware_source_stream_changed, self))
+        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__hardware_source_stream_changed(hardware_source_stream.value)
 
+    def about_to_delete(self) -> None:
+        if self.__frame_parameters_changed_listener:
+            self.__frame_parameters_changed_listener.close()
+            self.__frame_parameters_changed_listener = None
+        self.__hardware_source_stream_listener.close()
+        self.__hardware_source_stream_listener = None
+        self.__hardware_source_stream.remove_ref()
+        super().about_to_delete()
 
-class ComboBoxHandler:
-    """Combine a label and combo box; and facilitate storing the selected item using an item identifier."""
+    def __hardware_source_stream_changed(self, hardware_source: HardwareSource.HardwareSource) -> None:
+        # when the hardware source choice changes, update the frame parameters listener.
+        if self.__frame_parameters_changed_listener:
+            self.__frame_parameters_changed_listener.close()
+            self.__frame_parameters_changed_listener = None
+        if hardware_source and hardware_source.features.get("is_camera"):
+            camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
+            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
+            # use weak_partial to avoid self reference and facilitate no-close.
+            self.__frame_parameters_changed_listener = camera_hardware_source.frame_parameters_changed_event.listen(
+                weak_partial(CameraExposureValueStream.__frame_parameters_changed, self, camera_hardware_source))
 
-    def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
-                 filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
-                 selection_storage_model: Model.PropertyModel):
-        self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
-        self.sorted_items.sort_key = sort_key
-        if filter:
-            self.sorted_items.filter = filter
-        self.item_list = ListModel.ListPropertyModel(self.sorted_items)
-        self.selected_index_model = Model.PropertyModel[int](0)
-        self.selected_item_value_stream = Stream.ValueStream().add_ref()
-
-        def update_selected_item(c: ListModel.ListPropertyModel, index_model: Model.PropertyModel[int],
-                                 v: Stream.ValueStream, k: str) -> None:
-            index = index_model.value or 0
-            item = c.value[index] if 0 <= index < len(c.value) else None
-            v.value = item
-            if item:
-                selection_storage_model.value = id_getter(item)
-
-        self.__selected_component_index_listener = self.selected_index_model.property_changed_event.listen(
-            functools.partial(update_selected_item, self.item_list, self.selected_index_model,
-                              self.selected_item_value_stream))
-
-        # read the identifier from storage and match it to an item and make that item the selected one
-        selected_item_id = selection_storage_model.value
-        for index, item in enumerate(self.sorted_items.items or list()):
-            if id_getter(item) == selected_item_id:
-                self.selected_index_model.value = index
-
-        update_selected_item(self.item_list, self.selected_index_model, self.selected_item_value_stream, "value")
-
-        # build the UI
-        u = Declarative.DeclarativeUI()
-        component_type_combo = u.create_combo_box(items_ref="@binding(item_list.value)",
-                                                  current_index="@binding(selected_index_model.value)")
-        self.ui_view = component_type_combo
-
-    def close(self) -> None:
-        self.__selected_component_index_listener.close()
-        self.__selected_component_index_listener = typing.cast(Event.EventListener, None)
-        self.selected_item_value_stream.remove_ref()
-        self.selected_item_value_stream = typing.cast(Stream.ValueStream, None)
-        self.selected_index_model.close()
-        self.selected_index_model = typing.cast(Model.PropertyModel[int], None)
-        self.item_list.close()
-        self.item_list = typing.cast(ListModel.ListPropertyModel, None)
-        self.sorted_items.close()
-        self.sorted_items = typing.cast(ListModel.FilteredListModel, None)
+    def __frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
+        if profile_index == 0:
+            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
 
     @property
-    def current_item(self) -> typing.Any:
-        index = self.selected_index_model.value or 0
-        return self.sorted_items.items[index]
+    def exposure_time_ms(self) -> float:
+        return self.value if self.value else 0.0
+
+    @exposure_time_ms.setter
+    def exposure_time_ms(self, exposure_time_ms: float) -> None:
+        if exposure_time_ms and exposure_time_ms > 0:
+            hardware_source = self.__hardware_source_stream.value
+            if hardware_source:
+                frame_parameters = hardware_source.get_frame_parameters(0)
+                frame_parameters.exposure_ms = exposure_time_ms
+                hardware_source.set_frame_parameters(0, frame_parameters)
 
 
-class ComponentComboBoxHandler:
+class CameraDetailsHandler(Observable.Observable):
+    """A declarative component handler for a row describing a camera device.
 
-    def __init__(self, component_base: str, title: str, configuration: AcquisitionConfiguration, component_id_key: str, components_key: str):
-        self.__component_name = component_base
-        self.__component_factory_name = f"{component_base}-factory"
-        self.__components = ListModel.ListModel[ComponentHandler]()
-        self.__selected_component_id_model = Model.PropertyChangedPropertyModel[str](configuration, component_id_key)
+    The hardware_source_choice parameter is the associated hardware source choice.
+    """
 
-        component_map: typing.Dict[str, Schema.Entity] = dict()
-        for component_entity in configuration._get_array_items(components_key):
-            component_map[component_entity.entity_type.entity_id] = component_entity
+    def __init__(self, hardware_source_choice: HardwareSourceChoice.HardwareSourceChoice):
+        super().__init__()
 
-        # put this above combo box so the selection gets made correctly from existing items
-        # iterate through the components, creating them. look for a corresponding entry
-        # in the component_map, creating a new entity if it doesn't exist. then assign the
-        # entity to the component.
-        for component_factory in Registry.get_components_by_type(self.__component_factory_name):
-            component_id = f"{component_base}-{component_factory.component_id}".replace("-", "_")
-            component_entity = component_map.get(component_id)
-            if not component_entity:
-                entity_type = Schema.get_entity_type(component_id)
-                component_entity = entity_type.create() if entity_type else None
-                if component_entity:
-                    configuration._append_item(components_key, component_entity)
-            component = component_factory(component_entity)
-            self.__components.append_item(component)
+        # the exposure value stream gives the stream of exposure values from the hardware source choice
+        self.exposure_value_stream = CameraExposureValueStream(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice)).add_ref()
+        # the exposure model converts the exposure value stream to a property model that supports binding.
+        self.exposure_model = Model.StreamValueModel(self.exposure_value_stream)
+        # the exposure value converter converts the exposure value to a string and back in the line edit.
+        self.exposure_value_converter = Converter.PhysicalValueToStringConverter("ms", 1, "{:.1f}")
 
-        # this gets closed by the declarative machinery
-        self._combo_box_handler = ComboBoxHandler(self.__components, "items", operator.attrgetter("display_name"),
-                                                  None, operator.attrgetter("component_id"),
-                                                  self.__selected_component_id_model)
+        # need to explicitly watch the exposure model for a value change from the UI so that it can update the exposure
+        # value stream. this is a hack; check whether there is a better way when encountering this code in the future -
+        # something like standardized support for setting values in the value streams.
+        self.__exposure_model_listener = self.exposure_model.property_changed_event.listen(weak_partial(CameraDetailsHandler.__exposure_changed, self))
 
-        # this is merely a reference and does not need to be closed
-        self.selected_item_value_stream = self._combo_box_handler.selected_item_value_stream
-
-        # TODO: listen for components being registered/unregistered
-
-        u = Declarative.DeclarativeUI()
-        component_type_row = u.create_row(
-            u.create_label(text=title),
-            u.create_component_instance(identifier="combo_box"),
-            u.create_stretch(),
-            spacing=8
-        )
-        component_page = u.create_stack(
-            items="_combo_box_handler.sorted_items.items",
-            item_component_id=self.__component_name,
-            current_index="@binding(_combo_box_handler.selected_index_model.value)",
-            size_policy_vertical="preferred"
-        )
-        self.ui_view = u.create_column(component_type_row, component_page, spacing=8, size_policy_vertical="maximum")
-
-    def close(self) -> None:
-        self.__selected_component_id_model.close()
-        self.__selected_component_id_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
-        self.__components.close()
-        self.__components = typing.cast(ListModel.ListModel[ComponentHandler], None)
-
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
-        if component_id == self.__component_name:
-            return item
-        if component_id == "combo_box":
-            return self._combo_box_handler
-        return None
-
-    @property
-    def current_item(self) -> typing.Any:
-        return self._combo_box_handler.current_item
-
-
-class AcquireHandler(ComponentHandler):
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        raise NotImplementedError()
-
-
-class BasicAcquireHandler(AcquireHandler):
-    component_id = "basic-acquire"
-
-    def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Basic Acquire"))
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            spacing=8
-        )
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        return data_stream, str(), channel_names
-
-
-class SequenceAcquireHandler(AcquireHandler):
-    component_id = "sequence-acquire"
-
-    def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Sequence Acquire"))
-        self.configuration = configuration
-        self.count_converter = Converter.IntegerToStringConverter()
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            u.create_row(
-                u.create_label(text=_("Count")),
-                u.create_line_edit(text="@binding(configuration.count, converter=count_converter)", width=90),
-                u.create_stretch(),
-                spacing=8
-            ),
-            spacing=8
-        )
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        width = max(1, self.configuration.count) if self.configuration.count else 1
-        if width > 1:
-            return Acquisition.SequenceDataStream(data_stream, width), _("Sequence"), channel_names
-        else:
-            return data_stream, _("Sequence"), channel_names
-
-
-units_multiplier = {
-    "": 1,
-    "nm": 1E9,
-    "um": 1E6,
-    "mm": 1E3,
-    "m": 1,
-    "eV": 1,
-    "meV": 1E3,
-    "ns": 1E9,
-    "us": 1E6,
-    "ms": 1E3,
-    "s": 1,
-}
-
-class SeriesControlHandler:
-
-    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: Schema.Entity, label: typing.Optional[str]):
-        self.__control_customization = control_customization
-        self.control_values = control_values
-        self.count_converter = Converter.IntegerToStringConverter()
-        control_description = control_customization.control_description
-        assert control_description
-        self.value_converter = Converter.PhysicalValueToStringConverter(control_description.units,
-                                                                        units_multiplier[control_description.units],
-                                                                        "{:.1f}")
-        u = Declarative.DeclarativeUI()
-        row_items = list()
-        row_items.append(u.create_spacing(20))
-        if label is not None:
-            row_items.append(u.create_label(text=label, width=28))
-        row_items.append(u.create_line_edit(text="@binding(control_values.count, converter=count_converter)", width=90))
-        row_items.append(u.create_line_edit(text="@binding(control_values.start_value, converter=value_converter)", width=90))
-        row_items.append(u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90))
-        row_items.append(u.create_stretch())
-        self.ui_view = u.create_row(*row_items, spacing=8)
-
-    def get_control_info(self) -> typing.Tuple[float, float, int]:
-        control_description = self.__control_customization.control_description
-        assert control_description
-        width = max(1, self.control_values.count) if self.control_values.count else 1
-        start = (self.control_values.start_value or 0)
-        step = (self.control_values.step_value or 0)
-        return start * control_description.multiplier, step * control_description.multiplier, width
-
-
-def get_control_values(configuration: Schema.Entity, control_values_list_key: str, control_customization: AcquisitionPreferences.ControlCustomization, value_index: typing.Optional[int] = None) -> Schema.Entity:
-    """Extract the control values from the configuration."""
-    control_id = control_customization.control_id
-    m = dict()
-    for c in configuration._get_array_items(control_values_list_key):
-        m[c.control_id] = c
-    control_values = m.get(control_id)
-    if not control_values:
-        control_description = control_customization.control_description
-        assert control_description
-        value = control_description.default_value
-        control_values = ControlValuesSchema.create(None, {"control_id": control_id, "count": 1,
-                                                           "start_value": value[value_index] if value_index is not None else value,
-                                                           "step_value": 0.0})
-        configuration._append_item(control_values_list_key, control_values)
-    return control_values
-
-
-class SeriesAcquireHandler(AcquireHandler):
-    component_id = "series-acquire"
-
-    def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Series Acquire"))
-        assert AcquisitionPreferences.acquisition_preferences
-        self.configuration = configuration
-        self.__control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
-        self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
-        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
-                                                          "control_customizations",
-                                                          operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "1d"),
-                                                          operator.attrgetter("control_id"),
-                                                          self.__selection_storage_model)
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            u.create_row(
-                u.create_label(text=_("Control")),
-                u.create_component_instance(identifier="control_combo_box"),
-                u.create_stretch(),
-                spacing=8
-            ),
-            u.create_row(
-                u.create_spacing(20),
-                u.create_label(text=_("Count"), width=90),
-                u.create_label(text=_("Start"), width=90),
-                u.create_label(text=_("Step"), width=90),
-                u.create_stretch(),
-                spacing=8
-            ),
-            u.create_stack(
-                items="_control_combo_box_handler.sorted_items.items",
-                item_component_id="series-control",
-                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
-                size_policy_vertical="preferred"
-            ),
-            spacing=8
-        )
-
-    def close(self) -> None:
-        self.__selection_storage_model.close()
-        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
-        super().close()
-
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
-        if component_id == "control_combo_box":
-            return self._control_combo_box_handler
-        if component_id == "series-control":
-            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            control_id = control_customization.control_id
-            assert control_id not in self.__control_handlers
-            control_values = get_control_values(self.configuration, "control_values_list", control_customization)
-            self.__control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, None)
-            return self.__control_handlers[control_id]
-        return None
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        item = self._control_combo_box_handler.selected_item_value_stream.value
-        if item:
-            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            control_handler = self.__control_handlers.get(control_customization.control_id)
-            if control_handler and data_stream:
-                start, step, width = control_handler.get_control_info()
-                if width > 1:
-                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
-                               device_map: typing.Mapping[str, DeviceController],
-                               starts: typing.Sequence[float], steps: typing.Sequence[float],
-                               index: typing.Sequence[int]) -> None:
-                        control_description = control_customization.control_description
-                        assert control_description
-                        device_controller = device_map.get(control_description.device_id)
-                        if device_controller:
-                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
-                            device_controller.set_values(control_customization, values)
-
-                    action_fn = weak_partial(action, control_customization, device_map, [start], [step])
-                    data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), width)
-        return data_stream, _("Series"), channel_names
-
-
-class TableauAcquireHandler(AcquireHandler):
-    component_id = "tableau-acquire"
-
-    def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Tableau Acquire"))
-        assert AcquisitionPreferences.acquisition_preferences
-        self.configuration = configuration
-        self.__x_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
-        self.__y_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
-        self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
-        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
-                                                          "control_customizations",
-                                                          operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
-                                                          operator.attrgetter("control_id"),
-                                                          self.__selection_storage_model)
-        self.__axis_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "axis_id")
-        stem_controller = Registry.get_component("stem_controller")
-        assert stem_controller
-        self._axis_combo_box_handler = ComboBoxHandler(stem_controller, "axis_descriptions",
-                                                       operator.attrgetter("display_name"), None,
-                                                       operator.attrgetter("axis_id"), self.__axis_storage_model)
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            u.create_row(
-                u.create_label(text=_("Control")),
-                u.create_component_instance(identifier="control_combo_box"),
-                u.create_stretch(),
-                spacing=8),
-            u.create_row(
-                u.create_label(text=_("Axis")),
-                u.create_component_instance(identifier="axis_combo_box"),
-                u.create_stretch(),
-                spacing=8),
-            u.create_row(
-                u.create_spacing(20),
-                u.create_spacing(28),
-                u.create_label(text=_("Count"), width=90),
-                u.create_label(text=_("Start"), width=90),
-                u.create_label(text=_("Step"), width=90),
-                u.create_stretch(),
-                spacing=8
-            ),
-            u.create_stack(
-                items="_control_combo_box_handler.sorted_items.items",
-                item_component_id="x-control",
-                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
-                size_policy_vertical="preferred"
-            ),
-            u.create_stack(
-                items="_control_combo_box_handler.sorted_items.items",
-                item_component_id="y-control",
-                current_index="@binding(_control_combo_box_handler.selected_index_model.value)",
-                size_policy_vertical="preferred"
-            ),
-            spacing=8
-        )
-
-    def close(self) -> None:
-        self.__selection_storage_model.close()
-        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
-        super().close()
-
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
-        if component_id == "control_combo_box":
-            return self._control_combo_box_handler
-        if component_id == "axis_combo_box":
-            return self._axis_combo_box_handler
-        if component_id == "y-control":
-            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            control_id = control_customization.control_id
-            assert control_id not in self.__y_control_handlers
-            control_values = get_control_values(self.configuration, "y_control_values_list", control_customization, 0)
-            self.__y_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "Y")
-            return self.__y_control_handlers[control_id]
-        if component_id == "x-control":
-            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            control_id = control_customization.control_id
-            assert control_id not in self.__x_control_handlers
-            control_values = get_control_values(self.configuration, "x_control_values_list", control_customization, 1)
-            self.__x_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "X")
-            return self.__x_control_handlers[control_id]
-        return None
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        item = self._control_combo_box_handler.selected_item_value_stream.value
-        if item:
-            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
-            y_control_handler = self.__y_control_handlers.get(control_customization.control_id)
-            if x_control_handler and y_control_handler and data_stream:
-                axis_id = self.__axis_storage_model.value
-                y_start, y_step, height = y_control_handler.get_control_info()
-                x_start, x_step, width = x_control_handler.get_control_info()
-                if width > 1 or height > 1:
-                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
-                               device_map: typing.Mapping[str, DeviceController],
-                               starts: typing.Sequence[float], steps: typing.Sequence[float],
-                               axis_id: str, index: typing.Sequence[int]) -> None:
-                        control_description = control_customization.control_description
-                        assert control_description
-                        device_controller = device_map.get(control_description.device_id)
-                        if device_controller:
-                            axis: typing.Optional[stem_controller.AxisType] = ("x", "y")
-                            for axis_description in typing.cast(STEMDeviceController, device_map["stem"]).stem_controller.axis_descriptions:
-                                if axis_id == axis_description.axis_id:
-                                    axis = axis_description.axis_type
-                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
-                            device_controller.set_values(control_customization, values, axis)
-
-                    action_fn = weak_partial(action, control_customization, device_map, [y_start, x_start], [y_step, x_step], axis_id)
-                    data_stream = Acquisition.CollectedDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
-                                                                 (height, width), (Calibration.Calibration(), Calibration.Calibration()))
-        return data_stream, _("Tableau"), channel_names
-
-
-class MultiAcquireEntryHandler:
-
-    def __init__(self, container: typing.Any, item: Schema.Entity):
-        self.offset_converter = Converter.PhysicalValueToStringConverter("eV", units_multiplier["eV"], "{:.0f}")
-        self.exposure_converter = Converter.PhysicalValueToStringConverter("ms", units_multiplier["ms"], "{:.1f}")
-        self.count_converter = Converter.IntegerToStringConverter()
-        self.item = item
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_row(
-            u.create_line_edit(text="@binding(item.offset, converter=offset_converter)", width=100),
-            u.create_line_edit(text="@binding(item.exposure, converter=exposure_converter)", width=100),
-            u.create_line_edit(text="@binding(item.count, converter=count_converter)", width=100),
-            u.create_stretch(),
-            spacing=8
+            u.create_stack(
+                u.create_row(
+                    u.create_label(text=_("Camera Exposure Time")),
+                    u.create_line_edit(text="@binding(exposure_model.value, converter=exposure_value_converter)", width=80),
+                    u.create_stretch(),
+                    spacing=8
+                )
+            ),
+            u.create_stretch()
         )
 
+    def close(self) -> None:
+        self.__exposure_model_listener.close()
+        self.__exposure_model_listener = typing.cast(Event.EventListener, None)
+        self.exposure_model.close()
+        self.exposure_model = typing.cast(Model.StreamValueModel, None)
+        self.exposure_value_stream.remove_ref()
+        self.exposure_value_stream = typing.cast(CameraExposureValueStream, None)
 
-class MultipleAcquireHandler(AcquireHandler):
-    component_id = "multiple-acquire"
-
-    def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Multiple Acquire"))
-        self.configuration = configuration
-        if len(self.configuration.sections) == 0:
-            self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
-            self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 10.0, "exposure": 0.01, "count": 3}))
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            u.create_row(
-                u.create_label(text=_("Offset"), width=100),
-                u.create_label(text=_("Exposure"), width=100),
-                u.create_label(text=_("Frames"), width=100),
-                u.create_stretch(),
-                spacing=8
-            ),
-            u.create_column(items="configuration.sections", item_component_id="section", spacing=8),
-            u.create_row(
-                u.create_push_button(text="+", on_clicked="add"),
-                u.create_push_button(text="-", on_clicked="remove"),
-                u.create_stretch(),
-                spacing=8
-            ),
-        )
-
-    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
-        if component_id == "section":
-            assert container is not None
-            assert item is not None
-            return MultiAcquireEntryHandler(container, item)
-        return None
-
-    def add(self, widget: UserInterfaceModule.Widget) -> None:
-        self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
-
-    def remove(self, widget: UserInterfaceModule.Widget) -> None:
-        self.configuration._remove_item("sections", self.configuration._get_array_item("sections", -1))
-
-    def enclose(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> typing.Tuple[Acquisition.DataStream, str, typing.Dict[Acquisition.Channel, str]]:
-        assert AcquisitionPreferences.acquisition_preferences
-        data_streams: typing.List[Acquisition.DataStream] = list()
-        for item in self.configuration.sections:
-            multi_acquire_entry = typing.cast(Schema.Entity, item)
-            control_customizations_map = {control_customization.control_id: control_customization for
-                                          control_customization in AcquisitionPreferences.acquisition_preferences.control_customizations}
-            stem_value_controller = device_map.get("stem")
-            camera_value_controller = device_map.get("camera")
-            control_customization_energy_offset = control_customizations_map["energy_offset"]
-            control_customization_exposure = control_customizations_map["exposure"]
-            assert control_customization_energy_offset
-            assert control_customization_exposure
-            control_description_energy_offset = control_customization_energy_offset.control_description
-            control_description_exposure = control_customization_exposure.control_description
-            assert control_description_energy_offset
-            assert control_description_exposure
-
-            def action(offset_value: float, exposure_value: float, index: typing.Sequence[int]) -> None:
-                if stem_value_controller:
-                    stem_value_controller.set_values(control_customization_energy_offset, [offset_value])
-                if camera_value_controller:
-                    camera_value_controller.set_values(control_customization_exposure, [exposure_value])
-
-            action_fn = functools.partial(action,
-                                          multi_acquire_entry.offset * control_description_energy_offset.multiplier,
-                                          multi_acquire_entry.exposure * control_description_exposure.multiplier)
-            data_streams.append(Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), max(1, multi_acquire_entry.count)))
-
-        sequential_data_stream = Acquisition.SequentialDataStream(data_streams)
-        for index, channel in enumerate(sequential_data_stream.channels):
-            channel_names[channel] = " ".join((f"{str(index + 1)} / {str(len(sequential_data_stream.channels))}", channel_names[Acquisition.Channel(*channel.segments[1:])]))
-        return sequential_data_stream, _("Multiple"), channel_names
+    def __exposure_changed(self, k: str) -> None:
+        if k == "value":
+            self.exposure_value_stream.exposure_time_ms = self.exposure_model.value if self.exposure_model.value else 0.0
 
 
-Registry.register_component(BasicAcquireHandler, {"acquisition-method-component-factory"})
-Registry.register_component(SequenceAcquireHandler, {"acquisition-method-component-factory"})
-Registry.register_component(SeriesAcquireHandler, {"acquisition-method-component-factory"})
-Registry.register_component(TableauAcquireHandler, {"acquisition-method-component-factory"})
-Registry.register_component(MultipleAcquireHandler, {"acquisition-method-component-factory"})
+class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
+    """A declarative component handler for a synchronized scan/camera virtual device.
 
+    Produces data streams from the camera and scan.
 
-class AcquisitionComponentHandler(ComponentHandler):
+    The configuration should contain a camera_device_id, camera_channel_id, scan_device_id, and scan_width. The
+    camera_device_id, camera_channel_id, and scan_device_id are used to associate a camera hardware source,
+    a camera channel, and a scan hardware source with this virtual device. The scan_width will override the
+    width used in the context. The subscan may be used depending on the settings in the scan control panel.
+    """
 
-    def _handle_acquire(self) -> typing.Tuple[Acquisition.DataStream, typing.Dict[Acquisition.Channel, str], typing.Optional[scan_base.DriftTracker], typing.Mapping[str, typing.Any]]:
-        raise NotImplementedError()
-
-
-class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
     component_id = "synchronized-scan"
     display_name = _("Synchronized Scan")
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(SynchronizedScanAcquisitionComponentHandler.display_name)
+        super().__init__(SynchronizedScanAcquisitionDeviceComponentHandler.display_name)
+
+        # the camera hardware source choice model is a property model made by observing the camera_device_id in the configuration.
         self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_device_id")
+
+        # the camera hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
+
+        # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
+
+        # the scan hardware source choice model is a property model made by observing the scan_device_id in the configuration.
         self.__scan_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "scan_device_id")
+
+        # the scan hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
+        # it will not be presented in the UI unless multiple choices exist.
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+
+        # the scan width model is a property model made by observing the scan_width property in the configuration.
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
+
+        # the scan context description value stream observes the scan and camera hardware sources to produce
+        # a description of the upcoming scan. it also supplies a context_valid flag which can be used to enable
+        # the acquire button in the UI.
         self.__scan_context_description_value_stream = SynchronizedScanDescriptionValueStream(
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice),
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice),
             self.scan_width,
             asyncio.get_event_loop()).add_ref()
+
+        # the scan context value model is the text description of the scan context extracted from the value stream.
         self.scan_context_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
             lambda x: x.context_text
         ))
+
+        # the scan context value model is the text description of the upcoming scan extracted from the value stream.
         self.scan_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
             lambda x: x.scan_text
         ))
+
+        # a converter for the scan width.
         self.scan_width_converter = Converter.IntegerToStringConverter()
+
+        # the acquire valid value stream is a value stream of bool values extracted from the scan context description.
+        # it is used to enable the acquire button. but to do so, this stream must be read from the enclosing
+        # declarative component handler. this stream is not used within this class. perhaps there is a better way to
+        # do this.
         self.acquire_valid_value_stream = Stream.MapStream(self.__scan_context_description_value_stream,
                                                            lambda x: x.context_valid).add_ref()
 
@@ -1101,6 +1358,7 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         super().close()
 
     def create_handler(self, component_id: str, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return HardwareSourceHandler(self.__camera_hardware_source_choice)
         elif component_id == "acquisition-device-component-output":
@@ -1111,7 +1369,10 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
             return HardwareSourceHandler(self.__scan_hardware_source_choice)
         return None
 
-    def _handle_acquire(self) -> typing.Tuple[Acquisition.DataStream, typing.Dict[Acquisition.Channel, str], typing.Optional[scan_base.DriftTracker], typing.Mapping[str, typing.Any]]:
+    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+        # first get the camera and scan hardware sources and the camera channel and scan context descriptions.
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, self.__camera_hardware_source_choice.hardware_source)
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
         if self.__camera_hardware_source_channel_model.value in hardware_source_channel_descriptions:
@@ -1119,28 +1380,36 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         else:
             camera_channel_description = hardware_source_channel_descriptions["image"]
         scan_context_description = self.__scan_context_description_value_stream.value
-
         assert camera_hardware_source is not None
         assert scan_hardware_source is not None
         assert camera_channel_description is not None
         assert scan_context_description is not None
 
+        # configure the camera hardware source processing. always use camera parameters at index 0.
         camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
         if camera_channel_description.processing_id:
-            camera_frame_parameters["processing"] = camera_channel_description.processing_id
+            camera_frame_parameters.processing = camera_channel_description.processing_id
+        else:
+            camera_frame_parameters.processing = None
 
+        # configure the scan uuid and scan frame parameters.
         scan_count = 1
         scan_size = scan_context_description.scan_size
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, scan_size)
         scan_frame_parameters["scan_id"] = str(uuid.uuid4())
 
+        # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
+        # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
+        # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
+        # tracker is separate at the moment.
         drift_correction_behavior: typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
         section_height: typing.Optional[int] = None
         if scan_context_description.drift_interval_lines > 0:
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             section_height = scan_context_description.drift_interval_lines
 
+        # build the synchronized data stream. this will also automatically include scan-channel drift correction.
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
             scan_hardware_source=scan_hardware_source,
             scan_frame_parameters=scan_frame_parameters,
@@ -1153,6 +1422,7 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
             include_summed=False
         )
 
+        # construct the channel names.
         op = _("Synchronized")
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():
@@ -1163,17 +1433,19 @@ class SynchronizedScanAcquisitionComponentHandler(AcquisitionComponentHandler):
 
         drift_tracker = scan_hardware_source.drift_tracker
 
+        # construct the device map for this acquisition device.
         device_map: typing.Dict[str, DeviceController] = dict()
         device_map["stem"] = STEMDeviceController()
         device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
         device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
         device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-        return synchronized_scan_data_stream, channel_names, drift_tracker, device_map
+        return AcquisitionDeviceResult(synchronized_scan_data_stream, channel_names, drift_tracker, device_map)
 
 
 class CameraFrameDataStream(Acquisition.DataStream):
-    # unsynchronized camera frames
+    """A data stream of individual camera frames."""
+
     # TODO: use sequence acquisition if there are no "in between" actions
 
     def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters):
@@ -1231,15 +1503,33 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 self.__record_task = scan_base.RecordTask(self.__hardware_source, self.__frame_parameters)
 
 
-class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
+class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
+    """A declarative component handler for a camera device.
+
+    Produces a data stream from the camera in the form of individual frames.
+
+    The configuration should contain a camera_device_id and camera_channel_id. The camera_device_id and
+    camera_channel_id are used to associate a camera hardware source and a camera channel.
+    """
+
     component_id = "camera"
     display_name = _("Camera")
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(CameraAcquisitionComponentHandler.display_name)
-        self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_device_id")
-        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
-        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
+        super().__init__(CameraAcquisitionDeviceComponentHandler.display_name)
+
+        # the camera hardware source choice model is a property model made by observing the camera_device_id in the configuration.
+        self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration,
+                                                                                             "camera_device_id")
+
+        # the camera hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
+        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(
+            self.__camera_hardware_source_choice_model,
+            lambda hardware_source: hardware_source.features.get("is_camera"))
+
+        # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
+        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration,
+                                                                                              "camera_channel_id")
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1267,6 +1557,7 @@ class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return HardwareSourceHandler(self.__camera_hardware_source_choice)
         elif component_id == "acquisition-device-component-output":
@@ -1275,25 +1566,32 @@ class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
             return CameraDetailsHandler(self.__camera_hardware_source_choice)
         return None
 
-    def _handle_acquire(self) -> typing.Tuple[Acquisition.DataStream, typing.Dict[Acquisition.Channel, str], typing.Optional[scan_base.DriftTracker], typing.Mapping[str, typing.Any]]:
+    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+        # first get the camera hardware source and the camera channel description.
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, self.__camera_hardware_source_choice.hardware_source)
         if self.__camera_hardware_source_channel_model.value in hardware_source_channel_descriptions:
             camera_channel_description = hardware_source_channel_descriptions[self.__camera_hardware_source_channel_model.value]
         else:
             camera_channel_description = hardware_source_channel_descriptions["image"]
-
         assert camera_hardware_source is not None
         assert camera_channel_description is not None
 
+        # configure the camera hardware source processing. always use camera parameters at index 0.
         camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
         if camera_channel_description.processing_id:
-            camera_frame_parameters["processing"] = camera_channel_description.processing_id
+            camera_frame_parameters.processing = camera_channel_description.processing_id
+        else:
+            camera_frame_parameters.processing = None
 
+        # gather the instrument metadata
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
         stem_controller = Registry.get_component('stem_controller')
         assert stem_controller
         scan_base.update_instrument_properties(instrument_metadata, stem_controller, None)
 
+        # construct the camera frame data stream. add processing.
         camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
         processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
         if camera_frame_parameters.get("processing", None) == "sum_project":
@@ -1311,24 +1609,40 @@ class CameraAcquisitionComponentHandler(AcquisitionComponentHandler):
                 processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
                                                                             operator=operator)
 
+        # construct the channel names.
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
 
+        # construct the device map for this acquisition device.
         device_map: typing.Dict[str, DeviceController] = dict()
         device_map["stem"] = STEMDeviceController()
         device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
 
-        return processed_camera_data_stream, channel_names, None, device_map
+        return AcquisitionDeviceResult(processed_camera_data_stream, channel_names, None, device_map)
 
 
-class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
+class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
+    """A declarative component handler for a scan device.
+
+    Produces a data stream from scan device.
+
+    The configuration should contain a scan_device_id, used to associate a scan hardware source. The subscan may be
+    used depending on the settings in the scan control panel.
+    """
+
     component_id = "scan"
     display_name = _("Scan")
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(ScanAcquisitionComponentHandler.display_name)
+        super().__init__(ScanAcquisitionDeviceComponentHandler.display_name)
+
+        # the scan hardware source choice model is a property model made by observing the scan_device_id in the configuration.
         self.__scan_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "scan_device_id")
+
+        # the scan hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
+        # it will not be presented in the UI unless multiple choices exist.
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+
         u = Declarative.DeclarativeUI()
         if len(self.__scan_hardware_source_choice.hardware_sources) > 1:
             self.ui_view = u.create_column(
@@ -1351,20 +1665,25 @@ class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
         if component_id == "scan-component":
             return HardwareSourceHandler(self.__scan_hardware_source_choice)
         return None
 
-    def _handle_acquire(self) -> typing.Tuple[Acquisition.DataStream, typing.Dict[Acquisition.Channel, str], typing.Optional[scan_base.DriftTracker], typing.Mapping[str, typing.Any]]:
-        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
+    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
+        # first get the scan hardware source.
+        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
         assert scan_hardware_source is not None
 
+        # configure the scan uuid and scan frame parameters.
         scan_uuid = uuid.uuid4()
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
         scan_frame_parameters["scan_id"] = str(scan_uuid)
 
+        # gather the scan metadata.
         scan_metadata: typing.Dict[str, typing.Any] = dict()
         scan_base.update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id,
                                        scan_hardware_source.display_name, scan_frame_parameters, scan_uuid, dict())
@@ -1373,8 +1692,10 @@ class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
         scan_base.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
                                                scan_hardware_source.scan_device)
 
+        # build the scan frame data stream.
         scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters)
 
+        # potentially break the scan into multiple sections; this is an unused capability currently.
         scan_size = scan_data_stream.scan_size
         section_height = scan_size.height
         section_count = (scan_size.height + section_height - 1) // section_height
@@ -1387,28 +1708,33 @@ class ScanAcquisitionComponentHandler(AcquisitionComponentHandler):
                                                                             scan_frame_parameters.get_scan_calibrations(),
                                                                             slice_list)
 
+        # construct the channel names.
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():
             channel_state = scan_hardware_source.get_channel_state(c)
             channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
             channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
 
+        # construct the device map for this acquisition device.
         device_map: typing.Dict[str, DeviceController] = dict()
         device_map["stem"] = STEMDeviceController()
         device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
         device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-        return collector, channel_names, None, device_map
+        return AcquisitionDeviceResult(collector, channel_names, None, device_map)
 
 
-Registry.register_component(SynchronizedScanAcquisitionComponentHandler, {"acquisition-device-component-factory"})
-Registry.register_component(CameraAcquisitionComponentHandler, {"acquisition-device-component-factory"})
-Registry.register_component(ScanAcquisitionComponentHandler, {"acquisition-device-component-factory"})
+# register each component as an acquisition device component factory.
+Registry.register_component(SynchronizedScanAcquisitionDeviceComponentHandler, {"acquisition-device-component-factory"})
+Registry.register_component(CameraAcquisitionDeviceComponentHandler, {"acquisition-device-component-factory"})
+Registry.register_component(ScanAcquisitionDeviceComponentHandler, {"acquisition-device-component-factory"})
+
+# define the entities used for persistent storage.
 
 AcquisitionDeviceComponentSchema = Schema.entity("acquisition_device_component", None, None, {
 })
 
-# SynchronizedScanAcquisitionComponentHandler
+# SynchronizedScanAcquisitionDeviceComponentHandler
 Schema.entity("acquisition_device_component_synchronized_scan", AcquisitionDeviceComponentSchema, None, {
     "camera_device_id": Schema.prop(Schema.STRING),
     "camera_channel_id": Schema.prop(Schema.STRING),
@@ -1416,12 +1742,12 @@ Schema.entity("acquisition_device_component_synchronized_scan", AcquisitionDevic
     "scan_width": Schema.prop(Schema.INT, default=32),
 })
 
-# ScanAcquisitionComponentHandler
+# ScanAcquisitionDeviceComponentHandler
 Schema.entity("acquisition_device_component_scan", AcquisitionDeviceComponentSchema, None, {
     "scan_device_id": Schema.prop(Schema.STRING),
 })
 
-# CameraAcquisitionComponentHandler
+# CameraAcquisitionDeviceComponentHandler
 Schema.entity("acquisition_device_component_camera", AcquisitionDeviceComponentSchema, None, {
     "camera_device_id": Schema.prop(Schema.STRING),
     "camera_channel_id": Schema.prop(Schema.STRING),
@@ -1430,11 +1756,11 @@ Schema.entity("acquisition_device_component_camera", AcquisitionDeviceComponentS
 AcquisitionMethodSchema = Schema.entity("acquisition_method_component", None, None, {
 })
 
-# BasicAcquireHandler
+# BasicAcquisitionMethodComponentHandler
 Schema.entity("acquisition_method_component_basic_acquire", AcquisitionMethodSchema, None, {
 })
 
-# SequenceAcquireHandler
+# SequenceAcquisitionMethodComponentHandler
 Schema.entity("acquisition_method_component_sequence_acquire", AcquisitionMethodSchema, None, {
     "count": Schema.prop(Schema.INT, default=1),
 })
@@ -1446,13 +1772,13 @@ ControlValuesSchema = Schema.entity("control_values", None, None, {
     "step_value": Schema.prop(Schema.FLOAT),
 })
 
-# SeriesAcquireHandler
+# SeriesAcquisitionMethodComponentHandler
 Schema.entity("acquisition_method_component_series_acquire", AcquisitionMethodSchema, None, {
     "control_id": Schema.prop(Schema.STRING),
     "control_values_list": Schema.array(Schema.component(ControlValuesSchema))
 })
 
-# TableauAcquireHandler
+# TableauAcquisitionMethodComponentHandler
 Schema.entity("acquisition_method_component_tableau_acquire", AcquisitionMethodSchema, None, {
     "control_id": Schema.prop(Schema.STRING),
     "axis_id": Schema.prop(Schema.STRING),
@@ -1460,7 +1786,7 @@ Schema.entity("acquisition_method_component_tableau_acquire", AcquisitionMethodS
     "y_control_values_list": Schema.array(Schema.component(ControlValuesSchema)),
 })
 
-# MultipleAcquireHandler
+# MultipleAcquisitionMethodComponentHandler
 MultipleAcquireEntrySchema = Schema.entity("multi_acquire_entry", None, None, {
     "offset": Schema.prop(Schema.FLOAT),
     "exposure": Schema.prop(Schema.FLOAT),
@@ -1480,6 +1806,11 @@ AcquisitionConfigurationSchema = Schema.entity("acquisition_configuration", None
 
 
 class AcquisitionConfiguration(Schema.Entity):
+    """A configuration object that is synchronized to a file path.
+
+    The logger/recorder observes changes to the entity. The changes get written to the file.
+    """
+
     def __init__(self, file_path: pathlib.Path):
         super().__init__(AcquisitionConfigurationSchema)
         self.file_path = file_path
@@ -1502,15 +1833,46 @@ class AcquisitionConfiguration(Schema.Entity):
         return entity
 
 
+# define the global acquisition configuration object. this object is created/destroyed when the
+# global application object changes. this is observed using the registry.
 acquisition_configuration: typing.Optional[AcquisitionConfiguration] = None
 
 
+# when the registry sends a "application_changed" object, call this function. this function configures
+# the file path and creates/destroys the acquisition_configuration global variable.
+def handle_application_changed(application: typing.Optional[Application.BaseApplication]):
+    global acquisition_configuration
+    if application:
+        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_preferences.json")
+        logging.info("Acquisition preferences: " + str(file_path))
+        AcquisitionPreferences.init_acquisition_preferences(file_path)
+        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_configuration.json")
+        logging.info("Acquisition configuration: " + str(file_path))
+        acquisition_configuration = AcquisitionConfiguration(file_path)
+    else:
+        AcquisitionPreferences.deinit_acquisition_preferences()
+        acquisition_configuration = None
+
+
+# observe changes to the global application.
+Registry.register_component(handle_application_changed, {"application_changed"})
+
+
 class AcquisitionController:
+    """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
+
+    The acquisition controller allows the user to select an acquisition method (such as basic, sequence, serial, etc.)
+    and an acquisition device (synchronized scan/camera, scan, camera, etc.).
+
+    It also implements the basic acquisition start button, progress bar, drift logger (optional), and data display.
+    """
 
     def __init__(self, document_controller: DocumentController.DocumentController):
         self.document_controller = document_controller
         assert acquisition_configuration
 
+        # create two component combo box declarative components for handling the method and device.
+        # pass the configuration and desired accessor strings for each.
         # these get closed by the declarative machinery
         self.__acquisition_method_component = ComponentComboBoxHandler("acquisition-method-component",
                                                                        _("Acquisition Method"),
@@ -1523,23 +1885,8 @@ class AcquisitionController:
                                                                        "acquisition_device_component_id",
                                                                        "acquisition_device_components")
 
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_column(
-            u.create_component_instance(identifier="acquisition-method-component"),
-            u.create_spacing(8),
-            u.create_divider(orientation="horizontal", height=8),
-            u.create_component_instance(identifier="acquisition-device-component"),
-            u.create_spacing(8),
-            u.create_divider(orientation="horizontal", height=8),
-            u.create_row(
-                u.create_push_button(text="@binding(button_text_model.value)", enabled="@binding(button_enabled_model.value)", on_clicked="handle_button", width=80),
-                u.create_progress_bar(value="@binding(progress_value_model.value)", width=180),
-                u.create_stretch(),
-                spacing=8,
-            ),
-            u.create_stretch(),
-            margin=8
-        )
+        # define the progress value model, a simple bool 'is_acquiring' model, and a button text model that
+        # updates according to whether acquire is running or not.
         self.progress_value_model = Model.PropertyModel[int](0)
         self.is_acquiring_model = Model.PropertyModel[bool](False)
         self.button_text_model = Model.StreamValueModel(Stream.MapStream(
@@ -1547,6 +1894,8 @@ class AcquisitionController:
             lambda b: _("Acquire") if not b else _("Cancel")))
 
         class StreamStreamer(Stream.ValueStream):
+            """A utility stream for stream a set of streams. There must be a better way!"""
+
             def __init__(self, streams_stream: Stream.AbstractStream[Stream.AbstractStream]):
                 super().__init__()
                 self.__streams_stream = streams_stream.add_ref()
@@ -1591,9 +1940,28 @@ class AcquisitionController:
             Stream.MapStream(self.__acquisition_device_component.selected_item_value_stream,
                              lambda c: getattr(c, "acquire_valid_value_stream", Stream.ConstantStream(True)))
         ))
-        # these get closed after use in _acquire_data_stream
+
+        # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task = typing.cast(asyncio.Task, None)
         self.__acquisition = typing.cast(Acquisition.Acquisition, None)
+
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_column(
+            u.create_component_instance(identifier="acquisition-method-component"),
+            u.create_spacing(8),
+            u.create_divider(orientation="horizontal", height=8),
+            u.create_component_instance(identifier="acquisition-device-component"),
+            u.create_spacing(8),
+            u.create_divider(orientation="horizontal", height=8),
+            u.create_row(
+                u.create_push_button(text="@binding(button_text_model.value)", enabled="@binding(button_enabled_model.value)", on_clicked="handle_button", width=80),
+                u.create_progress_bar(value="@binding(progress_value_model.value)", width=180),
+                u.create_stretch(),
+                spacing=8,
+            ),
+            u.create_stretch(),
+            margin=8
+        )
 
     def close(self) -> None:
         self.button_enabled_model.close()
@@ -1606,28 +1974,44 @@ class AcquisitionController:
         self.button_text_model = typing.cast(Model.StreamValueModel, None)
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
+        # handle acquire button, which can either start or stop acquisition.
         if self.__acquisition:
             self.__acquisition.abort_acquire()
         else:
-            data_stream, channel_names, drift_tracker, device_map = self.__acquisition_device_component.current_item._handle_acquire()
-            data_stream, title_base, channel_names = self.__acquisition_method_component.current_item.enclose(data_stream, device_map, channel_names)
-            self._acquire_data_stream(data_stream, title_base, channel_names, drift_tracker)
+            # starting acquisition means building the device data stream using the acquisition device component and
+            # then wrapping the device data stream using the acquisition method component.
+            build_result = self.__acquisition_device_component.current_item.build_acquisition_device_data_stream()
+            apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
+            # call the acquire data stream method to carry out the acquisition.
+            self._acquire_data_stream(apply_result.data_stream, apply_result.title_base, apply_result.channel_names, build_result.drift_tracker)
 
     def _acquire_data_stream(self,
                              data_stream: Acquisition.DataStream,
                              title_base: str,
                              channel_names: typing.Dict[Acquisition.Channel, str],
                              drift_tracker: typing.Optional[scan_base.DriftTracker]):
+        """Perform acquisition of of the data stream."""
+
+        # define a callback method to display the data item.
         def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
             Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
 
+        # create a data item data channel for converting data streams to data items, using partial updates and
+        # minimizing extra copies where possible.
         data_item_data_channel = DataChannel.DataItemDataChannel(self.document_controller.document_model, title_base, channel_names)
         data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.document_controller)
-        event_loop = self.document_controller.event_loop
         self.__data_stream = Acquisition.FramedDataStream(data_stream, data_channel=data_item_data_channel).add_ref()
-        self.__acquisition = Acquisition.Acquisition(self.__data_stream)
-        self.__scan_drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker, event_loop) if drift_tracker else None
 
+        # create the acquisition state/controller object based on the data item data channel data stream.
+        self.__acquisition = Acquisition.Acquisition(self.__data_stream)
+
+        # configure the scan drift logger if required. the drift tracker here is only enabled if using the
+        # scan hardware source drift tracker.
+        self.__scan_drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker,
+                                                            self.document_controller.event_loop) if drift_tracker else None
+
+        # define a method that gets called when the async acquisition method finished. this closes the various
+        # objects and updates the UI as 'complete'.
         def finish_grab_async():
             self.__acquisition.close()
             self.__acquisition = typing.cast(Acquisition.Acquisition, None)
@@ -1641,7 +2025,10 @@ class AcquisitionController:
             self.__progress_task = typing.cast(asyncio.Task, None)
             self.progress_value_model.value = 100
 
+        # manage the 'is_acquiring' state.
         self.is_acquiring_model.value = True
+
+        # define a task to update progress every 250ms.
         if not self.__progress_task:
             async def update_progress():
                 while True:
@@ -1649,9 +2036,12 @@ class AcquisitionController:
                     await asyncio.sleep(0.25)
 
             self.__progress_task = asyncio.get_event_loop().create_task(update_progress())
-        self.__acquisition.acquire_async(event_loop=event_loop, on_completion=finish_grab_async)
+
+        # start async acquire.
+        self.__acquisition.acquire_async(event_loop=self.document_controller.event_loop, on_completion=finish_grab_async)
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+        # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return self.__acquisition_device_component
         elif component_id == "acquisition-method-component":
@@ -1660,6 +2050,8 @@ class AcquisitionController:
 
 
 class AcquisitionPanel(Panel.Panel):
+    """The acquisition panel holds the declarative component acquisition controller."""
+
     def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: dict):
         super().__init__(document_controller, panel_id, "acquisition-panel")
         self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller))
@@ -1714,24 +2106,11 @@ class ScanDeviceController(DeviceController):
             self.scan_frame_parameters.fov_nm = values[0]
 
 
-def handle_application_changed(application: typing.Optional[Application.BaseApplication]):
-    global acquisition_configuration
-    if application:
-        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_preferences.json")
-        logging.info("Acquisition preferences: " + str(file_path))
-        AcquisitionPreferences.init_acquisition_preferences(file_path)
-        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_configuration.json")
-        logging.info("Acquisition configuration: " + str(file_path))
-        acquisition_configuration = AcquisitionConfiguration(file_path)
-    else:
-        AcquisitionPreferences.deinit_acquisition_preferences()
-        acquisition_configuration = None
-
-
-Registry.register_component(handle_application_changed, {"application_changed"})
-
-
 class AcquisitionPreferencePanel:
+    """Define a acquisition preference panel.
+
+    This preference panel allows the user to customize the various controls.
+    """
 
     def __init__(self):
         self.identifier = "nion.acquisition-panel"
@@ -1779,6 +2158,7 @@ class AcquisitionPreferencePanel:
                 self.sorted_controls = typing.cast(ListModel.ListModel[AcquisitionPreferences.ControlDescription], None)
 
             def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+                # this is called to construct contained declarative component handlers within this handler.
                 if component_id == "control-component":
                     assert container is not None
                     assert item is not None
@@ -1788,6 +2168,7 @@ class AcquisitionPreferencePanel:
         return Declarative.DeclarativeWidget(ui, event_loop, Handler())
 
 
+# register the preference panel.
 PreferencesDialog.PreferencesManager().register_preference_pane(AcquisitionPreferencePanel())
 
 
