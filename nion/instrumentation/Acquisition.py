@@ -989,7 +989,8 @@ class SequentialDataStream(DataStream):
             self.__data_streams[self.__current_index].advance_stream()
 
     def _finish_stream(self) -> None:
-        pass
+        if self.__current_index < len(self.__data_streams):
+            self.__data_streams[self.__current_index].finish_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event = DataStreamEventArgs(
