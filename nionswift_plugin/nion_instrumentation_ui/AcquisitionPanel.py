@@ -1838,24 +1838,27 @@ class AcquisitionConfiguration(Schema.Entity):
 acquisition_configuration: typing.Optional[AcquisitionConfiguration] = None
 
 
-# when the registry sends a "application_changed" object, call this function. this function configures
+# when the registry gets a "application" object, call this function. this function configures
 # the file path and creates/destroys the acquisition_configuration global variable.
-def handle_application_changed(application: typing.Optional[Application.BaseApplication]):
-    global acquisition_configuration
-    if application:
-        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_preferences.json")
-        logging.info("Acquisition preferences: " + str(file_path))
-        AcquisitionPreferences.init_acquisition_preferences(file_path)
-        file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_configuration.json")
-        logging.info("Acquisition configuration: " + str(file_path))
-        acquisition_configuration = AcquisitionConfiguration(file_path)
-    else:
-        AcquisitionPreferences.deinit_acquisition_preferences()
-        acquisition_configuration = None
+def handle_application_changed(is_register: bool, component, component_types: typing.Set[str]) -> None:
+    if "application" in component_types:
+        application: typing.Optional[Application.BaseApplication] = component if is_register else None
+        global acquisition_configuration
+        if application:
+            file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_preferences.json")
+            logging.info("Acquisition preferences: " + str(file_path))
+            AcquisitionPreferences.init_acquisition_preferences(file_path)
+            file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_configuration.json")
+            logging.info("Acquisition configuration: " + str(file_path))
+            acquisition_configuration = AcquisitionConfiguration(file_path)
+        else:
+            AcquisitionPreferences.deinit_acquisition_preferences()
+            acquisition_configuration = None
 
 
-# observe changes to the global application.
-Registry.register_component(handle_application_changed, {"application_changed"})
+component_registered_event_listener = Registry.listen_component_registered_event(functools.partial(handle_application_changed, True))
+component_unregistered_event_listener = Registry.listen_component_unregistered_event(functools.partial(handle_application_changed, False))
+Registry.fire_existing_component_registered_events("application")
 
 
 class AcquisitionController:
