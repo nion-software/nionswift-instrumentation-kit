@@ -3,7 +3,7 @@ import operator
 import typing
 
 # local libraries
-from nion.swift.model import HardwareSource as HardwareSourceModule
+from nion.instrumentation import HardwareSource
 from nion.ui import UserInterface
 from nion.utils import Binding
 from nion.utils import Event
@@ -19,14 +19,14 @@ class PersistentStorageInterface:
 
 class HardwareSourceChoice:
     def __init__(self, choice_model: Model.PropertyModel[str],
-                 filter: typing.Optional[typing.Callable[[HardwareSourceModule.HardwareSource], bool]] = None):
+                 filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]] = None):
         self.__choice_model = choice_model
-        self.hardware_sources_model = Model.PropertyModel[typing.List[HardwareSourceModule.HardwareSource]](list())
+        self.hardware_sources_model = Model.PropertyModel[typing.List[HardwareSource.HardwareSource]](list())
         self.hardware_source_index_model = Model.PropertyModel[int](0)
         self.hardware_source_changed_event = Event.Event()
         self.__filter = filter or (lambda x: True)
-        self.__hardware_source_added_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_added_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
-        self.__hardware_source_removed_event_listener = HardwareSourceModule.HardwareSourceManager().hardware_source_removed_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
+        self.__hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
+        self.__hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(weak_partial(HardwareSourceChoice.__rebuild_hardware_source_list, self))
         self.__rebuild_hardware_source_list(self.hardware_source)
 
         hardware_source_id = choice_model.value
@@ -56,11 +56,11 @@ class HardwareSourceChoice:
         return len(hardware_sources)
 
     @property
-    def hardware_sources(self) -> typing.Sequence[HardwareSourceModule.HardwareSource]:
+    def hardware_sources(self) -> typing.Sequence[HardwareSource.HardwareSource]:
         return self.hardware_sources_model.value or list()
 
     @property
-    def hardware_source(self) -> HardwareSourceModule.HardwareSource:
+    def hardware_source(self) -> HardwareSource.HardwareSource:
         index = self.hardware_source_index_model.value or 0
         hardware_sources = self.hardware_sources_model.value or list()
         return hardware_sources[index] if 0 <= index < len(hardware_sources) else None
@@ -71,13 +71,13 @@ class HardwareSourceChoice:
         combo_box.bind_current_index(Binding.PropertyBinding(self.hardware_source_index_model, "value"))
         return combo_box
 
-    def __rebuild_hardware_source_list(self, h: HardwareSourceModule.HardwareSource) -> None:
+    def __rebuild_hardware_source_list(self, h: HardwareSource.HardwareSource) -> None:
         # keep selected item the same
         old_index = self.hardware_source_index_model.value or 0
         hardware_sources = self.hardware_sources_model.value or list()
         old_hardware_source = hardware_sources[old_index] if 0 <= old_index < len(hardware_sources) else None
         items = list()
-        for hardware_source in HardwareSourceModule.HardwareSourceManager().hardware_sources:
+        for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
             if self.__filter(hardware_source):
                 items.append(hardware_source)
         self.hardware_sources_model.value = sorted(items, key=operator.attrgetter("display_name"))
@@ -99,7 +99,7 @@ class HardwareSourceChoice:
             self.hardware_source_changed_event.fire(self.hardware_source)
 
 
-class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.HardwareSource]):
+class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSource.HardwareSource]):
 
     def __init__(self, hardware_source_choice: HardwareSourceChoice):
         super().__init__()
@@ -117,10 +117,10 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSourceModule.Hard
         super().about_to_delete()
 
     @property
-    def value(self) -> HardwareSourceModule.HardwareSource:
+    def value(self) -> HardwareSource.HardwareSource:
         return self.__value
 
-    def __hardware_source_changed(self, hardware_source: typing.Optional[HardwareSourceModule.HardwareSource]) -> None:
+    def __hardware_source_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
         if hardware_source != self.__value:
             self.__value = hardware_source
             self.value_stream.fire(self.__value)

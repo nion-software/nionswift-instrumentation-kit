@@ -1,9 +1,9 @@
 import typing
 
 from nion.instrumentation import camera_base
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
-from nion.swift.model import HardwareSource
 from nion.swift.test import TestContext
 from nion.utils import Event
 from nion.utils import Registry

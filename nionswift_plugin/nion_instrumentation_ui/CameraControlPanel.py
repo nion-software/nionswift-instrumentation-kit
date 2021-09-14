@@ -15,12 +15,12 @@ import typing
 
 # local libraries
 from nion.instrumentation import camera_base
+from nion.instrumentation import HardwareSource
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
-from nion.swift.model import HardwareSource
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import Declarative

@@ -33,6 +33,7 @@ from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import DocumentController
@@ -41,7 +42,6 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
-from nion.swift.model import HardwareSource
 from nion.swift.model import Schema
 from nion.ui import Application
 from nion.ui import Declarative

@@ -11,7 +11,7 @@ import pathlib
 import numpy
 
 # local libraries
-from nion.swift.model import HardwareSource
+from nion.instrumentation import HardwareSource
 from nion.utils import ListModel
 from nion.utils import Registry
 from nion.utils import StructuredModel

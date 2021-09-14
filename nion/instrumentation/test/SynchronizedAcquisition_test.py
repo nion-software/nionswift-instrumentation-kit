@@ -8,10 +8,10 @@ import unittest
 import uuid
 
 from nion.data import DataAndMetadata
+from nion.instrumentation import HardwareSource
 from nion.swift import Application
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
-from nion.swift.model import HardwareSource
 from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Geometry

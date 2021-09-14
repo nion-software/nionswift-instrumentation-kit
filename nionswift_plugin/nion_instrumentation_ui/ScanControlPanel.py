@@ -13,6 +13,7 @@ import typing
 import math
 
 # local libraries
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import DataItemThumbnailWidget
@@ -20,7 +21,6 @@ from nion.swift import DisplayPanel
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
-from nion.swift.model import HardwareSource
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem

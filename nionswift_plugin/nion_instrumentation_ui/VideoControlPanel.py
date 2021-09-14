@@ -5,11 +5,11 @@ import copy
 import functools
 import gettext
 
+from nion.instrumentation import HardwareSource
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
 from nion.swift import Workspace
-from nion.swift.model import HardwareSource
 from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import PreferencesDialog

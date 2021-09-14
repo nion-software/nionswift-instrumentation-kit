@@ -24,8 +24,8 @@ from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller as stem_controller_module
-from nion.swift.model import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event

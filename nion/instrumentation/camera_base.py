@@ -24,7 +24,7 @@ import numpy
 from nion.data import Calibration
 from nion.data import Core
 from nion.data import DataAndMetadata
-from nion.swift.model import HardwareSource
+from nion.instrumentation import HardwareSource
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.swift.model import Graphics

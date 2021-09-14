@@ -16,9 +16,9 @@ import typing
 
 # local libraries
 from nion.data import Calibration
+from nion.instrumentation import HardwareSource
 from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
-from nion.swift.model import HardwareSource
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Observable

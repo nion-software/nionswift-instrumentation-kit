@@ -7,10 +7,10 @@ import zlib
 
 import numpy
 
+from nion.instrumentation.test import HardwareSource_test
 from nion.swift import Application
 from nion.swift import Facade
 from nion.swift.model import Metadata
-from nion.swift.test import HardwareSource_test
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Registry
