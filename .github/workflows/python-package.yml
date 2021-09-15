@@ -45,8 +45,10 @@ jobs:
         mypy --namespace-packages --ignore-missing-imports --follow-imports=silent \
           -p nion.instrumentation.Acquisition \
           -p nion.instrumentation.AcquisitionPreferences \
+          -p nion.instrumentation.camera_base \
           -p nion.instrumentation.DataChannel \
           -p nion.instrumentation.DriftTracker \
+          -p nion.instrumentation.HardwareSource \
           -p nion.instrumentation.scan_base \
           -p nion.instrumentation.stem_controller \
           -p nionswift_plugin.nion_instrumentation_ui.AcquisitionPanel \

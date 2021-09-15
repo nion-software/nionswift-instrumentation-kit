@@ -929,9 +929,10 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
         if k == "value":
             hardware_source = self.__hardware_source_choice.hardware_source
             if hardware_source.features.get("is_camera", False):
-                if hardware_source.camera.camera_type == "ronchigram":
+                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
+                if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
                     channel_descriptions = [hardware_source_channel_descriptions["ronchigram"]]
-                elif hardware_source.camera.camera_type == "eels":
+                elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
                     channel_descriptions = [hardware_source_channel_descriptions["eels_spectrum"], hardware_source_channel_descriptions["eels_image"]]
                 else:
                     channel_descriptions = [hardware_source_channel_descriptions["image"]]
@@ -1130,7 +1131,9 @@ class CameraExposureValueStream(Stream.ValueStream[float]):
         self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(
             weak_partial(CameraExposureValueStream.__hardware_source_stream_changed, self))
         self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
-        self.__hardware_source_stream_changed(hardware_source_stream.value)
+        hardware_source = hardware_source_stream.value
+        assert hardware_source
+        self.__hardware_source_stream_changed(hardware_source)
 
     def about_to_delete(self) -> None:
         if self.__frame_parameters_changed_listener:
@@ -1239,7 +1242,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.__camera_hardware_source_choice_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_device_id")
 
         # the camera hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
-        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
+        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera", False))
 
         # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
@@ -1249,7 +1252,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
 
         # the scan hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
         # it will not be presented in the UI unless multiple choices exist.
-        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning", False))
 
         # the scan width model is a property model made by observing the scan_width property in the configuration.
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
@@ -1525,7 +1528,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         # the camera hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(
             self.__camera_hardware_source_choice_model,
-            lambda hardware_source: hardware_source.features.get("is_camera"))
+            lambda hardware_source: hardware_source.features.get("is_camera", False))
 
         # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration,
@@ -1641,7 +1644,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
 
         # the scan hardware source choice associates a camera_device_id with a hardware source and also facilitates a combo box.
         # it will not be presented in the UI unless multiple choices exist.
-        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning", False))
 
         u = Declarative.DeclarativeUI()
         if len(self.__scan_hardware_source_choice.hardware_sources) > 1:

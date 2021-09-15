@@ -175,9 +175,9 @@ class STEMController(Observable.Observable):
         self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
-        self.__ronchigram_camera = None
-        self.__eels_camera = None
-        self.__scan_controller = None
+        self.__ronchigram_camera: typing.Optional[HardwareSource.HardwareSource] = None
+        self.__eels_camera: typing.Optional[HardwareSource.HardwareSource] = None
+        self.__scan_controller: typing.Optional[HardwareSource.HardwareSource] = None
 
     def close(self):
         self.__scan_context_channel_map = None
@@ -201,32 +201,35 @@ class STEMController(Observable.Observable):
     # configuration methods
 
     @property
-    def ronchigram_camera(self) -> HardwareSource.HardwareSource:
+    def ronchigram_camera(self) -> typing.Optional[HardwareSource.HardwareSource]:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
-        return Registry.get_component("ronchigram_camera_hardware_source")
+        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+                           Registry.get_component("ronchigram_camera_hardware_source"))
 
-    def set_ronchigram_camera(self, camera: HardwareSource.HardwareSource) -> None:
-        assert camera.features.get("is_ronchigram_camera", False)
+    def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = camera
 
     @property
-    def eels_camera(self) -> HardwareSource.HardwareSource:
+    def eels_camera(self) -> typing.Optional[HardwareSource.HardwareSource]:
         if self.__eels_camera:
             return self.__eels_camera
-        return Registry.get_component("eels_camera_hardware_source")
+        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+                           Registry.get_component("eels_camera_hardware_source"))
 
-    def set_eels_camera(self, camera: HardwareSource.HardwareSource) -> None:
-        assert camera.features.get("is_eels_camera", False)
+    def set_eels_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        assert camera is None or camera.features.get("is_eels_camera", False)
         self.__eels_camera = camera
 
     @property
-    def scan_controller(self) -> HardwareSource.HardwareSource:
+    def scan_controller(self) -> typing.Optional[HardwareSource.HardwareSource]:
         if self.__scan_controller:
             return self.__scan_controller
-        return Registry.get_component("scan_hardware_source")
+        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+                           Registry.get_component("scan_hardware_source"))
 
-    def set_scan_controller(self, scan_controller: HardwareSource.HardwareSource) -> None:
+    def set_scan_controller(self, scan_controller: typing.Optional[HardwareSource.HardwareSource]) -> None:
         self.__scan_controller = scan_controller
 
     # end configuration methods

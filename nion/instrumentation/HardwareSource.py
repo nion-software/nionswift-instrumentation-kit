@@ -9,6 +9,7 @@ The HardwareSourceManager allows callers to register and unregister hardware sou
 
 This module also defines individual functions that can be used to collect data from hardware sources.
 """
+from __future__ import annotations
 
 from __future__ import annotations
 
@@ -449,7 +450,7 @@ class AcquisitionTask:
         self.start_event = Event.Event()
         self.stop_event = Event.Event()
         self.data_elements_changed_event = Event.Event()
-        self.finished_callback_fn = None  # hack to determine when 'record' mode finishes.
+        self.finished_callback_fn: typing.Optional[typing.Callable[[typing.Sequence[DataAndMetadata.DataAndMetadata]], None]] = None  # hack to determine when 'record' mode finishes.
 
     def __mark_as_finished(self):
         self.__finished = True
@@ -669,11 +670,11 @@ class DataChannel:
         self.__src_channel_index = src_channel_index
         self.__processor = processor
         self.__start_count = 0
-        self.__state = None
+        self.__state: typing.Optional[str] = None
         self.__data_shape = None
         self.__sub_area = None
         self.__dest_sub_area = None
-        self.__data_and_metadata = None
+        self.__data_and_metadata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.is_dirty = False
         self.data_channel_updated_event = Event.Event()
         self.data_channel_start_event = Event.Event()
@@ -692,7 +693,7 @@ class DataChannel:
         return self.__name
 
     @property
-    def state(self):
+    def state(self) -> typing.Optional[str]:
         return self.__state
 
     @property
@@ -716,7 +717,7 @@ class DataChannel:
         return self.__processor
 
     @property
-    def data_and_metadata(self):
+    def data_and_metadata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
         return self.__data_and_metadata
 
     @property
@@ -1144,7 +1145,7 @@ class HardwareSource(Observable.Observable):
 
     def get_next_xdatas_to_finish(self, timeout=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
         new_data_event = threading.Event()
-        new_xdatas = list()
+        new_xdatas: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
         def receive_new_xdatas(xdatas):
             new_xdatas[:] = xdatas
@@ -1163,7 +1164,7 @@ class HardwareSource(Observable.Observable):
 
     def get_next_xdatas_to_start(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
         new_data_event = threading.Event()
-        new_xdatas = list()
+        new_xdatas: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
         def receive_new_xdatas(xdatas):
             new_xdatas[:] = xdatas
@@ -1227,6 +1228,17 @@ class HardwareSource(Observable.Observable):
                 pass
 
         return HardwareSourceFacade()
+
+    # some dummy methods to pass type checking. the hardware source needs to be refactored.
+
+    def set_current_frame_parameters(self, frame_parameters):
+        pass
+
+    def get_frame_parameters_from_dict(self, d):
+        return None
+
+    def set_channel_enabled(self, channel_index, enabled):
+        pass
 
 
 # used for Facade backwards compatibility

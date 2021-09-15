@@ -240,9 +240,9 @@ class PanelDelegate:
         stem_controller_ = typing.cast(stem_controller.STEMController, Registry.get_component("stem_controller"))
 
         self.__scan_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_hardware_source_id")
-        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning"))
+        self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning", False))
         self.__camera_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_camera_hardware_source_id")
-        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera"))
+        self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera", False))
 
         self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()

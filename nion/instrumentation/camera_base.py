@@ -94,7 +94,7 @@ class CameraDevice(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def sensor_dimensions(self) -> (int, int):
+    def sensor_dimensions(self) -> typing.Tuple[int, int]:
         """Read-only property for the native sensor size (no binning).
 
         Returns (height, width) in pixels.
@@ -103,9 +103,9 @@ class CameraDevice(abc.ABC):
         """
         ...
 
-    @property
+    @property # type:ignore
     @abc.abstractmethod
-    def readout_area(self) -> (int, int, int, int):
+    def readout_area(self) -> typing.Tuple[int, int, int, int]:
         """Return the detector readout area.
 
         Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
@@ -117,9 +117,9 @@ class CameraDevice(abc.ABC):
         """
         ...
 
-    @readout_area.setter
+    @readout_area.setter # type:ignore
     @abc.abstractmethod
-    def readout_area(self, readout_area_TLBR: (int, int, int, int)) -> None:
+    def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
         """Set the detector readout area.
 
         The coordinates, top, left, bottom, right, are specified in sensor coordinates.
@@ -131,7 +131,7 @@ class CameraDevice(abc.ABC):
         """
         ...
 
-    @property
+    @property # type:ignore
     @abc.abstractmethod
     def flip(self):
         """Return whether data is flipped left-right (last dimension).
@@ -140,7 +140,7 @@ class CameraDevice(abc.ABC):
         """
         ...
 
-    @flip.setter
+    @flip.setter # type:ignore
     @abc.abstractmethod
     def flip(self, do_flip):
         """Set whether data is flipped left-right (last dimension).
@@ -219,7 +219,7 @@ class CameraDevice(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_expected_dimensions(self, binning: int) -> (int, int):
+    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
         """Read-only property for the expected image size (binning and readout area included).
 
         Returns (height, width).
@@ -443,7 +443,7 @@ class CameraDevice(abc.ABC):
 class InstrumentController(abc.ABC):
 
     @abc.abstractmethod
-    def TryGetVal(self, s: str) -> (bool, float): ...
+    def TryGetVal(self, s: str) -> typing.Tuple[bool, float]: ...
 
     @abc.abstractmethod
     def get_value(self, value_id: str, default_value: float=None) -> typing.Optional[float]: ...
@@ -766,7 +766,7 @@ class CameraSettings:
 class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
-        super().__init__(camera.camera_id, camera.camera_name)
+        super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
         # configure the event loop object
         logger = logging.getLogger()
@@ -804,10 +804,10 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
 
         self.__instrument_controller_id = instrument_controller_id
-        self.__instrument_controller = None
+        self.__instrument_controller: typing.Optional[InstrumentController] = None
 
         self.__camera = camera
-        self.__camera_category = camera.camera_type
+        self.__camera_category = typing.cast(typing.Any, camera).camera_type
         # signal type falls back to camera category if camera category is "eels" or "ronchigram". this is only for
         # backward compatibility. new camera instances should define signal_type directly.
         self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
@@ -898,7 +898,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         if not self.__instrument_controller:
             print(f"Instrument Controller ({self.__instrument_controller_id}) for ({self.hardware_source_id}) not found. Using proxy.")
             from nion.instrumentation import stem_controller
-            self.__instrument_controller = self.__instrument_controller or stem_controller.STEMController()
+            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, stem_controller.STEMController())
         return self.__instrument_controller
 
     def __handle_log_messages_event(self):
@@ -1012,8 +1012,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             self.valid_rows = valid_rows
 
     def acquire_synchronized_begin(self, camera_frame_parameters: typing.Mapping, scan_shape: typing.Tuple[int, ...]) -> PartialData:
-        if callable(getattr(self.__camera, "acquire_synchronized_begin", None)):
-            return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+        acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
+        if callable(acquire_synchronized_begin):
+            return acquire_synchronized_begin(camera_frame_parameters, scan_shape)
         else:
             data_elements = self.acquire_synchronized(scan_shape)
             if len(data_elements) > 0:
@@ -1024,26 +1025,30 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
-        if callable(getattr(self.__camera, "acquire_synchronized_continue", None)):
-            return self.__camera.acquire_synchronized_continue(update_period=update_period)
+        acquire_synchronized_continue = getattr(self.__camera, "acquire_synchronized_continue", None)
+        if callable(acquire_synchronized_continue):
+            return acquire_synchronized_continue(update_period=update_period)
         return CameraHardwareSource.PartialData(None, True, True, 0)
 
     def acquire_synchronized_end(self) -> None:
-        if callable(getattr(self.__camera, "acquire_synchronized_end", None)):
-            self.__camera.acquire_synchronized_end()
+        acquire_synchronized_end = getattr(self.__camera, "acquire_synchronized_end", None)
+        if callable(acquire_synchronized_end):
+            acquire_synchronized_end()
 
     def acquire_synchronized_prepare(self, data_shape, **kwargs) -> None:
-        if callable(getattr(self.__camera, "acquire_synchronized_prepare", None)):
+        acquire_synchronized_prepare = getattr(self.__camera, "acquire_synchronized_prepare", None)
+        if callable(acquire_synchronized_prepare):
             frame_parameters = self.get_current_frame_parameters()
             self.__camera.set_frame_parameters(frame_parameters)
-            self.__camera.acquire_synchronized_prepare(data_shape, **kwargs)
+            acquire_synchronized_prepare(data_shape, **kwargs)
         else:
             self.acquire_sequence_prepare(int(numpy.product(data_shape)))
 
     def acquire_synchronized(self, data_shape, **kwargs) -> typing.Sequence[typing.Dict]:
-        if callable(getattr(self.__camera, "acquire_synchronized", None)):
+        acquire_synchronized = getattr(self.__camera, "acquire_synchronized", None)
+        if callable(acquire_synchronized):
             frame_parameters = self.get_current_frame_parameters()
-            data_element = self.__camera.acquire_synchronized(data_shape, **kwargs)
+            data_element = acquire_synchronized(data_shape, **kwargs)
             if data_element:
                 self.__update_data_element_for_sequence(data_element, frame_parameters)
                 return [data_element]
@@ -1054,8 +1059,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
     def acquire_sequence_prepare(self, n: int) -> None:
         frame_parameters = self.get_current_frame_parameters()
         self.__camera.set_frame_parameters(frame_parameters)
-        if callable(getattr(self.__camera, "acquire_sequence_prepare", None)):
-            self.__camera.acquire_sequence_prepare(n)
+        acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
+        if callable(acquire_sequence_prepare):
+            acquire_sequence_prepare(n)
 
     def __acquire_sequence_fallback(self, n: int, frame_parameters) -> dict:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
@@ -1085,7 +1091,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                         properties["spatial_calibrations"] = spatial_properties[1:]
         finally:
             acquisition_task._stop_acquisition()
-        data_element = dict()
+        data_element: typing.Dict[str, typing.Any] = dict()
         data_element["data"] = data
         data_element["metadata"] = dict()
         data_element["hardware_source"] = properties
@@ -1093,8 +1099,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
     def acquire_sequence(self, n: int) -> typing.Sequence[typing.Dict]:
         frame_parameters = self.get_current_frame_parameters()
-        if callable(getattr(self.__camera, "acquire_sequence", None)):
-            data_element = self.__camera.acquire_sequence(n)
+        acquire_sequence = getattr(self.__camera, "acquire_sequence", None)
+        if callable(acquire_sequence):
+            data_element = acquire_sequence(n)
         else:
             data_element = self.__acquire_sequence_fallback(n, frame_parameters)
         if data_element:
@@ -1135,15 +1142,19 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
             return (y_calibration, x_calibration)
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
-        return build_calibration(self.__instrument_controller, self.__camera.calibration_controls, "intensity")
+        instrument_controller = self.__instrument_controller
+        assert instrument_controller
+        return build_calibration(instrument_controller, self.__camera.calibration_controls, "intensity")
 
     def acquire_sequence_cancel(self) -> None:
-        if callable(getattr(self.__camera, "acquire_sequence_cancel", None)):
-            self.__camera.acquire_sequence_cancel()
+        acquire_sequence_cancel = getattr(self.__camera, "acquire_sequence_cancel", None)
+        if callable(acquire_sequence_cancel):
+            acquire_sequence_cancel()
 
     def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
-        if hasattr(self.__camera, "get_acquire_sequence_metrics"):
-            return self.__camera.get_acquire_sequence_metrics(frame_parameters)
+        get_acquire_sequence_metrics = getattr(self.__camera, "get_acquire_sequence_metrics", None)
+        if callable(get_acquire_sequence_metrics):
+            return get_acquire_sequence_metrics(frame_parameters)
         return dict()
 
     def __current_frame_parameters_changed(self, frame_parameters):
@@ -1180,8 +1191,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         else:
             # TODO: remove this backwards compatibility code once everyone updated to new technique above
             if self.__camera_category.lower() == "ronchigram":
-                radians_per_pixel = instrument_controller.get_value("TVPixelAngle")
-                defocus_value = instrument_controller.get_value("C10")  # get the defocus
+                radians_per_pixel = typing.cast(float, instrument_controller.get_value("TVPixelAngle", 0.0))
+                defocus_value = typing.cast(float, instrument_controller.get_value("C10", 0.0))
                 dx = radians_per_pixel * defocus_value * (mouse_position[1] - (camera_shape[1] / 2))
                 dy = radians_per_pixel * defocus_value * (mouse_position[0] - (camera_shape[0] / 2))
                 logger.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
@@ -1378,7 +1389,7 @@ def update_instrument_properties(stem_properties: typing.MutableMapping, instrum
                 pass
         # give the instrument controller opportunity to update metadata groups specified by the camera
         if hasattr(camera, "acquisition_metatdata_groups"):
-            acquisition_metatdata_groups = camera.acquisition_metatdata_groups
+            acquisition_metatdata_groups = getattr(camera, "acquisition_metatdata_groups")
             instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
@@ -1409,7 +1420,7 @@ def run(configuration_location: pathlib.Path):
             try:
                 camera_hardware_source = CameraHardwareSource(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type, camera_panel_delegate_type)
                 if hasattr(camera_module, "priority"):
-                    camera_hardware_source.priority = camera_module.priority
+                    setattr(camera_hardware_source, "priority", getattr(camera_module, "priority"))
                 component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})
                 Registry.register_component(camera_hardware_source, component_types)
                 HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)

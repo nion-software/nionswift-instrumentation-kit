@@ -106,7 +106,7 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSource.HardwareSo
         # outgoing messages
         self.value_stream = Event.Event()
         # initialize
-        self.__value = None
+        self.__value: typing.Optional[HardwareSource.HardwareSource] = None
         # listen for display changes
         self.__hardware_source_changed_listener = hardware_source_choice.hardware_source_changed_event.listen(self.__hardware_source_changed)
         self.__hardware_source_changed(hardware_source_choice.hardware_source)
@@ -117,7 +117,7 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSource.HardwareSo
         super().about_to_delete()
 
     @property
-    def value(self) -> HardwareSource.HardwareSource:
+    def value(self) -> typing.Optional[HardwareSource.HardwareSource]:
         return self.__value
 
     def __hardware_source_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
