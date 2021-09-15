@@ -11,7 +11,6 @@ from . import MultipleShiftEELSAcquire
 from . import VideoControlPanel
 
 from nion.instrumentation import camera_base
-from nion.instrumentation import camera_base_1
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import video_base
@@ -51,7 +50,6 @@ class STEMControllerExtension:
 def run():
     global configuration_location
     camera_base.run(configuration_location)
-    camera_base_1.run()
     scan_base.run()
     video_base.run()
     CameraControlPanel.run()

@@ -473,7 +473,11 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
     def prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
-        """Prepare stream."""
+        """Prepare stream. Top level prepare_stream is called before start_stream.
+
+        The prepare function allows streams to perform any preparations before any other
+        stream has started.
+        """
         self._prepare_stream(stream_args, **kwargs)
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:

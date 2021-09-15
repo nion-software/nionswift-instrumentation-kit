@@ -36,36 +36,6 @@ from nion.utils import Registry
 _ = gettext.gettext
 
 
-class Camera(abc.ABC):
-    """DEPRECATED. Here for backwards compatibility.
-
-    The method implementations only exist since classes derived from this base class may have assumed these methods
-    would be implemented. Methods marked as abstract have been removed since they must have already been implemented in
-    any class derived from this one.
-    """
-
-    def set_integration_count(self, integration_count: int, mode_id: str) -> None:
-        pass
-
-    def get_acquire_sequence_metrics(self, frame_parameters: typing.Dict) -> typing.Dict:
-        return dict()
-
-    def acquire_sequence_prepare(self, n: int) -> None:
-        pass
-
-    def acquire_sequence(self, n: int) -> typing.Optional[typing.Dict]:
-        return None
-
-    def show_config_window(self) -> None:
-        pass
-
-    def show_configuration_dialog(self, api_broker) -> None:
-        pass
-
-    def start_monitor(self) -> None:
-        pass
-
-
 class CameraDevice(abc.ABC):
     """Camera device.
 

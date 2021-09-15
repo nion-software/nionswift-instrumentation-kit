@@ -1748,6 +1748,8 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
 
 class CameraFrameDataStream(Acquisition.DataStream):
+    """A data stream of individual camera frames, for use in synchronized acquisition."""
+
     def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource,
                  camera_frame_parameters: camera_base.CameraFrameParameters, flyback_pixels: int = 0,
                  additional_metadata: typing.Optional[typing.Dict] = None):
