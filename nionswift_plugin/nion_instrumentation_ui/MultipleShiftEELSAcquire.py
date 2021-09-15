@@ -116,9 +116,7 @@ class AcquireController(metaclass=Utility.Singleton):
             first_data = first_xdata.data
 
             # Initialize an empty stack to fill with acquired data
-            image_stack_data = numpy.empty((number_frames, first_data.shape[0],
-                                            first_data.shape[1]),
-                                           dtype=numpy.float)
+            image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
 
             reference_energy = stem_controller.GetVal(energy_adjust_control)
 

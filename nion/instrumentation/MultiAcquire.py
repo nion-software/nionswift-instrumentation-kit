@@ -207,7 +207,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         if axes_descriptor.data_axes:
             axes_order.extend(axes_descriptor.data_axes)
 
-        data_shape = tuple(scan_shape) + camera_readout_size
+        data_shape = list(scan_shape) + list(camera_readout_size)
 
         assert len(axes_order) == len(data_shape)
 
@@ -298,8 +298,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
         metadata = data_and_metadata.metadata
 
-        src_slice = tuple()
-        dst_slice = tuple()
+        src_slice: typing.List[slice] = list()
+        dst_slice: typing.List[slice] = list()
         for index in axes_order:
             if index >= len(sub_area.slice):
                 src_slice += (slice(None),)
@@ -317,12 +317,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if data.shape[collection_axis] == 1:
                 data = numpy.squeeze(data, axis=collection_axis)
                 dimensional_calibrations = dimensional_calibrations[1:]
-                src_slice = list(src_slice)
                 src_slice.pop(collection_axis)
-                src_slice = tuple(src_slice)
-                dst_slice = list(dst_slice)
                 dst_slice.pop(collection_axis)
-                dst_slice = tuple(dst_slice)
                 collection_dimension_count = 0
         data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
 
@@ -403,9 +399,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if sum_frames:
                 existing_data = self.__data_item.data
                 if existing_data is not None:
-                    existing_data[dst_slice] += data_and_metadata.data[src_slice]
+                    existing_data[tuple(dst_slice)] += data_and_metadata.data[tuple(src_slice)]
             else:
-                dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
+                dst_slice = [slice(self.current_frames_index, self.current_frames_index + 1)] + dst_slice
 
         self.__document_model.update_data_item_partial(self.__data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
         self.update_progress(dest_sub_area.bottom)
@@ -436,10 +432,10 @@ SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_behavio
 class SISequenceAcquisitionHandler:
     def __init__(self,
                  camera: camera_base.CameraHardwareSource,
-                 camera_data_channel: scan_base.SynchronizedDataChannelInterface,
+                 camera_data_channel: CameraDataChannel,
                  camera_frame_parameters: dict,
                  scan_controller: scan_base.ScanHardwareSource,
-                 scan_data_channel: scan_base.SynchronizedDataChannelInterface,
+                 scan_data_channel: ScanDataChannel,
                  scan_frame_parameters: dict,
                  si_sequence_behavior: typing.Optional[SISequenceBehavior] = None):
 
@@ -488,9 +484,9 @@ class MultiAcquireController:
                          'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
                          'use_multi_eels_calibration': False, 'shift_each_sequence_slice': False})
         self.stem_controller = stem_controller
-        self.camera: camera_base.CameraHardwareSource = None
-        self.scan_controller: scan_base.ScanHardwareSource = None
-        self.zeros = {'x': 0, 'focus': 0}
+        self.camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self.scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
+        self.zeros = {'x': 0.0, 'focus': 0.0}
         self.scan_calibrations = [{'offset': 0, 'scale': 1, 'units': ''}, {'offset': 0, 'scale': 1, 'units': ''}]
         self.__progress_counter = 0
         self.acquisition_state_changed_event = Event.Event()

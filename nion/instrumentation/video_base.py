@@ -86,7 +86,7 @@ class AcquisitionTask(HardwareSource.AcquisitionTask):
 class VideoHardwareSource(HardwareSource.HardwareSource):
 
     def __init__(self, camera: AbstractVideoCamera):
-        super().__init__(camera.camera_id, camera.camera_name)
+        super().__init__(getattr(camera, "camera_id"), getattr(camera, "camera_name"))
         self.features["is_video"] = True
         self.add_data_channel()
         self.__camera = camera

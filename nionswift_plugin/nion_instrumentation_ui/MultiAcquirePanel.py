@@ -10,10 +10,11 @@ import webbrowser
 
 # local libraries
 import typing
+from nion.instrumentation import camera_base
+from nion.instrumentation import HardwareSource
+from nion.instrumentation import MultiAcquire
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
-from nion.instrumentation import camera_base
-from nion.instrumentation import MultiAcquire
 from nion.swift.model import ImportExportManager
 from nion.ui import Dialog
 from nion.utils import Registry
@@ -104,7 +105,7 @@ class MultiAcquirePanelDelegate:
         self.__scan_frame_parameters_changed_event_listener = None
         self.__new_data_ready_event_listener = None
         self._stem_controller: typing.Optional[stem_controller.STEMController] = None
-        self._camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self._camera: typing.Optional[HardwareSource.HardwareSource] = None
         self._scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
         self.settings_window_open = False
         self.parameter_column = None
@@ -127,7 +128,7 @@ class MultiAcquirePanelDelegate:
         return self._stem_controller
 
     @property
-    def camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
+    def camera(self) -> typing.Optional[HardwareSource.HardwareSource]:
         if hasattr(self, 'camera_choice_combo_box'):
             return self.camera_choice_combo_box.current_item
         if self._camera is None and self.stem_controller:
@@ -347,22 +348,26 @@ class MultiAcquirePanelDelegate:
             else:
                 # Camera must be accessed from the UI thread, so do it here and re-use later
                 camera = self.camera
+                scan_controller = self.scan_controller
+                assert camera
+                assert scan_controller
+
                 self.multi_acquire_controller.stem_controller = self.stem_controller
                 self.multi_acquire_controller.camera = camera
-                self.multi_acquire_controller.scan_controller = self.scan_controller
+                self.multi_acquire_controller.scan_controller = scan_controller
 
                 def create_acquisition_handler(multi_acquire_parameters: list, current_parameters_index: int, multi_acquire_settings: dict):
                     document_model = self.document_controller._document_controller.document_model
                     camera_frame_parameters = camera.get_current_frame_parameters()
-                    scan_frame_parameters = self.scan_controller.get_current_frame_parameters()
+                    scan_frame_parameters = scan_controller.get_current_frame_parameters()
                     camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                     camera_frame_parameters['processing'] = multi_acquire_settings['processing']
                     scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
-                    grab_synchronized_info = self.scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                                                             camera=camera,
-                                                                                             camera_frame_parameters=camera_frame_parameters)
-                    camera_data_channel = None
-                    scan_data_channel = None
+                    grab_synchronized_info = scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                                                   camera=camera,
+                                                                                   camera_frame_parameters=camera_frame_parameters)
+                    camera_data_channel: typing.Optional[MultiAcquire.CameraDataChannel] = None
+                    scan_data_channel: typing.Optional[MultiAcquire.ScanDataChannel] = None
                     channels_ready_event = threading.Event()
 
                     def create_channels():
@@ -371,8 +376,8 @@ class MultiAcquirePanelDelegate:
                         camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera.display_name, grab_synchronized_info,
                                                                              multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
                                                                              stack_metadata_keys=stack_metadata_keys)
-                        enabled_channels = self.scan_controller.get_enabled_channels()
-                        enabled_channel_names = [self.scan_controller.data_channels[i].name for i in enabled_channels]
+                        enabled_channels = scan_controller.get_enabled_channels()
+                        enabled_channel_names = [scan_controller.data_channels[i].name for i in enabled_channels]
                         scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
                                                                          multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
                         camera_data_channel.start()
@@ -382,10 +387,13 @@ class MultiAcquirePanelDelegate:
                     self.document_controller.queue_task(create_channels)
                     assert channels_ready_event.wait(10)
 
+                    assert camera_data_channel
+                    assert scan_data_channel
+
                     sequence_behavior = MultiAcquire.SequenceBehavior(self.multi_acquire_controller, current_parameters_index)
                     si_sequence_behavior = MultiAcquire.SISequenceBehavior(None, None, sequence_behavior, 1)
                     handler =  MultiAcquire.SISequenceAcquisitionHandler(camera, camera_data_channel, camera_frame_parameters,
-                                                                         self.scan_controller, scan_data_channel, scan_frame_parameters,
+                                                                         scan_controller, scan_data_channel, scan_frame_parameters,
                                                                          si_sequence_behavior)
 
                     listener = handler.camera_data_channel.progress_updated_event.listen(self.multi_acquire_controller.set_progress_counter)
