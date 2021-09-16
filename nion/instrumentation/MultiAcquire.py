@@ -82,7 +82,7 @@ class ScanDataChannel:
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_names: typing.Sequence[str],
-                 grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo,
+                 grab_sync_info: scan_base.GrabSynchronizedInfo,
                  multi_acquire_parameters: list, multi_acquire_settings: dict, current_parameters_index: int):
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
@@ -183,7 +183,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_name: str,
-                 grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo,
+                 grab_sync_info: scan_base.GrabSynchronizedInfo,
                  multi_acquire_parameters: list, multi_acquire_settings: dict,
                  current_parameters_index: int,
                  stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None):
@@ -199,7 +199,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.progress_updated_event = Event.Event()
 
-    def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.ScanHardwareSource.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
+    def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
         # axes_descriptor provides the information needed to re-order the axes of the result data approprietly.
         axes_order = []
         if axes_descriptor.sequence_axes:
@@ -223,7 +223,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
         return axes_order, tuple(data_shape)
 
-    def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.ScanHardwareSource.GrabSynchronizedInfo) -> DataItem.DataItem:
+    def __create_data_item(self, channel_name: str, grab_sync_info: scan_base.GrabSynchronizedInfo) -> DataItem.DataItem:
         scan_calibrations = grab_sync_info.scan_calibrations
         data_calibrations = grab_sync_info.data_calibrations
         axes_descriptor = grab_sync_info.axes_descriptor
