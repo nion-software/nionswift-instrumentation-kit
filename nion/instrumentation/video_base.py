@@ -86,7 +86,7 @@ class AcquisitionTask(HardwareSource.AcquisitionTask):
         super()._stop_acquisition()
 
 
-class VideoHardwareSource(HardwareSource.HardwareSource):
+class VideoHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def __init__(self, camera: AbstractVideoCamera):
         super().__init__(getattr(camera, "camera_id"), getattr(camera, "camera_name"))

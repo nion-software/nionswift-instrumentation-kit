@@ -69,7 +69,7 @@ class ScanFrameParameters(dict):
         memo[id(self)] = deepcopy
         return deepcopy
 
-    def as_dict(self):
+    def as_dict(self) -> typing.Dict[str, typing.Any]:
         d = {
             "size": self.size,
             "center_nm": self.center_nm,
@@ -158,7 +158,7 @@ def update_scan_properties(properties: typing.MutableMapping, scan_frame_paramet
 
 
 # set the calibrations for this image. does not touch metadata.
-def update_scan_data_element(data_element, scan_frame_parameters, data_shape, channel_name, channel_id, scan_properties):
+def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, scan_properties: typing.Mapping[str, typing.Any]) -> None:
     scan_properties = copy.deepcopy(scan_properties)
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
@@ -384,7 +384,7 @@ class SynchronizedScanBehaviorInterface:
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __init__(self, stem_controller_: stem_controller_module.STEMController, scan_hardware_source: ScanHardwareSource,
-                 device, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
+                 device: ScanDevice, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
                  channel_ids: typing.List[str], display_name: str):
         # channel_ids is the channel id for each acquired channel
         # for instance, there may be 4 possible channels (0-3, a-d) and acquisition from channels 1,2
@@ -398,31 +398,31 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
-        self.__frame_number = None
+        self.__frame_number = 0
         self.__scan_id: typing.Optional[uuid.UUID] = None
         self.__last_scan_id: typing.Optional[uuid.UUID] = None
         self.__fixed_scan_id = uuid.UUID(frame_parameters["scan_id"]) if "scan_id" in frame_parameters else None
         self.__pixels_to_skip = 0
         self.__channel_ids = channel_ids
-        self.__last_read_time = 0
+        self.__last_read_time = 0.0
         self.__subscan_enabled = False
 
-    def set_frame_parameters(self, frame_parameters):
+    def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         self.__frame_parameters = ScanFrameParameters(frame_parameters)
         self.__activate_frame_parameters()
 
     @property
-    def frame_parameters(self):
+    def frame_parameters(self) -> typing.Optional[ScanFrameParameters]:
         return self.__frame_parameters
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
             return False
-        self.__scan_hardware_source._enter_scanning_state()
+        self.__stem_controller._enter_scanning_state()
         if not any(self.__device.channels_enabled):
             return False
         self._resume_acquisition()
-        self.__frame_number = None
+        self.__frame_number = 0
         self.__scan_id = self.__fixed_scan_id
         return True
 
@@ -460,13 +460,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         start_time = time.time()
         while self.__device.is_scanning and time.time() - start_time < 1.0:
             time.sleep(0.01)
-        self.__frame_number = None
+        self.__frame_number = 0
         self.__scan_id = self.__fixed_scan_id
-        self.__scan_hardware_source._exit_scanning_state()
+        self.__stem_controller._exit_scanning_state()
 
-    def _acquire_data_elements(self):
+    def _acquire_data_elements(self) -> typing.List[typing.Dict[str, typing.Any]]:
 
-        def update_data_element(data_element, complete, sub_area: Geometry.RectIntTuple, npdata):
+        def update_data_element(data_element: typing.MutableMapping[str, typing.Any], complete: bool, sub_area: typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], npdata: numpy.ndarray) -> None:
             data_element["data"] = npdata
             data_element["data_shape"] = self.__frame_parameters.get("data_shape_override")
             data_element["sub_area"] = sub_area
@@ -503,8 +503,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
-            data_element = {"metadata": dict()}
-            instrument_metadata = dict()
+            data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
+            instrument_metadata: typing.Dict[str, typing.Any] = dict()
             update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
             if instrument_metadata:
                 data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
@@ -516,13 +516,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
         if complete or bad_frame:
             # proceed to next frame
-            self.__frame_number = None
+            self.__frame_number = 0
             self.__scan_id = self.__fixed_scan_id
             self.__pixels_to_skip = 0
 
         return data_elements
 
-    def __activate_frame_parameters(self):
+    def __activate_frame_parameters(self) -> None:
         device_frame_parameters = ScanFrameParameters(self.__frame_parameters)
         context_size = Geometry.FloatSize.make(device_frame_parameters.size)
         device_frame_parameters.fov_size_nm = device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm
@@ -547,7 +547,7 @@ class RecordTask:
         # for the acquisition.
         self.__recording_started = threading.Event()
 
-        def record_thread():
+        def record_thread() -> None:
             self.__hardware_source.start_recording()
             self.__recording_started.set()
             self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
@@ -623,40 +623,198 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
                                                  None)
 
 
-class SynchronizedScanControl:
-    def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource):
-        self.__scan_hardware_source = scan_hardware_source
-        self.__camera_hardware_source = camera_hardware_source
-        self.__grab_synchronized_is_scanning = True
-        self.__stem_controller = scan_hardware_source.stem_controller
-        self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
-        self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
-        self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
-        self.__grab_synchronized_aborted = False  # set this flag when abort requested in case low level doesn't follow rules
+class ScanDevice(typing.Protocol):
+
+    def close(self) -> None: ...
+    def get_channel_name(self, channel_index: int) -> str: ...
+    def set_channel_enabled(self, channel_index: int, enabled: bool) -> bool: ...
+    def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None: ...
+    def save_frame_parameters(self) -> None: ...
+    def start_frame(self, is_continuous: bool) -> int: ...
+    def cancel(self) -> None: ...
+    def stop(self) -> None: ...
+    def read_partial(self, frame_number: int, pixels_to_skip: int) -> typing.Tuple[typing.Sequence[dict], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], int, int]: ...
+    def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
+    def set_scan_context_probe_position(self, scan_context: stem_controller_module.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
+    def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
+    def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs) -> None: ...
+    def get_profile_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
+    def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
+    def open_configuration_interface(self) -> None: ...
+    def show_configuration_dialog(self, api_broker) -> None: ...
 
     @property
-    def is_aborted(self) -> bool:
-        return self.__grab_synchronized_aborted
+    def channel_count(self) -> int: raise NotImplementedError()
 
-    def abort(self) -> None:
-        if self.__grab_synchronized_is_scanning:
-            # if the state is scanning, the thread could be stuck on acquire sequence or
-            # stuck on scan.grab. cancel both here.
-            self.__camera_hardware_source.acquire_sequence_cancel()
-            self.__scan_hardware_source.abort_recording()
-        # and set the flag for misbehaving acquire_sequence return values.
-        self.__grab_synchronized_aborted = True
+    @property
+    def channels_enabled(self) -> typing.Tuple[bool, ...]: raise NotImplementedError()
 
-    def close(self) -> None:
-        self.__scan_hardware_source.set_record_frame_parameters(self.__old_record_parameters)
-        self.__stem_controller._exit_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
-        self.__grab_synchronized_is_scanning = False
-        self.__scan_hardware_source.acquisition_state_changed_event.fire(False)
+    @property
+    def is_scanning(self) -> bool: raise NotImplementedError()
+
+    @property
+    def current_frame_parameters(self) -> ScanFrameParameters: raise NotImplementedError()
+
+    @property
+    def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]: raise NotImplementedError()
+
+    flyback_pixels: int
+    on_device_state_changed: typing.Optional[typing.Callable[[typing.Sequence[ScanFrameParameters], typing.Sequence[typing.Tuple[str, bool]]], None]]
 
 
-class ScanHardwareSource(HardwareSource.HardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, device, hardware_source_id: str, display_name: str):
+
+class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
+
+    # public methods
+
+    def grab_synchronized(self, *, data_channel: Acquisition.DataChannel = None,
+                          scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
+                          camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
+                          section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None,
+                          scan_count: int = 1) -> GrabSynchronizedResult: ...
+
+    def record_immediate(self, frame_parameters: ScanFrameParameters, enabled_channels: typing.Sequence[int] = None,
+                         sync_timeout: float = None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+
+    # used in Facade
+
+    @property
+    def selected_profile_index(self) -> int: raise NotImplementedError()
+
+    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
+    def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
+    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
+
+    # properties
+
+    @property
+    def scan_device(self) -> ScanDevice: raise NotImplementedError()
+
+    @property
+    def stem_controller(self) -> stem_controller_module.STEMController: raise NotImplementedError()
+
+    @property
+    def channel_count(self) -> int: raise NotImplementedError()
+
+    @property
+    def scan_context(self) -> stem_controller_module.ScanContext: raise NotImplementedError()
+
+    @property
+    def flyback_pixels(self) -> int: raise NotImplementedError()
+
+    @property
+    def probe_position(self) -> typing.Optional[Geometry.FloatPoint]: raise NotImplementedError()
+
+    @probe_position.setter
+    def probe_position(self, probe_position: typing.Optional[typing.Union[Geometry.FloatPoint, typing.Tuple]]) -> None: ...
+
+    @property
+    def subscan_state(self) -> stem_controller_module.SubscanState: raise NotImplementedError()
+
+    @property
+    def subscan_enabled(self) -> bool: raise NotImplementedError()
+
+    @subscan_enabled.setter
+    def subscan_enabled(self, enabled: bool) -> None: ...
+
+    @property
+    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]: raise NotImplementedError()
+
+    @subscan_region.setter
+    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None: ...
+
+    @property
+    def line_scan_state(self) -> stem_controller_module.LineScanState: raise NotImplementedError()
+
+    @property
+    def line_scan_enabled(self) -> bool: raise NotImplementedError()
+
+    @line_scan_enabled.setter
+    def line_scan_enabled(self, enabled: bool) -> None: ...
+
+    @property
+    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]: raise NotImplementedError()
+
+    @property
+    def drift_channel_id(self) -> typing.Optional[str]: raise NotImplementedError()
+
+    @drift_channel_id.setter
+    def drift_channel_id(self, value: typing.Optional[str]) -> None: ...
+
+    @property
+    def drift_region(self) -> typing.Optional[Geometry.FloatRect]: raise NotImplementedError()
+
+    @drift_region.setter
+    def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None: ...
+
+    @property
+    def drift_rotation(self) -> float: raise NotImplementedError()
+
+    @drift_rotation.setter
+    def drift_rotation(self, value: float) -> None: ...
+
+    @property
+    def drift_settings(self) -> stem_controller_module.DriftCorrectionSettings: raise NotImplementedError()
+
+    @drift_settings.setter
+    def drift_settings(self, value: stem_controller_module.DriftCorrectionSettings) -> None: ...
+
+    @property
+    def drift_enabled(self) -> bool: raise NotImplementedError()
+
+    @drift_enabled.setter
+    def drift_enabled(self, enabled: bool) -> None: ...
+
+    # private. do not use outside of instrumentation-kit.
+
+    def set_record_frame_parameters(self, camera_frame_parameters: ScanFrameParameters) -> None: ...
+    def get_record_frame_parameters(self) -> ScanFrameParameters: ...
+    def periodic(self) -> None: ...
+    def get_enabled_channels(self) -> typing.Sequence[int]: ...
+    def get_channel_state(self, channel_index) -> ChannelState: ...
+    def get_channel_enabled(self, channel_index: int) -> bool: ...
+    def get_channel_index(self, channel_id: str) -> typing.Optional[int]: ...
+    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]: ...
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
+    def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
+    def calculate_drift_scans(self) -> int: ...
+    def shift_click(self, mouse_position, camera_shape, logger: logging.Logger) -> None: ...
+
+    priority: int = 100
+    drift_tracker: DriftTracker
+
+
+AxesDescriptor = collections.namedtuple("AxesDescriptor", ["sequence_axes", "collection_axes", "data_axes"])
+
+GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo",
+                                              ["scan_size",
+                                               "fractional_area",
+                                               "is_subscan",
+                                               "camera_readout_size",
+                                               "camera_readout_size_squeezed",
+                                               "channel_modifier",
+                                               "scan_calibrations",
+                                               "data_calibrations",
+                                               "data_intensity_calibration",
+                                               "instrument_metadata",
+                                               "camera_metadata",
+                                               "scan_metadata",
+                                               "axes_descriptor"])
+
+GrabSynchronizedResult = typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]
+
+
+@dataclasses.dataclass
+class ChannelState:
+    channel_id: str
+    name: str
+    enabled: bool
+
+
+class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
+
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, hardware_source_id: str, display_name: str):
         super().__init__(hardware_source_id, display_name)
 
         self.features["is_scanning"] = True
@@ -706,7 +864,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
         self.__latest_values_lock = threading.RLock()
-        self.__latest_values: typing.Dict[int, dict] = dict()
+        self.__latest_values: typing.Dict[int, ScanFrameParameters] = dict()
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
@@ -719,7 +877,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # do it slightly out of order for this class.
         self.close_thread()
         self.drift_tracker.close()
-        self.drift_tracker = typing.cast(typing.Any, None)
+        self.drift_tracker = typing.cast(DriftTracker, None)
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
         self.__stem_controller.disconnect_probe_connections()
@@ -741,7 +899,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # may do something that requires the device.
         self.__device.save_frame_parameters()
         self.__device.close()
-        self.__device = None
+        self.__device = typing.cast(ScanDevice, None)
 
     def periodic(self) -> None:
         self.__handle_executing_task_queue()
@@ -771,7 +929,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__stem_controller
 
     @property
-    def scan_device(self):
+    def scan_device(self) -> ScanDevice:
         return self.__device
 
     def __get_initial_profiles(self) -> typing.List[typing.Any]:
@@ -787,11 +945,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def __get_initial_profile_index(self) -> int:
         return 0
 
-    def start_playing(self, *args, **kwargs):
+    def start_playing(self, *args, **kwargs) -> None:
         if "frame_parameters" in kwargs:
-            self.set_current_frame_parameters(kwargs["frame_parameters"])
+            self.set_current_frame_parameters(ScanFrameParameters(kwargs["frame_parameters"]))
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(args[0])
+            self.set_current_frame_parameters(ScanFrameParameters(args[0]))
         super().start_playing(*args, **kwargs)
 
     def get_enabled_channels(self) -> typing.Sequence[int]:
@@ -818,29 +976,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
     def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]:
         return None
-
-    def grab_sequence_abort(self) -> None:
-        pass
-
-    def grab_sequence_get_progress(self) -> typing.Optional[float]:
-        return None
-
-    AxesDescriptor = collections.namedtuple("AxesDescriptor", ["sequence_axes", "collection_axes", "data_axes"])
-
-    GrabSynchronizedInfo = collections.namedtuple("GrabSynchronizedInfo",
-                                                  ["scan_size",
-                                                   "fractional_area",
-                                                   "is_subscan",
-                                                   "camera_readout_size",
-                                                   "camera_readout_size_squeezed",
-                                                   "channel_modifier",
-                                                   "scan_calibrations",
-                                                   "data_calibrations",
-                                                   "data_intensity_calibration",
-                                                   "instrument_metadata",
-                                                   "camera_metadata",
-                                                   "scan_metadata",
-                                                   "axes_descriptor"])
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
         channel_modifier: typing.Optional[str]
@@ -870,13 +1005,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         camera_readout_size_squeezed: typing.Tuple[int, ...]
         if camera_frame_parameters.get("processing") == "sum_project":
             camera_readout_size_squeezed = (camera_readout_size.width,)
-            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2])
+            axes_descriptor = AxesDescriptor(None, [0, 1], [2])
         elif camera_frame_parameters.get("processing") == "sum_masked":
             camera_readout_size_squeezed = (max(len(camera_frame_parameters.get("active_masks", [])), 1),)
-            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [2], [0, 1])
+            axes_descriptor = AxesDescriptor(None, [2], [0, 1])
         else:
             camera_readout_size_squeezed = tuple(camera_readout_size)
-            axes_descriptor = ScanHardwareSource.AxesDescriptor(None, [0, 1], [2, 3])
+            axes_descriptor = AxesDescriptor(None, [0, 1], [2, 3])
 
         scan_calibrations = ScanFrameParameters(scan_frame_parameters).get_scan_calibrations()
 
@@ -892,13 +1027,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
         update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
 
-        return ScanHardwareSource.GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
-                                                       camera_readout_size_squeezed, channel_modifier,
-                                                       scan_calibrations, data_calibrations, data_intensity_calibration,
-                                                       instrument_metadata, camera_metadata, scan_metadata,
-                                                       axes_descriptor)
-
-    GrabSynchronizedResult = typing.Optional[typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]]
+        return GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
+                                    camera_readout_size_squeezed, channel_modifier,
+                                    scan_calibrations, data_calibrations, data_intensity_calibration,
+                                    instrument_metadata, camera_metadata, scan_metadata,
+                                    axes_descriptor)
 
     def grab_synchronized(self, *, data_channel: Acquisition.DataChannel = None,
                           scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
@@ -917,7 +1050,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_channel)
         scan_acquisition = Acquisition.Acquisition(result_data_stream)
         with result_data_stream.ref(), contextlib.closing(scan_acquisition):
-            results: ScanHardwareSource.GrabSynchronizedResult = None
+            results: GrabSynchronizedResult = None
             self.__scan_acquisition = scan_acquisition
             try:
                 scan_acquisition.prepare_acquire()
@@ -957,7 +1090,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return xdata_group_list
 
     @property
-    def flyback_pixels(self):
+    def flyback_pixels(self) -> int:
         return self.__device.flyback_pixels
 
     @property
@@ -1177,7 +1310,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, channel_ids, self.display_name)
 
-    def _view_task_updated(self, view_task):
+    def _view_task_updated(self, view_task) -> None:
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
@@ -1221,7 +1354,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             assert time.time() - start < float(sync_timeout)
         return xdatas
 
-    def set_frame_parameters(self, profile_index, frame_parameters):
+    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         frame_parameters = ScanFrameParameters(frame_parameters)
         self.__profiles[profile_index] = frame_parameters
         self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
@@ -1231,13 +1364,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.set_record_frame_parameters(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
-    def get_frame_parameters(self, profile):
-        return copy.copy(self.__profiles[profile])
+    def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters:
+        return copy.copy(self.__profiles[profile_index])
 
-    def set_current_frame_parameters(self, frame_parameters):
+    def set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         self.__set_current_frame_parameters(frame_parameters, True)
 
-    def __set_current_frame_parameters(self, frame_parameters, is_context: bool, update_task: bool = True) -> None:
+    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, is_context: bool, update_task: bool = True) -> None:
         frame_parameters = ScanFrameParameters(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
         if frame_parameters.subscan_pixel_size:
@@ -1263,10 +1396,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_current_frame_parameters(self) -> ScanFrameParameters:
         return ScanFrameParameters(self.__frame_parameters)
 
-    def set_record_frame_parameters(self, frame_parameters):
+    def set_record_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         self.__record_parameters = ScanFrameParameters(frame_parameters)
 
-    def get_record_frame_parameters(self):
+    def get_record_frame_parameters(self) -> ScanFrameParameters:
         return self.__record_parameters
 
     @property
@@ -1283,7 +1416,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         assert 0 <= channel_index < self.__device.channel_count
         return self.__device.channels_enabled[channel_index]
 
-    def set_channel_enabled(self, channel_index, enabled):
+    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         changed = self.__device.set_channel_enabled(channel_index, enabled)
         if changed:
             self.__channel_states_changed([self.get_channel_state(i) for i in range(self.channel_count)])
@@ -1306,14 +1439,14 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
-    def record_async(self, callback_fn):
+    def record_async(self, callback_fn: typing.Callable[[typing.List[DataAndMetadata.DataAndMetadata]], None]) -> None:
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
 
-        def record_thread():
+        def record_thread() -> None:
             current_frame_time = self.get_current_frame_time()
 
-            def handle_finished(xdatas):
+            def handle_finished(xdatas: typing.List[DataAndMetadata.DataAndMetadata]) -> None:
                 callback_fn(xdatas)
 
             self.start_recording(current_frame_time, finished_callback_fn=handle_finished)
@@ -1321,16 +1454,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__thread = threading.Thread(target=record_thread)
         self.__thread.start()
 
-    def set_selected_profile_index(self, profile_index):
+    def set_selected_profile_index(self, profile_index: int) -> None:
         self.__current_profile_index = profile_index
         self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
         self.profile_changed_event.fire(profile_index)
 
     @property
-    def selected_profile_index(self):
+    def selected_profile_index(self) -> int:
         return self.__current_profile_index
 
-    def __update_frame_parameters(self, profile_index, frame_parameters):
+    def __update_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         # update the frame parameters as they are changed from the low level.
         # the low level frame parameters should be treated as if they are updating
         # the existing profiles since the low level device has no way to know
@@ -1345,10 +1478,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             self.__record_parameters.update(frame_parameters)
         self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
 
-    def _update_frame_parameters_test(self, profile_index, frame_parameters):
+    def _update_frame_parameters_test(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         self.__update_frame_parameters(profile_index, frame_parameters)
 
-    def __profile_frame_parameters_changed(self, profile_index, frame_parameters):
+    def __profile_frame_parameters_changed(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         # this method will be called when the device changes parameters (via a dialog or something similar).
         # it calls __update_frame_parameters instead of set_frame_parameters so that we do _not_ update the
         # current acquisition (which can cause a cycle in that it would again set the low level values, which
@@ -1357,20 +1490,20 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # the current profile is selected. Hrrmmm.
         with self.__latest_values_lock:
             self.__latest_values[profile_index] = ScanFrameParameters(frame_parameters)
-        def do_update_parameters():
+        def do_update_parameters() -> None:
             with self.__latest_values_lock:
                 for profile_index in self.__latest_values.keys():
                     self.__update_frame_parameters(profile_index, self.__latest_values[profile_index])
                 self.__latest_values = dict()
         self.__task_queue.put(do_update_parameters)
 
-    def __channel_states_changed(self, channel_states):
+    def __channel_states_changed(self, channel_states: typing.List[ChannelState]) -> None:
         # this method will be called when the device changes channels enabled (via dialog or script).
         # it updates the channels internally but does not send out a message to set the channels to the
         # hardware, since they're already set, and doing so can cause strange change loops.
         channel_count = self.channel_count
         assert len(channel_states) == channel_count
-        def channel_states_changed():
+        def channel_states_changed() -> None:
             for channel_index, channel_state in enumerate(channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
             at_least_one_enabled = False
@@ -1382,12 +1515,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                 self.stop_playing()
         self.__task_queue.put(channel_states_changed)
 
-    @dataclasses.dataclass
-    class ChannelState:
-        channel_id: str
-        name: str
-        enabled: bool
-
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
         for channel_index in range(self.channel_count):
             if self.get_channel_state(channel_index).channel_id == channel_id:
@@ -1398,9 +1525,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return "abcdefgh"[channel_index]
 
     def __make_channel_state(self, channel_index: int, channel_name: str, channel_enabled: bool) -> ChannelState:
-        return ScanHardwareSource.ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
+        return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
-    def __device_state_changed(self, profile_frame_parameters_list, device_channel_states) -> None:
+    def __device_state_changed(self, profile_frame_parameters_list: typing.Sequence[ScanFrameParameters], device_channel_states: typing.Sequence[typing.Tuple[str, bool]]) -> None:
         for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
             self.__profile_frame_parameters_changed(profile_index, profile_frame_parameters)
         channel_states = list()
@@ -1408,7 +1535,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))
         self.__channel_states_changed(channel_states)
 
-    def get_frame_parameters_from_dict(self, d):
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         return ScanFrameParameters(d)
 
     def calculate_frame_time(self, frame_parameters: dict) -> float:
@@ -1416,10 +1543,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         pixel_time_us = frame_parameters["pixel_time_us"]
         return size[0] * size[1] * pixel_time_us / 1000000.0
 
-    def get_current_frame_time(self):
+    def get_current_frame_time(self) -> float:
         return self.calculate_frame_time(self.get_current_frame_parameters())
 
-    def get_record_frame_time(self):
+    def get_record_frame_time(self) -> float:
         return self.calculate_frame_time(self.get_record_frame_parameters())
 
     def make_reference_key(self, **kwargs) -> str:
@@ -1501,11 +1628,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         # update the probe position for listeners and also explicitly update for probe_graphic_connections.
         self.probe_state_changed_event.fire(probe_state, probe_position)
 
-    def _enter_scanning_state(self):
+    def _enter_scanning_state(self) -> None:
         """Enter scanning state. Acquisition task will call this. Tell the STEM controller."""
         self.__stem_controller._enter_scanning_state()
 
-    def _exit_scanning_state(self):
+    def _exit_scanning_state(self) -> None:
         """Exit scanning state. Acquisition task will call this. Tell the STEM controller."""
         self.__stem_controller._exit_scanning_state()
 
@@ -1536,7 +1663,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__stem_controller.probe_position
 
     @probe_position.setter
-    def probe_position(self, probe_position: typing.Optional[Geometry.FloatPointTuple]):
+    def probe_position(self, probe_position: typing.Optional[Geometry.FloatPointTuple]) -> None:
         probe_position = Geometry.FloatPoint.make(probe_position) if probe_position else None
         self.__stem_controller.set_probe_position(probe_position)
 
@@ -1544,7 +1671,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
-    def data_item_states_changed(self, data_item_states):
+    def data_item_states_changed(self, data_item_states) -> None:
         channel_ids = {self.get_channel_state(channel_index).channel_id for channel_index in range(self.channel_count)}
         channel_map = dict()
         for data_item_state in data_item_states:
@@ -1553,7 +1680,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__stem_controller._update_scan_channel_map(channel_map)
 
     @property
-    def use_hardware_simulator(self):
+    def use_hardware_simulator(self) -> bool:
         return False
 
     def get_property(self, name):
@@ -1562,7 +1689,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def set_property(self, name, value):
         setattr(self, name, value)
 
-    def open_configuration_interface(self, api_broker):
+    def open_configuration_interface(self, api_broker) -> None:
         if hasattr(self.__device, "open_configuration_interface"):
             self.__device.open_configuration_interface()
         if hasattr(self.__device, "show_configuration_dialog"):
@@ -1579,11 +1706,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         logger.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
         self.__stem_controller.change_stage_position(dy=dy, dx=dx)
 
-    def increase_pmt(self, channel_index):
-        self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
+    def increase_pmt(self, channel_index: int) -> None:
+        self.__stem_controller.change_pmt_gain(stem_controller_module.PMTType(channel_index), factor=2.0)
 
-    def decrease_pmt(self, channel_index):
-        self.__stem_controller.change_pmt_gain(channel_index, factor=0.5)
+    def decrease_pmt(self, channel_index: int) -> None:
+        self.__stem_controller.change_pmt_gain(stem_controller_module.PMTType(channel_index), factor=0.5)
 
     def get_api(self, version):
         actual_version = "1.0.0"
@@ -1769,7 +1896,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__flyback_pixels = flyback_pixels
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
-        self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
+        self.__partial_data_info = typing.cast(camera_base.PartialData, None)
         self.__additional_metadata = additional_metadata or dict()
         self.__camera_sequence_overheads: typing.List[float] = list()
         self.__record_task = typing.cast(RecordTask, None)  # used for single frames
@@ -2142,7 +2269,7 @@ class InstrumentController(abc.ABC):
     def handle_tilt_click(self, **kwargs) -> None: pass
 
 
-def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: stem_controller_module.STEMController, scan_device) -> None:
+def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: stem_controller_module.STEMController, scan_device: typing.Optional[ScanDevice]) -> None:
     if instrument_controller:
         # give the instrument controller opportunity to add properties
         get_autostem_properties_fn = getattr(instrument_controller, "get_autostem_properties", None)
@@ -2153,16 +2280,16 @@ def update_instrument_properties(stem_properties: typing.MutableMapping, instrum
             except Exception as e:
                 pass
         # give the instrument controller opportunity to update metadata groups specified by the camera
-        if hasattr(scan_device, "acquisition_metatdata_groups"):
-            acquisition_metatdata_groups = scan_device.acquisition_metatdata_groups
+        acquisition_metatdata_groups = getattr(scan_device, "acquisition_metatdata_groups", None)
+        if acquisition_metatdata_groups:
             instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
 _component_registered_listener = None
 _component_unregistered_listener = None
 
-def run():
-    def component_registered(component, component_types):
+def run() -> None:
+    def component_registered(component, component_types) -> None:
         if "scan_device" in component_types:
             stem_controller = None
             stem_controller_id = getattr(component, "stem_controller_id", None)
@@ -2173,14 +2300,14 @@ def run():
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 stem_controller = stem_controller_module.STEMController()
-            scan_hardware_source = ScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
+            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
             if hasattr(component, "priority"):
                 scan_hardware_source.priority = component.priority
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
             component.hardware_source = scan_hardware_source
 
-    def component_unregistered(component, component_types):
+    def component_unregistered(component, component_types) -> None:
         if "scan_device" in component_types:
             scan_hardware_source = component.hardware_source
             Registry.unregister_component(scan_hardware_source)
@@ -2194,32 +2321,3 @@ def run():
 
     for component in Registry.get_components_by_type("scan_device"):
         component_registered(component, {"scan_device"})
-
-
-class ScanInterface:
-    # preliminary interface (v1.0.0) for scan hardware source
-    def get_current_frame_parameters(self) -> dict: ...
-    def create_frame_parameters(self, d: dict) -> dict: ...
-    def get_enabled_channels(self) -> typing.Sequence[int]: ...
-    def set_enabled_channels(self, channel_indexes: typing.Sequence[int]) -> None: ...
-    def start_playing(self, frame_parameters: dict) -> None: ...
-    def stop_playing(self) -> None: ...
-    def abort_playing(self) -> None: ...
-    def is_playing(self) -> bool: ...
-    def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def grab_sequence_prepare(self, count: int) -> bool: ...
-    def grab_sequence(self, count: int) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]: ...
-    def grab_sequence_abort(self) -> None: ...
-    def grab_sequence_get_progress(self) -> typing.Optional[float]: ...
-    def grab_synchronized(self, *, scan_frame_parameters: dict=None, camera=None, camera_frame_parameters: dict=None) -> typing.Tuple[typing.List[DataAndMetadata.DataAndMetadata], typing.List[DataAndMetadata.DataAndMetadata]]: ...
-    def grab_synchronized_abort(self) -> None: ...
-    def grab_synchronized_get_progress(self) -> typing.Optional[float]: ...
-    def grab_buffer(self, count: int, *, start: int = None) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]: ...
-    def calculate_frame_time(self, frame_parameters: dict) -> float: ...
-    def calculate_line_scan_frame_parameters(self, frame_parameters: dict, start: typing.Tuple[float, float], end: typing.Tuple[float, float], length: int) -> dict: ...
-    def make_reference_key(self, **kwargs) -> str: ...
-
-    def get_current_frame_id(self) -> int: ...
-    def get_frame_progress(self, frame_id: int) -> float: ...
-

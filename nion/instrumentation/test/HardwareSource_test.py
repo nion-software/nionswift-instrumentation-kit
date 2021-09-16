@@ -54,7 +54,7 @@ class SimpleAcquisitionTask(HardwareSource.AcquisitionTask):
         return [data_element]
 
 
-class SimpleHardwareSource(HardwareSource.HardwareSource):
+class SimpleHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def __init__(self, sleep=0.05):
         super().__init__("simple_hardware_source", "SimpleHardwareSource")
@@ -100,7 +100,7 @@ class LinePlotAcquisitionTask(HardwareSource.AcquisitionTask):
         return [data_element]
 
 
-class LinePlotHardwareSource(HardwareSource.HardwareSource):
+class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def __init__(self, shape, processed, sleep=0.05):
         super().__init__("described_hardware_source", "DescribedHardwareSource")
@@ -118,7 +118,7 @@ class LinePlotHardwareSource(HardwareSource.HardwareSource):
         return LinePlotAcquisitionTask(self.shape, False, self.sleep)
 
 
-class SummedHardwareSource(HardwareSource.HardwareSource):
+class SummedHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def __init__(self, sleep=0.05):
         super().__init__("summed_hardware_source", "SummedHardwareSource")
@@ -223,7 +223,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         super()._stop_acquisition()
 
 
-class ScanHardwareSource(HardwareSource.HardwareSource):
+class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def __init__(self, sleep=0.02):
         super().__init__("scan_hardware_source", "ScanHardwareSource")

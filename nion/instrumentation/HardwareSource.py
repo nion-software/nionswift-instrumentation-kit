@@ -791,7 +791,76 @@ class DataChannel:
             self.data_channel_stop_event.fire()
 
 
-class HardwareSource(Observable.Observable):
+class HardwareSource(typing.Protocol):
+
+    # methods
+
+    def close(self): ...
+    def start_playing(self, *args, **kwargs): ...
+    def abort_playing(self, *, sync_timeout: typing.Optional[float] = None): ...
+    def stop_playing(self, *, sync_timeout=None): ...
+    def start_recording(self, sync_timeout=None, finished_callback_fn=None): ...
+    def abort_recording(self, sync_timeout=None): ...
+    def stop_recording(self, sync_timeout=None): ...
+    def get_next_xdatas_to_finish(self, timeout=None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+    def get_next_xdatas_to_start(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+    def set_current_frame_parameters(self, frame_parameters): ...
+
+    # properties
+
+    @property
+    def features(self) -> typing.Dict[str, typing.Any]:
+        return dict()
+
+    @property
+    def hardware_source_id(self) -> str:
+        return str()
+
+    @hardware_source_id.setter
+    def hardware_source_id(self, value: str) -> None:
+        pass
+
+    @property
+    def display_name(self) -> str:
+        return str()
+
+    @display_name.setter
+    def display_name(self, value: str) -> None:
+        pass
+
+    @property
+    def is_playing(self) -> bool:
+        return False
+
+    @property
+    def is_recording(self) -> bool:
+        return False
+
+    @property
+    def data_channel_count(self) -> int:
+        return len(self.data_channels)
+
+    @property
+    def data_channels(self) -> typing.List[DataChannel]:
+        return list()
+
+    # private. do not use outside of instrumentation-kit.
+
+    data_channel_states_updated: Event.Event
+    xdatas_available_event: Event.Event
+    abort_event: Event.Event
+    acquisition_state_changed_event: Event.Event
+    data_item_states_changed_event: Event.Event
+    call_soon_event: Event.Event
+
+    def add_data_channel(self, channel_id: str=None, name: str=None): ...
+    def add_channel_processor(self, channel_index: int, processor): ...
+    def clean_display_items(self, document_model, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs) -> None: ...
+    def get_frame_parameters_from_dict(self, d): ...
+    def set_channel_enabled(self, channel_index, enabled): ...
+
+
+class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     """Represents a source of data and metadata frames.
 
     The hardware source generates data on a background thread.
@@ -802,7 +871,7 @@ class HardwareSource(Observable.Observable):
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
         self.__data_channels: typing.List[DataChannel] = list()
-        self.features: typing.Dict[str, typing.Any] = dict()
+        self.__features: typing.Dict[str, typing.Any] = dict()
         self.data_channel_states_updated = Event.Event()
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
@@ -825,11 +894,15 @@ class HardwareSource(Observable.Observable):
         self.close_thread()
 
     @property
-    def hardware_source_id(self):
+    def features(self) -> typing.Dict[str, typing.Any]:
+        return self.__features
+
+    @property
+    def hardware_source_id(self) -> str:
         return self.__hardware_source_id
 
     @hardware_source_id.setter
-    def hardware_source_id(self, value):
+    def hardware_source_id(self, value: str) -> None:
         self.__hardware_source_id = value
         self.property_changed_event.fire("hardware_source_id")
 
@@ -1273,7 +1346,7 @@ class DelegateAcquisitionTask(AcquisitionTask):
 
 
 # used for Facade backwards compatibility
-class DelegateHardwareSource(HardwareSource):
+class DelegateHardwareSource(ConcreteHardwareSource):
 
     def __init__(self, delegate, hardware_source_id: str, hardware_source_name: str):
         super().__init__(hardware_source_id, hardware_source_name)
