@@ -26,7 +26,6 @@ from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import Dialog
 from nion.ui import Widgets
-from nion.ui import Window
 from nion.utils import Geometry
 from nion.utils import Registry
 
@@ -63,7 +62,6 @@ class CameraControlStateController:
         (method) get_current_frame_parameters()
         (method) shift_click(mouse_position, camera_shape)
         (method) open_configuration_interface(api_broker)
-        (method) open_monitor()
         (method) periodic()
 
     Clients can query:
@@ -80,7 +78,6 @@ class CameraControlStateController:
         handle_increase_exposure()
         handle_decrease_exposure()
         handle_settings_button_clicked(api_broker)
-        handle_monitor_button_clicked()
         handle_periodic()
         handle_capture_clicked()
 
@@ -92,16 +89,15 @@ class CameraControlStateController:
         on_frame_parameters_changed(frame_parameters)
         on_play_button_state_changed(enabled, play_button_state)  play, pause
         on_abort_button_state_changed(visible, enabled)
-        on_monitor_button_state_changed(visible, enabled)
         on_capture_button_state_changed(visible, enabled)
         on_display_new_data_item(data_item)
         on_log_messages(messages, data_elements)
         (thread) on_data_item_states_changed(data_item_states)
     """
 
-    def __init__(self, camera_hardware_source, queue_task, document_model):
-        self.__hardware_source = camera_hardware_source
-        self.__has_processed_channel = self.__hardware_source and self.__hardware_source.features.get("has_processed_channel", False)
+    def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, queue_task, document_model):
+        self.__camera_hardware_source = camera_hardware_source
+        self.__has_processed_channel = camera_hardware_source.features.get("has_processed_channel", False)
         self.use_processed_data = False
         self.queue_task = queue_task
         self.__document_model = document_model
@@ -111,27 +107,26 @@ class CameraControlStateController:
         self.__acquisition_state_changed_event_listener = None
         self.__log_messages_event_listener = None
         self.on_display_name_changed = None
-        self.on_binning_values_changed = None
-        self.on_profiles_changed = None
-        self.on_profile_changed = None
-        self.on_frame_parameters_changed = None
-        self.on_play_button_state_changed = None
-        self.on_abort_button_state_changed = None
-        self.on_monitor_button_state_changed = None
-        self.on_data_item_states_changed = None
-        self.on_capture_button_state_changed = None
-        self.on_display_new_data_item = None
-        self.on_camera_current_changed = None
-        self.on_log_messages = None
+        self.on_binning_values_changed: typing.Optional[typing.Callable[[typing.Sequence[int]], None]] = None
+        self.on_profiles_changed: typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
+        self.on_profile_changed: typing.Optional[typing.Callable[[str], None]] = None
+        self.on_frame_parameters_changed: typing.Optional[typing.Callable[[camera_base.CameraFrameParameters], None]] = None
+        self.on_play_button_state_changed: typing.Optional[typing.Callable[[bool, str], None]] = None
+        self.on_abort_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
+        self.on_capture_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_display_new_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
+        self.on_camera_current_changed: typing.Optional[typing.Callable[[float], None]] = None
+        self.on_log_messages: typing.Optional[typing.Callable[[typing.List[str], typing.List[typing.Mapping[str, typing.Any]]], None]] = None
 
         self.__captured_xdatas_available_event = None
 
         self.__camera_current = None
         self.__last_camera_current_time = 0
-        self.__xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
+        self.__xdatas_available_event = self.__camera_hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
 
-        self.data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
-        self.processed_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__hardware_source.hardware_source_id, "summed"))
+        self.data_item_reference = document_model.get_data_item_reference(self.__camera_hardware_source.hardware_source_id)
+        self.processed_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__camera_hardware_source.hardware_source_id, "summed"))
 
     def close(self):
         if self.__captured_xdatas_available_event:
@@ -162,27 +157,26 @@ class CameraControlStateController:
         self.on_frame_parameters_changed = None
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
-        self.on_monitor_button_state_changed = None
         self.on_data_item_states_changed = None
         self.on_capture_button_state_changed = None
         self.on_display_new_data_item = None
         self.on_log_messages = None
-        self.__hardware_source = None
+        self.__camera_hardware_source = None
 
     def _reset_camera_current(self):
         self.__last_camera_current_time = 0
 
     def __update_play_button_state(self):
-        enabled = self.__hardware_source is not None
-        if self.on_play_button_state_changed:
+        enabled = self.__camera_hardware_source is not None
+        if callable(self.on_play_button_state_changed):
             self.on_play_button_state_changed(enabled, "pause" if self.is_playing else "play")
         if enabled and not self.is_playing and callable(self.on_camera_current_changed):
             self.on_camera_current_changed(None)
 
     def __update_abort_button_state(self):
-        if self.on_abort_button_state_changed:
+        if callable(self.on_abort_button_state_changed):
             self.on_abort_button_state_changed(self.is_playing, self.is_playing)
-        if self.on_capture_button_state_changed:
+        if callable(self.on_capture_button_state_changed):
             self.on_capture_button_state_changed(self.is_playing, not self.__captured_xdatas_available_event)
 
     def __update_buttons(self):
@@ -190,23 +184,23 @@ class CameraControlStateController:
         self.__update_abort_button_state()
 
     def __update_profile_state(self, profile_label):
-        if self.on_profile_changed:
+        if callable(self.on_profile_changed):
             self.on_profile_changed(profile_label)
 
     def __update_frame_parameters(self, profile_index, frame_parameters):
-        if self.on_frame_parameters_changed:
-            if profile_index == self.__hardware_source.selected_profile_index:
+        if callable(self.on_frame_parameters_changed):
+            if profile_index == self.__camera_hardware_source.selected_profile_index:
                 self.on_frame_parameters_changed(frame_parameters)
 
     # received from the camera controller when the profile changes.
     # thread safe
-    def __update_profile_index(self, profile_index):
-        for index, name in enumerate(self.__hardware_source.modes):
+    def __update_profile_index(self, profile_index: int) -> None:
+        for index, name in enumerate(self.__camera_hardware_source.modes):
             if index == profile_index:
                 def update_profile_state_and_frame_parameters(name):
-                    if self.__hardware_source:  # check to see if close has been called.
+                    if self.__camera_hardware_source:  # check to see if close has been called.
                         self.__update_profile_state(name)
-                        self.__update_frame_parameters(self.__hardware_source.selected_profile_index, self.__hardware_source.get_frame_parameters(profile_index))
+                        self.__update_frame_parameters(self.__camera_hardware_source.selected_profile_index, self.__camera_hardware_source.get_frame_parameters(profile_index))
                 self.queue_task(functools.partial(update_profile_state_and_frame_parameters, name))
 
     @property
@@ -224,100 +218,94 @@ class CameraControlStateController:
                 detector_current = sum_counts / exposure / counts_per_electron / 6.242e18 if exposure > 0 and counts_per_electron > 0 else 0.0
                 if detector_current != self.__camera_current:
                     self.__camera_current = detector_current
+
                     def update_camera_current():
                         self.on_camera_current_changed(self.__camera_current)
+
                     self.queue_task(update_camera_current)
             self.__last_camera_current_time = current_time
 
     def initialize_state(self):
         """ Call this to initialize the state of the UI after everything has been connected. """
-        if self.__hardware_source:
-            self.__profile_changed_event_listener = self.__hardware_source.profile_changed_event.listen(self.__update_profile_index)
-            self.__frame_parameters_changed_event_listener = self.__hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
-            self.__data_item_states_changed_event_listener = self.__hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
-            self.__acquisition_state_changed_event_listener = self.__hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
-            self.__log_messages_event_listener = self.__hardware_source.log_messages_event.listen(self.__log_messages)
-        if self.on_display_name_changed:
+        if self.__camera_hardware_source:
+            self.__profile_changed_event_listener = self.__camera_hardware_source.profile_changed_event.listen(self.__update_profile_index)
+            self.__frame_parameters_changed_event_listener = self.__camera_hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
+            self.__data_item_states_changed_event_listener = self.__camera_hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
+            self.__acquisition_state_changed_event_listener = self.__camera_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
+            self.__log_messages_event_listener = self.__camera_hardware_source.log_messages_event.listen(self.__log_messages)
+        if callable(self.on_display_name_changed):
             self.on_display_name_changed(self.display_name)
-        if self.on_binning_values_changed:
-            self.on_binning_values_changed(self.__hardware_source.binning_values)
-        if self.on_monitor_button_state_changed:
-            has_monitor = self.__hardware_source and self.__hardware_source.features.get("has_monitor", False)
-            self.on_monitor_button_state_changed(has_monitor, has_monitor)
+        if callable(self.on_binning_values_changed):
+            self.on_binning_values_changed(self.__camera_hardware_source.binning_values)
         self.__update_buttons()
-        if self.on_profiles_changed:
-            profile_items = self.__hardware_source.modes
+        if callable(self.on_profiles_changed):
+            profile_items = self.__camera_hardware_source.modes
             self.on_profiles_changed(profile_items)
-            self.__update_profile_index(self.__hardware_source.selected_profile_index)
-        if self.on_data_item_states_changed:
+            self.__update_profile_index(self.__camera_hardware_source.selected_profile_index)
+        if callable(self.on_data_item_states_changed):
             self.on_data_item_states_changed(list())
 
     # must be called on ui thread
     def handle_change_profile(self, profile_label):
-        if profile_label in self.__hardware_source.modes:
-            self.__hardware_source.set_selected_profile_index(self.__hardware_source.modes.index(profile_label))
+        if profile_label in self.__camera_hardware_source.modes:
+            self.__camera_hardware_source.set_selected_profile_index(self.__camera_hardware_source.modes.index(profile_label))
 
     def handle_play_pause_clicked(self):
         """ Call this when the user clicks the play/pause button. """
-        if self.__hardware_source:
+        if self.__camera_hardware_source:
             if self.is_playing:
-                self.__hardware_source.stop_playing()
+                self.__camera_hardware_source.stop_playing()
             else:
-                self.__hardware_source.start_playing()
+                self.__camera_hardware_source.start_playing()
 
     def handle_abort_clicked(self):
         """ Call this when the user clicks the abort button. """
-        if self.__hardware_source:
-            self.__hardware_source.abort_playing()
+        if self.__camera_hardware_source:
+            self.__camera_hardware_source.abort_playing()
 
     # must be called on ui thread
     def handle_settings_button_clicked(self, api_broker):
-        if self.__hardware_source:
-            self.__hardware_source.open_configuration_interface(api_broker)
-
-    # must be called on ui thread
-    def handle_monitor_button_clicked(self):
-        if self.__hardware_source:
-            self.__hardware_source.open_monitor()
+        if self.__camera_hardware_source:
+            self.__camera_hardware_source.open_configuration_interface(api_broker)
 
     # must be called on ui thread
     def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape, logger: logging.Logger) -> bool:
-        if hardware_source_id == self.__hardware_source.hardware_source_id:
-            self.__hardware_source.shift_click(mouse_position, camera_shape, logger)
+        if hardware_source_id == self.__camera_hardware_source.hardware_source_id:
+            self.__camera_hardware_source.shift_click(mouse_position, camera_shape, logger)
             return True
         return False
 
     # must be called on ui thread
     def handle_tilt_click(self, hardware_source_id, mouse_position, camera_shape, logger: logging.Logger) -> bool:
-        if hardware_source_id == self.__hardware_source.hardware_source_id:
-            self.__hardware_source.tilt_click(mouse_position, camera_shape, logger)
+        if hardware_source_id == self.__camera_hardware_source.hardware_source_id:
+            self.__camera_hardware_source.tilt_click(mouse_position, camera_shape, logger)
             return True
         return False
 
     # must be called on ui thread
     def handle_binning_changed(self, binning_str):
-        frame_parameters = self.__hardware_source.get_frame_parameters(self.__hardware_source.selected_profile_index)
+        frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.binning = max(int(binning_str), 1)
-        self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
+        self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     # must be called on ui thread
     def handle_exposure_changed(self, exposure):
-        frame_parameters = self.__hardware_source.get_frame_parameters(self.__hardware_source.selected_profile_index)
+        frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         try:
             frame_parameters.exposure_ms = float(exposure)
         except ValueError:
             pass
-        self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
+        self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_decrease_exposure(self):
-        frame_parameters = self.__hardware_source.get_frame_parameters(self.__hardware_source.selected_profile_index)
+        frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.exposure_ms = frame_parameters.exposure_ms * 0.5
-        self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
+        self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_increase_exposure(self):
-        frame_parameters = self.__hardware_source.get_frame_parameters(self.__hardware_source.selected_profile_index)
+        frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.exposure_ms = frame_parameters.exposure_ms * 2.0
-        self.__hardware_source.set_frame_parameters(self.__hardware_source.selected_profile_index, frame_parameters)
+        self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_capture_clicked(self):
         def capture_xdatas(xdatas):
@@ -325,9 +313,9 @@ class CameraControlStateController:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
             for index, xdata in enumerate(xdatas):
-                def add_data_item(data_item):
+                def add_data_item(data_item: DataItem.DataItem) -> None:
                     self.__document_model.append_data_item(data_item)
-                    if self.on_display_new_data_item:
+                    if callable(self.on_display_new_data_item):
                         self.on_display_new_data_item(data_item)
 
                 if index == (1 if self.use_processed_data else 0):
@@ -338,38 +326,38 @@ class CameraControlStateController:
                     self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
-        self.__captured_xdatas_available_event = self.__hardware_source.xdatas_available_event.listen(capture_xdatas)
+        self.__captured_xdatas_available_event = self.__camera_hardware_source.xdatas_available_event.listen(capture_xdatas)
         self.__update_buttons()
 
     # must be called on ui thread
     def handle_periodic(self):
-        if self.__hardware_source and getattr(self.__hardware_source, "periodic", None):
-            self.__hardware_source.periodic()
+        if self.__camera_hardware_source and getattr(self.__camera_hardware_source, "periodic", None):
+            self.__camera_hardware_source.periodic()
 
     @property
     def is_playing(self):
         """ Returns whether the hardware source is playing or not. """
-        return self.__hardware_source.is_playing if self.__hardware_source else False
+        return self.__camera_hardware_source.is_playing if self.__camera_hardware_source else False
 
     @property
     def display_name(self):
         """ Returns the display name for the hardware source. """
-        return self.__hardware_source.display_name if self.__hardware_source else _("N/A")
+        return self.__camera_hardware_source.display_name if self.__camera_hardware_source else _("N/A")
 
     # this message comes from the data buffer. it will always be invoked on the UI thread.
-    def __acquisition_state_changed(self, is_acquiring):
+    def __acquisition_state_changed(self, is_acquiring: bool) -> None:
         if self.__captured_xdatas_available_event:
             self.__captured_xdatas_available_event.close()
             self.__captured_xdatas_available_event = None
         self.queue_task(self.__update_buttons)
 
     def __log_messages(self, messages, data_elements):
-        if self.on_log_messages:
+        if callable(self.on_log_messages):
             self.on_log_messages(messages, data_elements)
 
     # this message comes from the hardware source. may be called from thread.
-    def __data_item_states_changed(self, data_item_states):
-        if self.on_data_item_states_changed:
+    def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
+        if callable(self.on_data_item_states_changed):
             self.on_data_item_states_changed(data_item_states)
 
 
@@ -413,7 +401,7 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
     def mouse_clicked(self, x, y, modifiers):
         if self.enabled:
-            if self.on_button_clicked:
+            if callable(self.on_button_clicked):
                 self.on_button_clicked()
         return True
 
@@ -571,33 +559,19 @@ class CameraPanelDelegate:
                            camera_settings: camera_base.CameraSettings = None) -> bool:
         return False
 
-    def get_monitor_ui_handler(self, *, api_broker: PlugInManager.APIBroker = None,
-                               event_loop: asyncio.AbstractEventLoop = None,
-                               hardware_source_id: str = None,
-                               camera_device: camera_base.CameraDevice = None,
-                               camera_settings: camera_base.CameraSettings = None,
-                               **kwargs):
-        return None
-
-    def open_monitor(self, *, api_broker: PlugInManager.APIBroker,
-                     hardware_source_id: str = None,
-                     camera_device: camera_base.CameraDevice = None,
-                     camera_settings: camera_base.CameraSettings = None) -> bool:
-        return False
-
 
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
-    def __init__(self, document_controller, camera_controller):
+    def __init__(self, document_controller, camera_hardware_source: camera_base.CameraHardwareSource):
         super().__init__(document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2}))
 
         self.document_controller = document_controller
 
-        self.__state_controller = CameraControlStateController(camera_controller, document_controller.queue_task, document_controller.document_model)
+        self.__state_controller = CameraControlStateController(camera_hardware_source, document_controller.queue_task, document_controller.document_model)
 
-        self.__delegate : typing.Optional[CameraPanelDelegate] = None
+        self.__delegate: typing.Optional[CameraPanelDelegate] = None
 
-        camera_panel_delegate_type = camera_controller.features.get("camera_panel_delegate_type")
+        camera_panel_delegate_type = camera_hardware_source.features.get("camera_panel_delegate_type")
         for component in Registry.get_components_by_type("camera_panel_delegate"):
             if component.camera_panel_delegate_type == camera_panel_delegate_type:
                 self.__delegate = component
@@ -622,7 +596,9 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 if self.__delegate:
                     self.__delegate.open_help(api_broker=api_broker)
 
-            help_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/help_icon_24.png"), "png"))
+            help_icon_24_png = pkgutil.get_data(__name__, "resources/help_icon_24.png")
+            assert help_icon_24_png is not None
+            help_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(help_icon_24_png, "png"))
             help_button.on_button_clicked = help_button_clicked
             help_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
             help_widget.canvas_item.add_canvas_item(help_button)
@@ -639,11 +615,11 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                     # if not already open, see if delegate wants to open it via a ui handler.
                     ui_handler = self.__delegate.get_configuration_ui_handler(api_broker=api_broker,
                                                                               event_loop=document_controller.event_loop,
-                                                                              hardware_source_id = camera_controller.hardware_source_id,
-                                                                              camera_device = camera_controller.camera,
-                                                                              camera_settings = camera_controller.camera_settings)
+                                                                              hardware_source_id=camera_hardware_source.hardware_source_id,
+                                                                              camera_device=camera_hardware_source.camera,
+                                                                              camera_settings=camera_hardware_source.camera_settings)
                     if ui_handler:
-                        dialog = Dialog.ActionDialog(ui, camera_controller.display_name)
+                        dialog = Dialog.ActionDialog(ui, camera_hardware_source.display_name)
                         dialog.content.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler))
                         def wc(w): self.__configuration_dialog_close_listener = None
                         self.__configuration_dialog_close_listener = dialog._window_close_event.listen(wc)
@@ -651,55 +627,23 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                         return
                     # fall through means there is no declarative configuration dialog
                     if self.__delegate.open_configuration(api_broker=api_broker,
-                                                          hardware_source_id=camera_controller.hardware_source_id,
-                                                          camera_device=camera_controller.camera,
-                                                          camera_settings=camera_controller.camera_settings):
+                                                          hardware_source_id=camera_hardware_source.hardware_source_id,
+                                                          camera_device=camera_hardware_source.camera,
+                                                          camera_settings=camera_hardware_source.camera_settings):
                         return
                 # fall through: no ui handler or direct handler
                 self.__state_controller.handle_settings_button_clicked(api_broker)
 
-            open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(pkgutil.get_data(__name__, "resources/sliders_icon_24.png"), "png"))
+            sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
+            assert sliders_icon_24_png is not None
+            open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png"))
             open_controls_button.on_button_clicked = configuration_button_clicked
             open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
             open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
 
-        monitor_button = None
-        self.__monitor_dialog_close_listener = None
-        if not self.__delegate or self.__delegate.has_feature("monitor"):
-
-            def monitor_button_clicked() -> None:
-                api_broker = PlugInManager.APIBroker()
-                if self.__delegate:
-                    if self.__monitor_dialog_close_listener:
-                        return
-                    # if not already open, see if delegate wants to open it via a ui handler.
-                    ui_handler = self.__delegate.get_monitor_ui_handler(api_broker=api_broker,
-                                                                        event_loop=document_controller.event_loop,
-                                                                        hardware_source_id=camera_controller.hardware_source_id,
-                                                                        camera_device=camera_controller.camera,
-                                                                        camera_settings=camera_controller.camera_settings)
-                    if ui_handler:
-                        dialog = Dialog.ActionDialog(ui, document_controller)
-                        dialog.content.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler))
-                        def wc(w): self.__monitor_dialog_close_listener = None
-                        self.__monitor_dialog_close_listener = dialog._window_close_event.listen(wc)
-                        dialog.show()
-                        return
-                    # fall through means there is no declarative monitor dialog
-                    if self.__delegate.open_monitor(api_broker=api_broker,
-                                                    hardware_source_id=camera_controller.hardware_source_id,
-                                                    camera_device=camera_controller.camera,
-                                                    camera_settings=camera_controller.camera_settings):
-                        return
-                # fall through: no ui handler or direct handler
-                self.__state_controller.handle_monitor_button_clicked()
-
-            monitor_button = ui.create_push_button_widget(_("Monitor View..."))
-            monitor_button.on_clicked = monitor_button_clicked
-
         camera_current_label = ui.create_label_widget()
-        profile_label = ui.create_label_widget(_("Mode: "), properties={"margin":4})
-        profile_combo = ui.create_combo_box_widget(properties={"min-width":72})
+        profile_label = ui.create_label_widget(_("Mode: "), properties={"margin": 4})
+        profile_combo = ui.create_combo_box_widget(properties={"min-width": 72})
         play_state_label = ui.create_label_widget()
         play_button = ui.create_push_button_widget(_("Play"))
         play_button.on_clicked = self.__state_controller.handle_play_pause_clicked
@@ -707,7 +651,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         abort_button.on_clicked = self.__state_controller.handle_abort_clicked
 
         document_model = self.document_controller.document_model
-        data_item_reference = document_model.get_data_item_reference(camera_controller.hardware_source_id)
+        data_item_reference = document_model.get_data_item_reference(camera_hardware_source.hardware_source_id)
         data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, document_model, data_item_reference)
         thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
@@ -726,22 +670,15 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             button_row1.add(open_controls_widget)
 
         button_row1a = ui.create_row_widget(properties={"spacing": 2})
-        if monitor_button:
-            button_row1a.add(monitor_button)
         button_row1a.add_stretch()
         button_row1a.add(camera_current_label)
-
-        def monitor_button_state_changed(visible, enabled):
-            if monitor_button:
-                monitor_button.visible = visible
-                monitor_button.enabled = enabled
 
         def binning_combo_text_changed(text):
             if not self.__changes_blocked:
                 self.__state_controller.handle_binning_changed(text)
                 binning_combo.request_refocus()
 
-        binning_combo = ui.create_combo_box_widget(properties={"min-width":72})
+        binning_combo = ui.create_combo_box_widget(properties={"min-width": 72})
         binning_combo.on_current_text_changed = binning_combo_text_changed
 
         def handle_exposure_changed(text):
@@ -829,11 +766,11 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         profile_combo.on_current_text_changed = profile_combo_text_changed
 
-        def binning_values_changed(binning_values):
+        def binning_values_changed(binning_values: typing.Sequence[int]) -> None:
             binning_combo.items = [str(binning_value) for binning_value in binning_values]
 
-        def profiles_changed(items):
-            profile_combo.items = items
+        def profiles_changed(items: typing.Sequence[str]) -> None:
+            profile_combo.items = list(items)
 
         def change_profile_combo(profile_label):
             blocked = self.__changes_blocked
@@ -845,11 +782,11 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 self.__changes_blocked = blocked
 
         # thread safe
-        def profile_changed(profile_label):
+        def profile_changed(profile_label: str) -> None:
             # the current_text must be set on ui thread
             self.document_controller.queue_task(functools.partial(change_profile_combo, profile_label))
 
-        def frame_parameters_changed(frame_parameters):
+        def frame_parameters_changed(frame_parameters: camera_base.CameraFrameParameters) -> None:
             blocked = self.__changes_blocked
             self.__changes_blocked = True
             try:
@@ -860,18 +797,18 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             finally:
                 self.__changes_blocked = blocked
 
-        def play_button_state_changed(enabled, play_button_state):
+        def play_button_state_changed(enabled: bool, play_button_state: str) -> None:
             play_button_text = { "play": _("Play"), "pause": _("Pause") }
             play_button.enabled = enabled
             play_button.text = play_button_text[play_button_state]
 
-        def abort_button_state_changed(visible, enabled):
+        def abort_button_state_changed(visible: bool, enabled: bool) -> None:
             # abort_button.visible = visible
             abort_button.enabled = enabled
 
         def data_item_states_changed(data_item_states):
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                "partial": _("Acquiring"), "marked": _("Stopping")}
+                                         "partial": _("Acquiring"), "marked": _("Stopping")}
             if len(data_item_states) > 0:
                 data_item_state = data_item_states[0]
                 channel_state = data_item_state["channel_state"]
@@ -879,7 +816,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             else:
                 play_state_label.text = map_channel_state_to_text["stopped"]
 
-        def camera_current_changed(camera_current):
+        def camera_current_changed(camera_current: float) -> None:
             if camera_current:
                 camera_current_int = int(camera_current * 1e12) if math.isfinite(camera_current) else 0
                 camera_current_label.text = str(camera_current_int) + _("pA")
@@ -887,7 +824,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             else:
                 camera_current_label.text_color = "gray"
 
-        def log_messages(messages, data_elements):
+        def log_messages(messages: typing.List[str], data_elements: typing.List[typing.Mapping[str, typing.Any]]):
             while len(messages) > 0:
                 message = messages.pop(0)
                 logging.info(message)
@@ -903,7 +840,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
         self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
-        self.__state_controller.on_monitor_button_state_changed = monitor_button_state_changed
         self.__state_controller.on_camera_current_changed = camera_current_changed
         self.__state_controller.on_log_messages = log_messages
 
@@ -916,15 +852,14 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def close(self):
         self.__configuration_dialog_close_listener = None
-        self.__monitor_dialog_close_listener = None
         self.__key_pressed_event_listener.close()
         self.__key_pressed_event_listener = None
         self.__key_released_event_listener.close()
         self.__key_released_event_listener = None
         self.__image_display_mouse_pressed_event_listener.close()
-        self.__image_display_mouse_pressed_event_listener= None
+        self.__image_display_mouse_pressed_event_listener = None
         self.__image_display_mouse_released_event_listener.close()
-        self.__image_display_mouse_released_event_listener= None
+        self.__image_display_mouse_released_event_listener = None
         self.__state_controller.close()
         self.__state_controller = None
         super().close()
@@ -988,9 +923,10 @@ class CameraControlPanel(Panel.Panel):
         ui = document_controller.ui
         self.widget = ui.create_column_widget()
         self.hardware_source_id = properties["hardware_source_id"]
-        camera_controller = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.hardware_source_id)
-        if camera_controller:
-            camera_control_widget = CameraControlWidget(self.document_controller, camera_controller)
+        hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.hardware_source_id)
+        if hardware_source:
+            camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
+            camera_control_widget = CameraControlWidget(self.document_controller, camera_hardware_source)
             self.widget.add(camera_control_widget)
             self.widget.add_spacing(12)
             self.widget.add_stretch()
@@ -1029,12 +965,13 @@ class CameraDisplayPanelController:
     def __init__(self, display_panel, hardware_source_id, show_processed_data):
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
+        camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
         self.type = CameraDisplayPanelController.type
 
         self.__hardware_source_id = hardware_source_id
 
         # configure the hardware source state controller
-        self.__state_controller = CameraControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model)
+        self.__state_controller = CameraControlStateController(camera_hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model)
 
         # configure the user interface
         self.__display_name = str()
@@ -1075,7 +1012,7 @@ class CameraDisplayPanelController:
         self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
 
         def update_display_name():
-            new_text = "%s" % (self.__display_name)
+            new_text = self.__display_name
             if hardware_source_display_name_canvas_item.text != new_text:
                 hardware_source_display_name_canvas_item.text = new_text
                 hardware_source_display_name_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
@@ -1101,7 +1038,7 @@ class CameraDisplayPanelController:
 
         def update_status_text():
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                "partial": _("Acquiring"), "marked": _("Stopping")}
+                                         "partial": _("Acquiring"), "marked": _("Stopping")}
             for data_item_state in self.__data_item_states:
                 channel_state = data_item_state["channel_state"]
                 new_text = map_channel_state_to_text[channel_state]
@@ -1128,7 +1065,7 @@ class CameraDisplayPanelController:
             self.__data_item_states = data_item_states
             update_status_text()
 
-        def update_capture_button(visible, enabled):
+        def update_capture_button(visible: bool, enabled: bool) -> None:
             if visible:
                 capture_button.enabled = enabled
                 capture_button.text = _("Capture")
@@ -1146,7 +1083,7 @@ class CameraDisplayPanelController:
                 display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
                 self.__state_controller.use_processed_data = False  # for capture
 
-        def display_new_data_item(data_item):
+        def display_new_data_item(data_item: DataItem.DataItem) -> None:
             result_display_panel = display_panel.document_controller.next_result_display_panel()
             if result_display_panel:
                 result_display_panel.set_display_panel_data_item(data_item)
@@ -1172,7 +1109,6 @@ class CameraDisplayPanelController:
         checkstate = self.__show_processed_checkbox.check_state if self.__show_processed_checkbox else "unchecked"
 
         show_processed_checkbox_changed(checkstate)
-
 
     def close(self):
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
