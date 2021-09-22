@@ -480,7 +480,7 @@ class STEMController(Observable.Observable):
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         return False, None
 
-    def GetVal(self, s: str, default_value: float=None) -> float:
+    def GetVal(self, s: str, default_value: float = None) -> float:
         raise Exception(f"No element named '{s}' exists! Cannot get value.")
 
     def SetVal(self, s: str, val: float) -> bool:
