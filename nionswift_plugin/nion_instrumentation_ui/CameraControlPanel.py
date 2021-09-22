@@ -470,7 +470,7 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.border_style_pressed = "rgb(128, 128, 128)"
         self.border_style_disabled = "rgb(192, 192, 192)"
         self.stroke_style = "#000"
-        self.on_button_clicked = None
+        self.on_button_clicked: typing.Optional[typing.Callable[[], None]] = None
         self.border_enabled = False
 
     def close(self):
