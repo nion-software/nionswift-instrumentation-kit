@@ -470,6 +470,9 @@ class STEMController(Observable.Observable):
     def axis_descriptions(self) -> typing.Sequence[AxisDescription]:
         return list()
 
+    def get_reference_setting_index(self, setting_control: str) -> int:
+        raise NotImplementedError()
+
     # end instrument API
 
     # required functions (templates). subclasses should override.
