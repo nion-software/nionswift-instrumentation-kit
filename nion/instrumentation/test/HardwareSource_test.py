@@ -1198,7 +1198,7 @@ class TestHardwareSourceClass(unittest.TestCase):
                 Utility.local_timezone_override = [None]
                 Utility.local_utcoffset_override = [0]
                 data_item = DataItem.DataItem(numpy.ones(256) + 1)
-                self.assertIsNone(data_item.timezone)
+                self.assertFalse(data_item.timezone)
                 self.assertEqual(data_item.timezone_offset, "+0000")
                 document_model.append_data_item(data_item)
                 document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source_id), data_item)

@@ -424,7 +424,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Return channel info.
 
         Should only be called with a channel return by channels property."""
-        return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
+        return DataStreamInfo(DataAndMetadata.DataMetadata(((), typing.cast(numpy.dtype, float))), 0.0)
 
     @property
     def is_finished(self) -> bool:
@@ -584,7 +584,7 @@ class CollectedDataStream(DataStream):
         data_metadata = DataAndMetadata.DataMetadata(
             (self.__collection_shape + data_metadata.data_shape, data_metadata.data_dtype),
             data_metadata.intensity_calibration,
-            list(self.__collection_calibrations) + data_metadata.dimensional_calibrations,
+            list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
             data_metadata.metadata,
             data_metadata.timestamp,
             self._get_new_data_descriptor(data_metadata),
@@ -695,7 +695,9 @@ class CollectedDataStream(DataStream):
         new_dimensional_calibrations = self.__collection_calibrations + tuple(data_metadata.dimensional_calibrations)
 
         # create a new data metadata object
-        new_data_metadata = DataAndMetadata.DataMetadata((new_shape, data_metadata.data_dtype),
+        dtype = data_metadata.data_dtype
+        assert dtype is not None
+        new_data_metadata = DataAndMetadata.DataMetadata((new_shape, dtype),
                                                          data_metadata.intensity_calibration,
                                                          new_dimensional_calibrations,
                                                          data_metadata.metadata,
@@ -1050,6 +1052,7 @@ class DataStreamOperator:
         for index, new_channel_data in enumerate(channel_data_list_list[0]):
             new_channel = new_channel_data.channel
             new_data_and_metadata = xd.sequence_join([cdl[index].data_and_metadata for cdl in channel_data_list_list])
+            assert new_data_and_metadata
             new_data_and_metadata._set_metadata(data_and_metadata.metadata)
             new_data_and_metadata._set_timestamp(data_and_metadata.timestamp)
             new_data_and_metadata.timezone = data_and_metadata.timezone
@@ -1113,10 +1116,12 @@ class StackedDataStreamOperator(DataStreamOperator):
             assert not data_metadata.is_collection
             assert data_metadata.datum_dimension_count == 0
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, 1)
+            dtype = data_metadata.data_dtype
+            assert dtype is not None
             data_metadata = DataAndMetadata.DataMetadata(
-                ((operator_count, ) + data_metadata.data_shape, data_metadata.data_dtype),
+                ((operator_count, ) + data_metadata.data_shape, dtype),
                 data_metadata.intensity_calibration,
-                [Calibration.Calibration()] + data_metadata.dimensional_calibrations,
+                [Calibration.Calibration()] + list(data_metadata.dimensional_calibrations),
                 data_metadata.metadata,
                 data_metadata.timestamp,
                 data_descriptor,
@@ -1127,7 +1132,7 @@ class StackedDataStreamOperator(DataStreamOperator):
         return data_stream_info
 
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
-        data_list = list()
+        data_list: typing.List[DataAndMetadata.DataAndMetadata] = list()
         for operator in self.__operators:
             for new_channel_data in operator.process(channel_data):
                 data_list.append(new_channel_data.data_and_metadata[..., numpy.newaxis])
@@ -1135,9 +1140,13 @@ class StackedDataStreamOperator(DataStreamOperator):
             if len(data_list) == 1:
                 # handle special case where we're only concatenating a single scalar
                 # squeeze the numpy arrays to keep the dtype the same. xdata promotes to float64.
-                new_data = numpy.squeeze(data_list[0].data, axis=-1)
+                data = data_list[0].data
+                assert data is not None
+                new_data = numpy.squeeze(data, axis=-1)
                 data_metadata = data_list[0].data_metadata
-                data_metadata = DataAndMetadata.DataMetadata(((), data_metadata.data_dtype), data_metadata.intensity_calibration, [],
+                dtype = data_metadata.data_dtype
+                assert dtype is not None
+                data_metadata = DataAndMetadata.DataMetadata(((), dtype), data_metadata.intensity_calibration, [],
                                                              data_metadata.metadata, data_metadata.timestamp,
                                                              DataAndMetadata.DataDescriptor(False, 0, 0),
                                                              data_metadata.timezone, data_metadata.timezone_offset)
@@ -1148,7 +1157,8 @@ class StackedDataStreamOperator(DataStreamOperator):
                 new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)
                 data_metadata = data_list[0].data_metadata
                 data_metadata = DataAndMetadata.DataMetadata(((new_data.shape), new_data.dtype),
-                                                             data_metadata.intensity_calibration, [Calibration.Calibration()] + data_metadata.dimensional_calibrations[:-1],
+                                                             data_metadata.intensity_calibration,
+                                                             [Calibration.Calibration()] + list(data_metadata.dimensional_calibrations[:-1]),
                                                              data_metadata.metadata, data_metadata.timestamp,
                                                              DataAndMetadata.DataDescriptor(False, 0, 1),
                                                              data_metadata.timezone, data_metadata.timezone_offset)
@@ -1219,7 +1229,9 @@ class DataAndMetadataDataChannel(DataChannel):
     def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)
         # copy data
-        data_and_metadata.data.reshape(-1)[dest_slice] = source_data[source_slice].reshape(-1)
+        data = data_and_metadata.data
+        assert data is not None
+        data.reshape(-1)[dest_slice] = source_data[source_slice].reshape(-1)
         # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
         # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
         # metadata contains in-progress information.
@@ -1234,7 +1246,9 @@ class DataAndMetadataDataChannel(DataChannel):
     def accumulate_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)
         # accumulate data
-        data_and_metadata.data.reshape(-1)[dest_slice] += source_data[source_slice].reshape(-1)
+        data = data_and_metadata.data
+        assert data is not None
+        data.reshape(-1)[dest_slice] += source_data[source_slice].reshape(-1)
         # recopy metadata. this isn't perfect; but it's the chosen way for now. if changed, ensure tests pass.
         # the effect of this is that the last chunk of data defines the final metadata. this is useful if the
         # metadata contains in-progress information.
@@ -1427,7 +1441,9 @@ class FramedDataStream(DataStream):
             # special case for camera compatibility. cameras should not return empty dimensions.
             if data_and_metadata.data_shape[-1] == 1:
                 data_metadata = data_and_metadata.data_metadata
-                data_and_metadata = DataAndMetadata.new_data_and_metadata(data_and_metadata.data.squeeze(axis=-1),
+                data = data_and_metadata.data
+                assert data is not None
+                data_and_metadata = DataAndMetadata.new_data_and_metadata(data.squeeze(axis=-1),
                                                                           data_metadata.intensity_calibration,
                                                                           data_metadata.dimensional_calibrations[:-1],
                                                                           data_metadata.metadata,
@@ -1450,6 +1466,7 @@ class FramedDataStream(DataStream):
             new_data = numpy.array([new_data])
             assert len(new_data.shape) == 1
             new_count = new_data.shape[0]
+        assert new_data is not None
         # form the new slice
         new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
         # send the new data chunk
@@ -1461,8 +1478,10 @@ class FramedDataStream(DataStream):
         assert data_and_metadata.is_sequence
         new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count,
                                                              data_and_metadata.datum_dimension_count)
+        data_dtype = data_and_metadata.data_dtype
+        assert data_dtype is not None
         new_data_metadata = DataAndMetadata.DataMetadata(
-            (data_and_metadata.data_shape[1:], data_and_metadata.data_dtype),
+            (data_and_metadata.data_shape[1:], data_dtype),
             data_and_metadata.intensity_calibration,
             data_and_metadata.dimensional_calibrations[1:],
             data_and_metadata.metadata,
@@ -1471,8 +1490,9 @@ class FramedDataStream(DataStream):
             data_and_metadata.timezone,
             data_and_metadata.timezone_offset)
         new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
-        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data_and_metadata.data, count,
-                                                    new_source_slice, DataStreamStateEnum.COMPLETE)
+        data = data_and_metadata.data
+        assert data is not None
+        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
         self.fire_data_available(new_data_stream_event)
 
 
@@ -1513,8 +1533,10 @@ class SumOperator(DataStreamOperator):
                 new_shape.append(old_shape[i])
                 new_dimensional_calibrations.append(old_dimension_calibrations[i])
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(new_shape))
+        data_dtype = data_metadata.data_dtype
+        assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(new_shape), data_metadata.data_dtype),
+            (tuple(new_shape), data_dtype),
             data_metadata.intensity_calibration,
             new_dimensional_calibrations,
             data_metadata.metadata,
@@ -1528,11 +1550,15 @@ class SumOperator(DataStreamOperator):
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         data_and_metadata = channel_data.data_and_metadata
         if self.__axis is not None:
-            summed_xdata = data_and_metadata
-            summed_xdata = xd.sum(summed_xdata, self.__axis)
+            summed_xdata = xd.sum(data_and_metadata, self.__axis)
+            assert summed_xdata
             return [ChannelData(channel_data.channel, summed_xdata)]
         else:
-            summed_data = numpy.array(data_and_metadata.data.sum(), dtype=data_and_metadata.data_dtype)
+            data = data_and_metadata.data
+            assert data is not None
+            data_dtype = data_and_metadata.data_dtype
+            assert data_dtype is not None
+            summed_data = numpy.array(data.sum(), dtype=data_dtype)
             summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
                                                                  intensity_calibration=data_and_metadata.intensity_calibration,
                                                                  data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
@@ -1555,7 +1581,7 @@ class MaskedSumOperator(DataStreamOperator):
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         data_metadata = data_stream_info.data_metadata
         data_metadata = DataAndMetadata.DataMetadata(
-            ((), float),
+            ((), typing.cast(numpy.dtype, float)),
             data_metadata.intensity_calibration,
             [],
             data_metadata.metadata,
@@ -1594,8 +1620,10 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             data_descriptor = DataAndMetadata.DataDescriptor(False, 1, data_metadata.data_descriptor.collection_dimension_count)
             new_shape = data_metadata.data_shape[-1:] + data_metadata.data_shape[:-1]
             new_dimensional_calibrations = data_metadata.dimensional_calibrations[-1:] + data_metadata.dimensional_calibrations[:-1]
+            data_dtype = data_metadata.data_dtype
+            assert data_dtype is not None
             data_metadata = DataAndMetadata.DataMetadata(
-                (tuple(new_shape), data_metadata.data_dtype),
+                (tuple(new_shape), data_dtype),
                 data_metadata.intensity_calibration,
                 new_dimensional_calibrations,
                 data_metadata.metadata,
@@ -1612,7 +1640,9 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
         if self.__channel is None or channel_data.channel == self.__channel:
             data_and_metadata = channel_data.data_and_metadata
             data_metadata = data_and_metadata.data_metadata
-            moved_data = numpy.moveaxis(data_and_metadata.data, -1, 0)
+            data = data_and_metadata.data
+            assert data is not None
+            moved_data = numpy.moveaxis(data, -1, 0)
             data_descriptor = DataAndMetadata.DataDescriptor(False, 1, data_metadata.data_descriptor.collection_dimension_count)
             new_dimensional_calibrations = data_metadata.dimensional_calibrations[-1:] + data_metadata.dimensional_calibrations[:-1]
             moved_xdata = DataAndMetadata.new_data_and_metadata(moved_data,
@@ -1820,8 +1850,10 @@ class AccumulatedDataStream(ContainerDataStream):
         data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
         assert data_descriptor.is_sequence
         data_descriptor.is_sequence = False
+        data_dtype = old_data_metadata.data_dtype
+        assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(old_data_metadata.data_shape[1:]), old_data_metadata.data_dtype),
+            (tuple(old_data_metadata.data_shape[1:]), data_dtype),
             old_data_metadata.intensity_calibration,
             old_data_metadata.dimensional_calibrations[1:],
             old_data_metadata.metadata,
@@ -1841,8 +1873,10 @@ class AccumulatedDataStream(ContainerDataStream):
         sequence_slice = data_stream_event.source_slice[0]
         assert sequence_slice.stop - sequence_slice.start == 1
         data_descriptor.is_sequence = False
+        data_dtype = old_data_metadata.data_dtype
+        assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(old_data_metadata.data_shape[1:]), old_data_metadata.data_dtype),
+            (tuple(old_data_metadata.data_shape[1:]), data_dtype),
             old_data_metadata.intensity_calibration,
             old_data_metadata.dimensional_calibrations[1:],
             old_data_metadata.metadata,

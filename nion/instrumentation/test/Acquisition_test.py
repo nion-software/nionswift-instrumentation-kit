@@ -47,7 +47,7 @@ class ScanDataStream(Acquisition.DataStream):
         assert self.__partial_index < self.__scan_length
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, 0)
-        data_metadata = DataAndMetadata.DataMetadata(((), float), data_descriptor=data_descriptor)
+        data_metadata = DataAndMetadata.DataMetadata(((), typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         start_index = self.__partial_index
         stop_index = min(start_index + self.__partial_length, self.__scan_length)
@@ -109,7 +109,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-        data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, float), data_descriptor=data_descriptor)
+        data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         new_partial = min(self.__partial_index + self.__partial_height, self.__frame_shape[0])
         source_data_slice = (slice(self.__partial_index, new_partial), slice(None))
@@ -169,10 +169,10 @@ class MultiFrameDataStream(Acquisition.DataStream):
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         if self.__do_processing:
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape) - 1)
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape[1:], float), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape[1:], typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         else:
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, float), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         count = min(self.__count, self.__frame_count - self.__frame_index)
         source_data_slice: typing.Tuple[slice, ...] = (slice(0, count), slice(None), slice(None))
@@ -522,7 +522,7 @@ class TestAcquisitionClass(unittest.TestCase):
         channel = Acquisition.Channel("2")
         channel11 = Acquisition.Channel("11")
         channel22 = Acquisition.Channel("22")
-        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), 2)
+        camera_data_stream = SingleFrameDataStream(numpy.product(scan_shape), (8, 8), channel)
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({channel11: Acquisition.MaskedSumOperator(mask1), channel22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.FramedDataStream(collector)

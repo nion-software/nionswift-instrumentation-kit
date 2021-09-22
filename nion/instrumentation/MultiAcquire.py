@@ -1,31 +1,24 @@
 # standard libraries
 import copy
 import json
-import logging
 import numpy
 import os
-import queue
 import threading
 import time
 import gettext
-import math
-import functools
 import typing
-import uuid
 import collections
 
 # local libraries
-from nion.utils import Event, Geometry
 from nion.data import DataAndMetadata, Calibration
-from nion.data import xdata_1_0 as xd
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import ImportExportManager
-from nion.swift import Facade
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.utils import Event
+from nion.utils import Geometry
 
 _ = gettext.gettext
 
@@ -138,7 +131,9 @@ class ScanDataChannel:
         for i, data_and_metadata in enumerate(data_and_metadata_list):
             data_item = self.__data_items[i]
             scan_shape = data_and_metadata.data_shape
-            data_shape_and_dtype = (tuple(scan_shape), data_and_metadata.data_dtype)
+            data_dtype = data_and_metadata.data_dtype
+            assert data_dtype is not None
+            data_shape_and_dtype = (tuple(scan_shape), data_dtype)
             data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 0, len(tuple(scan_shape)))
             dimensional_calibrations = data_and_metadata.dimensional_calibrations
             if frames > 1 and not sum_frames:
@@ -147,7 +142,7 @@ class ScanDataChannel:
                 data_shape = (frames,) + data_shape
                 data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
             intensity_calibration = data_and_metadata.intensity_calibration
-            metadata = data_and_metadata.metadata
+            metadata = dict(copy.deepcopy(data_and_metadata.metadata))
             metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
             metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
             data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
@@ -155,13 +150,15 @@ class ScanDataChannel:
                                                          dimensional_calibrations,
                                                          metadata=data_and_metadata.metadata,
                                                          data_descriptor=data_descriptor)
-            src_slice = (Ellipsis,)
-            dst_slice = (Ellipsis,)
+            src_slice: typing.Tuple[typing.Union[slice, int, ellipsis]] = (Ellipsis,)
+            dst_slice: typing.Tuple[typing.Union[slice, int, ellipsis]] = (Ellipsis,)
             if frames > 1:
                 if sum_frames:
                     existing_data = data_item.data
                     if existing_data is not None:
-                        summed_data = existing_data[dst_slice] + data_and_metadata.data[src_slice]
+                        data = data_and_metadata.data
+                        assert data is not None
+                        summed_data = existing_data[dst_slice] + data[src_slice]
                         data_and_metadata._set_data(summed_data)
                 else:
                     dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
@@ -268,6 +265,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         current_time = 0
         current_frame = self.current_frames_index
         scan_size = tuple(self.__grab_sync_info.scan_size)
+        parameters = dict()
         for parameters in self.__multi_acquire_parameters:
             if parameters['index'] >= self.__current_parameters_index:
                 break
@@ -289,6 +287,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         # Calibrations, data descriptor and shape estimates are updated accordingly.
         dimensional_calibrations = data_and_metadata.dimensional_calibrations
         data = data_and_metadata.data
+        assert data is not None
         axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
         assert len(axes_order) == data.ndim
         data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
@@ -296,7 +295,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         is_sequence = axes_descriptor.sequence_axes is not None
         collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
         datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
-        metadata = data_and_metadata.metadata
+        metadata = dict(copy.deepcopy(data_and_metadata.metadata))
 
         src_slice: typing.List[slice] = list()
         dst_slice: typing.List[slice] = list()
@@ -330,7 +329,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
         frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
-        data_shape_and_dtype = (data_shape, data_and_metadata.data_dtype)
+        data_dtype = data_and_metadata.data_dtype
+        assert data_dtype is not None
+        data_shape_and_dtype = (data_shape, data_dtype)
         data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, collection_dimension_count, datum_dimension_count)
         if frames > 1 and not sum_frames:
             if self.__multi_acquire_settings['shift_each_sequence_slice']:
@@ -399,7 +400,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             if sum_frames:
                 existing_data = self.__data_item.data
                 if existing_data is not None:
-                    existing_data[tuple(dst_slice)] += data_and_metadata.data[tuple(src_slice)]
+                    data = data_and_metadata.data
+                    assert data is not None
+                    existing_data[tuple(dst_slice)] += data[tuple(src_slice)]
             else:
                 dst_slice = [slice(self.current_frames_index, self.current_frames_index + 1)] + dst_slice
 
@@ -549,33 +552,39 @@ class MultiAcquireController:
 
     def get_offset_x(self, index):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
-        return self.spectrum_parameters[index]['offset_x']
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        return d['offset_x']
 
     def set_offset_x(self, index, offset_x):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
-        parameters = self.spectrum_parameters[index].copy()
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        parameters = dict(copy.deepcopy(d))
         if offset_x != parameters.get('offset_x'):
             parameters['offset_x'] = offset_x
             self.spectrum_parameters[index] = parameters
 
     def get_exposure_ms(self, index):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
-        return self.spectrum_parameters[index]['exposure_ms']
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        return d['exposure_ms']
 
     def set_exposure_ms(self, index, exposure_ms):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
-        parameters = self.spectrum_parameters[index].copy()
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        parameters = dict(copy.deepcopy(d))
         if exposure_ms != parameters.get('exposure_ms'):
             parameters['exposure_ms'] = exposure_ms
             self.spectrum_parameters[index] = parameters
 
     def get_frames(self, index):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
-        return self.spectrum_parameters[index]['frames']
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        return d['frames']
 
     def set_frames(self, index, frames):
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
-        parameters = self.spectrum_parameters[index].copy()
+        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
+        parameters = dict(copy.deepcopy(d))
         if frames != parameters.get('frames'):
             parameters['frames'] = frames
             self.spectrum_parameters[index] = parameters
@@ -677,6 +686,7 @@ class MultiAcquireController:
                 self.zeros['x_start'] = self.zeros['x']
             start_frame_parameters = self.camera.get_current_frame_parameters()
 
+            data: typing.Optional[numpy.ndarray] = None
             for parameters in self.__active_spectrum_parameters:
                 if self.abort_event.is_set():
                     break

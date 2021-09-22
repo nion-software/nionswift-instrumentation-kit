@@ -991,14 +991,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                 data_elements[0]["data"] = data_elements[0]["data"].reshape(*scan_shape, *(data_elements[0]["data"].shape[1:]))
                 xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_elements[0])
                 return CameraHardwareSource.PartialData(xdata, True, False, scan_shape[0])
-        return CameraHardwareSource.PartialData(None, True, True, 0)
+        return CameraHardwareSource.PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
 
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
         acquire_synchronized_continue = getattr(self.__camera, "acquire_synchronized_continue", None)
         if callable(acquire_synchronized_continue):
             return acquire_synchronized_continue(update_period=update_period)
-        return CameraHardwareSource.PartialData(None, True, True, 0)
+        return CameraHardwareSource.PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
 
     def acquire_synchronized_end(self) -> None:
         acquire_synchronized_end = getattr(self.__camera, "acquire_synchronized_end", None)
@@ -1050,7 +1050,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
                     else:
                         data = numpy.empty((n,) + frame_data.shape, frame_data.dtype)
                 if processing == "sum_project" and len(frame_data.shape) > 1:
-                    data[index] = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0).data
+                    summed_xdata = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0)
+                    assert summed_xdata
+                    data[index] = summed_xdata.data
                 else:
                     data[index] = frame_data
                 properties = copy.deepcopy(frame_data_element["properties"])

@@ -666,7 +666,7 @@ class DataChannel:
         self.__processor = processor
         self.__start_count = 0
         self.__state: typing.Optional[str] = None
-        self.__data_shape = None
+        self.__data_shape: typing.Optional[DataAndMetadata.ShapeType] = None
         self.__sub_area = None
         self.__dest_sub_area = None
         self.__data_and_metadata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
@@ -731,7 +731,7 @@ class DataChannel:
         channel_index = self.index
         channel_id = self.channel_id
         channel_name = self.name
-        metadata = copy.deepcopy(data_and_metadata.metadata)
+        metadata = dict(copy.deepcopy(data_and_metadata.metadata))
         hardware_source_metadata = dict()
         hardware_source_metadata["hardware_source_id"] = hardware_source_id
         hardware_source_metadata["channel_index"] = channel_index
@@ -747,6 +747,7 @@ class DataChannel:
         metadata.setdefault("hardware_source", dict()).update(hardware_source_metadata)
 
         data = data_and_metadata.data
+        assert data is not None
         data_shape = data_shape or data.shape
         master_data = self.__data_and_metadata.data if self.__data_and_metadata else None
         if master_data is None or (master_data.shape != data_shape and data.shape != data_shape):
@@ -763,6 +764,7 @@ class DataChannel:
         else:
             assert data.shape == data_shape
             master_data = data  # numpy.copy(data). assume data does not need a copy.
+        assert master_data is not None
 
         data_descriptor = data_and_metadata.data_descriptor
         intensity_calibration = data_and_metadata.intensity_calibration if data_and_metadata else None
@@ -1100,11 +1102,13 @@ class HardwareSource(Observable.Observable):
         if not self.is_recording:
             record_task = self._create_acquisition_record_task()
             old_finished_callback_fn = record_task.finished_callback_fn
+
             def finished(xdatas: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
                 if callable(old_finished_callback_fn):
                     old_finished_callback_fn(xdatas)
                 if callable(finished_callback_fn):
                     finished_callback_fn(xdatas)
+
             record_task.finished_callback_fn = finished
             self._record_task_updated(record_task)
             self.start_task('record', record_task)
@@ -1312,13 +1316,17 @@ class SumProcessor(Observable.Observable):
             if self.__crop_graphic:
                 self.__crop_graphic.bounds = value
 
-    def process(self, data_and_metadata: Core.DataAndMetadata) -> Core.DataAndMetadata:
+    def process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
         if data_and_metadata.datum_dimension_count > 1 and data_and_metadata.data_shape[0] > 1:
-            summed = Core.function_sum(Core.function_crop(data_and_metadata, self.__bounds), 0)
+            cropped_xdata = Core.function_crop(data_and_metadata, self.__bounds)
+            assert cropped_xdata
+            summed = Core.function_sum(cropped_xdata, 0)
+            assert summed
             summed._set_metadata(data_and_metadata.metadata)
             return summed
         elif len(data_and_metadata.data_shape) > 1:
             summed = Core.function_sum(data_and_metadata, 0)
+            assert summed
             summed._set_metadata(data_and_metadata.metadata)
             return summed
         else:
@@ -1465,10 +1473,10 @@ class DataChannelBuffer:
         self.__state = DataChannelBuffer.State.idle
         self.__buffer_size = buffer_size
         self.__buffer_lock = threading.RLock()
-        self.__buffer: typing.List[typing.List[DataAndMetadata]] = list()
+        self.__buffer: typing.List[typing.List[DataAndMetadata.DataAndMetadata]] = list()
         self.__done_events: typing.List[threading.Event] = list()
         self.__active_channel_ids: typing.Set[str] = set()
-        self.__latest: typing.Dict[str, DataAndMetadata] = dict()
+        self.__latest: typing.Dict[str, DataAndMetadata.DataAndMetadata] = dict()
         self.__data_channel_updated_listeners: typing.List[Event.EventListener] = list()
         self.__data_channel_start_listeners: typing.List[Event.EventListener] = list()
         self.__data_channel_stop_listeners: typing.List[Event.EventListener] = list()

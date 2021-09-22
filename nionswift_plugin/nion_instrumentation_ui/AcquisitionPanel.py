@@ -1471,7 +1471,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__hardware_source.get_expected_dimensions(self.__frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, typing.cast(numpy.dtype, numpy.float32)))
         return Acquisition.DataStreamInfo(data_metadata, self.__frame_parameters.exposure_ms / 1000)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
@@ -1493,10 +1493,11 @@ class CameraFrameDataStream(Acquisition.DataStream):
         if self.__record_task.is_finished:
             # data metadata describes the data being sent from this stream: shape, data type, and descriptor
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, numpy.float32), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, numpy.float32)), data_descriptor=data_descriptor)
             source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
             state = Acquisition.DataStreamStateEnum.COMPLETE
             data = self.__record_task.grab()[0].data
+            assert data is not None
             data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
                                                                 source_data_slice, state)
             self.fire_data_available(data_stream_event)

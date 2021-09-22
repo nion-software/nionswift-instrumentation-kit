@@ -336,10 +336,10 @@ class DriftTracker:
             rotation = self.__rotation
 
             if first_xdata and current_xdata:
-                quality, offset = xd.register_template(first_xdata, current_xdata)
+                quality, raw_offset = xd.register_template(first_xdata, current_xdata)
                 delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds() - numpy.sum(self.__drift_data_frame[3])
                 assert delta_time > 0.0
-                offset = Geometry.FloatPoint.make(offset)
+                offset = Geometry.FloatPoint.make(raw_offset)
                 delta_nm = Geometry.FloatSize(
                     h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                     w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
@@ -609,10 +609,12 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
     data_shape = uncropped_xdata.data_shape
     scan_shape = uncropped_xdata.collection_dimension_shape
     scan_calibrations = scan_calibrations or uncropped_xdata.collection_dimensional_calibrations
+    uncropped_data = uncropped_xdata.data
+    assert uncropped_data is not None
     if flyback_pixels > 0:
-        data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
+        data = uncropped_data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
     else:
-        data = uncropped_xdata.data.reshape(*scan_shape, *data_shape[len(scan_shape):])
+        data = uncropped_data.reshape(*scan_shape, *data_shape[len(scan_shape):])
     dimensional_calibrations = tuple(scan_calibrations) + tuple(data_calibrations)
     return DataAndMetadata.new_data_and_metadata(data, data_intensity_calibration,
                                                  dimensional_calibrations,
@@ -1635,7 +1637,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__record_task = typing.cast(RecordTask, None)
 
         self.__lock = threading.RLock()
-        self.__buffers: typing.Dict[Acquisition.Channel, DataAndMetadata] = dict()
+        self.__buffers: typing.Dict[Acquisition.Channel, DataAndMetadata.DataAndMetadata] = dict()
         self.__sent_rows: typing.Dict[Acquisition.Channel, int] = dict()
         self.__available_rows: typing.Dict[Acquisition.Channel, int] = dict()
 
@@ -1651,8 +1653,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
                     if channel not in self.__buffers:
                         self.__buffers[channel] = copy.deepcopy(data_and_metadata)
                     buffer = self.__buffers[channel]
-                    assert buffer is not None
-                    buffer.data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
+                    assert buffer
+                    buffer_data = buffer.data
+                    assert buffer_data is not None
+                    buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
                     self.__available_rows[channel] = valid_rows
 
         self.__data_channel_listeners = list()
@@ -1724,7 +1728,9 @@ class ScanFrameDataStream(Acquisition.DataStream):
                     if not is_complete or (is_complete and self.__record_task.is_finished):
                         start = self.__section_rect.width * sent_rows
                         stop = self.__section_rect.width * available_rows
-                        data_metadata = DataAndMetadata.DataMetadata(((), scan_data.data_dtype),
+                        data_dtype = scan_data.data_dtype
+                        assert data_dtype is not None
+                        data_metadata = DataAndMetadata.DataMetadata(((), data_dtype),
                                                                      scan_data.intensity_calibration,
                                                                      (),
                                                                      scan_data.metadata,
@@ -1734,10 +1740,12 @@ class ScanFrameDataStream(Acquisition.DataStream):
                                                                      scan_data.timezone_offset)
                         source_slice = (slice(start, stop),)
                         data_stream_state = Acquisition.DataStreamStateEnum.COMPLETE if is_complete else Acquisition.DataStreamStateEnum.PARTIAL
+                        scan_data_data = scan_data.data
+                        assert scan_data_data is not None
                         data_stream_event = Acquisition.DataStreamEventArgs(self,
                                                                             channel,
                                                                             data_metadata,
-                                                                            scan_data.data.reshape(-1),
+                                                                            scan_data_data.reshape(-1),
                                                                             stop - start,
                                                                             source_slice,
                                                                             data_stream_state)
@@ -1776,7 +1784,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, float))
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, typing.cast(numpy.dtype, float)))
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
@@ -1845,11 +1853,12 @@ class CameraFrameDataStream(Acquisition.DataStream):
             if self.__record_task.is_finished:
                 # data metadata describes the data being sent from this stream: shape, data type, and descriptor
                 data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-                data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, numpy.float32),
+                data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, numpy.float32)),
                                                              data_descriptor=data_descriptor)
                 source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
                 state = Acquisition.DataStreamStateEnum.COMPLETE
                 data = self.__record_task.grab()[0].data
+                assert data is not None
                 data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
                                                                     source_data_slice, state)
                 self.fire_data_available(data_stream_event)
@@ -1866,7 +1875,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
             is_canceled = self.__partial_data_info.is_canceled
             assert valid_rows is not None
             src_top_row = self.__last_valid_rows
-            metadata = copy.deepcopy(uncropped_xdata.metadata)
+            metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
             # this is a hack to prevent some of the potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
@@ -1897,7 +1906,12 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 assert src_rect.left == 0
                 assert src_rect.right == partial_size.width
                 source_slice = (slice(src_rect.top * partial_size.width, src_rect.bottom * partial_size.width),) + (slice(None),) * len(data_channel_data_and_metadata.datum_dimension_shape)
-                data_metadata = DataAndMetadata.DataMetadata((tuple(data_channel_data_and_metadata.data_metadata.data_shape[2:]), data_channel_data_and_metadata.data_metadata.data_dtype),
+                data_channel_data = data_channel_data_and_metadata.data
+                assert data_channel_data is not None
+                data_channel_data_metadata = data_channel_data_and_metadata.data_metadata
+                data_channel_data_dtype = data_channel_data_metadata.data_dtype
+                assert data_channel_data_dtype is not None
+                data_metadata = DataAndMetadata.DataMetadata((tuple(data_channel_data_metadata.data_shape[2:]), data_channel_data_dtype),
                                                              data_channel_data_and_metadata.intensity_calibration,
                                                              data_channel_data_and_metadata.dimensional_calibrations[2:],
                                                              data_channel_data_and_metadata.metadata,
@@ -1908,7 +1922,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
                 count = src_rect.height * src_rect.width
                 total_count = numpy.product(data_channel_data_and_metadata.navigation_dimension_shape, dtype=numpy.int64)
-                data = data_channel_data_and_metadata.data.reshape((total_count,) + data_channel_data_and_metadata.datum_dimension_shape)
+                data = data_channel_data.reshape((total_count,) + tuple(data_channel_data_and_metadata.datum_dimension_shape))
                 data_stream_event = Acquisition.DataStreamEventArgs(self,
                                                                     channel,
                                                                     data_metadata,
@@ -1979,13 +1993,13 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
                 collection_shape = data_stream_event.data_metadata.navigation_dimension_shape
                 data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
                 data = data_stream_event.source_data
-                dimensional_calibrations = data_stream_event.data_metadata.dimensional_calibrations
+                dimensional_calibrations = tuple(data_stream_event.data_metadata.dimensional_calibrations)
                 data_descriptor = data_stream_event.data_metadata.data_descriptor
             else:
                 collection_shape = data_stream_event.data_metadata.datum_dimension_shape
                 data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
                 data = data_stream_event.source_data[..., numpy.newaxis]
-                dimensional_calibrations = list(data_stream_event.data_metadata.dimensional_calibrations) + [Calibration.Calibration()]
+                dimensional_calibrations = tuple(data_stream_event.data_metadata.dimensional_calibrations) + (Calibration.Calibration(),)
                 data_descriptor = DataAndMetadata.DataDescriptor(False, data_stream_event.data_metadata.data_descriptor.datum_dimension_count, 1)
             assert data_stream_event.source_slice[1].stop is None or data_stream_event.source_slice[1].stop == data_shape.width
             height = data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
