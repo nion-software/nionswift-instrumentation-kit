@@ -3,6 +3,7 @@ Changelog (nionswift-instrumentation)
 
 0.19.6 (UNRELEASED)
 -------------------
+- Drop support for Python 3.7.
 - Add virtual detector option to MultiAcquire.
 - Add option to apply shift for each frame in MultiAcquire.
 
