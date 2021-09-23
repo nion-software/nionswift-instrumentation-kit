@@ -470,7 +470,16 @@ class STEMController(Observable.Observable):
     def axis_descriptions(self) -> typing.Sequence[AxisDescription]:
         return list()
 
-    def get_reference_setting_index(self, setting_control: str) -> int:
+    def get_reference_setting_index(self, settings_control: str) -> typing.Optional[int]:
+        """
+        Queries the instrument for the reference setting number of a settings control.
+
+        A reference setting is the setting that you would typically use for tuning and alignment of the microscope. In
+        this setting it is guaranteed that rotations, strenghts, etc. are calibrated and set up so that (automated)
+        procedures can work properly. There is always exactly one reference setting per settings control, because it
+        is important to always align the microscope in the same setting to avoid creating diverging alignments and
+        settings.
+        """
         raise NotImplementedError()
 
     # end instrument API
