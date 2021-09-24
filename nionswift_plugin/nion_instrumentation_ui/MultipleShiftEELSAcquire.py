@@ -2,6 +2,7 @@
 import functools
 import gettext
 import logging
+import pathlib
 import threading
 import time
 import typing
@@ -448,8 +449,8 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             float(self.energy_offset.text),
             int(self.sleep_time.text),
             bool(self.dark_ref_choice.checked),
-            '',  # stand-in dark reference
-#            str(self.dark_file.text),
+            pathlib.Path(),  # stand-in dark reference
+#            pathlib.Path(self.dark_file.text),
             bool(self.cross_cor_choice.checked)
             )
 
@@ -484,7 +485,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 energy_offset: float,
                 sleep_time: int,
                 dark_ref_choice: bool,
-                dark_file: str,
+                dark_file: pathlib.Path,
                 cross_cor_choice: bool):
         if number_frames <= 0:
             return
@@ -505,9 +506,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 # Dark reference is desired: import from the file given, if
                 # the import does not succeed (file does not exist or no path
                 # was given), then set dark_ref_data to None
-                dark_ref_import = (
-                    ImportExportManager.ImportExportManager().read_data_items(
-                        None, dark_file))
+                dark_ref_import = ImportExportManager.ImportExportManager().read_data_items(dark_file)
                 if dark_ref_import:
                     dark_ref_data = dark_ref_import[0].data
                 else:

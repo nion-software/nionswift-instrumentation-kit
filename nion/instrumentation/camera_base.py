@@ -1276,7 +1276,7 @@ class CameraFrameParameters(dict):
         }
 
 
-def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls, key) -> typing.Optional[float]:
+def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls, key) -> typing.Optional[typing.Union[float, str]]:
     if key + "_control" in calibration_controls:
         valid, value = instrument_controller.TryGetVal(calibration_controls[key + "_control"])
         if valid:
@@ -1288,10 +1288,10 @@ def get_instrument_calibration_value(instrument_controller: InstrumentController
 
 def build_calibration(instrument_controller: InstrumentController, calibration_controls: typing.Mapping, prefix: str,
                       relative_scale: float = 1, data_len: int = 0) -> Calibration.Calibration:
-    scale = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "scale")
+    scale = typing.cast(float, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "scale"))
     scale = scale * relative_scale if scale is not None else scale
-    offset = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "offset")
-    units = get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "units")
+    offset = typing.cast(float, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "offset"))
+    units = typing.cast(str, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "units"))
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
     return Calibration.Calibration(offset, scale, units)
