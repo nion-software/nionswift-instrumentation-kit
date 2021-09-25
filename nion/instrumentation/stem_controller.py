@@ -854,9 +854,9 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__subscan_region_changed_listener.close()
-        self.__subscan_region_changed_listener = None
+        self.__subscan_region_changed_listener = typing.cast(Event.EventListener, None)
         self.__subscan_rotation_changed_listener.close()
-        self.__subscan_rotation_changed_listener = None
+        self.__subscan_rotation_changed_listener = typing.cast(Event.EventListener, None)
 
     # methods for handling changes to the subscan region
 
@@ -939,7 +939,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__line_scan_vector_changed_listener.close()
-        self.__line_scan_vector_changed_listener = None
+        self.__line_scan_vector_changed_listener = typing.cast(Event.EventListener, None)
 
     # methods for handling changes to the line scan region
 
@@ -1018,11 +1018,11 @@ class DriftView(EventLoopMonitor):
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__drift_region_changed_listener.close()
-        self.__drift_region_changed_listener = None
+        self.__drift_region_changed_listener = typing.cast(Event.EventListener, None)
         self.__drift_rotation_changed_listener.close()
-        self.__drift_rotation_changed_listener = None
+        self.__drift_rotation_changed_listener = typing.cast(Event.EventListener, None)
         self.__drift_channel_id_changed_listener.close()
-        self.__drift_channel_id_changed_listener = None
+        self.__drift_channel_id_changed_listener = typing.cast(Event.EventListener, None)
         self.__scan_context_data_items_changed_listener.close()
         self.__scan_context_data_items_changed_listener = None
 

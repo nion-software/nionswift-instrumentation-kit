@@ -104,7 +104,7 @@ class ComboBoxHandler:
     id_getter and selection_storage_model are used to read/write the selected item identifier.
     """
 
-    def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.SortKeyCallable,
+    def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.OptionalSortKeyCallable,
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
                  selection_storage_model: Model.PropertyModel):
         # create a filtered list model with the sort key and filter key.
@@ -894,9 +894,9 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
 
     def close(self) -> None:
         self.__hardware_sources_list_changed_listener.close()
-        self.__hardware_sources_list_changed_listener = None
+        self.__hardware_sources_list_changed_listener = typing.cast(Event.EventListener, None)
         self.__hardware_source_changed_listener.close()
-        self.__hardware_source_changed_listener = None
+        self.__hardware_source_changed_listener = typing.cast(Event.EventListener, None)
         self.__channel_model = typing.cast(Model.PropertyModel[str], None)
         self.__hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
 
@@ -1028,7 +1028,7 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
         self.__hardware_source_stream_listener.close()
         self.__hardware_source_stream_listener = None
         self.__scan_width_changed_listener.close()
-        self.__scan_width_changed_listener = None
+        self.__scan_width_changed_listener = typing.cast(Event.EventListener, None)
         self.__scan_hardware_source_stream.remove_ref()
         self.__scan_hardware_source_stream = typing.cast(Stream.AbstractStream[HardwareSource.HardwareSource], None)
         self.__camera_hardware_source_stream.remove_ref()

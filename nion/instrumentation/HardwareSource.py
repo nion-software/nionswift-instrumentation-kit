@@ -98,7 +98,7 @@ class HardwareSourceBridge:
         # close hardware source related stuff
         # close data items left to append that haven't been appended
         self.__project_loaded_event_listener.close()
-        self.__project_loaded_event_listener = None
+        self.__project_loaded_event_listener = typing.cast(Event.EventListener, None)
         with self.__data_items_to_append_lock:
             for key, data_item in self.__data_items_to_append:
                 data_item.close()
