@@ -410,6 +410,10 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.__sequence_indexes: typing.Dict[Channel, int] = dict()
         self.is_aborted = False
 
+    def add_ref(self) -> DataStream:
+        super().add_ref()
+        return self
+
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         """Return the channels for this data stream."""
@@ -570,7 +574,7 @@ class CollectedDataStream(DataStream):
         if self.__data_stream_started:
             warnings.warn("Stream deleted but not finished.", category=RuntimeWarning)
         self.__data_stream.remove_ref()
-        self.__data_stream = None
+        self.__data_stream = typing.cast(DataStream, None)
         super().about_to_delete()
 
     @property
@@ -581,8 +585,10 @@ class CollectedDataStream(DataStream):
         data_stream_info = self.__data_stream.get_info(channel)
         count = numpy.product(self.__collection_shape, dtype=numpy.int64)
         data_metadata = data_stream_info.data_metadata
+        data_dtype = data_metadata.data_dtype
+        assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (self.__collection_shape + data_metadata.data_shape, data_metadata.data_dtype),
+            (self.__collection_shape + data_metadata.data_shape, data_dtype),
             data_metadata.intensity_calibration,
             list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
             data_metadata.metadata,
@@ -1189,6 +1195,10 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
         # about_to_delete will be called on the main thread.
         pass
 
+    def add_ref(self) -> DataChannel:
+        super().add_ref()
+        return self
+
     def prepare(self, data_stream: DataStream) -> None:
         # prepare will be called on the main thread.
         pass
@@ -1206,6 +1216,10 @@ class DataAndMetadataDataChannel(DataChannel):
     def __init__(self):
         super().__init__()
         self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
+
+    def add_ref(self) -> DataAndMetadataDataChannel:
+        super().add_ref()
+        return self
 
     def __make_data(self, channel: Channel, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data.get(channel, None)
@@ -1272,8 +1286,12 @@ class Framer(ReferenceCounting.ReferenceCounted):
 
     def about_to_delete(self) -> None:
         self.__data_channel.remove_ref()
-        self.__data_channel = None
+        self.__data_channel = typing.cast(DataChannel, None)
         super().about_to_delete()
+
+    def add_ref(self) -> Framer:
+        super().add_ref()
+        return self
 
     def prepare(self, data_stream: DataStream) -> None:
         self.__indexes = dict()
@@ -1363,10 +1381,14 @@ class FramedDataStream(DataStream):
             self.__listener.close()
             self.__listener = typing.cast(Event.EventListener, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = None
+        self.__data_stream = typing.cast(DataStream, None)
         self.__framer.remove_ref()
-        self.__framer = None
+        self.__framer = typing.cast(Framer, None)
         super().about_to_delete()
+
+    def add_ref(self) -> FramedDataStream:
+        super().add_ref()
+        return self
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1669,7 +1691,7 @@ class ContainerDataStream(DataStream):
             self.__listener.close()
             self.__listener = typing.cast(Event.EventListener, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = None
+        self.__data_stream = typing.cast(DataStream, None)
         super().about_to_delete()
 
     @property
@@ -1771,7 +1793,7 @@ class MonitorDataStream(DataStream):
             self.__listener.close()
             self.__listener = typing.cast(Event.EventListener, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = None
+        self.__data_stream = typing.cast(DataStream, None)
         super().about_to_delete()
 
     @property
@@ -1833,7 +1855,7 @@ class AccumulatedDataStream(ContainerDataStream):
 
     def about_to_delete(self) -> None:
         self.__data_channel.remove_ref()
-        self.__data_channel = None
+        self.__data_channel = typing.cast(DataAndMetadataDataChannel, None)
         super().about_to_delete()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
@@ -1898,8 +1920,10 @@ class AccumulatedDataStream(ContainerDataStream):
         new_source_slice = new_source_slices[0]
         self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_slice.start],
                                             data_stream_event.source_slice[1:], dest_slice, data_metadata)
+        data_channel_data = self.__data_channel.get_data(channel).data
+        assert data_channel_data is not None
         new_data_stream_event = DataStreamEventArgs(self, channel, data_metadata,
-                                                    self.__data_channel.get_data(channel).data, None, new_source_slice,
+                                                    data_channel_data, None, new_source_slice,
                                                     data_stream_event.state)
         new_data_stream_event.reset_frame = dest_slice.start == 0
         super()._fire_data_available(new_data_stream_event)
@@ -1940,7 +1964,7 @@ class Acquisition:
     def close(self) -> None:
         if self.__data_stream:
             self.__data_stream.remove_ref()
-            self.__data_stream = None
+            self.__data_stream = typing.cast(FramedDataStream, None)
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.

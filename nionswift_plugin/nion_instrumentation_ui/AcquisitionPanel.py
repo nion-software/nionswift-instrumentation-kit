@@ -121,7 +121,7 @@ class ComboBoxHandler:
 
         # create a value stream for the selected item. this is useful in cases where other UI items
         # need to adjust themselves based on the selected value.
-        self.selected_item_value_stream = Stream.ValueStream().add_ref()
+        self.selected_item_value_stream = Stream.ValueStream[typing.Any]().add_ref()
 
         # update the selected item. this function should not refer to self.
         def update_selected_item(c: ListModel.ListPropertyModel, index_model: Model.PropertyModel[int],
@@ -928,7 +928,7 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
         # channels needs to be updated. the selected channel may also be updated if it is no longer available.
         if k == "value":
             hardware_source = self.__hardware_source_choice.hardware_source
-            if hardware_source.features.get("is_camera", False):
+            if hardware_source and hardware_source.features.get("is_camera", False):
                 camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
                 if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
                     channel_descriptions = [hardware_source_channel_descriptions["ronchigram"]]
@@ -1026,7 +1026,7 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
             self.__scan_context_changed_listener.close()
             self.__scan_context_changed_listener = None
         self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = None
+        self.__hardware_source_stream_listener = typing.cast(Event.EventListener, None)
         self.__scan_width_changed_listener.close()
         self.__scan_width_changed_listener = typing.cast(Event.EventListener, None)
         self.__scan_hardware_source_stream.remove_ref()
@@ -1140,7 +1140,7 @@ class CameraExposureValueStream(Stream.ValueStream[float]):
             self.__frame_parameters_changed_listener.close()
             self.__frame_parameters_changed_listener = None
         self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = None
+        self.__hardware_source_stream_listener = typing.cast(Event.EventListener, None)
         self.__hardware_source_stream.remove_ref()
         super().about_to_delete()
 
@@ -1167,7 +1167,8 @@ class CameraExposureValueStream(Stream.ValueStream[float]):
     @exposure_time_ms.setter
     def exposure_time_ms(self, exposure_time_ms: float) -> None:
         if exposure_time_ms and exposure_time_ms > 0:
-            hardware_source = self.__hardware_source_stream.value
+            # cast to typing.Any until HardwareSource protocols are implemented sanely.
+            hardware_source = typing.cast(typing.Any, self.__hardware_source_stream.value)
             if hardware_source:
                 frame_parameters = hardware_source.get_frame_parameters(0)
                 frame_parameters.exposure_ms = exposure_time_ms
@@ -1184,7 +1185,7 @@ class CameraDetailsHandler(Observable.Observable):
         super().__init__()
 
         # the exposure value stream gives the stream of exposure values from the hardware source choice
-        self.exposure_value_stream = CameraExposureValueStream(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice)).add_ref()
+        self.exposure_value_stream = typing.cast(CameraExposureValueStream, CameraExposureValueStream(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice)).add_ref())
         # the exposure model converts the exposure value stream to a property model that supports binding.
         self.exposure_model = Model.StreamValueModel(self.exposure_value_stream)
         # the exposure value converter converts the exposure value to a string and back in the line edit.
@@ -1269,13 +1270,13 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # the scan context value model is the text description of the scan context extracted from the value stream.
         self.scan_context_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
-            lambda x: x.context_text
+            lambda x: x.context_text if x is not None else str()
         ))
 
         # the scan context value model is the text description of the upcoming scan extracted from the value stream.
         self.scan_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
-            lambda x: x.scan_text
+            lambda x: x.scan_text if x is not None else str()
         ))
 
         # a converter for the scan width.
@@ -1286,7 +1287,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # declarative component handler. this stream is not used within this class. perhaps there is a better way to
         # do this.
         self.acquire_valid_value_stream = Stream.MapStream(self.__scan_context_description_value_stream,
-                                                           lambda x: x.context_valid).add_ref()
+                                                           lambda x: x.context_valid if x is not None else False).add_ref()
 
         u = Declarative.DeclarativeUI()
 
@@ -1343,7 +1344,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.scan_value_model.close()
         self.scan_value_model = typing.cast(Model.StreamValueModel, None)
         self.__scan_context_description_value_stream.remove_ref()
-        self.__scan_context_description_value_stream = None
+        self.__scan_context_description_value_stream = typing.cast(SynchronizedScanDescriptionValueStream, None)
         self.scan_context_value_model.close()
         self.scan_context_value_model = typing.cast(Model.StreamValueModel, None)
         self.__camera_hardware_source_choice.close()
@@ -1399,7 +1400,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         scan_count = 1
         scan_size = scan_context_description.scan_size
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, scan_size)
+        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
         scan_frame_parameters["scan_id"] = str(uuid.uuid4())
 
         # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift

@@ -60,7 +60,7 @@ class HardwareSourceChoice:
         return self.hardware_sources_model.value or list()
 
     @property
-    def hardware_source(self) -> HardwareSource.HardwareSource:
+    def hardware_source(self) -> typing.Optional[HardwareSource.HardwareSource]:
         index = self.hardware_source_index_model.value or 0
         hardware_sources = self.hardware_sources_model.value or list()
         return hardware_sources[index] if 0 <= index < len(hardware_sources) else None
@@ -71,7 +71,7 @@ class HardwareSourceChoice:
         combo_box.bind_current_index(Binding.PropertyBinding(self.hardware_source_index_model, "value"))
         return combo_box
 
-    def __rebuild_hardware_source_list(self, h: HardwareSource.HardwareSource) -> None:
+    def __rebuild_hardware_source_list(self, h: typing.Optional[HardwareSource.HardwareSource]) -> None:
         # keep selected item the same
         old_index = self.hardware_source_index_model.value or 0
         hardware_sources = self.hardware_sources_model.value or list()

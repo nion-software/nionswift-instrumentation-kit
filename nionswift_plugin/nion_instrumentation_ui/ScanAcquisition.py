@@ -489,7 +489,7 @@ class PanelDelegate:
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
 
         def scan_count_changed(text: str) -> None:
-            scan_count = Converter.IntegerToStringConverter().convert_back(text) if text else 1
+            scan_count = Converter.IntegerToStringConverter().convert_back(text) or 1
             scan_count = max(scan_count, 1)
             if scan_count != self.__scan_count:
                 self.__scan_count = scan_count
@@ -499,7 +499,7 @@ class PanelDelegate:
         self.__scan_count_widget.on_editing_finished = scan_count_changed
 
         def scan_width_changed(text: str) -> None:
-            scan_width = Converter.IntegerToStringConverter().convert_back(text) if text else 1
+            scan_width = Converter.IntegerToStringConverter().convert_back(text) or 1
             scan_width = max(scan_width, 1)
             if scan_width != self.__scan_width:
                 self.__scan_width = scan_width
