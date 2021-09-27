@@ -339,7 +339,7 @@ class DriftTracker:
                 quality, raw_offset = xd.register_template(first_xdata, current_xdata)
                 delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds() - numpy.sum(self.__drift_data_frame[3])
                 assert delta_time > 0.0
-                offset = Geometry.FloatPoint.make(raw_offset)
+                offset = Geometry.FloatPoint.make(typing.cast(typing.Tuple[float, float], raw_offset))
                 delta_nm = Geometry.FloatSize(
                     h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                     w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
@@ -466,11 +466,11 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _acquire_data_elements(self):
 
-        def update_data_element(data_element, complete, sub_area, npdata):
+        def update_data_element(data_element, complete, sub_area: Geometry.RectIntTuple, npdata):
             data_element["data"] = npdata
             data_element["data_shape"] = self.__frame_parameters.get("data_shape_override")
             data_element["sub_area"] = sub_area
-            data_element["dest_sub_area"] = Geometry.IntRect.make(sub_area) + Geometry.IntPoint.make(self.__frame_parameters.get("top_left_override", (0, 0)))
+            data_element["dest_sub_area"] = tuple(Geometry.IntRect.make(sub_area) + Geometry.IntPoint.make(self.__frame_parameters.get("top_left_override", (0, 0))))
             data_element["state"] = self.__frame_parameters.get("state_override", "complete") if complete else "partial"
             data_element["section_state"] = "complete" if complete else "partial"
             data_element["metadata"].setdefault("hardware_source", dict())["valid_rows"] = sub_area[0][0] + sub_area[1][0]
@@ -1043,8 +1043,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
             frame_parameters.subscan_fractional_center = tuple(Geometry.midpoint(start, end))
             frame_parameters.subscan_rotation = -math.atan2(end.y - start.y, end.x - start.x)
         else:
-            size = size or Geometry.IntSize.make(tuple(context_size))
-            frame_parameters.size = tuple(size)
+            size_tuple = tuple(size) if size is not None else tuple(int(x) for x in context_size)
+            frame_parameters.size = size_tuple
             frame_parameters.subscan_pixel_size = None
             frame_parameters.subscan_fractional_size = None
             frame_parameters.subscan_fractional_center = None
@@ -1532,7 +1532,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         return self.__stem_controller.probe_position
 
     @probe_position.setter
-    def probe_position(self, probe_position: typing.Optional[typing.Union[Geometry.FloatPoint, typing.Tuple]]):
+    def probe_position(self, probe_position: typing.Optional[Geometry.FloatPointTuple]):
         probe_position = Geometry.FloatPoint.make(probe_position) if probe_position else None
         self.__stem_controller.set_probe_position(probe_position)
 

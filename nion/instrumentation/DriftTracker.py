@@ -91,7 +91,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
         context_size = Geometry.FloatSize.make(frame_parameters.size)
         drift_channel_id = self.__scan_hardware_source.drift_channel_id
-        drift_region = Geometry.FloatRect.make(self.__scan_hardware_source.drift_region)
+        drift_region = self.__scan_hardware_source.drift_region
         drift_rotation = self.__scan_hardware_source.drift_rotation
         if drift_channel_id is not None and drift_region is not None:
             drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
