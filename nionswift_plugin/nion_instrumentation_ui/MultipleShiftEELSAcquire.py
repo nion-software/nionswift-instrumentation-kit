@@ -235,7 +235,7 @@ class AcquireController(metaclass=Utility.Singleton):
                 _slice_xdata = DataAndMetadata.new_data_and_metadata(_slice)
                 shifted_slice_data = xd.shift(_slice_xdata, shifts[index])
                 assert shifted_slice_data
-                sum_image += shifted_slice_data.data
+                sum_image += shifted_slice_data.data  # type: ignore
             return sum_image, shifts
 
         def show_in_panel(data_item, document_controller, display_panel_id):
