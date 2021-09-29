@@ -563,7 +563,8 @@ class CameraPanelDelegate:
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def __init__(self, document_controller, camera_hardware_source: camera_base.CameraHardwareSource):
-        super().__init__(document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2}))
+        column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
+        super().__init__(column_widget)
 
         self.document_controller = document_controller
 
@@ -750,14 +751,12 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         button_row.add_stretch()
         button_row.add(thumbnail_column)
 
-        column = self.content_widget
-
-        column.add(button_row1)
-        column.add(button_row1a)
-        column.add(parameters_group1)
-        column.add(status_row)
-        column.add(button_row)
-        column.add_stretch()
+        column_widget.add(button_row1)
+        column_widget.add(button_row1a)
+        column_widget.add(parameters_group1)
+        column_widget.add(status_row)
+        column_widget.add(button_row)
+        column_widget.add_stretch()
 
         def profile_combo_text_changed(text):
             if not self.__changes_blocked:

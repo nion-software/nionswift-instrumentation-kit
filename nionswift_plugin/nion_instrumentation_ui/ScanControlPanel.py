@@ -988,7 +988,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     """
 
     def __init__(self, document_controller: "DocumentController.DocumentController", scan_controller: scan_base.ScanHardwareSource):
-        super().__init__(document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2}))
+        column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
+        super().__init__(column_widget)
 
         self.document_controller = document_controller
 
@@ -1319,19 +1320,17 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         row7.add_stretch()
         row7.add(ac_line_sync_check_box, alignment="right")
 
-        column = self.content_widget
-
-        column.add(button_row1)
-        column.add(parameters_group1)
-        column.add(parameters_group2)
-        column.add(drift_row)
-        column.add(scan_row)
-        column.add(record_row)
-        column.add(simulatate_row)
-        column.add(thumbnail_row)
-        column.add(row5)
-        column.add(row7)
-        column.add_stretch()
+        column_widget.add(button_row1)
+        column_widget.add(parameters_group1)
+        column_widget.add(parameters_group2)
+        column_widget.add(drift_row)
+        column_widget.add(scan_row)
+        column_widget.add(record_row)
+        column_widget.add(simulatate_row)
+        column_widget.add(thumbnail_row)
+        column_widget.add(row5)
+        column_widget.add(row7)
+        column_widget.add_stretch()
 
         def positioned_check_state_changed(check_state: str) -> None:
             self.__state_controller.handle_positioned_check_box(check_state == "checked")
@@ -1449,7 +1448,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
             def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
-                column.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
+                column_widget.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
 
             thumbnail_widget.on_drag = thumbnail_widget_drag
 
