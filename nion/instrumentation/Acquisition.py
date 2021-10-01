@@ -1641,7 +1641,7 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             assert data_metadata.data_descriptor.datum_dimension_count == 1
             data_descriptor = DataAndMetadata.DataDescriptor(False, 1, data_metadata.data_descriptor.collection_dimension_count)
             new_shape = data_metadata.data_shape[-1:] + data_metadata.data_shape[:-1]
-            new_dimensional_calibrations = data_metadata.dimensional_calibrations[-1:] + data_metadata.dimensional_calibrations[:-1]
+            new_dimensional_calibrations = tuple(data_metadata.dimensional_calibrations)[-1:] + tuple(data_metadata.dimensional_calibrations)[:-1]
             data_dtype = data_metadata.data_dtype
             assert data_dtype is not None
             data_metadata = DataAndMetadata.DataMetadata(
@@ -1666,7 +1666,7 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             assert data is not None
             moved_data = numpy.moveaxis(data, -1, 0)
             data_descriptor = DataAndMetadata.DataDescriptor(False, 1, data_metadata.data_descriptor.collection_dimension_count)
-            new_dimensional_calibrations = data_metadata.dimensional_calibrations[-1:] + data_metadata.dimensional_calibrations[:-1]
+            new_dimensional_calibrations = tuple(data_metadata.dimensional_calibrations)[-1:] + tuple(data_metadata.dimensional_calibrations)[:-1]
             moved_xdata = DataAndMetadata.new_data_and_metadata(moved_data,
                                                                 intensity_calibration=data_and_metadata.intensity_calibration,
                                                                 dimensional_calibrations=new_dimensional_calibrations,
