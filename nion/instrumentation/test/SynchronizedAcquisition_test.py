@@ -378,7 +378,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 super().update_data(channel, source_data, source_slice, dest_slice, data_metadata)
                 if channel == Acquisition.Channel(camera_hardware_source.hardware_source_id):
                     self.__document_model.perform_data_item_updates()
-                    self.updates.append(copy.deepcopy(self.get_data_item(channel).xdata))
+                    channel_xdata = self.get_data_item(channel).xdata
+                    assert channel_xdata
+                    self.updates.append(copy.deepcopy(channel_xdata))
 
         with self.__test_context(is_eels=True) as test_context:
             scan_hardware_source = test_context.scan_hardware_source

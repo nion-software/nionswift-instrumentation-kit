@@ -628,7 +628,7 @@ class GraphicSetController:
             del display_about_to_be_removed_listener
         self.__graphic_trackers = list()
         for graphic in graphics:
-            graphic.container.remove_graphic(graphic)
+            graphic.display_item.remove_graphic(graphic)
 
     def __remove_one_graphic(self, graphic_to_remove) -> None:
         graphic_trackers = list()
@@ -675,12 +675,12 @@ class DisplayItemListModel(Observable.Observable):
             self.__change_event_listener.close()
             self.__change_event_listener = None
         self.__item_inserted_listener.close()
-        self.__item_inserted_listener = None
+        self.__item_inserted_listener = typing.cast(typing.Any, None)
         self.__item_removed_listener.close()
-        self.__item_removed_listener = None
+        self.__item_removed_listener = typing.cast(typing.Any, None)
         self.__document_close_listener.close()
-        self.__document_close_listener = None
-        self.__document_model = None
+        self.__document_close_listener = typing.cast(typing.Any, None)
+        self.__document_model = typing.cast(typing.Any, None)
 
     def __item_inserted(self, key: str, display_item: "DisplayItem.DisplayItem", index: int) -> None:
         if key == "display_items" and not display_item in self.__items and self.__predicate(display_item):
@@ -741,7 +741,7 @@ class EventLoopMonitor:
     def _mark_closed(self) -> None:
         self.__closed = True
         self.__document_close_listener.close()
-        self.__document_close_listener = None
+        self.__document_close_listener = typing.cast(typing.Any, None)
         self.__event_loop = None
 
     def _call_soon_threadsafe(self, fn: typing.Callable, *args) -> None:
@@ -807,7 +807,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         graphic = Graphics.PointGraphic()
         graphic.graphic_id = "probe"
         graphic.label = _("Probe")
-        graphic.position = self.__stem_controller.probe_position
+        graphic.position = self.__stem_controller.probe_position or Geometry.FloatPoint()
         graphic.is_bounds_constrained = True
         graphic.color = "#F80"
         return graphic
@@ -889,7 +889,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         subscan_graphic = Graphics.RectangleGraphic()
         subscan_graphic.graphic_id = "subscan"
         subscan_graphic.label = _("Subscan")
-        subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
+        subscan_graphic.bounds = self.__stem_controller.subscan_region or Geometry.FloatRect.empty_rect()
         subscan_graphic.rotation = self.__stem_controller.subscan_rotation
         subscan_graphic.is_bounds_constrained = True
         return subscan_graphic
@@ -966,13 +966,14 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         line_scan_graphic = Graphics.LineGraphic()
         line_scan_graphic.graphic_id = "line_scan"
         line_scan_graphic.label = _("Line Scan")
-        line_scan_graphic.vector = self.__stem_controller.line_scan_vector
+        self._update_graphic(line_scan_graphic)
         line_scan_graphic.is_bounds_constrained = True
         return line_scan_graphic
 
     def _update_graphic(self, line_scan_graphic: Graphics.Graphic) -> None:
-        if line_scan_graphic.vector != self.__stem_controller.line_scan_vector:
-            line_scan_graphic.vector = self.__stem_controller.line_scan_vector
+        line_scan_vector = self.__stem_controller.line_scan_vector
+        if line_scan_vector and line_scan_graphic.vector != line_scan_vector:
+            line_scan_graphic.vector = Geometry.FloatPoint.make(line_scan_vector[0]), Geometry.FloatPoint.make(line_scan_vector[1])
 
     def _graphic_property_changed(self, line_scan_graphic: Graphics.Graphic, name: str) -> None:
         if name == "vector":
@@ -992,10 +993,10 @@ class DriftView(EventLoopMonitor):
         super().__init__(document_model, event_loop)
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__graphic_display_item : typing.Optional["DisplayItem.DisplayItem"] = None
+        self.__graphic_display_item : typing.Optional[DisplayItem.DisplayItem] = None
         self.__graphic : typing.Optional[Graphics.RectangleGraphic] = None
-        self.__graphic_property_changed_listener = None
-        self.__graphic_about_to_be_removed_listener = None
+        self.__graphic_property_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__graphic_about_to_be_removed_listener: typing.Optional[Event.EventListener] = None
         # note: these property changed listeners can all possibly be fired from a thread.
         self.__scan_context_data_items_changed_listener = stem_controller.scan_context_data_items_changed_event.listen(self.__scan_context_data_items_changed)
         self.__drift_channel_id_changed_listener = stem_controller.property_changed_event.listen(self.__drift_channel_id_changed)
@@ -1054,7 +1055,8 @@ class DriftView(EventLoopMonitor):
         else:
             drift_data_item = None
         # determine if a new graphic should exist and if it exists already
-        if self.__stem_controller.drift_channel_id and self.__stem_controller.drift_region and drift_data_item:
+        drift_region = self.__stem_controller.drift_region
+        if self.__stem_controller.drift_channel_id and drift_region and drift_data_item:
             drift_display_item = self.__document_model.get_display_item_for_data_item(drift_data_item)
             # remove the graphic if it already exists on the wrong display item
             if self.__graphic and (not drift_display_item or not self.__graphic in drift_display_item.graphics):
@@ -1062,8 +1064,8 @@ class DriftView(EventLoopMonitor):
             # it already exists on the correct display item, update it.
             if self.__graphic:
                 # only fire messages when something changes to avoid flickering, difficulty editing.
-                if self.__graphic.bounds != tuple(self.__stem_controller.drift_region):
-                    self.__graphic.bounds = tuple(self.__stem_controller.drift_region)
+                if self.__graphic.bounds != drift_region:
+                    self.__graphic.bounds = drift_region
                 if self.__graphic.rotation != self.__stem_controller.drift_rotation:
                     self.__graphic.rotation = self.__stem_controller.drift_rotation
             # otherwise create it if there is a display item for it
@@ -1071,7 +1073,7 @@ class DriftView(EventLoopMonitor):
                 drift_graphic = Graphics.RectangleGraphic()
                 drift_graphic.graphic_id = "drift"
                 drift_graphic.label = _("Drift")
-                drift_graphic.bounds = tuple(self.__stem_controller.drift_region)
+                drift_graphic.bounds = drift_region
                 drift_graphic.rotation = self.__stem_controller.drift_rotation
                 drift_graphic.is_bounds_constrained = True
                 drift_graphic.color = "#F0F"  # purple

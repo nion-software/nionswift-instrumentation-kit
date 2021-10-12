@@ -872,7 +872,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
-        if self.__shift_click_state == "shift":
+        if data_item and self.__shift_click_state == "shift":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape, logger)
@@ -881,7 +881,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
             return self.__mouse_pressed
-        if self.__shift_click_state == "tilt":
+        if data_item and self.__shift_click_state == "tilt":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, camera_shape, logger)

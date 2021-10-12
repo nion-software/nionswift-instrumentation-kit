@@ -129,16 +129,16 @@ ChannelSegment = str
 
 
 class Channel:
-    def __init__(self, *segments: ChannelSegment):
+    def __init__(self, *segments: ChannelSegment) -> None:
         self.__segments: typing.List[ChannelSegment] = list(segments)
 
     def __repr__(self) -> str:
         return ".".join(self.__segments)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return sum(hash(s) for s in self.__segments)
 
-    def __eq__(self, other):
+    def __eq__(self, other: typing.Any) -> bool:
         return isinstance(other, self.__class__) and other.segments == self.segments
 
     @property
@@ -1523,7 +1523,7 @@ class Mask:
         raise NotImplementedError
 
 
-AxisType = typing.Union[int, typing.Tuple[int]]
+AxisType = typing.Union[int, typing.Tuple[int, ...]]
 
 
 class SumOperator(DataStreamOperator):

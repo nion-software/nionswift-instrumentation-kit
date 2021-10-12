@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 # system imports
@@ -356,13 +357,13 @@ class PanelDelegate:
         self.__style_combo_box._widget.set_property("min-width", 100)
         items_binding = Binding.PropertyBinding(self.__styles_list_property_model, "value")
         items_binding.source_setter = None
-        self.__style_combo_box._widget.bind_items(items_binding)
+        typing.cast(UserInterfaceModule.ComboBoxWidget, self.__style_combo_box._widget).bind_items(items_binding)
         self.__style_combo_box.current_index = 0
 
         self.__acquire_button = ui.create_push_button_widget(_("Acquire"))
 
         self.__progress_bar = ui.create_progress_bar_widget()
-        self.__progress_bar.enabled = False
+        # self.__progress_bar.enabled = False
 
         self.__roi_description = ui.create_label_widget()
 
@@ -513,7 +514,7 @@ class PanelDelegate:
 
             async def update_state(is_idle: bool) -> None:
                 self.__acquire_button.text = _("Acquire") if is_idle else _("Cancel")
-                self.__progress_bar.enabled = not is_idle
+                # self.__progress_bar.enabled = not is_idle
                 update_context()  # update the cancel button
                 if is_idle and self.__progress_task:
                     self.__progress_task.cancel()

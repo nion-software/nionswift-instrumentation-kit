@@ -54,9 +54,11 @@ class DataItemDataChannel(Acquisition.DataChannel):
         self.__data_item_transaction_map.clear()
 
     def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
-        return self.__data_item_map[channel].data_and_metadata
+        data_and_metadata = self.__data_item_map[channel].data_and_metadata
+        assert data_and_metadata
+        return data_and_metadata
 
-    def get_data_item(self, channel: Acquisition.Channel) -> DataItem:
+    def get_data_item(self, channel: Acquisition.Channel) -> DataItem.DataItem:
         return self.__data_item_map[channel]
 
     def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:

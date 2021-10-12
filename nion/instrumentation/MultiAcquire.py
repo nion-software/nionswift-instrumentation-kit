@@ -110,7 +110,7 @@ class ScanDataChannel:
         if frames > 1 and not sum_frames:
             dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
         data_item.dimensional_calibrations = dimensional_calibrations
-        data_item_metadata = data_item.metadata
+        data_item_metadata = dict(data_item.metadata)
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
@@ -162,7 +162,10 @@ class ScanDataChannel:
                         data_and_metadata._set_data(summed_data)
                 else:
                     dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
-            self.__document_model.update_data_item_partial(data_item, data_metadata, data_and_metadata, src_slice, dst_slice)
+            # casting required until ellipsis type is worked out in mypy
+            self.__document_model.update_data_item_partial(data_item, data_metadata, data_and_metadata,
+                                                           typing.cast(typing.Sequence[slice], src_slice),
+                                                           typing.cast(typing.Sequence[slice], dst_slice))
 
     def stop(self) -> None:
         data_item_transactions = self.__data_item_transactions
@@ -184,7 +187,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                  stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None):
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
-        self.__data_item_transaction = None
+        self.__data_item_transaction: typing.Optional[DocumentModel.Transaction] = None
         self.__data_and_metadata = None
         self.__multi_acquire_parameters = multi_acquire_parameters
         self.__multi_acquire_settings = multi_acquire_settings
@@ -248,7 +251,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
         data_item.dimensional_calibrations = dimensional_calibrations
         data_item.intensity_calibration = data_intensity_calibration
-        data_item_metadata = data_item.metadata
+        data_item_metadata = dict(data_item.metadata)
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
@@ -364,9 +367,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                 existing_data = None
                 if isinstance(key_path, str):
                     key_path = [key_path]
-                sub_dict = self.__data_item.metadata
+                sub_dict = dict(self.__data_item.metadata)
                 for key in key_path:
-                    sub_dict = sub_dict.get(key)
+                    sub_dict = typing.cast(typing.Dict[str, typing.Any], sub_dict.get(key))
                     if sub_dict is None:
                         break
                 else:
@@ -376,7 +379,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                 sub_dict = metadata
                 for key in key_path:
                     parent = sub_dict
-                    sub_dict = sub_dict.get(key)
+                    sub_dict = typing.cast(typing.Dict[str, typing.Any], sub_dict.get(key))
                     if sub_dict is None:
                         break
                 else:
@@ -398,11 +401,11 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
         if frames > 1:
             if sum_frames:
-                existing_data = self.__data_item.data
-                if existing_data is not None:
+                data_item_data = self.__data_item.data
+                if data_item_data is not None:
                     data = data_and_metadata.data
                     assert data is not None
-                    existing_data[tuple(dst_slice)] += data[tuple(src_slice)]
+                    data_item_data[tuple(dst_slice)] += data[tuple(src_slice)]
             else:
                 dst_slice = [slice(self.current_frames_index, self.current_frames_index + 1)] + dst_slice
 

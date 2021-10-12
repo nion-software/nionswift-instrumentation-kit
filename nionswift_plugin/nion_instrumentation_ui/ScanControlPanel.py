@@ -24,6 +24,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
+from nion.ui import UserInterface
 from nion.ui import Widgets
 from nion.utils import Converter
 from nion.utils import Geometry
@@ -1210,7 +1211,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         rotation_row.add(rotation_group)
 
         def rotation_tracker_mouse_delta(mouse_delta: Geometry.IntPoint) -> None:
-            text = str(float(rotation_field.text) + mouse_delta.x / 20)
+            float_to_string_converter = Converter.FloatToStringConverter()
+            rotation = float_to_string_converter.convert_back(rotation_field.text) or 0.0
+            text = str(rotation + mouse_delta.x / 20)
             self.__state_controller.handle_rotation_changed(text)
 
         rotation_tracker.on_mouse_delta = rotation_tracker_mouse_delta
@@ -1233,10 +1236,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             scan_controller.drift_settings = drift_settings
             drift_settings_value.request_refocus()
 
-        def drift_unit_changed(index: int) -> None:
-            drift_settings = copy.copy(scan_controller.drift_settings)
-            drift_settings.interval_units = stem_controller.DriftIntervalUnit(index)
-            scan_controller.drift_settings = drift_settings
+        def drift_unit_changed(index: typing.Optional[int]) -> None:
+            if index is not None:
+                drift_settings = copy.copy(scan_controller.drift_settings)
+                drift_settings.interval_units = stem_controller.DriftIntervalUnit(index)
+                scan_controller.drift_settings = drift_settings
 
         drift_settings_value.on_editing_finished = drift_value_edited
         drift_settings_unit.on_current_index_changed = drift_unit_changed
@@ -1437,7 +1441,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             channel_id = data_channel.channel_id
             name = data_channel.name
 
-            thumbnail_column = thumbnail_group.children[channel_index]
+            thumbnail_column = typing.cast(UserInterface.BoxWidget, thumbnail_group.children[channel_index])
             thumbnail_column.remove_all()
 
             actual_channel_id = channel_id if not is_subscan_channel else channel_id + "_subscan"

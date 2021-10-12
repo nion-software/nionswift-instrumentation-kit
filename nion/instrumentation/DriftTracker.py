@@ -45,12 +45,13 @@ class DriftLogger:
             data_item.title = f"Drift Log"
             self.__document_model.append_data_item(data_item)
             display_item = self.__document_model.get_display_item_for_data_item(data_item)
-            display_item.display_type = "line_plot"
-            display_item.append_display_data_channel_for_data_item(data_item)
-            display_item.append_display_data_channel_for_data_item(data_item)
-            display_item._set_display_layer_properties(0, label=_("x"), stroke_color=display_item.get_display_layer_property(0, "fill_color"), fill_color=None)
-            display_item._set_display_layer_properties(1, label=_("y"), stroke_color=display_item.get_display_layer_property(1, "fill_color"), fill_color=None)
-            display_item._set_display_layer_properties(2, label=_("m"), stroke_color=display_item.get_display_layer_property(2, "fill_color"), fill_color=None)
+            if display_item:
+                display_item.display_type = "line_plot"
+                display_item.append_display_data_channel_for_data_item(data_item)
+                display_item.append_display_data_channel_for_data_item(data_item)
+                display_item._set_display_layer_properties(0, label=_("x"), stroke_color=display_item.get_display_layer_property(0, "fill_color"), fill_color=None)
+                display_item._set_display_layer_properties(1, label=_("y"), stroke_color=display_item.get_display_layer_property(1, "fill_color"), fill_color=None)
+                display_item._set_display_layer_properties(2, label=_("m"), stroke_color=display_item.get_display_layer_property(2, "fill_color"), fill_color=None)
             self.__data_item = data_item
 
     def __update_drift_log_data_item(self, delta_nm_data: numpy.ndarray) -> None:
