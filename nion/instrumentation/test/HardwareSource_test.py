@@ -61,6 +61,7 @@ class SimpleHardwareSource(HardwareSource.HardwareSource):
         self.add_data_channel()
         self.sleep = sleep
         self.image = numpy.zeros(256)
+        self.exposure = 0.0
 
     def _create_acquisition_view_task(self) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(True, self.sleep, self.image)
@@ -108,6 +109,7 @@ class LinePlotHardwareSource(HardwareSource.HardwareSource):
             self.add_channel_processor(0, HardwareSource.SumProcessor(((0.0, 0.0), (1.0, 1.0))))
         self.sleep = sleep
         self.shape = shape
+        self.exposure = 0.0
 
     def _create_acquisition_view_task(self) -> LinePlotAcquisitionTask:
         return LinePlotAcquisitionTask(self.shape, True, self.sleep)
@@ -124,6 +126,7 @@ class SummedHardwareSource(HardwareSource.HardwareSource):
         self.add_channel_processor(0, HardwareSource.SumProcessor(((0.0, 0.0), (1.0, 1.0))))
         self.sleep = sleep
         self.image = numpy.zeros((256, 256))
+        self.exposure = 0.0
 
     def _create_acquisition_view_task(self) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(True, self.sleep, self.image)
@@ -232,6 +235,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.suspended_ref = [False]
         self.suspend_event = threading.Event()
         self.image = numpy.zeros((256, 256))
+        self.exposure = 0.0
+        self.stages_per_frame = 1
+        self.blanked = False
+        self.positioned = False
 
     @property
     def scanning(self):
@@ -508,7 +515,7 @@ class TestHardwareSourceClass(unittest.TestCase):
     def __simple_test_context(self):
 
         class SimpleTestContext(TestContext.MemoryProfileContext):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.document_controller = self.create_document_controller(auto_close=False)
                 self.document_model = self.document_controller.document_model
@@ -516,7 +523,7 @@ class TestHardwareSourceClass(unittest.TestCase):
                 self.hardware_source.exposure = 0.01
                 HardwareSource.HardwareSourceManager().register_hardware_source(self.hardware_source)
 
-            def close(self):
+            def close(self) -> None:
                 self.document_controller.close()
                 super().close()
 
@@ -525,7 +532,7 @@ class TestHardwareSourceClass(unittest.TestCase):
     def __summed_test_context(self):
 
         class SummedTestContext(TestContext.MemoryProfileContext):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.document_controller = self.create_document_controller()
                 self.document_model = self.document_controller.document_model
@@ -538,7 +545,7 @@ class TestHardwareSourceClass(unittest.TestCase):
     def __line_plot_test_context(self, shape, processed=False):
 
         class LinePlotTestContext(TestContext.MemoryProfileContext):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.document_controller = self.create_document_controller()
                 self.document_model = self.document_controller.document_model
@@ -551,7 +558,7 @@ class TestHardwareSourceClass(unittest.TestCase):
     def __scan_test_context(self):
 
         class ScanTestContext(TestContext.MemoryProfileContext):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.document_controller = self.create_document_controller()
                 self.document_model = self.document_controller.document_model

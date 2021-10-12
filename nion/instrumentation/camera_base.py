@@ -530,9 +530,9 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
 
 class Mask:
-    def __init__(self):
-        self._layers = list()
-        self.name = None
+    def __init__(self) -> None:
+        self._layers: typing.List[typing.Dict[str, typing.Any]] = list()
+        self.name: typing.Optional[str] = None
         self.uuid = uuid.uuid4()
 
     def add_layer(self, graphic: Graphics.Graphic, value: typing.Union[float, numpy.ndarray], inverted: bool = False):
@@ -630,7 +630,7 @@ class CameraSettings:
     TODO: write about threading (events must be triggered on main thread)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # these events must be defined
         self.current_frame_parameters_changed_event = Event.Event()
         self.record_frame_parameters_changed_event = Event.Event()
@@ -647,7 +647,7 @@ class CameraSettings:
         # the list of possible modes should be defined here
         self.modes = [str()]
 
-    def close(self):
+    def close(self) -> None:
         pass
 
     def initialize(self, configuration_location: pathlib.Path = None, event_loop: asyncio.AbstractEventLoop = None, **kwargs):
@@ -830,28 +830,28 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
         periodic_logger_fn = getattr(self.__camera, "periodic_logger_fn", None)
         self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
 
-    def close(self):
+    def close(self) -> None:
         Process.close_event_loop(self.__event_loop)
-        self.__event_loop = None
+        self.__event_loop = typing.cast(typing.Any, None)
         self.__periodic_logger_fn = None
         super().close()
         if self.__settings_changed_event_listener:
             self.__settings_changed_event_listener.close()
             self.__settings_changed_event_listener = None
         self.__profile_changed_event_listener.close()
-        self.__profile_changed_event_listener = None
+        self.__profile_changed_event_listener = typing.cast(typing.Any, None)
         self.__frame_parameters_changed_event_listener.close()
-        self.__frame_parameters_changed_event_listener = None
+        self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
         self.__current_frame_parameters_changed_event_listener.close()
-        self.__current_frame_parameters_changed_event_listener = None
+        self.__current_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
         self.__record_frame_parameters_changed_event_listener.close()
-        self.__record_frame_parameters_changed_event_listener = None
+        self.__record_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
         self.__camera_settings.close()
-        self.__camera_settings = None
+        self.__camera_settings = typing.cast(typing.Any, None)
         camera_close_method = getattr(self.__camera, "close", None)
         if callable(camera_close_method):
             camera_close_method()
-        self.__camera = None
+        self.__camera = typing.cast(typing.Any, None)
 
     def periodic(self):
         self.__event_loop.stop()
@@ -1198,7 +1198,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource):
 
         class CameraFacade:
 
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
         return CameraFacade()
@@ -1260,7 +1260,7 @@ class CameraFrameParameters(dict):
     def __copy__(self):
         return self.__class__(copy.copy(self.as_dict()))
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> CameraFrameParameters:
         deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
         memo[id(self)] = deepcopy
         return deepcopy

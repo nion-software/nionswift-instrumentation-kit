@@ -28,6 +28,7 @@ if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
 
+_VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
 
 _ = gettext.gettext
 
@@ -57,7 +58,7 @@ class DriftIntervalUnit(enum.IntEnum):
 
 
 class DriftCorrectionSettings:
-    def __init__(self):
+    def __init__(self) -> None:
         self.interval = 0
         self.interval_units = DriftIntervalUnit.FRAME
 
@@ -76,16 +77,19 @@ class AxisDescription:
 
 
 class ScanContext:
-    def __init__(self):
-        self.size = None
-        self.center_nm = None
-        self.fov_nm = None
-        self.rotation_rad = None
+    def __init__(self) -> None:
+        self.size: typing.Optional[Geometry.IntSize] = None
+        self.center_nm: typing.Optional[Geometry.FloatPoint] = None
+        self.fov_nm: typing.Optional[float] = None
+        self.rotation_rad: typing.Optional[float] = None
 
     def __repr__(self) -> str:
-        return f"{tuple(self.size)} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg" if self.fov_nm else "NO CONTEXT"
+        if self.fov_nm and self.size and self.rotation_rad:
+            return f"{self.size} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg"
+        else:
+            return "NO CONTEXT"
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: typing.Any) -> bool:
         if other is None:
             return False
         if not isinstance(other, self.__class__):
@@ -100,9 +104,9 @@ class ScanContext:
             return False
         return True
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ScanContext:
         cls = self.__class__
-        result = cls.__new__(cls)
+        result = typing.cast(ScanContext, cls.__new__(cls))
         memo[id(self)] = result
         result.size = self.size
         result.center_nm = self.center_nm
@@ -127,15 +131,20 @@ class ScanContext:
         self.rotation_rad = rotation_rad
 
     @property
-    def fov_size_nm(self) -> Geometry.FloatSize:
-        if self.size.aspect_ratio > 1.0:
-            return Geometry.FloatSize(height=self.fov_nm / self.size.aspect_ratio, width=self.fov_nm)
+    def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
+        if self.size and self.fov_nm is not None:
+            if self.size.aspect_ratio > 1.0:
+                return Geometry.FloatSize(height=self.fov_nm / self.size.aspect_ratio, width=self.fov_nm)
+            else:
+                return Geometry.FloatSize(height=self.fov_nm, width=self.fov_nm * self.size.aspect_ratio)
         else:
-            return Geometry.FloatSize(height=self.fov_nm, width=self.fov_nm * self.size.aspect_ratio)
+            return None
 
     @property
     def calibration(self) -> Calibration.Calibration:
-        return Calibration.Calibration(scale=self.fov_nm / max(self.size.width, self.size.height), units="nm")
+        if self.size and self.fov_nm is not None:
+            return Calibration.Calibration(scale=self.fov_nm / max(self.size.width, self.size.height), units="nm")
+        return Calibration.Calibration()
 
 
 class STEMController(Observable.Observable):
@@ -156,20 +165,20 @@ class STEMController(Observable.Observable):
     probe_state_changed_event (probe_state, probe_position)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.__probe_position = None
+        self.__probe_position: typing.Optional[Geometry.FloatPoint] = None
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext()
         self.probe_state_changed_event = Event.Event()
         self.__subscan_state = SubscanState.INVALID
-        self.__subscan_region = None
+        self.__subscan_region: typing.Optional[Geometry.FloatRect] = None
         self.__subscan_rotation = 0.0
         self.__line_scan_state = LineScanState.INVALID
-        self.__line_scan_vector = None
-        self.__drift_channel_id = None
-        self.__drift_region = None
+        self.__line_scan_vector: typing.Optional[_VectorType] = None
+        self.__drift_channel_id: typing.Optional[str] = None
+        self.__drift_region: typing.Optional[Geometry.FloatRect] = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
         self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
@@ -179,8 +188,8 @@ class STEMController(Observable.Observable):
         self.__eels_camera: typing.Optional[HardwareSource.HardwareSource] = None
         self.__scan_controller: typing.Optional[HardwareSource.HardwareSource] = None
 
-    def close(self):
-        self.__scan_context_channel_map = None
+    def close(self) -> None:
+        self.__scan_context_channel_map = typing.cast(typing.Any, None)
 
     def reset(self) -> None:
         self.__probe_position = None
@@ -268,8 +277,7 @@ class STEMController(Observable.Observable):
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
-        region_tuple = self.__subscan_region
-        return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
+        return self.__subscan_region
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
@@ -298,11 +306,11 @@ class STEMController(Observable.Observable):
             self.notify_property_changed("line_scan_state")
 
     @property
-    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
+    def line_scan_vector(self) -> typing.Optional[_VectorType]:
         return self.__line_scan_vector
 
     @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+    def line_scan_vector(self, value: typing.Optional[_VectorType]) -> None:
         if self.__line_scan_vector != value:
             self.__line_scan_vector = value
             self.notify_property_changed("line_scan_vector")
@@ -319,8 +327,7 @@ class STEMController(Observable.Observable):
 
     @property
     def drift_region(self) -> typing.Optional[Geometry.FloatRect]:
-        region_tuple = self.__drift_region
-        return Geometry.FloatRect.make(region_tuple) if region_tuple is not None else None
+        return self.__drift_region
 
     @drift_region.setter
     def drift_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
@@ -576,7 +583,7 @@ class GraphicSetController:
         self.__graphic_trackers : typing.List[typing.Tuple[Graphics.Graphic, Event.EventListener, Event.EventListener, Event.EventListener]] = list()
         self.__handler = handler
 
-    def close(self):
+    def close(self) -> None:
         for _, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
             graphic_property_changed_listener.close()
             remove_region_graphic_event_listener.close()
@@ -768,23 +775,23 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__document_model.register_implicit_dependency(self)
 
-    def close(self):
+    def close(self) -> None:
         self._mark_closed()
         if self.__probe_state_changed_listener:
             self.__probe_state_changed_listener.close()
-            self.__probe_state_changed_listener = None
+            self.__probe_state_changed_listener = typing.cast(typing.Any, None)
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
-        self.__graphic_set = None
+        self.__graphic_set = typing.cast(typing.Any, None)
         self.__scan_display_items_model.close()
-        self.__scan_display_items_model = None
-        self.__document_model = None
-        self.__stem_controller = None
+        self.__scan_display_items_model = typing.cast(typing.Any, None)
+        self.__document_model = typing.cast(typing.Any, None)
+        self.__stem_controller = typing.cast(typing.Any, None)
 
     def _unlisten(self) -> None:
         if self.__probe_state_changed_listener:
             self.__probe_state_changed_listener.close()
-            self.__probe_state_changed_listener = None
+            self.__probe_state_changed_listener = typing.cast(typing.Any, None)
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # thread safe. move actual call to main thread using the event loop.
@@ -841,22 +848,22 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__subscan_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
         self.__document_model.register_implicit_dependency(self)
 
-    def close(self):
+    def close(self) -> None:
         self._mark_closed()
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
-        self.__graphic_set = None
+        self.__graphic_set = typing.cast(typing.Any, None)
         self.__scan_display_items_model.close()
-        self.__scan_display_items_model = None
-        self.__document_model = None
-        self.__stem_controller = None
+        self.__scan_display_items_model = typing.cast(typing.Any, None)
+        self.__document_model = typing.cast(typing.Any, None)
+        self.__stem_controller = typing.cast(typing.Any, None)
 
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__subscan_region_changed_listener.close()
-        self.__subscan_region_changed_listener = typing.cast(Event.EventListener, None)
+        self.__subscan_region_changed_listener = typing.cast(typing.Any, None)
         self.__subscan_rotation_changed_listener.close()
-        self.__subscan_rotation_changed_listener = typing.cast(Event.EventListener, None)
+        self.__subscan_rotation_changed_listener = typing.cast(typing.Any, None)
 
     # methods for handling changes to the subscan region
 
@@ -926,20 +933,20 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__line_scan_vector_changed_listener = stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
         self.__document_model.register_implicit_dependency(self)
 
-    def close(self):
+    def close(self) -> None:
         self._mark_closed()
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
-        self.__graphic_set = None
+        self.__graphic_set = typing.cast(typing.Any, None)
         self.__scan_display_items_model.close()
-        self.__scan_display_items_model = None
-        self.__document_model = None
-        self.__stem_controller = None
+        self.__scan_display_items_model = typing.cast(typing.Any, None)
+        self.__document_model = typing.cast(typing.Any, None)
+        self.__stem_controller = typing.cast(typing.Any, None)
 
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__line_scan_vector_changed_listener.close()
-        self.__line_scan_vector_changed_listener = typing.cast(Event.EventListener, None)
+        self.__line_scan_vector_changed_listener = typing.cast(typing.Any, None)
 
     # methods for handling changes to the line scan region
 
@@ -1003,7 +1010,7 @@ class DriftView(EventLoopMonitor):
         self.__drift_region_changed_listener = stem_controller.property_changed_event.listen(self.__drift_region_changed)
         self.__drift_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__drift_rotation_changed)
 
-    def close(self):
+    def close(self) -> None:
         self._mark_closed()
         if self.__graphic_property_changed_listener:
             self.__graphic_property_changed_listener.close()
@@ -1013,19 +1020,19 @@ class DriftView(EventLoopMonitor):
             self.__graphic_about_to_be_removed_listener = None
         self.__graphic_display_item = None
         self.__graphic = None
-        self.__document_model = None
-        self.__stem_controller = None
+        self.__document_model = typing.cast(typing.Any, None)
+        self.__stem_controller = typing.cast(typing.Any, None)
 
     def _unlisten(self) -> None:
         # unlisten to the event loop dependent listeners
         self.__drift_region_changed_listener.close()
-        self.__drift_region_changed_listener = typing.cast(Event.EventListener, None)
+        self.__drift_region_changed_listener = typing.cast(typing.Any, None)
         self.__drift_rotation_changed_listener.close()
-        self.__drift_rotation_changed_listener = typing.cast(Event.EventListener, None)
+        self.__drift_rotation_changed_listener = typing.cast(typing.Any, None)
         self.__drift_channel_id_changed_listener.close()
-        self.__drift_channel_id_changed_listener = typing.cast(Event.EventListener, None)
+        self.__drift_channel_id_changed_listener = typing.cast(typing.Any, None)
         self.__scan_context_data_items_changed_listener.close()
-        self.__scan_context_data_items_changed_listener = None
+        self.__scan_context_data_items_changed_listener = typing.cast(typing.Any, None)
 
     def __scan_context_data_items_changed(self) -> None:
         # must be thread safe
@@ -1126,7 +1133,7 @@ class ScanContextController:
         for instrument in HardwareSource.HardwareSourceManager().instruments:
             self.register_instrument(instrument)
 
-    def close(self):
+    def close(self) -> None:
         # close will be called when the extension is unloaded. in turn, close any references so they get closed. this
         # is not strictly necessary since the references will be deleted naturally when this object is deleted.
         for instrument in HardwareSource.HardwareSourceManager().instruments:

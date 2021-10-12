@@ -45,9 +45,9 @@ class AcquireController(metaclass=Utility.Singleton):
         algorithms used to control them.
     """
 
-    def __init__(self):
-        super(AcquireController, self).__init__()
-        self.__acquire_thread = None
+    def __init__(self) -> None:
+        super().__init__()
+        self.__acquire_thread: typing.Optional[threading.Thread] = None
 
     def start_threaded_acquire_and_sum(self, stem_controller, camera,
                                        number_frames: int,
@@ -473,7 +473,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
         self.__workspace_controller = None
 
-    def close(self):
+    def close(self) -> None:
         self.__eels_camera_choice.close()
         self.__eels_camera_choice = None
         self.__eels_camera_choice_model.close()

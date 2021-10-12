@@ -35,7 +35,7 @@ class WidgetWrapper:
 
 class Controller:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.state = Model.PropertyModel("idle")
         self.frame_count_model = Model.PropertyModel(20)
         self.progress_model = Model.PropertyModel(0)
@@ -43,7 +43,7 @@ class Controller:
         self.__grab_thread = None
         self.__record_thread = None
 
-    def close(self):
+    def close(self) -> None:
         self.cancel_event.set()
         if self.__grab_thread:
             self.__grab_thread.join()
@@ -52,11 +52,11 @@ class Controller:
             self.__record_thread.join()
             self.__record_thread = None
         self.state.close()
-        self.state = None
+        self.state = typing.cast(typing.Any, None)
         self.frame_count_model.close()
-        self.frame_count_model = None
+        self.frame_count_model = typing.cast(typing.Any, None)
         self.progress_model.close()
-        self.progress_model = None
+        self.progress_model = typing.cast(typing.Any, None)
 
     async def grab(self, document_controller, hardware_source, do_acquire):
         # this is an async method meaning that it will execute until it calls await, at which time
@@ -317,7 +317,7 @@ class PanelDelegate:
 
         return column
 
-    def close(self):
+    def close(self) -> None:
         # close anything created in `create_panel_widget`.
         # called when the panel closes, not when the delegate closes.
         if self.__scan_hardware_changed_event_listener:
@@ -347,7 +347,7 @@ class AcquisitionRecorderExtension:
         # be sure to keep a reference or it will be closed immediately.
         self.__panel_ref = api.create_panel(PanelDelegate(api))
 
-    def close(self):
+    def close(self) -> None:
         # close will be called when the extension is unloaded. in turn, close any references so they get closed. this
         # is not strictly necessary since the references will be deleted naturally when this object is deleted.
         # self.__menu_item_ref.close()

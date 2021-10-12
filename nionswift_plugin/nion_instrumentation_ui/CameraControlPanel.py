@@ -116,7 +116,7 @@ class CameraControlStateController:
         self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
         self.on_capture_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_display_new_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
-        self.on_camera_current_changed: typing.Optional[typing.Callable[[float], None]] = None
+        self.on_camera_current_changed: typing.Optional[typing.Callable[[typing.Optional[float]], None]] = None
         self.on_log_messages: typing.Optional[typing.Callable[[typing.List[str], typing.List[typing.Mapping[str, typing.Any]]], None]] = None
 
         self.__captured_xdatas_available_event = None
@@ -128,13 +128,13 @@ class CameraControlStateController:
         self.data_item_reference = document_model.get_data_item_reference(self.__camera_hardware_source.hardware_source_id)
         self.processed_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__camera_hardware_source.hardware_source_id, "summed"))
 
-    def close(self):
+    def close(self) -> None:
         if self.__captured_xdatas_available_event:
             self.__captured_xdatas_available_event.close()
             self.__captured_xdatas_available_event = None
         if self.__xdatas_available_event:
             self.__xdatas_available_event.close()
-            self.__xdatas_available_event = None
+            self.__xdatas_available_event = typing.cast(typing.Any, None)
         if self.__profile_changed_event_listener:
             self.__profile_changed_event_listener.close()
             self.__profile_changed_event_listener = None
@@ -161,29 +161,29 @@ class CameraControlStateController:
         self.on_capture_button_state_changed = None
         self.on_display_new_data_item = None
         self.on_log_messages = None
-        self.__camera_hardware_source = None
+        self.__camera_hardware_source = typing.cast(typing.Any, None)
 
-    def _reset_camera_current(self):
+    def _reset_camera_current(self) -> None:
         self.__last_camera_current_time = 0
 
-    def __update_play_button_state(self):
+    def __update_play_button_state(self) -> None:
         enabled = self.__camera_hardware_source is not None
         if callable(self.on_play_button_state_changed):
             self.on_play_button_state_changed(enabled, "pause" if self.is_playing else "play")
         if enabled and not self.is_playing and callable(self.on_camera_current_changed):
             self.on_camera_current_changed(None)
 
-    def __update_abort_button_state(self):
+    def __update_abort_button_state(self) -> None:
         if callable(self.on_abort_button_state_changed):
             self.on_abort_button_state_changed(self.is_playing, self.is_playing)
         if callable(self.on_capture_button_state_changed):
             self.on_capture_button_state_changed(self.is_playing, not self.__captured_xdatas_available_event)
 
-    def __update_buttons(self):
+    def __update_buttons(self) -> None:
         self.__update_play_button_state()
         self.__update_abort_button_state()
 
-    def __update_profile_state(self, profile_label):
+    def __update_profile_state(self, profile_label) -> None:
         if callable(self.on_profile_changed):
             self.on_profile_changed(profile_label)
 
@@ -364,7 +364,7 @@ class CameraControlStateController:
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
     def __init__(self, icon_id):
-        super(IconCanvasItem, self).__init__()
+        super().__init__()
         self.__icon_id = icon_id
         self.wants_mouse_events = True
         self.__mouse_inside = False
@@ -379,9 +379,9 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.stroke_width = 3.0
         self.on_button_clicked = None
 
-    def close(self):
+    def close(self) -> None:
         self.on_button_clicked = None
-        super(IconCanvasItem, self).close()
+        super().close()
 
     def mouse_entered(self):
         self.__mouse_inside = True
@@ -473,7 +473,7 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.on_button_clicked: typing.Optional[typing.Callable[[], None]] = None
         self.border_enabled = False
 
-    def close(self):
+    def close(self) -> None:
         self.on_button_clicked = None
         super().close()
 
@@ -815,7 +815,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             else:
                 play_state_label.text = map_channel_state_to_text["stopped"]
 
-        def camera_current_changed(camera_current: float) -> None:
+        def camera_current_changed(camera_current: typing.Optional[float]) -> None:
             if camera_current:
                 camera_current_int = int(camera_current * 1e12) if math.isfinite(camera_current) else 0
                 camera_current_label.text = str(camera_current_int) + _("pA")
@@ -849,18 +849,18 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.handle_periodic()
         super().periodic()
 
-    def close(self):
+    def close(self) -> None:
         self.__configuration_dialog_close_listener = None
         self.__key_pressed_event_listener.close()
-        self.__key_pressed_event_listener = None
+        self.__key_pressed_event_listener = typing.cast(typing.Any, None)
         self.__key_released_event_listener.close()
-        self.__key_released_event_listener = None
+        self.__key_released_event_listener = typing.cast(typing.Any, None)
         self.__image_display_mouse_pressed_event_listener.close()
-        self.__image_display_mouse_pressed_event_listener = None
+        self.__image_display_mouse_pressed_event_listener = typing.cast(typing.Any, None)
         self.__image_display_mouse_released_event_listener.close()
-        self.__image_display_mouse_released_event_listener = None
+        self.__image_display_mouse_released_event_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
-        self.__state_controller = None
+        self.__state_controller = typing.cast(typing.Any, None)
         super().close()
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
@@ -1109,7 +1109,7 @@ class CameraDisplayPanelController:
 
         show_processed_checkbox_changed(checkstate)
 
-    def close(self):
+    def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = None
         self.__state_controller.close()
@@ -1161,7 +1161,7 @@ def run():
             camera_control_panels[hardware_source.hardware_source_id] = panel_id
 
             class CameraDisplayPanelControllerFactory:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.priority = 2
 
                 def build_menu(self, display_type_menu, selected_display_panel):

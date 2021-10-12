@@ -151,15 +151,15 @@ class ComboBoxHandler:
 
     def close(self) -> None:
         self.__selected_component_index_listener.close()
-        self.__selected_component_index_listener = typing.cast(Event.EventListener, None)
+        self.__selected_component_index_listener = typing.cast(typing.Any, None)
         self.selected_item_value_stream.remove_ref()
-        self.selected_item_value_stream = typing.cast(Stream.ValueStream, None)
+        self.selected_item_value_stream = typing.cast(typing.Any, None)
         self.selected_index_model.close()
-        self.selected_index_model = typing.cast(Model.PropertyModel[int], None)
+        self.selected_index_model = typing.cast(typing.Any, None)
         self.item_list.close()
-        self.item_list = typing.cast(ListModel.ListPropertyModel, None)
+        self.item_list = typing.cast(typing.Any, None)
         self.sorted_items.close()
-        self.sorted_items = typing.cast(ListModel.FilteredListModel, None)
+        self.sorted_items = typing.cast(typing.Any, None)
 
     @property
     def current_item(self) -> typing.Any:
@@ -245,9 +245,9 @@ class ComponentComboBoxHandler:
 
     def close(self) -> None:
         self.__selected_component_id_model.close()
-        self.__selected_component_id_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__selected_component_id_model = typing.cast(typing.Any, None)
         self.__components.close()
-        self.__components = typing.cast(ListModel.ListModel[ComponentHandler], None)
+        self.__components = typing.cast(typing.Any, None)
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
         # this is called to construct contained declarative component handlers within this handler.
@@ -468,8 +468,8 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
 
     def close(self) -> None:
         self.__selection_storage_model.close()
-        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
-        self.__control_handlers = typing.cast(typing.Dict[str, SeriesControlHandler], None)
+        self.__selection_storage_model = typing.cast(typing.Any, None)
+        self.__control_handlers = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
@@ -600,7 +600,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
 
     def close(self) -> None:
         self.__selection_storage_model.close()
-        self.__selection_storage_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__selection_storage_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container=None, item=None, **kwargs):
@@ -830,7 +830,7 @@ class HardwareSourceHandler(Observable.Observable):
 
     def close(self) -> None:
         self.__listener.close()
-        self.__listener = typing.cast(Event.EventListener, None)
+        self.__listener = typing.cast(typing.Any, None)
 
     @property
     def hardware_source_display_names(self) -> typing.List[str]:
@@ -894,11 +894,11 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
 
     def close(self) -> None:
         self.__hardware_sources_list_changed_listener.close()
-        self.__hardware_sources_list_changed_listener = typing.cast(Event.EventListener, None)
+        self.__hardware_sources_list_changed_listener = typing.cast(typing.Any, None)
         self.__hardware_source_changed_listener.close()
-        self.__hardware_source_changed_listener = typing.cast(Event.EventListener, None)
-        self.__channel_model = typing.cast(Model.PropertyModel[str], None)
-        self.__hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
+        self.__hardware_source_changed_listener = typing.cast(typing.Any, None)
+        self.__channel_model = typing.cast(typing.Any, None)
+        self.__hardware_source_choice = typing.cast(typing.Any, None)
 
     @property
     def channel_descriptions(self) -> typing.List[HardwareSourceChannelDescription]:
@@ -1026,13 +1026,13 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
             self.__scan_context_changed_listener.close()
             self.__scan_context_changed_listener = None
         self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = typing.cast(Event.EventListener, None)
+        self.__hardware_source_stream_listener = typing.cast(typing.Any, None)
         self.__scan_width_changed_listener.close()
-        self.__scan_width_changed_listener = typing.cast(Event.EventListener, None)
+        self.__scan_width_changed_listener = typing.cast(typing.Any, None)
         self.__scan_hardware_source_stream.remove_ref()
-        self.__scan_hardware_source_stream = typing.cast(Stream.AbstractStream[HardwareSource.HardwareSource], None)
+        self.__scan_hardware_source_stream = typing.cast(typing.Any, None)
         self.__camera_hardware_source_stream.remove_ref()
-        self.__camera_hardware_source_stream = typing.cast(Stream.AbstractStream[HardwareSource.HardwareSource], None)
+        self.__camera_hardware_source_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     def __hardware_source_stream_changed(self, hardware_source: HardwareSource.HardwareSource) -> None:
@@ -1060,51 +1060,55 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
             scan_width = self.__scan_width_model.value
             assert scan_width is not None
 
+            scan_context_size = scan_context.size
             if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
+                assert scan_context_size
                 calibration = scan_context.calibration
                 start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
                 end = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[1])
-                length = int(Geometry.distance(start, end) * scan_context.size.height)
-                max_dim = max(scan_context.size.width, scan_context.size.height)
+                length = int(Geometry.distance(start, end) * scan_context_size.height)
+                max_dim = max(scan_context_size.width, scan_context_size.height)
                 length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, max_dim), samples=max_dim)
                 line_str = _("Line Scan")
                 context_text = f"{line_str} {length_str}"
-                scan_length = max(self.__scan_width_model.value or 0, 1)
+                scan_length = max(scan_width or 0, 1)
                 scan_text = f"{scan_length} px"
                 scan_size = Geometry.IntSize(height=1, width=scan_length)
                 drift_interval_lines = 0
                 self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines))
             elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
+                assert scan_context_size
                 calibration = scan_context.calibration
-                width = scan_hardware_source.subscan_region.width * scan_context.size.width
-                height = scan_hardware_source.subscan_region.height * scan_context.size.height
+                width = scan_hardware_source.subscan_region.width * scan_context_size.width
+                height = scan_hardware_source.subscan_region.height * scan_context_size.height
                 width_str = calibration.convert_to_calibrated_size_str(width,
-                                                                       value_range=(0, scan_context.size.width),
-                                                                       samples=scan_context.size.width)
+                                                                       value_range=(0, scan_context_size.width),
+                                                                       samples=scan_context_size.width)
                 height_str = calibration.convert_to_calibrated_size_str(height,
-                                                                        value_range=(0, scan_context.size.height),
-                                                                        samples=scan_context.size.height)
+                                                                        value_range=(0, scan_context_size.height),
+                                                                        samples=scan_context_size.height)
                 rect_str = _("Subscan")
                 context_text = f"{rect_str} {width_str} x {height_str}"
-                scan_height = int(self.__scan_width_model.value * height / width)
+                scan_height = int(scan_width * height / width)
                 scan_text = f"{scan_width} x {scan_height}"
                 scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
                 drift_interval_lines = drift_lines
                 self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines))
             elif scan_context.is_valid:
+                assert scan_context_size
                 calibration = scan_context.calibration
-                width = scan_context.size.width
-                height = scan_context.size.height
+                width = scan_context_size.width
+                height = scan_context_size.height
                 width_str = calibration.convert_to_calibrated_size_str(width,
-                                                                       value_range=(0, scan_context.size.width),
-                                                                       samples=scan_context.size.width)
+                                                                       value_range=(0, scan_context_size.width),
+                                                                       samples=scan_context_size.width)
                 height_str = calibration.convert_to_calibrated_size_str(height,
-                                                                        value_range=(0, scan_context.size.height),
-                                                                        samples=scan_context.size.height)
+                                                                        value_range=(0, scan_context_size.height),
+                                                                        samples=scan_context_size.height)
                 data_str = _("Context Scan")
                 context_text = f"{data_str} {width_str} x {height_str}"
-                scan_height = int(self.__scan_width_model.value * height / width)
+                scan_height = int(scan_width * height / width)
                 scan_text = f"{scan_width} x {scan_height}"
                 scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
@@ -1140,7 +1144,7 @@ class CameraExposureValueStream(Stream.ValueStream[float]):
             self.__frame_parameters_changed_listener.close()
             self.__frame_parameters_changed_listener = None
         self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = typing.cast(Event.EventListener, None)
+        self.__hardware_source_stream_listener = typing.cast(typing.Any, None)
         self.__hardware_source_stream.remove_ref()
         super().about_to_delete()
 
@@ -1211,11 +1215,11 @@ class CameraDetailsHandler(Observable.Observable):
 
     def close(self) -> None:
         self.__exposure_model_listener.close()
-        self.__exposure_model_listener = typing.cast(Event.EventListener, None)
+        self.__exposure_model_listener = typing.cast(typing.Any, None)
         self.exposure_model.close()
-        self.exposure_model = typing.cast(Model.StreamValueModel, None)
+        self.exposure_model = typing.cast(typing.Any, None)
         self.exposure_value_stream.remove_ref()
-        self.exposure_value_stream = typing.cast(CameraExposureValueStream, None)
+        self.exposure_value_stream = typing.cast(typing.Any, None)
 
     def __exposure_changed(self, k: str) -> None:
         if k == "value":
@@ -1340,25 +1344,25 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
 
     def close(self) -> None:
         self.acquire_valid_value_stream.remove_ref()
-        self.acquire_valid_value_stream = typing.cast(Stream.MapStream, None)
+        self.acquire_valid_value_stream = typing.cast(typing.Any, None)
         self.scan_value_model.close()
-        self.scan_value_model = typing.cast(Model.StreamValueModel, None)
+        self.scan_value_model = typing.cast(typing.Any, None)
         self.__scan_context_description_value_stream.remove_ref()
-        self.__scan_context_description_value_stream = typing.cast(SynchronizedScanDescriptionValueStream, None)
+        self.__scan_context_description_value_stream = typing.cast(typing.Any, None)
         self.scan_context_value_model.close()
-        self.scan_context_value_model = typing.cast(Model.StreamValueModel, None)
+        self.scan_context_value_model = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice.close()
-        self.__camera_hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
+        self.__camera_hardware_source_choice = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice_model.close()
-        self.__camera_hardware_source_choice_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__camera_hardware_source_choice_model = typing.cast(typing.Any, None)
         self.__camera_hardware_source_channel_model.close()
-        self.__camera_hardware_source_channel_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__camera_hardware_source_channel_model = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice.close()
-        self.__scan_hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
+        self.__scan_hardware_source_choice = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_model.close()
-        self.__scan_hardware_source_choice_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         self.scan_width.close()
-        self.scan_width = typing.cast(Model.PropertyChangedPropertyModel[int], None)
+        self.scan_width = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, **kwargs):
@@ -1463,7 +1467,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def about_to_delete(self) -> None:
         if self.__record_task:
-            self.__record_task = typing.cast(scan_base.RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -1485,7 +1489,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
     def _finish_stream(self) -> None:
         if self.__record_task:
             self.__record_task.grab()  # ensure grab is finished
-            self.__record_task = typing.cast(scan_base.RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
 
     def _abort_stream(self) -> None:
         self.__hardware_source.abort_recording()
@@ -1554,11 +1558,11 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
     def close(self) -> None:
         self.__camera_hardware_source_choice.close()
-        self.__camera_hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
+        self.__camera_hardware_source_choice = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice_model.close()
-        self.__camera_hardware_source_choice_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__camera_hardware_source_choice_model = typing.cast(typing.Any, None)
         self.__camera_hardware_source_channel_model.close()
-        self.__camera_hardware_source_channel_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__camera_hardware_source_channel_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
@@ -1664,9 +1668,9 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
 
     def close(self) -> None:
         self.__scan_hardware_source_choice.close()
-        self.__scan_hardware_source_choice = typing.cast(HardwareSourceChoice.HardwareSourceChoice, None)
+        self.__scan_hardware_source_choice = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_model.close()
-        self.__scan_hardware_source_choice_model = typing.cast(Model.PropertyChangedPropertyModel[str], None)
+        self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
@@ -1828,7 +1832,7 @@ class AcquisitionConfiguration(Schema.Entity):
 
     def close(self) -> None:
         self.__recorder.close()
-        self.__recorder = typing.cast(Recorder.Recorder, None)
+        self.__recorder = typing.cast(typing.Any, None)
         super().close()
 
     def _create(self, context: typing.Optional[Schema.EntityContext]) -> Schema.Entity:
@@ -1915,7 +1919,7 @@ class AcquisitionController:
             def close(self) -> None:
                 self.__streams_stream.remove_ref()
                 self.__listener.close()
-                self.__listener = typing.cast(Event.EventListener, None)
+                self.__listener = typing.cast(typing.Any, None)
                 if self.__sub_stream_listener:
                     self.__sub_stream_listener.close()
                     self.__sub_stream_listener = None
@@ -1973,13 +1977,13 @@ class AcquisitionController:
 
     def close(self) -> None:
         self.button_enabled_model.close()
-        self.button_enabled_model = typing.cast(Model.StreamValueModel, None)
+        self.button_enabled_model = typing.cast(typing.Any, None)
         self.is_acquiring_model.close()
-        self.is_acquiring_model = typing.cast(Model.PropertyModel[bool], None)
+        self.is_acquiring_model = typing.cast(typing.Any, None)
         self.progress_value_model.close()
-        self.progress_value_model = typing.cast(Model.PropertyModel[int], None)
+        self.progress_value_model = typing.cast(typing.Any, None)
         self.button_text_model.close()
-        self.button_text_model = typing.cast(Model.StreamValueModel, None)
+        self.button_text_model = typing.cast(typing.Any, None)
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
@@ -2022,15 +2026,15 @@ class AcquisitionController:
         # objects and updates the UI as 'complete'.
         def finish_grab_async():
             self.__acquisition.close()
-            self.__acquisition = typing.cast(Acquisition.Acquisition, None)
+            self.__acquisition = typing.cast(typing.Any, None)
             self.__data_stream.remove_ref()
-            self.__data_stream = typing.cast(Acquisition.FramedDataStream, None)
+            self.__data_stream = typing.cast(typing.Any, None)
             if self.__scan_drift_logger:
                 self.__scan_drift_logger.close()
-                self.__scan_drift_logger = typing.cast(DriftTracker.DriftLogger, None)
+                self.__scan_drift_logger = typing.cast(typing.Any, None)
             self.is_acquiring_model.value = False
             self.__progress_task.cancel()
-            self.__progress_task = typing.cast(asyncio.Task, None)
+            self.__progress_task = typing.cast(typing.Any, None)
             self.progress_value_model.value = 100
 
         # manage the 'is_acquiring' state.
@@ -2071,7 +2075,7 @@ class DeviceController(abc.ABC):
 
 
 class STEMDeviceController(DeviceController):
-    def __init__(self):
+    def __init__(self) -> None:
         stem_controller_component = Registry.get_component('stem_controller')
         assert stem_controller_component
         self.stem_controller = typing.cast(stem_controller.STEMController, stem_controller_component)
@@ -2120,7 +2124,7 @@ class AcquisitionPreferencePanel:
     This preference panel allows the user to customize the various controls.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.identifier = "nion.acquisition-panel"
         self.label = _("Acquisition")
 
@@ -2143,7 +2147,7 @@ class AcquisitionPreferencePanel:
                 )
 
         class Handler:
-            def __init__(self):
+            def __init__(self) -> None:
                 self.sorted_controls = ListModel.FilteredListModel(container=AcquisitionPreferences.acquisition_preferences, items_key="control_customizations")
                 self.sorted_controls.sort_key = operator.attrgetter("name")
                 self.sorted_controls.filter = ListModel.PredicateFilter(lambda x: x.is_customizable)
@@ -2163,7 +2167,7 @@ class AcquisitionPreferencePanel:
 
             def close(self) -> None:
                 self.sorted_controls.close()
-                self.sorted_controls = typing.cast(ListModel.ListModel[AcquisitionPreferences.ControlDescription], None)
+                self.sorted_controls = typing.cast(typing.Any, None)
 
             def create_handler(self, component_id: str, container=None, item=None, **kwargs):
                 # this is called to construct contained declarative component handlers within this handler.

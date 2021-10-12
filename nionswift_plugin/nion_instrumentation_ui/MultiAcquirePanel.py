@@ -146,7 +146,7 @@ class MultiAcquirePanelDelegate:
             self.__acquisition_state_changed_event_listener.close()
             self.__acquisition_state_changed_event_listener = None
 
-    def close(self):
+    def close(self) -> None:
         # close anything created in `create_panel_widget`.
         # called when the panel closes, not when the delegate closes.
         if self.__acquisition_state_changed_event_listener:
@@ -837,6 +837,6 @@ class MultiAcquireExtension:
         api = api_broker.get_api(version='1', ui_version='1')
         self.__panel_ref = api.create_panel(MultiAcquirePanelDelegate(api))
 
-    def close(self):
+    def close(self) -> None:
         self.__panel_ref.close()
         self.__panel_ref = None

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # standard libraries
 import copy
 import json
@@ -36,7 +38,7 @@ class MultiEELSSettings(dict):
     def __copy__(self):
         return MultiEELSSettings(super().copy())
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> MultiEELSSettings:
         return MultiEELSSettings(copy.deepcopy(super().copy()))
 
     def copy(self):
@@ -69,7 +71,7 @@ class MultiEELSParameters(list):
     def __copy__(self):
         return MultiEELSParameters(super().copy())
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> MultiEELSParameters:
         return MultiEELSParameters(copy.deepcopy(super().copy()))
 
     def copy(self):

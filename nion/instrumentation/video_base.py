@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 # standard libraries
 import abc
 import json
 import os
 import pathlib
+import typing
 
 # typing
 # None
@@ -92,13 +95,13 @@ class VideoHardwareSource(HardwareSource.HardwareSource):
         self.__camera = camera
         self.__acquisition_task = None
 
-    def close(self):
+    def close(self) -> None:
         super().close()
         # keep the camera device around until super close is called, since super may do something that requires it.
         camera_close_method = getattr(self.__camera, "close", None)
         if callable(camera_close_method):
             camera_close_method()
-        self.__camera = None
+        self.__camera = typing.cast(typing.Any, None)
 
     @property
     def video_device(self) -> AbstractVideoCamera:
@@ -115,22 +118,26 @@ class VideoDeviceInstance:
         self.settings = settings
 
 
+class VideoFactoryLike(typing.Protocol):
+    pass
+
+
 class VideoConfiguration:
 
-    def __init__(self):
-        self.__config_file = None
+    def __init__(self) -> None:
+        self.__config_file: typing.Optional[pathlib.Path] = None
 
         # the active video sources (hardware sources). this list is updated when a video camera device is registered or
         # unregistered with the hardware source manager.
-        self.video_sources = ListModel.ListModel()
+        self.video_sources = ListModel.ListModel[VideoHardwareSource]()
 
         # the list of instances of video cameras. this is similar to the video sources but is the devices plus settings
         # for the device. some devices might not have instances if the factory to create the instance hasn't been
         # registered yet.
-        self.__instances = list()
+        self.__instances: typing.List[VideoDeviceInstance] = list()
 
         # the list of video device factories. this is populated by responding to the registry messages.
-        self.__video_device_factories = list()
+        self.__video_device_factories: typing.List[VideoFactoryLike] = list()
 
         def component_registered(component, component_types):
             if "video_device_factory" in component_types:
@@ -149,11 +156,11 @@ class VideoConfiguration:
         for component in Registry.get_components_by_type("video_device_factory"):
             component_registered(component, {"video_device_factory"})
 
-    def close(self):
+    def close(self) -> None:
         self.__component_registered_listener.close()
-        self.__component_registered_listener = None
+        self.__component_registered_listener = typing.cast(typing.Any, None)
         self.__component_unregistered_listener.close()
-        self.__component_unregistered_listener = None
+        self.__component_unregistered_listener = typing.cast(typing.Any, None)
 
     def _remove_video_device(self, video_device):
         for instance in self.__instances:
@@ -170,7 +177,7 @@ class VideoConfiguration:
                     if instance.video_device:
                         Registry.register_component(instance.video_device, {"video_device"})
 
-    def load(self, config_file: pathlib.Path):
+    def load(self, config_file: pathlib.Path) -> None:
         # read the configured video cameras from the config file and populate the instances list.
         self.__config_file = config_file
         try:
