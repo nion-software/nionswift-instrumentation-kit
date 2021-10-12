@@ -109,7 +109,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_data_channel = None
 
             class TestAbortBehavior(scan_base.SynchronizedScanBehaviorInterface):
-                def __init__(self):
+                def __init__(self) -> None:
                     self.__i = 0
 
                 def prepare_section(self, **kwargs) -> None:

@@ -34,7 +34,7 @@ class DriftLogger:
 
     def close(self) -> None:
         self.__drift_changed_event_listener.close()
-        self.__drift_changed_event_listener = None
+        self.__drift_changed_event_listener = typing.cast(typing.Any, None)
 
     def __ensure_drift_log_data_item(self) -> None:
         # must be called on main thread

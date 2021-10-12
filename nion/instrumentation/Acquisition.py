@@ -127,6 +127,7 @@ SliceType = typing.Sequence[slice]
 SliceListType = typing.Sequence[SliceType]
 ChannelSegment = str
 
+_NDArray = typing.Any  # numpy 1.21
 
 class Channel:
     def __init__(self, *segments: ChannelSegment) -> None:
@@ -180,6 +181,10 @@ def get_slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
     return tuple(result_shape)
 
 
+def expand_shape(shape: ShapeType) -> int:
+    return numpy.product(shape, dtype=numpy.int64)  # type: ignore
+
+
 def get_slice_rect(slices: SliceType, shape: ShapeType) -> Geometry.IntRect:
     assert slices[0].start is not None
     assert slices[0].stop is not None
@@ -231,8 +236,8 @@ def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typin
     for i in reversed(range(0, len(shape))):
         # print(f"{start=} {stop=}")
         d = shape[i]
-        dd = numpy.product(shape[i:], dtype=numpy.int64)
-        ddl = numpy.product(shape[i+1:], dtype=numpy.int64)
+        dd = expand_shape(shape[i:])
+        ddl = expand_shape(shape[i+1:])
         cc = numpy.unravel_index(start, (shape[0] + 1,) + tuple(shape[1:]))
         c = cc[i]
         if c % dd != 0:
@@ -254,7 +259,7 @@ def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typin
     # fill the lower dimensions until everything up to stop is filled
     for i in range(0, len(shape)):
         # print(f"{start=} {stop=}")
-        ddl = numpy.product(shape[i + 1:], dtype=numpy.int64)
+        ddl = expand_shape(shape[i + 1:])
         cc = numpy.unravel_index(start, (shape[0] + 1,) + tuple(shape[1:]))
         # print(f"{ddl=} {cc=}")
         x = (stop - start) // ddl
@@ -269,7 +274,7 @@ def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typin
                     ss.append(slice(None))
             # print(tuple(ss))
             slices.append(tuple(ss))
-            start += x * numpy.product(shape[i + 1:], dtype=numpy.int64)
+            start += x * expand_shape(shape[i + 1:])
     return tuple(slices)
 
 
@@ -301,8 +306,8 @@ class DataStreamEventArgs:
     """
 
     def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
-                 source_data: numpy.ndarray, count: typing.Optional[int], source_slice: SliceType,
-                 state: DataStreamStateEnum):
+                 source_data: _NDArray, count: typing.Optional[int], source_slice: SliceType,
+                 state: DataStreamStateEnum) -> None:
         self.__print = False
 
         # check data shapes
@@ -345,7 +350,7 @@ class DataStreamEventArgs:
 
 
 class DataStreamArgs:
-    def __init__(self, slice: SliceType, shape: ShapeType):
+    def __init__(self, slice: SliceType, shape: ShapeType) -> None:
         for s, l in zip(slice, shape):
             assert s.start < s.stop
             assert 0 <= s.start <= l
@@ -362,7 +367,7 @@ class DataStreamArgs:
 
     @property
     def sequence_count(self) -> int:
-        return numpy.product(self.slice_shape, dtype=numpy.int64)
+        return expand_shape(self.slice_shape)
 
     @property
     def slice_rect(self) -> Geometry.IntRect:
@@ -370,7 +375,7 @@ class DataStreamArgs:
 
 
 class DataStreamInfo:
-    def __init__(self, data_metadata: DataAndMetadata.DataMetadata, duration: float):
+    def __init__(self, data_metadata: DataAndMetadata.DataMetadata, duration: float) -> None:
         self.data_metadata = data_metadata
         self.duration = duration
 
@@ -401,7 +406,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
     _advance_stream.
     """
 
-    def __init__(self, sequence_count: int = 1):
+    def __init__(self, sequence_count: int = 1) -> None:
         super().__init__()
         self.data_available_event = Event.Event()
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
@@ -428,7 +433,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Return channel info.
 
         Should only be called with a channel return by channels property."""
-        return DataStreamInfo(DataAndMetadata.DataMetadata(((), typing.cast(numpy.dtype, float))), 0.0)
+        return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
 
     @property
     def is_finished(self) -> bool:
@@ -476,7 +481,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
         self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
-    def prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         """Prepare stream. Top level prepare_stream is called before start_stream.
 
         The prepare function allows streams to perform any preparations before any other
@@ -484,7 +489,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         self._prepare_stream(stream_args, **kwargs)
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         """Prepare a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
@@ -550,7 +555,7 @@ class CollectedDataStream(DataStream):
     Optionally pass in a list of sub-slices to break collection into sections.
     """
 
-    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], sub_slices: typing.Optional[SliceListType] = None):
+    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], sub_slices: typing.Optional[SliceListType] = None) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__listener = typing.cast(Event.EventListener, None)
@@ -570,11 +575,11 @@ class CollectedDataStream(DataStream):
     def about_to_delete(self) -> None:
         if self.__listener:
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
         if self.__data_stream_started:
             warnings.warn("Stream deleted but not finished.", category=RuntimeWarning)
         self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(DataStream, None)
+        self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -583,7 +588,7 @@ class CollectedDataStream(DataStream):
 
     def get_info(self, channel: Channel) -> DataStreamInfo:
         data_stream_info = self.__data_stream.get_info(channel)
-        count = numpy.product(self.__collection_shape, dtype=numpy.int64)
+        count = expand_shape(self.__collection_shape)
         data_metadata = data_stream_info.data_metadata
         data_dtype = data_metadata.data_dtype
         assert data_dtype is not None
@@ -606,7 +611,7 @@ class CollectedDataStream(DataStream):
         # index is the number of frames completed in this collection, calculated as the minimum progress among incomplete channels
         # adding p to index will give the number of frames completed plus the fraction of the current one completed
         # all channels progress simultaneously in a collection; so use the last one for calculation
-        count = numpy.product(self.__collection_shape, dtype=numpy.int64)
+        count = expand_shape(self.__collection_shape)
         # only add current progress if we're not about to advance to the next sub slice
         p = 0.0 if all(self.__needs_starts.get(channel, False) for channel in self.input_channels) else self.__data_stream.progress
         incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
@@ -659,7 +664,7 @@ class CollectedDataStream(DataStream):
         self.__data_stream.finish_stream()
         self.__data_stream_started = False
         self.__listener.close()
-        self.__listener = typing.cast(Event.EventListener, None)
+        self.__listener = typing.cast(typing.Any, None)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # subclasses can override this method to provide different collection shapes.
@@ -689,7 +694,7 @@ class CollectedDataStream(DataStream):
         data_metadata = data_stream_event.data_metadata
         count = data_stream_event.count
         channel = data_stream_event.channel
-        collection_count = int(numpy.product(self.__collection_shape, dtype=numpy.int64))
+        collection_count = expand_shape(self.__collection_shape)
 
         # get the new data descriptor
         new_data_descriptor = self._get_new_data_descriptor(data_metadata)
@@ -719,8 +724,8 @@ class CollectedDataStream(DataStream):
         sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
         collection_rank = len(self.__collection_shape)
         collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
-        collection_sub_slice_length = int(numpy.product(collection_sub_slice_shape, dtype=numpy.int64))
-        collection_sub_slice_row_length = int(numpy.product(collection_sub_slice_shape[1:], dtype=numpy.int64))
+        collection_sub_slice_length = expand_shape(collection_sub_slice_shape)
+        collection_sub_slice_row_length = expand_shape(collection_sub_slice_shape[1:])
         if count is not None:
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
@@ -832,7 +837,7 @@ class SequenceDataStream(CollectedDataStream):
 
     This is a subclass of CollectedDataStream.
     """
-    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None, sub_slices: typing.Optional[SliceListType] = None):
+    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None, sub_slices: typing.Optional[SliceListType] = None) -> None:
         super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),), sub_slices)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
@@ -851,7 +856,7 @@ class CombinedDataStream(DataStream):
 
     Each stream can also produce multiple channels.
     """
-    def __init__(self, data_streams: typing.Sequence[DataStream]):
+    def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams = [data_stream.add_ref() for data_stream in data_streams]
         self.__listeners: typing.List[Event.EventListener] = list()
@@ -859,10 +864,10 @@ class CombinedDataStream(DataStream):
     def about_to_delete(self) -> None:
         for listener in self.__listeners:
             listener.close()
-        self.__listeners = typing.cast(typing.List[Event.EventListener], None)
+        self.__listeners = typing.cast(typing.Any, None)
         for data_stream in self.__data_streams:
             data_stream.remove_ref()
-        self.__data_streams = typing.cast(typing.List, None)
+        self.__data_streams = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -891,7 +896,7 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         for data_stream in self.__data_streams:
             data_stream.prepare_stream(stream_args)
 
@@ -925,7 +930,7 @@ class SequentialDataStream(DataStream):
 
     Each stream can also produce multiple channels.
     """
-    def __init__(self, data_streams: typing.Sequence[DataStream]):
+    def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
         self.__listener = typing.cast(Event.EventListener, None)
@@ -935,10 +940,10 @@ class SequentialDataStream(DataStream):
     def about_to_delete(self) -> None:
         if self.__listener:
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
         for data_stream in self.__data_streams:
             data_stream.remove_ref()
-        self.__data_streams = typing.cast(typing.List, None)
+        self.__data_streams = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -968,7 +973,7 @@ class SequentialDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__current_index = 0
         self.__stream_args = copy.deepcopy(stream_args)
         self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
@@ -990,7 +995,7 @@ class SequentialDataStream(DataStream):
         if self.__data_streams[self.__current_index].is_finished:
             self.__data_streams[self.__current_index].finish_stream()
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
             self.__current_index += 1
             if self.__current_index < len(self.__data_streams):
                 self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
@@ -1018,13 +1023,13 @@ class SequentialDataStream(DataStream):
 
 
 class ChannelData:
-    def __init__(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata):
+    def __init__(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         self.channel = channel
         self.data_and_metadata = data_and_metadata
 
 
 class DataStreamOperator:
-    def __init__(self):
+    def __init__(self) -> None:
         self.__applied = False
 
     def reset(self) -> None:
@@ -1071,7 +1076,7 @@ class DataStreamOperator:
 
 
 class NullDataStreamOperator(DataStreamOperator):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
@@ -1079,7 +1084,7 @@ class NullDataStreamOperator(DataStreamOperator):
 
 
 class CompositeDataStreamOperator(DataStreamOperator):
-    def __init__(self, operator_map: typing.Dict[Channel, DataStreamOperator]):
+    def __init__(self, operator_map: typing.Dict[Channel, DataStreamOperator]) -> None:
         super().__init__()
         self.__operator_map = operator_map
 
@@ -1103,7 +1108,7 @@ class StackedDataStreamOperator(DataStreamOperator):
     # and stack them so that the resulting stream is 1d data where each element is the result from the corresponding
     # operator.
 
-    def __init__(self, operators: typing.Sequence[DataStreamOperator]):
+    def __init__(self, operators: typing.Sequence[DataStreamOperator]) -> None:
         super().__init__()
         self.__operators = list(operators)
 
@@ -1160,7 +1165,7 @@ class StackedDataStreamOperator(DataStreamOperator):
                 # not sure if this special case is needed...? it is only different in that it produces
                 # slightly different data_metadata.
                 # concatenate the numpy arrays to keep the dtype the same. xdata promotes to float64.
-                new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)
+                new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)  # type: ignore
                 data_metadata = data_list[0].data_metadata
                 data_metadata = DataAndMetadata.DataMetadata(((new_data.shape), new_data.dtype),
                                                              data_metadata.intensity_calibration,
@@ -1170,7 +1175,7 @@ class StackedDataStreamOperator(DataStreamOperator):
                                                              data_metadata.timezone, data_metadata.timezone_offset)
         else:
             # concatenate the numpy arrays to keep the dtype the same. xdata promotes to float64.
-            new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)
+            new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)  # type: ignore
             data_metadata = data_list[0].data_metadata
         new_data_and_metadata = DataAndMetadata.new_data_and_metadata(new_data,
                                                                       data_metadata.intensity_calibration,
@@ -1188,7 +1193,7 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
 
     An acquisition data channel receives partial data and must return full data when required.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     def about_to_delete(self) -> None:
@@ -1203,7 +1208,7 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
         # prepare will be called on the main thread.
         pass
 
-    def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+    def update_data(self, channel: Channel, source_data: _NDArray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         # update_data will be called on an acquisition thread.
         raise NotImplementedError()
 
@@ -1213,7 +1218,7 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
 
 
 class DataAndMetadataDataChannel(DataChannel):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
 
@@ -1240,7 +1245,7 @@ class DataAndMetadataDataChannel(DataChannel):
     def clear_data(self) -> None:
         self.__data.clear()
 
-    def update_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+    def update_data(self, channel: Channel, source_data: _NDArray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)
         # copy data
         data = data_and_metadata.data
@@ -1257,7 +1262,7 @@ class DataAndMetadataDataChannel(DataChannel):
         data_and_metadata.timezone = data_metadata.timezone
         data_and_metadata.timezone_offset = data_metadata.timezone_offset
 
-    def accumulate_data(self, channel: Channel, source_data: numpy.ndarray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+    def accumulate_data(self, channel: Channel, source_data: _NDArray, source_slice: SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_and_metadata = self.__make_data(channel, data_metadata)
         # accumulate data
         data = data_and_metadata.data
@@ -1278,7 +1283,7 @@ class FrameCallbacks:
 
 
 class Framer(ReferenceCounting.ReferenceCounted):
-    def __init__(self, data_channel: DataChannel):
+    def __init__(self, data_channel: DataChannel) -> None:
         super().__init__()
         # data and indexes use the _incoming_ data channels as keys.
         self.__data_channel = data_channel.add_ref()
@@ -1286,7 +1291,7 @@ class Framer(ReferenceCounting.ReferenceCounted):
 
     def about_to_delete(self) -> None:
         self.__data_channel.remove_ref()
-        self.__data_channel = typing.cast(DataChannel, None)
+        self.__data_channel = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     def add_ref(self) -> Framer:
@@ -1319,7 +1324,7 @@ class Framer(ReferenceCounting.ReferenceCounted):
             source_start = ravel_slice_start(source_slice, data_stream_event.source_data.shape)
             source_stop = ravel_slice_stop(source_slice, data_stream_event.source_data.shape)
             source_count = source_stop - source_start
-            flat_shape = (numpy.product(data_metadata.data_shape, dtype=numpy.int64),)
+            flat_shape = (expand_shape(data_metadata.data_shape),)
             if data_stream_event.reset_frame:
                 index = 0
             else:
@@ -1369,7 +1374,7 @@ class FramedDataStream(DataStream):
     channels.
     """
 
-    def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None):
+    def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
@@ -1379,11 +1384,11 @@ class FramedDataStream(DataStream):
     def about_to_delete(self) -> None:
         if self.__listener:
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(DataStream, None)
+        self.__data_stream = typing.cast(typing.Any, None)
         self.__framer.remove_ref()
-        self.__framer = typing.cast(Framer, None)
+        self.__framer = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     def add_ref(self) -> FramedDataStream:
@@ -1415,7 +1420,7 @@ class FramedDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__operator.reset()
         self.__data_stream.prepare_stream(stream_args, operator=self.__operator)
 
@@ -1433,7 +1438,7 @@ class FramedDataStream(DataStream):
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
         self.__listener.close()
-        self.__listener = typing.cast(Event.EventListener, None)
+        self.__listener = typing.cast(typing.Any, None)
 
     def prepare_data_channel(self) -> None:
         self.__framer.prepare(self)
@@ -1519,7 +1524,7 @@ class FramedDataStream(DataStream):
 
 
 class Mask:
-    def get_mask_array(self, data_shape: ShapeType) -> numpy.ndarray:
+    def get_mask_array(self, data_shape: ShapeType) -> _NDArray:
         raise NotImplementedError
 
 
@@ -1527,7 +1532,7 @@ AxisType = typing.Union[int, typing.Tuple[int, ...]]
 
 
 class SumOperator(DataStreamOperator):
-    def __init__(self, *, axis: typing.Optional[AxisType] = None):
+    def __init__(self, *, axis: typing.Optional[AxisType] = None) -> None:
         super().__init__()
         self.__axis = axis
 
@@ -1592,7 +1597,7 @@ class SumOperator(DataStreamOperator):
 
 
 class MaskedSumOperator(DataStreamOperator):
-    def __init__(self, mask: Mask):
+    def __init__(self, mask: Mask) -> None:
         super().__init__()
         self.__mask = mask
 
@@ -1603,7 +1608,7 @@ class MaskedSumOperator(DataStreamOperator):
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         data_metadata = data_stream_info.data_metadata
         data_metadata = DataAndMetadata.DataMetadata(
-            ((), typing.cast(numpy.dtype, float)),
+            ((), float),
             data_metadata.intensity_calibration,
             [],
             data_metadata.metadata,
@@ -1617,7 +1622,7 @@ class MaskedSumOperator(DataStreamOperator):
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         data_and_metadata = channel_data.data_and_metadata
         mask_array = self.__mask.get_mask_array(data_and_metadata.data_shape)
-        summed_data = numpy.array((data_and_metadata.data * mask_array).sum(), dtype=data_and_metadata.data_dtype)  # type: ignore
+        summed_data = numpy.array((data_and_metadata.data * mask_array).sum(), dtype=data_and_metadata.data_dtype)
         summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
                                                              intensity_calibration=data_and_metadata.intensity_calibration,
                                                              data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
@@ -1629,7 +1634,7 @@ class MaskedSumOperator(DataStreamOperator):
 
 
 class MoveAxisDataStreamOperator(DataStreamOperator):
-    def __init__(self, channel: typing.Optional[Channel] = None):
+    def __init__(self, channel: typing.Optional[Channel] = None) -> None:
         super().__init__()
         self.__channel = channel
 
@@ -1681,7 +1686,7 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
 
 
 class ContainerDataStream(DataStream):
-    def __init__(self, data_stream: DataStream):
+    def __init__(self, data_stream: DataStream) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__listener = typing.cast(Event.EventListener, None)
@@ -1689,9 +1694,9 @@ class ContainerDataStream(DataStream):
     def about_to_delete(self) -> None:
         if self.__listener:
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(DataStream, None)
+        self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -1722,7 +1727,7 @@ class ContainerDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__data_stream.prepare_stream(stream_args, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
@@ -1736,7 +1741,7 @@ class ContainerDataStream(DataStream):
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
         self.__listener.close()
-        self.__listener = typing.cast(Event.EventListener, None)
+        self.__listener = typing.cast(typing.Any, None)
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         self.fire_data_available(data_stream_event)
@@ -1745,7 +1750,7 @@ class ContainerDataStream(DataStream):
 class ActionDataStream(ContainerDataStream):
     """Action data stream. Runs action on each complete frame, passing coordinates."""
 
-    def __init__(self, data_stream: DataStream, fn: typing.Callable[[typing.Sequence[int]], None]):
+    def __init__(self, data_stream: DataStream, fn: typing.Callable[[typing.Sequence[int]], None]) -> None:
         super().__init__(data_stream)
         self.__fn = fn
         self.__shape = typing.cast(ShapeType, (0,))
@@ -1782,7 +1787,7 @@ class ActionDataStream(ContainerDataStream):
 class MonitorDataStream(DataStream):
     """Non-controlling data stream. Monitors data coming out of data stream."""
 
-    def __init__(self, data_stream: DataStream, channel_segment: ChannelSegment):
+    def __init__(self, data_stream: DataStream, channel_segment: ChannelSegment) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__channel_segment = channel_segment
@@ -1791,9 +1796,9 @@ class MonitorDataStream(DataStream):
     def about_to_delete(self) -> None:
         if self.__listener:
             self.__listener.close()
-            self.__listener = typing.cast(Event.EventListener, None)
+            self.__listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(DataStream, None)
+        self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -1824,7 +1829,7 @@ class MonitorDataStream(DataStream):
     def _send_next(self) -> None:
         pass
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         pass
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
@@ -1836,7 +1841,7 @@ class MonitorDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__listener.close()
-        self.__listener = typing.cast(Event.EventListener, None)
+        self.__listener = typing.cast(typing.Any, None)
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
@@ -1848,17 +1853,17 @@ class AccumulatedDataStream(ContainerDataStream):
     """Change a data stream producing a sequence into an accumulated non-sequence.
     """
 
-    def __init__(self, data_stream: DataStream):
+    def __init__(self, data_stream: DataStream) -> None:
         super().__init__(data_stream)
         self.__data_channel = DataAndMetadataDataChannel().add_ref()
         self.__dest_indexes: typing.Dict[Channel, int] = dict()
 
     def about_to_delete(self) -> None:
         self.__data_channel.remove_ref()
-        self.__data_channel = typing.cast(DataAndMetadataDataChannel, None)
+        self.__data_channel = typing.cast(typing.Any, None)
         super().about_to_delete()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__data_channel.clear_data()
         super()._prepare_stream(stream_args, **kwargs)
 
@@ -1908,7 +1913,7 @@ class AccumulatedDataStream(ContainerDataStream):
             old_data_metadata.timezone_offset
         )
         channel = data_stream_event.channel
-        dest_count = numpy.product(data_metadata.data_shape, dtype=numpy.int64)
+        dest_count = expand_shape(data_metadata.data_shape)
         sequence_slice_offset = sequence_slice.start * dest_count
         source_start = ravel_slice_start(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
         source_stop = ravel_slice_stop(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
@@ -1956,15 +1961,15 @@ def acquire(data_stream: DataStream) -> None:
 
 
 class Acquisition:
-    def __init__(self, data_stream: FramedDataStream):
+    def __init__(self, data_stream: FramedDataStream) -> None:
         self.__data_stream = data_stream.add_ref()
-        self.__task = typing.cast(asyncio.Task, None)
+        self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
 
     def close(self) -> None:
         if self.__data_stream:
             self.__data_stream.remove_ref()
-            self.__data_stream = typing.cast(FramedDataStream, None)
+            self.__data_stream = typing.cast(typing.Any, None)
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.
@@ -1977,16 +1982,16 @@ class Acquisition:
                 self.__is_aborted = self.__data_stream.is_aborted
         finally:
             self.__data_stream.remove_ref()
-            self.__data_stream = typing.cast(FramedDataStream, None)
+            self.__data_stream = typing.cast(typing.Any, None)
 
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
-        async def grab_async():
+        async def grab_async() -> None:
             try:
                 self.prepare_acquire()
                 await asyncio.get_running_loop().run_in_executor(None, self.acquire)
             finally:
                 on_completion()
-                self.__task = typing.cast(asyncio.Task, None)
+                self.__task = None
 
         self.__task = event_loop.create_task(grab_async())
 

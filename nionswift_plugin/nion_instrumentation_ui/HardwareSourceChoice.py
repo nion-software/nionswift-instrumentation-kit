@@ -44,11 +44,11 @@ class HardwareSourceChoice:
 
     def close(self) -> None:
         self.__hardware_source_added_event_listener.close()
-        self.__hardware_source_added_event_listener = None
+        self.__hardware_source_added_event_listener = typing.cast(typing.Any, None)
         self.__hardware_source_removed_event_listener.close()
-        self.__hardware_source_removed_event_listener = None
+        self.__hardware_source_removed_event_listener = typing.cast(typing.Any, None)
         self.__property_changed_event_listener.close()
-        self.__property_changed_event_listener = typing.cast(Event.EventListener, None)
+        self.__property_changed_event_listener = typing.cast(typing.Any, None)
 
     @property
     def hardware_source_count(self) -> int:
@@ -113,7 +113,7 @@ class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSource.HardwareSo
 
     def about_to_delete(self) -> None:
         self.__hardware_source_changed_listener.close()
-        self.__hardware_source_changed_listener = typing.cast(Event.EventListener, None)
+        self.__hardware_source_changed_listener = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property

@@ -98,17 +98,17 @@ class HardwareSourceBridge:
         # close hardware source related stuff
         # close data items left to append that haven't been appended
         self.__project_loaded_event_listener.close()
-        self.__project_loaded_event_listener = typing.cast(Event.EventListener, None)
+        self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         with self.__data_items_to_append_lock:
             for key, data_item in self.__data_items_to_append:
                 data_item.close()
         self.__hardware_source_added_listener.close()
-        self.__hardware_source_added_listener = None
+        self.__hardware_source_added_listener = typing.cast(typing.Any, None)
         self.__hardware_source_removed_listener.close()
-        self.__hardware_source_removed_listener = None
+        self.__hardware_source_removed_listener = typing.cast(typing.Any, None)
         for listener in self.__data_channel_states_updated_listeners.values():
             listener.close()
-        self.__data_channel_states_updated_listeners = typing.cast(typing.Dict[str, Event.EventListener], None)
+        self.__data_channel_states_updated_listeners = typing.cast(typing.Any, None)
         HardwareSourceManager()._hardware_source_bridge_closed()
         for listeners in self.__data_channel_updated_listeners.values():
             for listener in listeners:
@@ -119,13 +119,13 @@ class HardwareSourceBridge:
         for listeners in self.__data_channel_stop_listeners.values():
             for listener in listeners:
                 listener.close()
-        self.__data_channel_updated_listeners = typing.cast(typing.Dict[str, typing.List[Event.EventListener]], None)
-        self.__data_channel_start_listeners = typing.cast(typing.Dict[str, typing.List[Event.EventListener]], None)
-        self.__data_channel_stop_listeners = typing.cast(typing.Dict[str, typing.List[Event.EventListener]], None)
+        self.__data_channel_updated_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_start_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
         for listener in self.__hardware_source_call_soon_event_listeners.values():
             listener.close()
-        self.__hardware_source_call_soon_event_listeners = typing.cast(typing.Dict[str, Event.EventListener], None)
-        self.__document_model = typing.cast(DocumentModelInterface, None)
+        self.__hardware_source_call_soon_event_listeners = typing.cast(typing.Any, None)
+        self.__document_model = typing.cast(typing.Any, None)
 
     def clean_display_items(self) -> None:
         # clean the display items for each data channel
@@ -255,21 +255,21 @@ class HardwareSourceBridge:
 # Keeps track of all registered hardware sources and instruments.
 # Also keeps track of aliases between hardware sources and logical names.
 class HardwareSourceManager(metaclass=Utility.Singleton):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.hardware_sources = list()
-        self.instruments = list()
+        self.hardware_sources: typing.List[HardwareSource] = list()
+        self.instruments: typing.List[typing.Any] = list()
         # we create a list of callbacks for when a hardware
         # source is added or removed
         self.hardware_source_added_event = Event.Event()
         self.hardware_source_removed_event = Event.Event()
         self.instrument_added_event = Event.Event()
         self.instrument_removed_event = Event.Event()
-        self.aliases_updated = list()
+        self.aliases_updated: typing.List[typing.Callable[[], None]] = list()
         # aliases are shared between hardware sources and instruments
-        self.__aliases = dict()
+        self.__aliases: typing.Dict[str, typing.Tuple[str, str]] = dict()
 
-    def close(self):
+    def close(self) -> None:
         self._close_hardware_sources()
         self._close_instruments()
 
@@ -821,7 +821,7 @@ class HardwareSource(Observable.Observable):
         self._test_acquire_exception = None
         self._test_acquire_hook = None
 
-    def close(self):
+    def close(self) -> None:
         self.close_thread()
 
     @property
@@ -1223,7 +1223,7 @@ class HardwareSource(Observable.Observable):
             raise NotImplementedError("Hardware Source API requested version %s is greater than %s." % (version, actual_version))
 
         class HardwareSourceFacade:
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
         return HardwareSourceFacade()
@@ -1404,7 +1404,7 @@ class ViewTask:
         """Close the task. Must be called when the task is no longer needed."""
         self.__data_channel_buffer.stop()
         self.__data_channel_buffer.close()
-        self.__data_channel_buffer = typing.cast(DataChannelBuffer, None)
+        self.__data_channel_buffer = typing.cast(typing.Any, None)
         if not self.__was_playing:
             self.__hardware_source.stop_playing()
 
@@ -1498,9 +1498,9 @@ class DataChannelBuffer:
             listener.close()
         for listener in self.__data_channel_stop_listeners:
             listener.close()
-        self.__data_channel_updated_listeners = typing.cast(typing.List[Event.EventListener], None)
-        self.__data_channel_start_listeners = typing.cast(typing.List[Event.EventListener], None)
-        self.__data_channel_stop_listeners = typing.cast(typing.List[Event.EventListener], None)
+        self.__data_channel_updated_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_start_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
 
     def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         if self.__state == DataChannelBuffer.State.started:

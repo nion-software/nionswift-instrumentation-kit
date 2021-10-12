@@ -64,7 +64,7 @@ class ScanFrameParameters(dict):
     def __copy__(self):
         return self.__class__(copy.copy(dict(self)))
 
-    def __deepcopy__(self, memo):
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ScanFrameParameters:
         deepcopy = self.__class__(copy.deepcopy(dict(self)))
         memo[id(self)] = deepcopy
         return deepcopy
@@ -236,7 +236,7 @@ class DriftTracker:
     An extension to this class would be to separate the drift algorithm into its own class and allow it to be
     configured.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         # dispatcher is used to calculate drift offsets on a thread
         self.__dispatcher = ThreadPool.SingleItemDispatcher()
 
@@ -256,7 +256,7 @@ class DriftTracker:
 
     def close(self) -> None:
         self.__dispatcher.close()
-        self.__dispatcher = None
+        self.__dispatcher = typing.cast(typing.Any, None)
 
     def reset(self) -> None:
         with self.__lock:
@@ -714,27 +714,27 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         self.drift_tracker = DriftTracker()
 
-    def close(self):
+    def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
         self.drift_tracker.close()
-        self.drift_tracker = None
+        self.drift_tracker = typing.cast(typing.Any, None)
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
         self.__stem_controller.disconnect_probe_connections()
         if self.__probe_state_changed_event_listener:
             self.__probe_state_changed_event_listener.close()
-            self.__probe_state_changed_event_listener = None
+            self.__probe_state_changed_event_listener = typing.cast(typing.Any, None)
         if self.__subscan_region_changed_event_listener:
             self.__subscan_region_changed_event_listener.close()
-            self.__subscan_region_changed_event_listener = None
+            self.__subscan_region_changed_event_listener = typing.cast(typing.Any, None)
         if self.__subscan_rotation_changed_event_listener:
             self.__subscan_rotation_changed_event_listener.close()
-            self.__subscan_rotation_changed_event_listener = None
+            self.__subscan_rotation_changed_event_listener = typing.cast(typing.Any, None)
         if self.__line_scan_vector_changed_event_listener:
             self.__line_scan_vector_changed_event_listener.close()
-            self.__line_scan_vector_changed_event_listener = None
+            self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
         super().close()
 
         # keep the device around until super close is called, since super
@@ -743,10 +743,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
         self.__device.close()
         self.__device = None
 
-    def periodic(self):
+    def periodic(self) -> None:
         self.__handle_executing_task_queue()
 
-    def __handle_executing_task_queue(self):
+    def __handle_executing_task_queue(self) -> None:
         # gather the pending tasks, then execute them.
         # doing it this way prevents tasks from triggering more tasks in an endless loop.
         tasks = list()
@@ -927,7 +927,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
                     camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera.hardware_source_id]
                     results = (scan_results, camera_results)
             finally:
-                self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+                self.__scan_acquisition = typing.cast(typing.Any, None)
             return results
 
     def grab_synchronized_abort(self) -> None:
@@ -1015,8 +1015,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         scan_context = self.scan_context
         if scan_context.is_valid:
-            frame_parameters.size = tuple(scan_context.size)
-            frame_parameters.center_nm = tuple(scan_context.center_nm)
+            scan_context_size = scan_context.size
+            scan_context_center_nm = scan_context.center_nm
+            assert scan_context_size
+            assert scan_context_center_nm
+            frame_parameters.size = tuple(scan_context_size)
+            frame_parameters.center_nm = tuple(scan_context_center_nm)
             frame_parameters.fov_nm = scan_context.fov_nm
             frame_parameters.rotation_rad = scan_context.rotation_rad
         self.__apply_subscan_parameters(frame_parameters, size)
@@ -1588,7 +1592,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource):
 
         class CameraFacade:
 
-            def __init__(self):
+            def __init__(self) -> None:
                 pass
 
         return CameraFacade()
@@ -1666,7 +1670,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def about_to_delete(self) -> None:
         if self.__record_task:
             self.__record_task.close()
-            self.__record_task = typing.cast(RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
         for data_channel_listener in self.__data_channel_listeners:
             data_channel_listener.close()
         self.__data_channel_listeners.clear()
@@ -1711,7 +1715,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def _finish_stream(self) -> None:
         if self.__record_task:
             self.__record_task.close()
-            self.__record_task = typing.cast(RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
 
     def _abort_stream(self) -> None:
         self.__scan_hardware_source.abort_recording()
@@ -1775,7 +1779,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def about_to_delete(self) -> None:
         if self.__record_task:
-            self.__record_task = typing.cast(RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -1838,7 +1842,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def _finish_stream(self) -> None:
         if self.__record_task:
-            self.__record_task = typing.cast(RecordTask, None)
+            self.__record_task = typing.cast(typing.Any, None)
         else:
             self.__camera_hardware_source.acquire_synchronized_end()
 
@@ -1942,7 +1946,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
             if not is_complete:
                 self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue()
             else:
-                self.__partial_data_info = typing.cast(camera_base.CameraHardwareSource.PartialData, None)
+                self.__partial_data_info = typing.cast(typing.Any, None)
 
 
 class DriftUpdaterDataStream(Acquisition.ContainerDataStream):

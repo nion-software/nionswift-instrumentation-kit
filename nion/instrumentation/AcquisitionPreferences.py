@@ -171,7 +171,7 @@ class AcquisitionPreferences(Schema.Entity):
 
     def close(self) -> None:
         self.__recorder.close()
-        self.__recorder = typing.cast(Recorder.Recorder, None)
+        self.__recorder = typing.cast(typing.Any, None)
         super().close()
 
     def _create(self, context: typing.Optional[Schema.EntityContext]) -> Schema.Entity:

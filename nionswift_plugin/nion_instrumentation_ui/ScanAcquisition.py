@@ -47,7 +47,7 @@ class SequenceState(enum.Enum):
 
 class ScanSpecifier:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.scan_context: typing.Optional[stem_controller.ScanContext] = None
         self.scan_count = 1
         self.size: typing.Optional[typing.Tuple[int, int]] = None
@@ -147,11 +147,11 @@ class ScanAcquisitionController:
         def finish_grab_async():
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
-            self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
+            self.__scan_acquisition = typing.cast(typing.Any, None)
             self.__scan_result_data_stream.remove_ref()
-            self.__scan_result_data_stream = typing.cast(Acquisition.FramedDataStream, None)
+            self.__scan_result_data_stream = typing.cast(typing.Any, None)
             self.__scan_drift_logger.close()
-            self.__scan_drift_logger = typing.cast(DriftTracker.DriftLogger, None)
+            self.__scan_drift_logger = typing.cast(typing.Any, None)
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 
@@ -252,12 +252,14 @@ class PanelDelegate:
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
             scan_context = scan_hardware_source.scan_context
 
+            scan_context_size = scan_context.size
             if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
+                assert scan_context_size
                 calibration = scan_context.calibration
                 start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
                 end = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[1])
-                length = int(Geometry.distance(start, end) * scan_context.size.height)
-                max_dim = max(scan_context.size.width, scan_context.size.height)
+                length = int(Geometry.distance(start, end) * scan_context_size.height)
+                max_dim = max(scan_context_size.width, scan_context_size.height)
                 length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, max_dim), samples=max_dim)
                 line_str = _("Line Scan")
                 self.__roi_description.text = f"{line_str} {length_str} ({length} px)"
@@ -272,11 +274,12 @@ class PanelDelegate:
                 self.__scan_specifier.drift_interval_scans = 0
                 self.__acquire_button._widget.enabled = True
             elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
+                assert scan_context_size
                 calibration = scan_context.calibration
-                width = scan_hardware_source.subscan_region.width * scan_context.size.width
-                height = scan_hardware_source.subscan_region.height * scan_context.size.height
-                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context.size.width), samples=scan_context.size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context.size.height), samples=scan_context.size.height)
+                width = scan_hardware_source.subscan_region.width * scan_context_size.width
+                height = scan_hardware_source.subscan_region.height * scan_context_size.height
+                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context_size.width), samples=scan_context_size.width)
+                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context_size.height), samples=scan_context_size.height)
                 rect_str = _("Subscan")
                 self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} px x {int(height)} px)"
                 scan_str = _("Scan (2D)")
@@ -295,11 +298,12 @@ class PanelDelegate:
                 self.__scan_specifier.drift_interval_scans = drift_scans
                 self.__acquire_button._widget.enabled = True
             elif scan_context.is_valid:
+                assert scan_context_size
                 calibration = scan_context.calibration
-                width = scan_context.size.width
-                height = scan_context.size.height
-                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context.size.width), samples=scan_context.size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context.size.height), samples=scan_context.size.height)
+                width = scan_context_size.width
+                height = scan_context_size.height
+                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context_size.width), samples=scan_context_size.width)
+                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context_size.height), samples=scan_context_size.height)
                 data_str = _("Context Scan")
                 self.__roi_description.text = f"{data_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
                 scan_str = _("Scan (2D)")
@@ -518,7 +522,7 @@ class PanelDelegate:
                 update_context()  # update the cancel button
                 if is_idle and self.__progress_task:
                     self.__progress_task.cancel()
-                    self.__progress_task = typing.cast(asyncio.Task, None)
+                    self.__progress_task = typing.cast(typing.Any, None)
                     self.__progress_bar.value = 100
                 if not is_idle and not self.__progress_task:
                     async def update_progress():

@@ -29,13 +29,13 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
                                                                              self.document_controller.event_loop)
         self.__exit_stack: typing.List[typing.Any] = list()
 
-    def close(self):
+    def close(self) -> None:
         self.document_controller.periodic()
         self.document_controller.close()
         for ex in self.__exit_stack:
             ex.close()
         self.scan_context_controller.close()
-        self.scan_context_controller = None
+        self.scan_context_controller = typing.cast(typing.Any, None)
         self.scan_hardware_source.close()
         self.camera_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)

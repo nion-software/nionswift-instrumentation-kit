@@ -86,7 +86,7 @@ class VideoSourceStateController:
 
         self.__property_changed_event_listener = self.__hardware_source.property_changed_event.listen(hardware_source_property_changed)
 
-    def close(self):
+    def close(self) -> None:
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
             self.__acquisition_state_changed_event_listener = None
@@ -259,7 +259,7 @@ class VideoDisplayPanelController:
 
         self.__state_controller.initialize_state()
 
-    def close(self):
+    def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = None
         self.__state_controller.close()
@@ -338,7 +338,7 @@ class VideoSourceWidget(Widgets.CompositeWidgetBase):
 
         self.__state_controller.initialize_state()
 
-    def close(self):
+    def close(self) -> None:
         self.__state_controller.close()
         self.__state_controller = None
         super().close()
@@ -385,7 +385,7 @@ class VideoSourcePanel(Panel.Panel):
 
         self.widget = hardware_column
 
-    def close(self):
+    def close(self) -> None:
         self.__hardware_source_added_event.close()
         self.__hardware_source_added_event = None
         self.__hardware_source_removed_event.close()
@@ -441,7 +441,7 @@ class VideoPreferencePanel:
 
                         self.__needs_saving_changed_event_listener = self.needs_saving_model.property_changed_event.listen(needs_saving_model_changed)
 
-                    def close(self):
+                    def close(self) -> None:
                         self.__settings_changed_event_listener.close()
                         self.__settings_changed_event_listener = None
 
@@ -559,7 +559,7 @@ def run():
             hardware_control_panels[hardware_source.hardware_source_id] = panel_id
 
             class HardwareDisplayPanelControllerFactory:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.priority = 1
 
                 def build_menu(self, display_type_menu, selected_display_panel):

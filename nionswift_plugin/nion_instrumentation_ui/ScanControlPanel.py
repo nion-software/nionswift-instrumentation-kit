@@ -182,7 +182,7 @@ class ScanControlStateController:
 
         self.data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
 
-    def close(self):
+    def close(self) -> None:
         if self.__captured_xdatas_available_event:
             self.__captured_xdatas_available_event.close()
             self.__captured_xdatas_available_event = None
@@ -242,7 +242,7 @@ class ScanControlStateController:
         self.on_ac_line_sync_check_box_changed = None
         self.on_capture_button_state_changed = None
         self.on_display_new_data_item = None
-        self.__scan_hardware_source = None
+        self.__scan_hardware_source = typing.cast(typing.Any, None)
 
     def __update_scan_button_state(self):
         if self.on_scan_button_state_changed:
@@ -648,7 +648,7 @@ class ScanControlStateController:
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
     def __init__(self, icon_id):
-        super(IconCanvasItem, self).__init__()
+        super().__init__()
         self.__icon_id = icon_id
         self.wants_mouse_events = True
         self.__mouse_inside = False
@@ -664,9 +664,9 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.on_button_clicked = None
         self.size_to_content()
 
-    def close(self):
+    def close(self) -> None:
         self.on_button_clicked = None
-        super(IconCanvasItem, self).close()
+        super().close()
 
     def size_to_content(self, horizontal_padding=None, vertical_padding=None):
         """ Size the canvas item to the text content. """
@@ -769,7 +769,7 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.border_enabled = False
         self.on_button_clicked : typing.Optional[typing.Callable[[], None]] = None
 
-    def close(self):
+    def close(self) -> None:
         self.on_button_clicked = None
         super().close()
 
@@ -948,8 +948,8 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
 
 class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
 
-    def __init__(self):
-        super(LinkedCheckBoxCanvasItem, self).__init__()
+    def __init__(self) -> None:
+        super().__init__()
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(w=10, h=30)))
 
     def _repaint(self, drawing_context):
@@ -1232,7 +1232,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         def drift_value_edited(text: str) -> None:
             drift_settings = copy.copy(scan_controller.drift_settings)
-            drift_settings.interval = Converter.IntegerToStringConverter().convert_back(text)
+            drift_settings.interval = Converter.IntegerToStringConverter().convert_back(text) or 0
             scan_controller.drift_settings = drift_settings
             drift_settings_value.request_refocus()
 
@@ -1515,20 +1515,20 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.__state_controller.initialize_state()
 
-    def close(self):
+    def close(self) -> None:
         self.__key_pressed_event_listener.close()
-        self.__key_pressed_event_listener = None
+        self.__key_pressed_event_listener = typing.cast(typing.Any, None)
         self.__key_released_event_listener.close()
-        self.__key_released_event_listener = None
+        self.__key_released_event_listener = typing.cast(typing.Any, None)
         self.__image_display_mouse_pressed_event_listener.close()
-        self.__image_display_mouse_pressed_event_listener= None
+        self.__image_display_mouse_pressed_event_listener= typing.cast(typing.Any, None)
         self.__image_display_mouse_released_event_listener.close()
-        self.__image_display_mouse_released_event_listener= None
+        self.__image_display_mouse_released_event_listener= typing.cast(typing.Any, None)
         self.__state_controller.close()
-        self.__state_controller = None
+        self.__state_controller = typing.cast(typing.Any, None)
         super().close()
 
-    def periodic(self):
+    def periodic(self) -> None:
         self.__state_controller.handle_periodic()
         super().periodic()
 
@@ -1572,7 +1572,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 class ScanControlPanel(Panel.Panel):
 
     def __init__(self, document_controller, panel_id, properties):
-        super(ScanControlPanel, self).__init__(document_controller, panel_id, "scan-control-panel")
+        super().__init__(document_controller, panel_id, "scan-control-panel")
         ui = document_controller.ui
         self.widget = ui.create_column_widget()
         self.__scan_control_widget = None
@@ -1590,9 +1590,9 @@ class ScanControlPanel(Panel.Panel):
                 self.widget.add_spacing(12)
                 self.widget.add_stretch()
 
-    def close(self):
+    def close(self) -> None:
         HardwareSource.HardwareSourceManager().aliases_updated.remove(self.__build_widget)
-        super(ScanControlPanel, self).close()
+        super().close()
 
 
 class ScanDisplayPanelController:
@@ -1797,7 +1797,7 @@ class ScanDisplayPanelController:
         decrease_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_decrease_pmt_clicked, self.__channel_index)
         increase_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_increase_pmt_clicked, self.__channel_index)
 
-    def close(self):
+    def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = None
         self.__state_controller.close()
@@ -1843,7 +1843,7 @@ def run():
             scan_control_panels[hardware_source.hardware_source_id] = panel_id
 
             class ScanDisplayPanelControllerFactory:
-                def __init__(self):
+                def __init__(self) -> None:
                     self.priority = 2
 
                 def build_menu(self, display_type_menu, selected_display_panel):

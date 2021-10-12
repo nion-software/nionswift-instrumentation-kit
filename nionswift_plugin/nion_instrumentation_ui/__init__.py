@@ -39,7 +39,7 @@ class STEMControllerExtension:
         global configuration_location
         configuration_location = pathlib.Path(api.application.configuration_location)
 
-    def close(self):
+    def close(self) -> None:
         if self.__scan_context_controller:
             self.__scan_context_controller.close()
             self.__scan_context_controller = None
