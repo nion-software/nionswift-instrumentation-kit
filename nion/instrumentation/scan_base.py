@@ -645,7 +645,7 @@ class ScanDevice(typing.Protocol):
     def get_profile_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
     def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
     def open_configuration_interface(self) -> None: ...
-    def show_configuration_dialog(self, api_broker) -> None: ...
+    def show_configuration_dialog(self, api_broker: typing.Any) -> None: ...
 
     @property
     def channel_count(self) -> int: raise NotImplementedError()
@@ -783,7 +783,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
     def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
     def calculate_drift_scans(self) -> int: ...
-    def shift_click(self, mouse_position, camera_shape, logger: logging.Logger) -> None: ...
+    def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
 
     priority: int = 100
     drift_tracker: DriftTracker
@@ -967,18 +967,18 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         for index in range(self.channel_count):
             self.set_channel_enabled(index, index in channel_indexes)
 
-    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+    def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         self.start_playing()
         return self.get_next_xdatas_to_start(timeout)
 
-    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+    def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         self.start_playing()
         return self.get_next_xdatas_to_finish(timeout)
 
-    def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
+    def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool:
         return False
 
-    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]:
+    def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]:
         return None
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
@@ -1074,7 +1074,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def grab_synchronized_get_progress(self) -> typing.Optional[float]:
         return None
 
-    def grab_buffer(self, count: int, *, start: int=None, **kwargs) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+    def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
         if start is None and count is not None:
             assert count > 0
             start = -count
@@ -1555,7 +1555,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_record_frame_time(self) -> float:
         return self.calculate_frame_time(self.get_record_frame_parameters())
 
-    def make_reference_key(self, **kwargs) -> str:
+    def make_reference_key(self, **kwargs: typing.Any) -> str:
         # TODO: specifying the channel key in an acquisition? and sub channels?
         is_subscan = kwargs.get("subscan", False)
         channel_index = kwargs.get("channel_index")
@@ -1695,13 +1695,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def set_property(self, name, value):
         setattr(self, name, value)
 
-    def open_configuration_interface(self, api_broker) -> None:
+    def open_configuration_interface(self, api_broker: typing.Any) -> None:
         if hasattr(self.__device, "open_configuration_interface"):
             self.__device.open_configuration_interface()
         if hasattr(self.__device, "show_configuration_dialog"):
             self.__device.show_configuration_dialog(api_broker)
 
-    def shift_click(self, mouse_position, camera_shape, logger: logging.Logger) -> None:
+    def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None:
         frame_parameters = self.__device.current_frame_parameters
         width, height = frame_parameters.size
         fov_nm = frame_parameters.fov_nm
@@ -1718,7 +1718,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def decrease_pmt(self, channel_index: int) -> None:
         self.__stem_controller.change_pmt_gain(stem_controller_module.PMTType(channel_index), factor=0.5)
 
-    def get_api(self, version):
+    def get_api(self, version: str) -> typing.Any:
         actual_version = "1.0.0"
         if Utility.compare_versions(version, actual_version) > 0:
             raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
@@ -2266,13 +2266,13 @@ def make_synchronized_scan_data_stream(
 
 class InstrumentController(abc.ABC):
 
-    def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
+    def apply_metadata_groups(self, properties: typing.MutableMapping[str, typing.Any], metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
 
-    def get_autostem_properties(self) -> typing.Dict: return dict()
+    def get_autostem_properties(self) -> typing.Mapping[str, typing.Any]: return dict()
 
-    def handle_shift_click(self, **kwargs) -> None: pass
+    def handle_shift_click(self, **kwargs: typing.Any) -> None: pass
 
-    def handle_tilt_click(self, **kwargs) -> None: pass
+    def handle_tilt_click(self, **kwargs: typing.Any) -> None: pass
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping, instrument_controller: stem_controller_module.STEMController, scan_device: typing.Optional[ScanDevice]) -> None:
