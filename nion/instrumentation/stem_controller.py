@@ -464,7 +464,7 @@ class STEMController(Observable.Observable):
             return setattr(self, name, value)
         return self.set_control_output(name, value)
 
-    def apply_metadata_groups(self, properties: typing.MutableMapping, metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None:
+    def apply_metadata_groups(self, properties: typing.MutableMapping[str, typing.Any], metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None:
         """Apply metadata groups to properties.
 
         Metadata groups is a tuple with two elements. The first is a list of strings representing a dict-path in which

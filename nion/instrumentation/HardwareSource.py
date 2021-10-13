@@ -47,7 +47,7 @@ if typing.TYPE_CHECKING:
 
 DataElementType = typing.Dict[str, typing.Any]
 _FinishedCallbackType = typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]
-_NDArray = typing.Any  # numpy 1.21
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 _ = gettext.gettext
 
