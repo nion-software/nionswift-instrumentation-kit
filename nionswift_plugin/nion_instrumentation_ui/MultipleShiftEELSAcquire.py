@@ -294,18 +294,18 @@ class AcquireController(metaclass=Utility.Singleton):
 
                 # align and sum the stack
                 data_element = dict()
-                if cross_cor:
-                    # Apply cross-correlation between subsequent acquired
-                    # images and align the image stack
-                    summed_image, shifts = align_stack(stack_data_item.data,
-                                                       task)
-                else:
-                    # If user does not desire the cross-correlation to happen
-                    # then simply sum the stack (eg, when acquiring dark data)
-                    summed_image = numpy.sum(stack_data_item.data, axis=0)
-                    shifts = numpy.zeros((number_frames, 2))
-                # add the summed image to Swift
-                data_element["data"] = summed_image
+                stack_data = stack_data_item.data
+                if stack_data is not None:
+                    if cross_cor:
+                        # Apply cross-correlation between subsequent acquired
+                        # images and align the image stack
+                        summed_image, _ = align_stack(stack_data, task)
+                    else:
+                        # If user does not desire the cross-correlation to happen
+                        # then simply sum the stack (eg, when acquiring dark data)
+                        summed_image = numpy.sum(stack_data, axis=0)
+                    # add the summed image to Swift
+                    data_element["data"] = summed_image
                 data_element["title"] = "Aligned and summed spectra"
                 # strip off the first dimension that we sum over
                 for dimensional_calibration in (

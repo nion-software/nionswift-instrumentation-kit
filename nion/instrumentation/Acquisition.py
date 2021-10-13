@@ -127,7 +127,7 @@ SliceType = typing.Sequence[slice]
 SliceListType = typing.Sequence[SliceType]
 ChannelSegment = str
 
-_NDArray = typing.Any  # numpy 1.21
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 class Channel:
     def __init__(self, *segments: ChannelSegment) -> None:
