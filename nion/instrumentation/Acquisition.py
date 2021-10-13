@@ -1523,9 +1523,8 @@ class FramedDataStream(DataStream):
         self.fire_data_available(new_data_stream_event)
 
 
-class Mask:
-    def get_mask_array(self, data_shape: ShapeType) -> _NDArray:
-        raise NotImplementedError
+class MaskLike(typing.Protocol):
+    def get_mask_array(self, data_shape: ShapeType) -> _NDArray: ...
 
 
 AxisType = typing.Union[int, typing.Tuple[int, ...]]
@@ -1597,12 +1596,12 @@ class SumOperator(DataStreamOperator):
 
 
 class MaskedSumOperator(DataStreamOperator):
-    def __init__(self, mask: Mask) -> None:
+    def __init__(self, mask: MaskLike) -> None:
         super().__init__()
         self.__mask = mask
 
     @property
-    def mask(self) -> Mask:
+    def mask(self) -> MaskLike:
         return self.__mask
 
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:

@@ -805,7 +805,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             # abort_button.visible = visible
             abort_button.enabled = enabled
 
-        def data_item_states_changed(data_item_states):
+        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                                          "partial": _("Acquiring"), "marked": _("Stopping")}
             if len(data_item_states) > 0:
@@ -1060,8 +1060,8 @@ class CameraDisplayPanelController:
             self.__abort_button_enabled = enabled
             update_abort_button()
 
-        def data_item_states_changed(data_item_states):
-            self.__data_item_states = data_item_states
+        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
+            self.__data_item_states = list(data_item_states)
             update_status_text()
 
         def update_capture_button(visible: bool, enabled: bool) -> None:

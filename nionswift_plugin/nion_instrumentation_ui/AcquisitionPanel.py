@@ -1603,10 +1603,10 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         # construct the camera frame data stream. add processing.
         camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
         processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
-        if camera_frame_parameters.get("processing", None) == "sum_project":
+        if camera_frame_parameters.processing == "sum_project":
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
                                                                         operator=Acquisition.SumOperator(axis=0))
-        elif camera_frame_parameters.get("processing", None) == "sum_masked":
+        elif camera_frame_parameters.processing == "sum_masked":
             active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
             if active_masks:
                 operator = Acquisition.StackedDataStreamOperator(

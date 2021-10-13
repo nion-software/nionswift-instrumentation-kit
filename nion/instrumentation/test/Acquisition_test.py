@@ -190,7 +190,7 @@ class MultiFrameDataStream(Acquisition.DataStream):
         self._sequence_next(self.__channel, count)
 
 
-class RectangleMask(Acquisition.Mask):
+class RectangleMask(Acquisition.MaskLike):
     def __init__(self, r: Geometry.FloatRect):
         self.__r = r
 
@@ -204,8 +204,8 @@ class RectangleMask(Acquisition.Mask):
         return mask
 
 
-class OrMask(Acquisition.Mask):
-    def __init__(self, mask1: Acquisition.Mask, mask2: Acquisition.Mask):
+class OrMask(Acquisition.MaskLike):
+    def __init__(self, mask1: Acquisition.MaskLike, mask2: Acquisition.MaskLike):
         self.__mask1 = mask1
         self.__mask2 = mask2
 

@@ -49,7 +49,7 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire.camera = camera_hardware_source
             # enable binning for speed
             frame_parameters = multi_acquire.camera.get_current_frame_parameters()
-            frame_parameters['binning'] = 8
+            frame_parameters.binning = 8
             multi_acquire.camera.set_current_frame_parameters(frame_parameters)
             progress = 0
             def update_progress(minimum, maximum, value):
@@ -88,7 +88,7 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire.camera = camera_hardware_source
             # enable binning for speed
             frame_parameters = multi_acquire.camera.get_current_frame_parameters()
-            frame_parameters['binning'] = 8
+            frame_parameters.binning = 8
             multi_acquire.camera.set_current_frame_parameters(frame_parameters)
             progress = 0
             def update_progress(minimum, maximum, value):
@@ -191,9 +191,9 @@ class TestMultiAcquire(unittest.TestCase):
                             def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings):
                                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                                camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                                camera_frame_parameters['processing'] = multi_acquire_settings['processing']
-                                camera_frame_parameters['active_masks'] = masks
+                                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                                camera_frame_parameters.processing = multi_acquire_settings['processing']
+                                camera_frame_parameters.active_masks = masks
                                 scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                                     camera=camera_hardware_source,
@@ -258,7 +258,7 @@ class TestMultiAcquire(unittest.TestCase):
 
                             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
                                 with self.subTest():
-                                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters['binning'])
+                                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
                                     total_shape = tuple(scan_frame_parameters['size'])
                                     haadf_shape = tuple(scan_frame_parameters['size'])
                                     index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
@@ -314,8 +314,8 @@ class TestMultiAcquire(unittest.TestCase):
             def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings):
                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                camera_frame_parameters['processing'] = multi_acquire_settings['processing']
+                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                camera_frame_parameters.processing = multi_acquire_settings['processing']
                 scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,
@@ -381,7 +381,7 @@ class TestMultiAcquire(unittest.TestCase):
 
             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
                 with self.subTest():
-                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters['binning'])
+                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
                     total_shape = tuple(scan_frame_parameters['size'])
                     haadf_shape = tuple(scan_frame_parameters['size'])
                     index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
