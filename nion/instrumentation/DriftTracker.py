@@ -108,4 +108,6 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
                 delta_nm = drift_tracker.predict_drift(utc_time)
                 frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) - delta_nm)
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
-                drift_tracker.submit_image(xdatas[0], drift_rotation, wait=True)
+                xdata0 = xdatas[0]
+                if xdata0:
+                    drift_tracker.submit_image(xdata0, drift_rotation, wait=True)

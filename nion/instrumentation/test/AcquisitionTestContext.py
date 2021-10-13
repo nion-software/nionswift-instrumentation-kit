@@ -6,6 +6,7 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift.test import TestContext
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import Registry
 from nionswift_plugin.usim import CameraDevice
 from nionswift_plugin.usim import InstrumentDevice
@@ -71,7 +72,7 @@ class AcquisitionTestContextBehavior:
                                                                    None, None)
         if is_eels:
             camera_hardware_source.features["is_eels_camera"] = True
-            camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(((0.25, 0.0), (0.5, 1.0))))
+            camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0))))
         camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
             {"exposure_ms": camera_exposure * 1000, "binning": 2}))
         camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters(

@@ -53,7 +53,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             # check the acquisition state
@@ -105,7 +105,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
 
             class TestAbortBehavior(scan_base.SynchronizedScanBehaviorInterface):
@@ -137,7 +137,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
@@ -162,7 +162,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             frame_time = scan_frame_parameters2.pixel_time_us * scan_frame_parameters2.size[0] * scan_frame_parameters2.size[1] / 1000000.0
@@ -180,7 +180,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             data_item_data_channel = DataChannel.DataItemDataChannel(test_context.document_model, "data", {
                 Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                 Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
@@ -199,7 +199,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_masked"
+            camera_frame_parameters.processing = "sum_masked"
             data_item_data_channel = DataChannel.DataItemDataChannel(test_context.document_model, "data", {
                 Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                 Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
@@ -218,7 +218,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 5)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_masked"
+            camera_frame_parameters.processing = "sum_masked"
             masks = [camera_base.Mask(), camera_base.Mask(), camera_base.Mask()]
             camera_frame_parameters.active_masks = masks
             data_item_data_channel = DataChannel.DataItemDataChannel(document_model, "Spectrum Image", {
@@ -247,7 +247,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["size"] = (4, 4)
             scan_frame_parameters.rotation_rad = math.radians(30)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
             for metadata_source in spectrum_images:
@@ -261,7 +261,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
@@ -281,7 +281,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
@@ -311,7 +311,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             grab_sync_info = scan_hardware_source.grab_synchronized_get_info(
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
@@ -389,7 +389,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (6, 6)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             data_channel = TestDataChannel(test_context.document_model,
                                            {Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
                                             Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
@@ -462,7 +462,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (8, 8)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
@@ -488,7 +488,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["scan_id"] = str(uuid.uuid4())
             scan_frame_parameters["size"] = (16, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             def do_grab():
@@ -529,7 +529,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters["subscan_fractional_size"] = (0.5, 0.5)
             scan_frame_parameters["subscan_fractional_center"] = (0.5, 0.5)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters["processing"] = "sum_project"
+            camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             def do_grab():

@@ -45,10 +45,14 @@ from nion.utils.ReferenceCounting import weak_partial
 if typing.TYPE_CHECKING:
     from nion.swift.model import DocumentModel
 
+DataElementType = typing.Dict[str, typing.Any]
+_FinishedCallbackType = typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]
+_NDArray = typing.Any  # numpy 1.21
+
 _ = gettext.gettext
 
 
-class DocumentModelInterface(abc.ABC):
+class DocumentModelInterface(typing.Protocol):
 
     @abc.abstractmethod
     def _call_soon(self, fn: typing.Callable[[], None]) -> None: ...
@@ -57,7 +61,7 @@ class DocumentModelInterface(abc.ABC):
     def update_data_item_session(self, data_item: DataItem.DataItem) -> None: ...
 
     @abc.abstractmethod
-    def get_data_item_channel_reference(self, hardware_source_id: str, channel_id: str) -> DocumentModel.DocumentModel.DataItemReference: ...
+    def get_data_item_channel_reference(self, hardware_source_id: str, channel_id: typing.Optional[str]) -> DocumentModel.DocumentModel.DataItemReference: ...
 
     @abc.abstractmethod
     def _update_data_item_reference(self, key: str, data_item: DataItem.DataItem) -> None: ...
@@ -152,7 +156,7 @@ class HardwareSourceBridge:
             self.__data_channel_stop_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_stop_listener)
             # NOTE: clean_display_items is called in __finish_project_read
 
-    def __hardware_source_removed(self, hardware_source: HardwareSource):
+    def __hardware_source_removed(self, hardware_source: HardwareSource) -> None:
         self.__hardware_source_call_soon_event_listeners[hardware_source.hardware_source_id].close()
         del self.__hardware_source_call_soon_event_listeners[hardware_source.hardware_source_id]
         self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id].close()
@@ -167,7 +171,7 @@ class HardwareSourceBridge:
         self.__data_channel_start_listeners.pop(hardware_source.hardware_source_id, None)
         self.__data_channel_stop_listeners.pop(hardware_source.hardware_source_id, None)
 
-    def __construct_data_item_reference(self, hardware_source: HardwareSource, data_channel: DataChannel):
+    def __construct_data_item_reference(self, hardware_source: HardwareSource, data_channel: DataChannel) -> DocumentModel.DocumentModel.DataItemReference:
         """Construct a data item reference.
 
         Construct a data item reference and assign a data item to it. Update data item session id and session metadata.
@@ -186,7 +190,7 @@ class HardwareSourceBridge:
                 data_item.category = "temporary"
                 data_item_reference.data_item = data_item
 
-                def append_data_items():
+                def append_data_items() -> None:
                     with self.__data_items_to_append_lock:
                         for key, data_item in self.__data_items_to_append:
                             self.__document_model.append_data_item(data_item)
@@ -198,39 +202,44 @@ class HardwareSourceBridge:
 
                 self.__call_soon(append_data_items)
 
-            def update_session():
+            def update_session(data_item: DataItem.DataItem) -> None:
                 # since this is a delayed call, the data item might have disappeared. check it.
                 if data_item._closed:
                     return
                 self.__document_model.update_data_item_session(data_item)
-                if data_channel.processor:
-                    src_data_channel = hardware_source.data_channels[data_channel.src_channel_index]
+                src_channel_index = data_channel.src_channel_index
+                sum_processor = data_channel.processor
+                if sum_processor and src_channel_index is not None:
+                    src_data_channel = hardware_source.data_channels[src_channel_index]
                     src_data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, src_data_channel.channel_id)
-                    data_channel.processor.connect_data_item_reference(src_data_item_reference)
+                    sum_processor.connect_data_item_reference(src_data_item_reference)
 
-            self.__call_soon(update_session)
+            assert data_item
+            self.__call_soon(functools.partial(update_session, data_item))
 
             return data_item_reference
 
-    def __data_channel_start(self, hardware_source, data_channel):
-        def data_channel_start():
+    def __data_channel_start(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
+        def data_channel_start() -> None:
             assert threading.current_thread() == threading.main_thread()
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
             data_item_reference.start()
         self.__call_soon(data_channel_start)
 
-    def __data_channel_stop(self, hardware_source, data_channel):
-        def data_channel_stop():
+    def __data_channel_stop(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
+        def data_channel_stop() -> None:
             assert threading.current_thread() == threading.main_thread()
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
             data_item_reference.stop()
         self.__call_soon(data_channel_stop)
 
-    def __data_channel_updated(self, hardware_source, data_channel, data_and_metadata):
+    def __data_channel_updated(self, hardware_source: HardwareSource, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         data_item_reference = self.__construct_data_item_reference(hardware_source, data_channel)
-        self.__document_model._queue_data_item_update(data_item_reference.data_item, data_and_metadata)
+        data_item = data_item_reference.data_item
+        assert data_item
+        self.__document_model._queue_data_item_update(data_item, data_and_metadata)
 
-    def __data_channel_states_updated(self, hardware_source, data_channels):
+    def __data_channel_states_updated(self, hardware_source: HardwareSource, data_channels: typing.Sequence[DataChannel]) -> None:
         data_item_states = list()
         for data_channel in data_channels:
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
@@ -239,7 +248,7 @@ class HardwareSourceBridge:
             channel_data_state = data_channel.state
             sub_area = data_channel.sub_area
             # make sure to send out the complete frame
-            data_item_state = dict()
+            data_item_state: typing.Dict[str, typing.Any] = dict()
             if channel_id is not None:
                 data_item_state["channel_id"] = channel_id
             data_item_state["data_item"] = data_item
@@ -258,7 +267,7 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
     def __init__(self) -> None:
         super().__init__()
         self.hardware_sources: typing.List[HardwareSource] = list()
-        self.instruments: typing.List[typing.Any] = list()
+        self.instruments: typing.List[Instrument] = list()
         # we create a list of callbacks for when a hardware
         # source is added or removed
         self.hardware_source_added_event = Event.Event()
@@ -273,19 +282,19 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         self._close_hardware_sources()
         self._close_instruments()
 
-    def _close_instruments(self):
+    def _close_instruments(self) -> None:
         for instrument in self.instruments:
             if hasattr(instrument, "close"):
                 instrument.close()
         self.instruments = []
 
-    def _close_hardware_sources(self):
+    def _close_hardware_sources(self) -> None:
         for hardware_source in self.hardware_sources:
             if hasattr(hardware_source, "close"):
                 hardware_source.close()
         self.hardware_sources = []
 
-    def _reset(self):  # used for testing to start from scratch
+    def _reset(self) -> None:  # used for testing to start from scratch
         self.hardware_sources = []
         self.instruments = []
         self.hardware_source_added_event = Event.Event()
@@ -294,20 +303,20 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         self.instrument_removed_event = Event.Event()
         self.__aliases = {}
 
-    def register_hardware_source(self, hardware_source):
+    def register_hardware_source(self, hardware_source: HardwareSource) -> None:
         self.hardware_sources.append(hardware_source)
         self.hardware_source_added_event.fire(hardware_source)
 
-    def unregister_hardware_source(self, hardware_source):
+    def unregister_hardware_source(self, hardware_source: HardwareSource) -> None:
         self.hardware_sources.remove(hardware_source)
         self.hardware_source_removed_event.fire(hardware_source)
 
-    def register_instrument(self, instrument_id, instrument):
+    def register_instrument(self, instrument_id: str, instrument: Instrument) -> None:
         instrument.instrument_id = instrument_id
         self.instruments.append(instrument)
         self.instrument_added_event.fire(instrument)
 
-    def unregister_instrument(self, instrument_id):
+    def unregister_instrument(self, instrument_id: str) -> None:
         for instrument in self.instruments:
             if instrument.instrument_id == instrument_id:
                 instrument.instrument_id = None
@@ -315,20 +324,20 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
                 self.instrument_removed_event.fire(instrument)
                 break
 
-    def abort_all_and_close(self):
+    def abort_all_and_close(self) -> None:
         for hardware_source in copy.copy(self.hardware_sources):
             hardware_source.abort_playing()
 
-    def get_all_instrument_ids(self):
-        instrument_ids = set()
-        instrument_ids.update(list(instrument.instrument_id for instrument in self.instruments))
+    def get_all_instrument_ids(self) -> typing.Set[str]:
+        instrument_ids: typing.Set[str] = set()
+        instrument_ids.update(list(instrument.instrument_id for instrument in self.instruments if instrument.instrument_id))
         for alias in self.__aliases.keys():
             resolved_alias = self.get_instrument_by_id(alias)
             if resolved_alias:
                 instrument_ids.add(alias)
         return instrument_ids
 
-    def get_all_hardware_source_ids(self):
+    def get_all_hardware_source_ids(self) -> typing.Set[str]:
         hardware_source_ids = set()
         hardware_source_ids.update(list(hardware_source.hardware_source_id for hardware_source in self.hardware_sources))
         for alias in self.__aliases.keys():
@@ -337,7 +346,7 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
                 hardware_source_ids.add(alias)
         return hardware_source_ids
 
-    def __get_info_for_instrument_id(self, instrument_id):
+    def __get_info_for_instrument_id(self, instrument_id: str) -> typing.Optional[typing.Tuple[Instrument, str]]:
         display_name = str()
         seen_instrument_ids = []  # prevent loops, just so we don't get into endless loop in case of user error
         while instrument_id in self.__aliases and instrument_id not in seen_instrument_ids:
@@ -349,14 +358,14 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         return None
 
     # may return None
-    def get_instrument_by_id(self, instrument_id):
+    def get_instrument_by_id(self, instrument_id: str) -> typing.Optional[Instrument]:
         info = self.__get_info_for_instrument_id(instrument_id)
         if info:
             instrument, display_name = info
             return instrument
         return None
 
-    def __get_info_for_hardware_source_id(self, hardware_source_id):
+    def __get_info_for_hardware_source_id(self, hardware_source_id: str) -> typing.Optional[typing.Tuple[HardwareSource, str]]:
         display_name = str()
         seen_hardware_source_ids = []  # prevent loops, just so we don't get into endless loop in case of user error
         while hardware_source_id in self.__aliases and hardware_source_id not in seen_hardware_source_ids:
@@ -374,7 +383,7 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
             return hardware_source
         return None
 
-    def make_instrument_alias(self, instrument_id, alias_instrument_id, display_name):
+    def make_instrument_alias(self, instrument_id: str, alias_instrument_id: str, display_name: str) -> None:
         """ Configure an alias.
 
             Callers can use the alias to refer to the instrument or hardware source.
@@ -390,7 +399,7 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         for f in self.aliases_updated:
             f()
 
-    def make_delegate_hardware_source(self, delegate, hardware_source_id: str, hardware_source_name: str) -> DelegateHardwareSource:
+    def make_delegate_hardware_source(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> DelegateHardwareSource:
         return DelegateHardwareSource(delegate, hardware_source_id, hardware_source_name)
 
     def register_document_model(self, document_model: DocumentModelInterface) -> HardwareSourceBridge:
@@ -436,8 +445,8 @@ class AcquisitionTask:
         self.__aborted = False
         self.__is_stopping = False
         self.__is_continuous = continuous
-        self.__last_acquire_time = None
-        self.__minimum_period = 1/1000.0
+        self.__last_acquire_time = 0.0
+        self.__minimum_period = 1 / 1000.0
         self.__frame_index = 0
         self.__view_id = str(uuid.uuid4()) if not continuous else None
         self._test_acquire_exception = None
@@ -445,16 +454,16 @@ class AcquisitionTask:
         self.start_event = Event.Event()
         self.stop_event = Event.Event()
         self.data_elements_changed_event = Event.Event()
-        self.finished_callback_fn: typing.Optional[typing.Callable[[typing.Sequence[DataAndMetadata.DataAndMetadata]], None]] = None  # hack to determine when 'record' mode finishes.
+        self.finished_callback_fn: typing.Optional[_FinishedCallbackType] = None
 
-    def __mark_as_finished(self):
+    def __mark_as_finished(self) -> None:
         self.__finished = True
         self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping)
 
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
     # one can't be executing when the other is called.
-    def execute(self):
+    def execute(self) -> None:
         # first start the task
         if not self.__started:
             try:
@@ -504,27 +513,27 @@ class AcquisitionTask:
             self._suspend_acquisition()
 
     @property
-    def is_finished(self):
+    def is_finished(self) -> bool:
         return self.__finished
 
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
     # one can't be executing when the other is called.
-    def abort(self):
+    def abort(self) -> None:
         self.__aborted = True
         self._request_abort_acquisition()
 
     # called from the hardware source
-    def stop(self):
+    def stop(self) -> None:
         self.__is_stopping = True
         self._mark_acquisition()
 
-    def __start(self):
+    def __start(self) -> None:
         if not self._start_acquisition():
             self.abort()
         self.__last_acquire_time = time.time() - self.__minimum_period
 
-    def __execute_acquire_data_elements(self):
+    def __execute_acquire_data_elements(self) -> bool:
         # with Utility.trace(): # (min_elapsed=0.0005, discard="anaconda"):
         # impose maximum frame rate so that acquire_data_elements can't starve main thread
         elapsed = time.time() - self.__last_acquire_time
@@ -628,7 +637,7 @@ class AcquisitionTask:
     # returns a tuple of a list of data elements.
     # called synchronously from execute thread.
     # must be thread safe
-    def _acquire_data_elements(self):
+    def _acquire_data_elements(self) -> typing.Sequence[DataElementType]:
         raise NotImplementedError()
 
 
@@ -657,7 +666,10 @@ class DataChannel:
     which will set pending data on the data item and eventually call set_data_and_metadata on the data item from the
     main thread.
     """
-    def __init__(self, hardware_source: HardwareSource, index: int, channel_id: str=None, name: str=None, src_channel_index: int=None, processor=None):
+
+    def __init__(self, hardware_source: HardwareSource, index: int, channel_id: typing.Optional[str] = None,
+                 name: typing.Optional[str] = None, src_channel_index: typing.Optional[int] = None,
+                 processor: typing.Optional[SumProcessor] = None) -> None:
         self.__hardware_source = hardware_source
         self.__index = index
         self.__channel_id = channel_id
@@ -667,8 +679,8 @@ class DataChannel:
         self.__start_count = 0
         self.__state: typing.Optional[str] = None
         self.__data_shape: typing.Optional[DataAndMetadata.ShapeType] = None
-        self.__sub_area = None
-        self.__dest_sub_area = None
+        self.__sub_area: typing.Optional[Geometry.IntRect] = None
+        self.__dest_sub_area: typing.Optional[Geometry.IntRect] = None
         self.__data_and_metadata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.is_dirty = False
         self.data_channel_updated_event = Event.Event()
@@ -676,15 +688,15 @@ class DataChannel:
         self.data_channel_stop_event = Event.Event()
 
     @property
-    def index(self):
+    def index(self) -> int:
         return self.__index
 
     @property
-    def channel_id(self):
+    def channel_id(self) -> typing.Optional[str]:
         return self.__channel_id
 
     @property
-    def name(self):
+    def name(self) -> typing.Optional[str]:
         return self.__name
 
     @property
@@ -692,23 +704,23 @@ class DataChannel:
         return self.__state
 
     @property
-    def data_shape(self):
+    def data_shape(self) -> typing.Optional[DataAndMetadata.ShapeType]:
         return self.__data_shape
 
     @property
-    def sub_area(self):
+    def sub_area(self) -> typing.Optional[Geometry.IntRect]:
         return self.__sub_area
 
     @property
-    def dest_sub_area(self):
+    def dest_sub_area(self) -> typing.Optional[Geometry.IntRect]:
         return self.__dest_sub_area
 
     @property
-    def src_channel_index(self):
+    def src_channel_index(self) -> typing.Optional[int]:
         return self.__src_channel_index
 
     @property
-    def processor(self):
+    def processor(self) -> typing.Optional[SumProcessor]:
         return self.__processor
 
     @property
@@ -716,25 +728,30 @@ class DataChannel:
         return self.__data_and_metadata
 
     @property
-    def is_started(self):
+    def is_started(self) -> bool:
         return self.__start_count > 0
 
-    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape, dest_sub_area, sub_area, view_id) -> None:
+    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: typing.Optional[DataAndMetadata.ShapeType], dest_sub_area: typing.Optional[Geometry.IntRectTuple], sub_area: typing.Optional[Geometry.IntRectTuple], view_id: typing.Optional[str]) -> None:
         """Called from hardware source when new data arrives."""
         self.__state = state
         self.__data_shape = data_shape or data_and_metadata.data_shape
-        dest_sub_area = dest_sub_area or sub_area
-        self.__dest_sub_area = dest_sub_area
-        self.__sub_area = sub_area
+
+        sub_area_r = Geometry.IntRect.make(sub_area) if sub_area is not None else None
+        dest_sub_area = dest_sub_area if dest_sub_area is not None else sub_area
+        dest_sub_area_r = Geometry.IntRect.make(dest_sub_area) if dest_sub_area is not None else None
+
+        self.__dest_sub_area = dest_sub_area_r
+        self.__sub_area = sub_area_r
 
         hardware_source_id = self.__hardware_source.hardware_source_id
         channel_index = self.index
         channel_id = self.channel_id
         channel_name = self.name
         metadata = dict(copy.deepcopy(data_and_metadata.metadata))
-        hardware_source_metadata = dict()
+        hardware_source_metadata: typing.Dict[str, typing.Any] = dict()
         hardware_source_metadata["hardware_source_id"] = hardware_source_id
-        hardware_source_metadata["channel_index"] = channel_index
+        if channel_index is not None:
+            hardware_source_metadata["channel_index"] = channel_index
         if channel_id is not None:
             hardware_source_metadata["reference_key"] = "_".join([hardware_source_id, channel_id])
             hardware_source_metadata["channel_id"] = channel_id
@@ -753,14 +770,14 @@ class DataChannel:
         if master_data is None or (master_data.shape != data_shape and data.shape != data_shape):
             master_data = numpy.zeros(data_shape, data.dtype)
         data_matches = master_data is not None and data_shape == master_data.shape and data.dtype == master_data.dtype
-        if data_matches and sub_area is not None:
-            src_rect = Geometry.IntRect.make(sub_area)
-            dst_rect = Geometry.IntRect.make(dest_sub_area)
+        if data_matches and sub_area_r and dest_sub_area_r:
+            src_rect = sub_area_r
+            dst_rect = dest_sub_area_r
             if (dst_rect.top > 0 or dst_rect.left > 0 or dst_rect.bottom < master_data.shape[0] or dst_rect.right < master_data.shape[1])\
                     or (src_rect.top > 0 or src_rect.left > 0 or src_rect.bottom < data.shape[0] or src_rect.right < data.shape[1]):
                 master_data[dst_rect.slice] = data[src_rect.slice]
             else:
-                master_data = numpy.copy(data)
+                master_data = numpy.copy(data)  # type: ignore
         else:
             assert data.shape == data_shape
             master_data = data  # numpy.copy(data). assume data does not need a copy.
@@ -777,34 +794,43 @@ class DataChannel:
         self.data_channel_updated_event.fire(new_extended_data)
         self.is_dirty = True
 
-    def start(self):
+    def start(self) -> None:
         """Called from hardware source when data starts streaming."""
         old_start_count = self.__start_count
         self.__start_count += 1
         if old_start_count == 0:
             self.data_channel_start_event.fire()
 
-    def stop(self):
+    def stop(self) -> None:
         """Called from hardware source when data stops streaming."""
         self.__start_count -= 1
         if self.__start_count == 0:
             self.data_channel_stop_event.fire()
 
 
+class Instrument(typing.Protocol):
+    instrument_id: typing.Optional[str]
+    def close(self) -> None: ...
+
+
+class FrameParameters(typing.Protocol):
+    def as_dict(self) -> typing.Dict[str, typing.Any]: ...
+
+
 class HardwareSource(typing.Protocol):
 
     # methods
 
-    def close(self): ...
-    def start_playing(self, *args, **kwargs): ...
-    def abort_playing(self, *, sync_timeout: typing.Optional[float] = None): ...
-    def stop_playing(self, *, sync_timeout=None): ...
-    def start_recording(self, sync_timeout=None, finished_callback_fn=None): ...
-    def abort_recording(self, sync_timeout=None): ...
-    def stop_recording(self, sync_timeout=None): ...
-    def get_next_xdatas_to_finish(self, timeout=None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def get_next_xdatas_to_start(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
-    def set_current_frame_parameters(self, frame_parameters): ...
+    def close(self) -> None: ...
+    def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None: ...
+    def abort_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
+    def stop_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None) -> None: ...
+    def abort_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
+    def stop_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
+    def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
+    def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
+    def set_current_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
 
     # properties
 
@@ -841,7 +867,7 @@ class HardwareSource(typing.Protocol):
         return len(self.data_channels)
 
     @property
-    def data_channels(self) -> typing.List[DataChannel]:
+    def data_channels(self) -> typing.Sequence[DataChannel]:
         return list()
 
     # private. do not use outside of instrumentation-kit.
@@ -853,11 +879,12 @@ class HardwareSource(typing.Protocol):
     data_item_states_changed_event: Event.Event
     call_soon_event: Event.Event
 
-    def add_data_channel(self, channel_id: str=None, name: str=None): ...
-    def add_channel_processor(self, channel_index: int, processor): ...
-    def clean_display_items(self, document_model, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs) -> None: ...
-    def get_frame_parameters_from_dict(self, d): ...
-    def set_channel_enabled(self, channel_index, enabled): ...
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None: ...
+    def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
+    def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None: ...
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
+    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
+    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None: ...
 
 
 class ConcreteHardwareSource(Observable.Observable, HardwareSource):
@@ -866,7 +893,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     The hardware source generates data on a background thread.
     """
 
-    def __init__(self, hardware_source_id: str, display_name: str):
+    def __init__(self, hardware_source_id: str, display_name: str) -> None:
         super().__init__()
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
@@ -884,7 +911,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__data_elements_changed_event_listeners: typing.Dict[str, Event.EventListener] = dict()
         self.__start_event_listeners: typing.Dict[str, Event.EventListener] = dict()
         self.__stop_event_listeners: typing.Dict[str, Event.EventListener] = dict()
-        self.__acquire_thread = threading.Thread(target=self.__acquire_thread_loop)
+        self.__acquire_thread: typing.Optional[threading.Thread] = threading.Thread(target=self.__acquire_thread_loop)
         self.__acquire_thread.daemon = True
         self.__acquire_thread.start()
         self._test_acquire_exception = None
@@ -907,15 +934,15 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.property_changed_event.fire("hardware_source_id")
 
     @property
-    def display_name(self):
+    def display_name(self) -> str:
         return self.__display_name
 
     @display_name.setter
-    def display_name(self, value):
+    def display_name(self, value: str) -> None:
         self.__display_name = value
         self.property_changed_event.fire("display_name")
 
-    def close_thread(self):
+    def close_thread(self) -> None:
         if self.__acquire_thread:
             # when overriding hardware source close, the acquisition loop may still be running
             # so nothing can be changed here that will make the acquisition loop fail.
@@ -925,10 +952,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.__acquire_thread.join()
             self.__acquire_thread = None
 
-    def _call_soon(self, fn):
+    def _call_soon(self, fn: typing.Callable[[], None]) -> None:
         self.call_soon_event.fire_any(fn)
 
-    def __acquire_thread_loop(self):
+    def __acquire_thread_loop(self) -> None:
         # acquire_thread_trigger should be set whenever the task list change.
         while self.__acquire_thread_trigger.wait():
             self.__acquire_thread_trigger.clear()
@@ -982,36 +1009,36 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # subclasses can implement this method which is called when the data items used for acquisition change.
     # NOTE: this is called from DocumentModel!
-    def data_item_states_changed(self, data_item_states):
+    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
         pass
 
     # subclasses should implement this method to create a continuous-style acquisition task.
     # create the view task
     # will be called from the UI thread and should return quickly.
-    def _create_acquisition_view_task(self):
+    def _create_acquisition_view_task(self) -> AcquisitionTask:
         raise NotImplementedError()
 
     # subclasses can implement this method to get notification that the view task has been changed.
     # subclasses may have a need to access the view task and this method can help keep track of the
     # current view task.
     # will be called from the UI thread and should return quickly.
-    def _view_task_updated(self, view_task):
+    def _view_task_updated(self, view_task: typing.Optional[AcquisitionTask]) -> None:
         pass
 
     # subclasses should implement this method to create a non-continuous-style acquisition task.
     # create the view task
     # will be called from the UI thread and should return quickly.
-    def _create_acquisition_record_task(self):
+    def _create_acquisition_record_task(self) -> AcquisitionTask:
         raise NotImplementedError()
 
     # subclasses can implement this method to get notification that the record task has been changed.
     # subclasses may have a need to access the record task and this method can help keep track of the
     # current record task.
     # will be called from the UI thread and should return quickly.
-    def _record_task_updated(self, record_task):
+    def _record_task_updated(self, record_task: typing.Optional[AcquisitionTask]) -> None:
         pass
 
-    def __data_elements_changed(self, task, data_elements, view_id, is_complete, is_stopping):
+    def __data_elements_changed(self, task: AcquisitionTask, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_complete: bool, is_stopping: bool) -> None:
         """Called in response to a data_elements_changed event from the task.
 
         data_elements is a list of data_elements; may be an empty list
@@ -1038,8 +1065,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         beyond these three items, the data element will be converted to xdata using convert_data_element_to_data_and_metadata.
         thread safe
         """
-        xdatas = list()
-        data_channels = list()
+        xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+        data_channels: typing.List[DataChannel] = list()
         for data_element in data_elements:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
@@ -1063,8 +1090,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             src_channel_index = data_channel.src_channel_index
             if src_channel_index is not None:
                 src_data_channel = self.__data_channels[src_channel_index]
-                if src_data_channel.is_dirty and src_data_channel.state == "complete":
-                    processed_data_and_metadata = data_channel.processor.process(src_data_channel.data_and_metadata)
+                src_data_and_metadata = src_data_channel.data_and_metadata
+                data_channel_processor = data_channel.processor
+                if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
+                    processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
                     data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
                 data_channels.append(data_channel)
                 xdatas.append(data_channel.data_and_metadata)
@@ -1080,11 +1109,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             if callable(task.finished_callback_fn):
                 task.finished_callback_fn(xdatas)
 
-    def __start(self):
+    def __start(self) -> None:
         for data_channel in self.__data_channels:
             data_channel.start()
 
-    def __stop(self):
+    def __stop(self) -> None:
         for data_channel in self.__data_channels:
             data_channel.stop()
 
@@ -1123,12 +1152,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # return whether acquisition is running
     @property
-    def is_playing(self):
+    def is_playing(self) -> bool:
         return self.is_task_running('view')
 
     # call this to start acquisition
     # not thread safe
-    def start_playing(self, *args, **kwargs):
+    def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         if not self.is_playing:
             view_task = self._create_acquisition_view_task()
             view_task._test_acquire_hook = self._test_acquire_hook
@@ -1142,7 +1171,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # call this to stop acquisition immediately
     # not thread safe
-    def abort_playing(self, *, sync_timeout=None):
+    def abort_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None:
         if self.is_playing:
             self.abort_task('view')
             self._view_task_updated(None)
@@ -1154,7 +1183,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # call this to stop acquisition gracefully
     # not thread safe
-    def stop_playing(self, *, sync_timeout=None):
+    def stop_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None:
         if self.is_playing:
             self.stop_task('view')
             self._view_task_updated(None)
@@ -1166,17 +1195,17 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # return whether acquisition is running
     @property
-    def is_recording(self):
+    def is_recording(self) -> bool:
         return self.is_task_running('record')
 
     # call this to start acquisition
     # thread safe
-    def start_recording(self, sync_timeout=None, finished_callback_fn=None):
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None) -> None:
         if not self.is_recording:
             record_task = self._create_acquisition_record_task()
             old_finished_callback_fn = record_task.finished_callback_fn
 
-            def finished(xdatas: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
+            def finished(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
                 if callable(old_finished_callback_fn):
                     old_finished_callback_fn(xdatas)
                 if callable(finished_callback_fn):
@@ -1193,7 +1222,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # call this to stop acquisition immediately
     # not thread safe
-    def abort_recording(self, sync_timeout=None):
+    def abort_recording(self, sync_timeout: typing.Optional[float] = None) -> None:
         if self.is_recording:
             self.abort_task('record')
             self._record_task_updated(None)
@@ -1205,7 +1234,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # call this to stop acquisition gracefully
     # not thread safe
-    def stop_recording(self, sync_timeout=None):
+    def stop_recording(self, sync_timeout: typing.Optional[float] = None) -> None:
         if self.is_recording:
             self.stop_task('record')
             self._record_task_updated(None)
@@ -1215,15 +1244,15 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 time.sleep(0.01)  # 10 msec
                 assert time.time() - start < float(sync_timeout)
 
-    def get_next_xdatas_to_finish(self, timeout=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         new_data_event = threading.Event()
-        new_xdatas: typing.List[DataAndMetadata.DataAndMetadata] = list()
+        new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
-        def receive_new_xdatas(xdatas):
+        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
             new_xdatas[:] = xdatas
             new_data_event.set()
 
-        def abort():
+        def abort() -> None:
             new_data_event.set()
 
         with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
@@ -1234,15 +1263,15 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
                 return new_xdatas
 
-    def get_next_xdatas_to_start(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         new_data_event = threading.Event()
-        new_xdatas: typing.List[DataAndMetadata.DataAndMetadata] = list()
+        new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
-        def receive_new_xdatas(xdatas):
+        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
             new_xdatas[:] = xdatas
             new_data_event.set()
 
-        def abort():
+        def abort() -> None:
             new_data_event.set()
 
         with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
@@ -1263,16 +1292,16 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         return len(self.__data_channels)
 
     @property
-    def data_channels(self) -> typing.List[DataChannel]:
+    def data_channels(self) -> typing.Sequence[DataChannel]:
         return self.__data_channels
 
-    def add_data_channel(self, channel_id: str=None, name: str=None):
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None:
         self.__data_channels.append(DataChannel(self, len(self.__data_channels), channel_id, name))
 
-    def add_channel_processor(self, channel_index: int, processor):
+    def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
         self.__data_channels.append(DataChannel(self, len(self.__data_channels), processor.processor_id, None, channel_index, processor))
 
-    def clean_display_items(self, document_model, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs) -> None:
+    def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
         """Clean the display items associated with this data channel.
 
         Invoked when the hardware source is registered with the document model. Useful for
@@ -1280,17 +1309,19 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         """
         pass
 
-    def get_property(self, name):
+    def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
 
-    def set_property(self, name, value):
+    def set_property(self, name: str, value: typing.Any) -> None:
         setattr(self, name, value)
 
     # deprecated. for Facade use only.
-    def create_view_task(self, frame_parameters: dict=None, channels_enabled: typing.List[bool]=None, buffer_size: int=1) -> ViewTask:
+    def create_view_task(self, frame_parameters: typing.Optional[FrameParameters] = None,
+                         channels_enabled: typing.Optional[typing.Sequence[bool]] = None,
+                         buffer_size: int = 1) -> ViewTask:
         return ViewTask(self, frame_parameters, channels_enabled, buffer_size)
 
-    def get_api(self, version):
+    def get_api(self, version: str) -> typing.Any:
         actual_version = "1.0.0"
         if Utility.compare_versions(version, actual_version) > 0:
             raise NotImplementedError("Hardware Source API requested version %s is greater than %s." % (version, actual_version))
@@ -1303,20 +1334,26 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # some dummy methods to pass type checking. the hardware source needs to be refactored.
 
-    def set_current_frame_parameters(self, frame_parameters):
+    def set_current_frame_parameters(self, frame_parameters: FrameParameters) -> None:
         pass
 
-    def get_frame_parameters_from_dict(self, d):
-        return None
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters:
+        raise NotImplementedError()
 
-    def set_channel_enabled(self, channel_index, enabled):
+    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         pass
+
+
+class DelegateAcquisitionTaskProtocol(typing.Protocol):
+    def start_acquisition(self) -> None: ...
+    def stop_acquisition(self) -> None: ...
+    def acquire_data_and_metadata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]: ...
 
 
 # used for Facade backwards compatibility
 class DelegateAcquisitionTask(AcquisitionTask):
 
-    def __init__(self, delegate, hardware_source_id: str, hardware_source_name: str):
+    def __init__(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> None:
         super().__init__(True)
         self.__delegate = delegate
         self.__hardware_source_id = hardware_source_id
@@ -1328,17 +1365,19 @@ class DelegateAcquisitionTask(AcquisitionTask):
         self.__delegate.start_acquisition()
         return True
 
-    def _acquire_data_elements(self):
+    def _acquire_data_elements(self) -> typing.Sequence[DataElementType]:
         data_and_metadata = self.__delegate.acquire_data_and_metadata()
-        data_element = {
-            "version": 1,
-            "data": data_and_metadata.data,
-            "properties": {
-                "hardware_source_name": self.__hardware_source_name,
-                "hardware_source_id": self.__hardware_source_id,
+        if data_and_metadata:
+            data_element = {
+                "version": 1,
+                "data": data_and_metadata.data,
+                "properties": {
+                    "hardware_source_name": self.__hardware_source_name,
+                    "hardware_source_id": self.__hardware_source_id,
+                }
             }
-        }
-        return [data_element]
+            return [data_element]
+        return list()
 
     def _stop_acquisition(self) -> None:
         self.__delegate.stop_acquisition()
@@ -1348,7 +1387,7 @@ class DelegateAcquisitionTask(AcquisitionTask):
 # used for Facade backwards compatibility
 class DelegateHardwareSource(ConcreteHardwareSource):
 
-    def __init__(self, delegate, hardware_source_id: str, hardware_source_name: str):
+    def __init__(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> None:
         super().__init__(hardware_source_id, hardware_source_name)
         self.__delegate = delegate
         self.features["is_video"] = True
@@ -1359,39 +1398,40 @@ class DelegateHardwareSource(ConcreteHardwareSource):
 
 
 class SumProcessor(Observable.Observable):
-    def __init__(self, bounds, processor_id=None, label=None):
+    def __init__(self, bounds: Geometry.FloatRect, processor_id: typing.Optional[str] = None, label: typing.Optional[str] = None) -> None:
         super().__init__()
         self.__bounds = bounds
         self.__processor_id = processor_id or "summed"
         self.__label = label or _("Summed")
-        self.__crop_graphic = None
-        self.__crop_listener = None
-        self.__remove_listener = None
-        self.__data_item_reference_changed_event_listener = None
+        self.__crop_graphic: typing.Optional[Graphics.RectangleGraphic] = None
+        self.__crop_listener: typing.Optional[Event.EventListener] = None
+        self.__remove_listener: typing.Optional[Event.EventListener] = None
+        self.__data_item_reference_changed_event_listener: typing.Optional[Event.EventListener] = None
 
     @property
-    def label(self):
+    def label(self) -> str:
         return self.__label
 
     @property
-    def processor_id(self):
+    def processor_id(self) -> str:
         return self.__processor_id
 
     @property
-    def bounds(self):
+    def bounds(self) -> Geometry.FloatRect:
         return self.__bounds
 
     @bounds.setter
-    def bounds(self, value):
-        if self.__bounds != value:
-            self.__bounds = value
+    def bounds(self, value: Geometry.FloatRectTuple) -> None:
+        bounds = Geometry.FloatRect.make(value)
+        if self.__bounds != bounds:
+            self.__bounds = bounds
             self.notify_property_changed("bounds")
             if self.__crop_graphic:
-                self.__crop_graphic.bounds = value
+                self.__crop_graphic.bounds = bounds
 
     def process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
         if data_and_metadata.datum_dimension_count > 1 and data_and_metadata.data_shape[0] > 1:
-            cropped_xdata = Core.function_crop(data_and_metadata, self.__bounds)
+            cropped_xdata = Core.function_crop(data_and_metadata, self.__bounds.as_tuple())
             assert cropped_xdata
             summed = Core.function_sum(cropped_xdata, 0)
             assert summed
@@ -1405,7 +1445,7 @@ class SumProcessor(Observable.Observable):
         else:
             return copy.deepcopy(data_and_metadata)
 
-    def connect_data_item_reference(self, data_item_reference):
+    def connect_data_item_reference(self, data_item_reference: DocumentModel.DocumentModel.DataItemReference) -> None:
         """Connect to the data item reference, creating a crop graphic if necessary.
 
         If the data item reference does not yet have an associated data item, add a
@@ -1416,19 +1456,21 @@ class SumProcessor(Observable.Observable):
         if data_item and display_item:
             self.__connect_display(display_item)
         else:
-            def data_item_reference_changed():
-                self.__data_item_reference_changed_event_listener.close()
+            def data_item_reference_changed() -> None:
+                if self.__data_item_reference_changed_event_listener:
+                    self.__data_item_reference_changed_event_listener.close()
+                    self.__data_item_reference_changed_event_listener = None
                 self.connect_data_item_reference(data_item_reference)  # ugh. recursive mess.
             self.__data_item_reference_changed_event_listener = data_item_reference.data_item_reference_changed_event.listen(data_item_reference_changed)
 
-    def __connect_display(self, display_item):
+    def __connect_display(self, display_item: DisplayItem.DisplayItem) -> None:
         assert threading.current_thread() == threading.main_thread()
-        crop_graphic = None
+        crop_graphic: typing.Optional[Graphics.RectangleGraphic] = None
         for graphic in display_item.graphics:
-            if graphic.graphic_id == self.__processor_id:
+            if graphic.graphic_id == self.__processor_id and isinstance(graphic, Graphics.RectangleGraphic):
                 crop_graphic = graphic
                 break
-        def close_all():
+        def close_all() -> None:
             self.__crop_graphic = None
             if self.__crop_listener:
                 self.__crop_listener.close()
@@ -1445,10 +1487,10 @@ class SumProcessor(Observable.Observable):
             crop_graphic.label = _("Crop")
             display_item.add_graphic(crop_graphic)
         if not self.__crop_listener:
-            def property_changed(k):
-                if k == "bounds":
+            def property_changed(k: str) -> None:
+                if k == "bounds" and crop_graphic:
                     self.bounds = crop_graphic.bounds
-            def graphic_removed(k, v, i):
+            def graphic_removed(k: str, v: Graphics.RectangleGraphic, i: int) -> None:
                 if v == crop_graphic:
                     close_all()
             self.__crop_listener = crop_graphic.property_changed_event.listen(property_changed)
@@ -1458,11 +1500,11 @@ class SumProcessor(Observable.Observable):
 
 class ViewTask:
 
-    def __init__(self, hardware_source: HardwareSource, frame_parameters: typing.Optional[dict], channels_enabled: typing.Optional[typing.List[bool]], buffer_size: int):
+    def __init__(self, hardware_source: HardwareSource, frame_parameters: typing.Optional[FrameParameters], channels_enabled: typing.Optional[typing.Sequence[bool]], buffer_size: int):
         self.__hardware_source = hardware_source
         self.__was_playing = self.__hardware_source.is_playing
         if frame_parameters:
-            self.__hardware_source.set_current_frame_parameters(self.__hardware_source.get_frame_parameters_from_dict(frame_parameters))
+            self.__hardware_source.set_current_frame_parameters(frame_parameters)
         if channels_enabled is not None:
             for channel_index, channel_enabled in enumerate(channels_enabled):
                 self.__hardware_source.set_channel_enabled(channel_index, channel_enabled)
@@ -1481,28 +1523,28 @@ class ViewTask:
         if not self.__was_playing:
             self.__hardware_source.stop_playing()
 
-    def grab_immediate(self) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_immediate(self) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab list of data/metadata from the task.
 
         This method will return immediately if data is available.
         """
         return self.__data_channel_buffer.grab_latest()
 
-    def grab_next_to_finish(self) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_next_to_finish(self) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab list of data/metadata from the task.
 
         This method will wait until the current frame completes.
         """
         return self.__data_channel_buffer.grab_next()
 
-    def grab_next_to_start(self) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_next_to_start(self) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab list of data/metadata from the task.
 
         This method will wait until the current frame completes and the next one finishes.
         """
         return self.__data_channel_buffer.grab_following()
 
-    def grab_earliest(self) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_earliest(self) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab list of data/metadata from the task.
 
         This method will return the earliest item in the buffer or wait for the next one to finish.
@@ -1511,7 +1553,7 @@ class ViewTask:
 
 
 @contextlib.contextmanager
-def get_data_generator_by_id(hardware_source_id, sync=True):
+def get_data_generator_by_id(hardware_source_id: str, sync: bool = True) -> typing.Iterator[typing.Callable[[], typing.Optional[_NDArray]]]:
     """
         Return a generator for data.
 
@@ -1520,8 +1562,14 @@ def get_data_generator_by_id(hardware_source_id, sync=True):
         NOTE: a new ndarray is created for each call.
     """
     hardware_source = HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
-    def get_last_data():
-        return hardware_source.get_next_xdatas_to_finish()[0].data.copy()
+    def get_last_data() -> typing.Optional[_NDArray]:
+        if hardware_source:
+            xdatas = hardware_source.get_next_xdatas_to_finish()
+            if xdatas:
+                first_xdata = xdatas[0]
+                first_data = first_xdata.data if first_xdata else None
+                return first_data.copy() if first_data is not None else None
+        return None
     yield get_last_data
 
 
@@ -1541,19 +1589,19 @@ class DataChannelBuffer:
         started = 1
         paused = 2
 
-    def __init__(self, data_channels: typing.List[DataChannel], buffer_size=16):
+    def __init__(self, data_channels: typing.Sequence[DataChannel], buffer_size: int = 16) -> None:
         self.__state_lock = threading.RLock()
         self.__state = DataChannelBuffer.State.idle
         self.__buffer_size = buffer_size
         self.__buffer_lock = threading.RLock()
         self.__buffer: typing.List[typing.List[DataAndMetadata.DataAndMetadata]] = list()
         self.__done_events: typing.List[threading.Event] = list()
-        self.__active_channel_ids: typing.Set[str] = set()
-        self.__latest: typing.Dict[str, DataAndMetadata.DataAndMetadata] = dict()
+        self.__active_channel_ids: typing.Set[typing.Optional[str]] = set()
+        self.__latest: typing.Dict[typing.Optional[str], DataAndMetadata.DataAndMetadata] = dict()
         self.__data_channel_updated_listeners: typing.List[Event.EventListener] = list()
         self.__data_channel_start_listeners: typing.List[Event.EventListener] = list()
         self.__data_channel_stop_listeners: typing.List[Event.EventListener] = list()
-        self.__data_channels = data_channels
+        self.__data_channels = list(data_channels)
         for data_channel in self.__data_channels:
             data_channel_updated_listener = data_channel.data_channel_updated_event.listen(functools.partial(self.__data_channel_updated, data_channel))
             self.__data_channel_updated_listeners.append(data_channel_updated_listener)
@@ -1599,7 +1647,7 @@ class DataChannelBuffer:
     def __data_channel_stop(self, data_channel: DataChannel) -> None:
         self.__active_channel_ids.remove(data_channel.channel_id)
 
-    def grab_latest(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_latest(self, timeout: typing.Optional[float] = None) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab the most recent data from the buffer, blocking until one is available. Clear earlier data."""
         timeout = timeout if timeout is not None else 10.0
         with self.__buffer_lock:
@@ -1615,7 +1663,7 @@ class DataChannelBuffer:
             self.__buffer = list()
             return result
 
-    def grab_earliest(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_earliest(self, timeout: typing.Optional[float] = None) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab the earliest data from the buffer, blocking until one is available."""
         timeout = timeout if timeout is not None else 10.0
         with self.__buffer_lock:
@@ -1629,13 +1677,13 @@ class DataChannelBuffer:
                     raise Exception("Could not grab latest.")
             return self.__buffer.pop(0)
 
-    def grab_next(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_next(self, timeout: typing.Optional[float] = None) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab the next data to finish from the buffer, blocking until one is available."""
         with self.__buffer_lock:
             self.__buffer = list()
         return self.grab_latest(timeout)
 
-    def grab_following(self, timeout: float=None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_following(self, timeout: typing.Optional[float] = None) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab the next data to start from the buffer, blocking until one is available."""
         self.grab_next(timeout)
         return self.grab_next(timeout)
@@ -1675,7 +1723,7 @@ class MetadataDisplayComponent:
 
     # populate the dictionary d with the keys 'frame_index' and 'info_items' if they can be extracted
     # from the metadata
-    def populate(self, d: typing.MutableMapping, metadata: typing.Mapping) -> None:
+    def populate(self, d: typing.Dict[str, typing.Any], metadata: DataAndMetadata.MetadataType) -> None:
         frame_index = Metadata.get_metadata_value(metadata, "stem.hardware_source.frame_number")
         if frame_index is not None:
             d["frame_index"] = frame_index
@@ -1704,7 +1752,7 @@ class MetadataDisplayComponent:
 Registry.register_component(MetadataDisplayComponent(), {"metadata_display"})
 
 
-def matches_hardware_source(hardware_source_id, channel_id, document_model, data_item):
+def matches_hardware_source(hardware_source_id: str, channel_id: typing.Optional[str], document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> bool:
     if not document_model.get_data_item_computation(data_item):
         hardware_source_metadata = data_item.metadata.get("hardware_source", dict())
         data_item_hardware_source_id = hardware_source_metadata.get("hardware_source_id")
@@ -1718,13 +1766,13 @@ Registry.register_component(HardwareSourceManager(), {"hardware_source_manager"}
 hardware_source_bridges: typing.Dict[uuid.UUID, HardwareSourceBridge] = dict()
 
 
-def handle_component_registered(component, component_types: typing.Set[str]) -> None:
+def handle_component_registered(component: typing.Any, component_types: typing.Set[str]) -> None:
     if "document_model" in component_types:
         assert component.uuid not in hardware_source_bridges
         hardware_source_bridges[component.uuid] = HardwareSourceManager().register_document_model(component)
 
 
-def handle_component_unregistered(component, component_types: typing.Set[str]) -> None:
+def handle_component_unregistered(component: typing.Any, component_types: typing.Set[str]) -> None:
     if "application" in component_types:
         HardwareSourceManager().close()
     elif "document_model" in component_types:

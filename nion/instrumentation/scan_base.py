@@ -33,6 +33,10 @@ from nion.utils import Geometry
 from nion.utils import Registry
 from nion.utils import ThreadPool
 
+if typing.TYPE_CHECKING:
+    from nion.swift.model import DataItem
+    from nion.swift.model import DisplayItem
+
 
 _ = gettext.gettext
 
@@ -670,12 +674,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     def grab_synchronized(self, *, data_channel: Acquisition.DataChannel = None,
                           scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
-                          camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
+                          camera_frame_parameters: camera_base.CameraFrameParameters, camera_data_channel: SynchronizedDataChannelInterface = None,
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None,
                           scan_count: int = 1) -> GrabSynchronizedResult: ...
 
     def record_immediate(self, frame_parameters: ScanFrameParameters, enabled_channels: typing.Sequence[int] = None,
-                         sync_timeout: float = None) -> typing.List[DataAndMetadata.DataAndMetadata]: ...
+                         sync_timeout: float = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
 
     # used in Facade
 
@@ -859,7 +863,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__frame_parameters = self.__profiles[0]
         self.__record_parameters = self.__profiles[2]
 
-        self.__acquisition_task = None
+        self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
@@ -945,7 +949,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __get_initial_profile_index(self) -> int:
         return 0
 
-    def start_playing(self, *args, **kwargs) -> None:
+    def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         if "frame_parameters" in kwargs:
             self.set_current_frame_parameters(ScanFrameParameters(kwargs["frame_parameters"]))
         elif len(args) == 1 and isinstance(args[0], dict):
@@ -963,18 +967,18 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         for index in range(self.channel_count):
             self.set_channel_enabled(index, index in channel_indexes)
 
-    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_next_to_start(self, *, timeout: float=None, **kwargs) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         self.start_playing()
         return self.get_next_xdatas_to_start(timeout)
 
-    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.List[DataAndMetadata.DataAndMetadata]:
+    def grab_next_to_finish(self, *, timeout: float=None, **kwargs) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         self.start_playing()
         return self.get_next_xdatas_to_finish(timeout)
 
     def grab_sequence_prepare(self, count: int, **kwargs) -> bool:
         return False
 
-    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.List[DataAndMetadata.DataAndMetadata]]:
+    def grab_sequence(self, count: int, **kwargs) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]:
         return None
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
@@ -998,16 +1002,16 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             is_subscan = False
             channel_modifier = None
 
-        camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.get("binning", 1)))
+        camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.binning))
 
         scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
         camera_readout_size_squeezed: typing.Tuple[int, ...]
-        if camera_frame_parameters.get("processing") == "sum_project":
+        if camera_frame_parameters.processing == "sum_project":
             camera_readout_size_squeezed = (camera_readout_size.width,)
             axes_descriptor = AxesDescriptor(None, [0, 1], [2])
-        elif camera_frame_parameters.get("processing") == "sum_masked":
-            camera_readout_size_squeezed = (max(len(camera_frame_parameters.get("active_masks", [])), 1),)
+        elif camera_frame_parameters.processing == "sum_masked":
+            camera_readout_size_squeezed = (max(len(camera_frame_parameters.active_masks), 1),)
             axes_descriptor = AxesDescriptor(None, [2], [0, 1])
         else:
             camera_readout_size_squeezed = tuple(camera_readout_size)
@@ -1035,13 +1039,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def grab_synchronized(self, *, data_channel: Acquisition.DataChannel = None,
                           scan_frame_parameters: dict, camera: camera_base.CameraHardwareSource,
-                          camera_frame_parameters: dict, camera_data_channel: SynchronizedDataChannelInterface = None,
+                          camera_frame_parameters: camera_base.CameraFrameParameters, camera_data_channel: SynchronizedDataChannelInterface = None,
                           section_height: int = None, scan_behavior: SynchronizedScanBehaviorInterface = None,
                           scan_count: int = 1) -> GrabSynchronizedResult:
         synchronized_scan_data_stream = make_synchronized_scan_data_stream(scan_hardware_source=self,
                                                                            scan_frame_parameters=ScanFrameParameters(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
-                                                                           camera_frame_parameters=camera_base.CameraFrameParameters(camera_frame_parameters),
+                                                                           camera_frame_parameters=camera_frame_parameters,
                                                                            camera_data_channel=camera_data_channel,
                                                                            scan_behavior=scan_behavior,
                                                                            section_height=section_height,
@@ -1310,7 +1314,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, channel_ids, self.display_name)
 
-    def _view_task_updated(self, view_task) -> None:
+    def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
@@ -1322,7 +1326,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
 
     def record_immediate(self, frame_parameters: ScanFrameParameters, enabled_channels: typing.Sequence[int] = None,
-                         sync_timeout: float = None) -> typing.List[DataAndMetadata.DataAndMetadata]:
+                         sync_timeout: float = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         assert not self.is_recording
         frame_parameters = copy.deepcopy(frame_parameters)
         old_enabled_channels = self.get_enabled_channels()
@@ -1332,8 +1336,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.set_enabled_channels(enabled_channels)
         record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
         finished_event = threading.Event()
-        xdatas = list()
-        def finished(xdatas_: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
+        xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+        def finished(xdatas_: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
             nonlocal xdatas
             xdatas = [copy.deepcopy(xdata) for xdata in xdatas_]  # low level may be reused; copy here
             self.set_enabled_channels(old_enabled_channels)
@@ -1367,7 +1371,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters:
         return copy.copy(self.__profiles[profile_index])
 
-    def set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+    def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
+        assert isinstance(frame_parameters, ScanFrameParameters)
         self.__set_current_frame_parameters(frame_parameters, True)
 
     def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, is_context: bool, update_task: bool = True) -> None:
@@ -1377,9 +1382,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.channel_modifier = "subscan"
         else:
             frame_parameters.channel_modifier = None
-        if self.__acquisition_task:
+        acquisition_task = self.__acquisition_task
+        if isinstance(acquisition_task, ScanAcquisitionTask):
             if update_task:
-                self.__acquisition_task.set_frame_parameters(frame_parameters)
+                acquisition_task.set_frame_parameters(frame_parameters)
             if not self.subscan_enabled:
                 self.__stem_controller._update_scan_context(frame_parameters.size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
             elif is_context:
@@ -1439,14 +1445,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
-    def record_async(self, callback_fn: typing.Callable[[typing.List[DataAndMetadata.DataAndMetadata]], None]) -> None:
+    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]) -> None:
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
 
         def record_thread() -> None:
             current_frame_time = self.get_current_frame_time()
 
-            def handle_finished(xdatas: typing.List[DataAndMetadata.DataAndMetadata]) -> None:
+            def handle_finished(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
                 callback_fn(xdatas)
 
             self.start_recording(current_frame_time, finished_callback_fn=handle_finished)
@@ -1563,7 +1569,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
         return self.hardware_source_id
 
-    def clean_display_items(self, document_model, display_items, **kwargs) -> None:
+    def clean_display_items(self, document_model: HardwareSource.HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
         for display_item in display_items:
             for graphic in copy.copy(display_item.graphics):
                 graphic_id = graphic.graphic_id
@@ -1671,12 +1677,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
-    def data_item_states_changed(self, data_item_states) -> None:
+    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
         channel_ids = {self.get_channel_state(channel_index).channel_id for channel_index in range(self.channel_count)}
-        channel_map = dict()
+        channel_map: typing.Dict[str, DataItem.DataItem] = dict()
         for data_item_state in data_item_states:
             if data_item_state.get("channel_id") in channel_ids:
-                channel_map[data_item_state.get("channel_id")] = data_item_state.get("data_item")
+                channel_map[typing.cast(str, data_item_state.get("channel_id"))] = typing.cast("DataItem.DataItem", data_item_state.get("data_item"))
         self.__stem_controller._update_scan_channel_map(channel_map)
 
     @property
@@ -1944,7 +1950,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 operator.apply()
             elif isinstance(operator, Acquisition.StackedDataStreamOperator) and all(isinstance(o, Acquisition.MaskedSumOperator) for o in operator.operators):
                 camera_frame_parameters.processing = "sum_masked"
-                camera_frame_parameters.active_masks = [typing.cast(Acquisition.MaskedSumOperator, o).mask for o in operator.operators]
+                camera_frame_parameters.active_masks = [typing.cast(camera_base.Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
                 operator.apply()
             self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
             self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
@@ -2196,15 +2202,15 @@ def make_synchronized_scan_data_stream(
     update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
                                  scan_hardware_source.scan_device)
 
-    camera_exposure_ms = camera_frame_parameters["exposure_ms"]
+    camera_exposure_ms = camera_frame_parameters.exposure_ms
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
                                   "instrument": copy.deepcopy(instrument_metadata)}
     camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
                                                scan_hardware_source.flyback_pixels, additional_camera_metadata)
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
-    if camera_frame_parameters.get("processing", None) == "sum_project":
+    if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
-    elif camera_frame_parameters.get("processing", None) == "sum_masked":
+    elif camera_frame_parameters.processing == "sum_masked":
         active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
         if active_masks:
             operator = Acquisition.StackedDataStreamOperator(
@@ -2227,7 +2233,7 @@ def make_synchronized_scan_data_stream(
     collector: Acquisition.DataStream = Acquisition.CollectedDataStream(combined_data_stream, tuple(scan_size),
                                                                         scan_frame_parameters.get_scan_calibrations(),
                                                                         slice_list)
-    if not old_move_axis and camera_frame_parameters.get("processing", None) == "sum_masked":
+    if not old_move_axis and camera_frame_parameters.processing == "sum_masked":
         active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
         if active_masks and len(active_masks) > 1:
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
@@ -2291,10 +2297,10 @@ _component_unregistered_listener = None
 def run() -> None:
     def component_registered(component, component_types) -> None:
         if "scan_device" in component_types:
-            stem_controller = None
+            stem_controller: typing.Optional[stem_controller_module.STEMController] = None
             stem_controller_id = getattr(component, "stem_controller_id", None)
             if not stem_controller and stem_controller_id:
-                stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id)
+                stem_controller = typing.cast(typing.Any, HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id))
             if not stem_controller and not stem_controller_id:
                 stem_controller = Registry.get_component("stem_controller")
             if not stem_controller:

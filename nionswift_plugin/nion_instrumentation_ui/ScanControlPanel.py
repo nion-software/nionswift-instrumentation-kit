@@ -1400,7 +1400,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             simulate_button.visible = visible
             simulate_button.enabled = enabled
 
-        def data_item_states_changed(data_item_states):
+        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                 "partial": _("Acquiring"), "marked": _("Stopping")}
             if len(data_item_states) > 0:
@@ -1438,7 +1438,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # handler, and checkbox handler.
 
             data_channel = self.__state_controller.data_channels[channel_index]
-            channel_id = data_channel.channel_id
+            channel_id = data_channel.channel_id or str()
             name = data_channel.name
 
             thumbnail_column = typing.cast(UserInterface.BoxWidget, thumbnail_group.children[channel_index])
@@ -1740,9 +1740,9 @@ class ScanDisplayPanelController:
             self.__abort_button_enabled = enabled
             update_abort_button()
 
-        def data_item_states_changed(data_item_states):
+        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             # This will be called on a thread, but updating the status must occur on main thread.
-            self.__data_item_states = data_item_states
+            self.__data_item_states = list(data_item_states)
             display_panel.document_controller.queue_task(update_status_text)
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:

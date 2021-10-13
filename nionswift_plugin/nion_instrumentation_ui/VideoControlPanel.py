@@ -4,6 +4,7 @@
 import copy
 import functools
 import gettext
+import typing
 
 from nion.instrumentation import HardwareSource
 from nion.swift import DataItemThumbnailWidget
@@ -236,7 +237,7 @@ class VideoDisplayPanelController:
                     status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
                 return
 
-        def data_item_states_changed(data_item_states):
+        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             self.__data_item_states = data_item_states
             update_status_text()
 

@@ -105,7 +105,7 @@ class ScanAcquisitionController:
 
         camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
 
-        camera_frame_parameters["processing"] = processing.value.processing_id
+        camera_frame_parameters.processing = processing.value.processing_id
 
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
         for c in scan_hardware_source.get_enabled_channels():

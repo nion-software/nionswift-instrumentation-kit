@@ -360,8 +360,8 @@ class MultiAcquirePanelDelegate:
                     document_model = self.document_controller._document_controller.document_model
                     camera_frame_parameters = camera.get_current_frame_parameters()
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
-                    camera_frame_parameters['exposure_ms'] = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                    camera_frame_parameters['processing'] = multi_acquire_settings['processing']
+                    camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                    camera_frame_parameters.processing = multi_acquire_settings['processing']
                     scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
                     grab_synchronized_info = scan_controller.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                    camera=camera,

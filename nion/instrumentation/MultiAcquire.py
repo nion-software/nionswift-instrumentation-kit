@@ -465,8 +465,9 @@ class SISequenceAcquisitionHandler:
             self.scan_data_channel.current_frames_index = frame
             if self.__si_sequence_behavior.sequence_behavior and self.__si_sequence_behavior.sequence_section_length and frame % self.__si_sequence_behavior.sequence_section_length == 0:
                 self.__si_sequence_behavior.sequence_behavior.prepare_frame()
+            camera_frame_parameters = camera_base.CameraFrameParameters(self.camera_frame_parameters) if isinstance(self.camera_frame_parameters, dict) else self.camera_frame_parameters
             combined_data = self.__scan_controller.grab_synchronized(camera=self.__camera,
-                                                                     camera_frame_parameters=self.camera_frame_parameters,
+                                                                     camera_frame_parameters=camera_frame_parameters,
                                                                      camera_data_channel=self.camera_data_channel,
                                                                      scan_frame_parameters=self.scan_frame_parameters,
                                                                      section_height=self.__si_sequence_behavior.scan_section_height,
@@ -697,8 +698,8 @@ class MultiAcquireController:
                     break
 
                 frame_parameters = self.camera.get_current_frame_parameters()
-                frame_parameters['exposure_ms'] =  parameters['exposure_ms']
-                frame_parameters['processing'] = self.__active_settings['processing']
+                frame_parameters.exposure_ms =  parameters['exposure_ms']
+                frame_parameters.processing = self.__active_settings['processing']
                 self.camera.set_current_frame_parameters(frame_parameters)
                 if self.__active_settings['shift_each_sequence_slice']:
                     data_element = None
@@ -842,7 +843,7 @@ class MultiAcquireController:
         except Exception as e:
             self.acquisition_state_changed_event.fire({'message': 'exception', 'content': str(e)})
             import traceback
-            traceback.print_stack()
+            traceback.print_exc()
             self.cancel()
             raise
         finally:

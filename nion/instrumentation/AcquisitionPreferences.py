@@ -91,7 +91,7 @@ class ControlCustomization(Schema.Entity):
 
     @property
     def control_id(self) -> str:
-        return self._get_field_value("control_id")
+        return typing.cast(str, self._get_field_value("control_id"))
 
     @property
     def name(self) -> str:
@@ -116,8 +116,8 @@ AcquisitionPreferencesSchema = Schema.entity("acquisition_preferences", None, No
 
 
 class DictRecorderLoggerDictInterface:
-    def get_data_dict(self) -> typing.Dict: ...
-    def set_data_dict(self, d: typing.Dict) -> None: ...
+    def get_data_dict(self) -> typing.Dict[str, typing.Any]: ...
+    def set_data_dict(self, d: typing.Dict[str, typing.Any]) -> None: ...
 
 
 class DictRecorderLogger(Recorder.RecorderLogger):
