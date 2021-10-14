@@ -259,10 +259,10 @@ class STEMController(Observable.Observable):
         self.__probe_state_stack.pop()
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
 
-    def _enter_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: HardwareSource.HardwareSource=None) -> None:
+    def _enter_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: typing.Optional[HardwareSource.HardwareSource] = None) -> None:
         pass
 
-    def _exit_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: HardwareSource.HardwareSource=None) -> None:
+    def _exit_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: typing.Optional[HardwareSource.HardwareSource] = None) -> None:
         pass
 
     @property
@@ -290,7 +290,7 @@ class STEMController(Observable.Observable):
         return self.__subscan_rotation
 
     @subscan_rotation.setter
-    def subscan_rotation(self, value: float):
+    def subscan_rotation(self, value: float) -> None:
         if self.__subscan_rotation != value:
             self.__subscan_rotation = value
             self.notify_property_changed("subscan_rotation")
@@ -337,10 +337,10 @@ class STEMController(Observable.Observable):
 
     @property
     def drift_rotation(self) -> float:
-        return typing.cast(float, self.__drift_rotation)
+        return self.__drift_rotation
 
     @drift_rotation.setter
-    def drift_rotation(self, value: float):
+    def drift_rotation(self, value: float) -> None:
         if self.__drift_rotation != value:
             self.__drift_rotation = value
             self.notify_property_changed("drift_rotation")
@@ -427,7 +427,7 @@ class STEMController(Observable.Observable):
 
     # instrument API
 
-    def set_control_output(self, name, value, options=None):
+    def set_control_output(self, name: str, value: float, options: typing.Optional[typing.Mapping[str, typing.Any]] = None) -> None:
         options = options if options else dict()
         value_type = options.get("value_type", "output")
         inform = options.get("inform", False)
@@ -447,19 +447,19 @@ class STEMController(Observable.Observable):
         else:
             raise NotImplementedError()
 
-    def get_control_output(self, name):
+    def get_control_output(self, name: str) -> float:
         return self.GetVal(name)
 
-    def get_control_state(self, name):
+    def get_control_state(self, name: str) -> typing.Optional[str]:
         value_exists, value = self.TryGetVal(name)
         return "unknown" if value_exists else None
 
-    def get_property(self, name):
+    def get_property(self, name: str) -> typing.Any:
         if name in ("probe_position", "probe_state"):
             return getattr(self, name)
         return self.get_control_output(name)
 
-    def set_property(self, name, value):
+    def set_property(self, name: str, value: typing.Any) -> None:
         if name in ("probe_position"):
             return setattr(self, name, value)
         return self.set_control_output(name, value)
@@ -496,7 +496,7 @@ class STEMController(Observable.Observable):
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         return False, None
 
-    def GetVal(self, s: str, default_value: float = None) -> float:
+    def GetVal(self, s: str, default_value: typing.Optional[float] = None) -> float:
         raise Exception(f"No element named '{s}' exists! Cannot get value.")
 
     def SetVal(self, s: str, val: float) -> bool:
@@ -517,7 +517,7 @@ class STEMController(Observable.Observable):
     def InformControl(self, s: str, val: float) -> bool:
         return False
 
-    def GetVal2D(self, s:str, default_value: Geometry.FloatPoint=None, *, axis: AxisType) -> Geometry.FloatPoint:
+    def GetVal2D(self, s: str, default_value: typing.Optional[Geometry.FloatPoint] = None, *, axis: AxisType) -> Geometry.FloatPoint:
         raise Exception(f"No 2D element named '{s}' exists! Cannot get value.")
 
     def SetVal2D(self, s:str, value: Geometry.FloatPoint, *, axis: AxisType) -> bool:
@@ -637,7 +637,7 @@ class GraphicSetController:
         for graphic in graphics:
             graphic.display_item.remove_graphic(graphic)
 
-    def __remove_one_graphic(self, graphic_to_remove) -> None:
+    def __remove_one_graphic(self, graphic_to_remove: Graphics.Graphic) -> None:
         graphic_trackers = list()
         for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
             if graphic_to_remove != graphic:
@@ -670,7 +670,7 @@ class DisplayItemListModel(Observable.Observable):
         self.__change_event_listener = change_event.listen(self.refilter) if change_event else None
 
         # special handling when document closes
-        def unlisten():
+        def unlisten() -> None:
             if self.__change_event_listener:
                 self.__change_event_listener.close()
                 self.__change_event_listener = None
@@ -705,7 +705,7 @@ class DisplayItemListModel(Observable.Observable):
     def items(self) -> typing.Sequence["DisplayItem.DisplayItem"]:
         return self.__items
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> typing.Any:
         if item == self.__item_key:
             return self.items
         raise AttributeError()
@@ -751,7 +751,7 @@ class EventLoopMonitor:
         self.__document_close_listener = typing.cast(typing.Any, None)
         self.__event_loop = None
 
-    def _call_soon_threadsafe(self, fn: typing.Callable, *args) -> None:
+    def _call_soon_threadsafe(self, fn: typing.Callable[...,  None], *args: typing.Any) -> None:
         if not self.__closed:
             def safe_fn() -> None:
                 if not self.__closed:
@@ -827,7 +827,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         if name == "position":
             self.__stem_controller.probe_position = Geometry.FloatPoint.make(graphic.position)
 
-    def get_dependents(self, item) -> typing.Sequence:
+    def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
         if item in graphics:
             return list(set(graphics) - {item})
@@ -913,7 +913,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         if name == "rotation":
             self.__stem_controller.subscan_rotation = subscan_graphic.rotation
 
-    def get_dependents(self, item) -> typing.Sequence:
+    def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
         if item in graphics:
             return list(set(graphics) - {item})
@@ -986,7 +986,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         if name == "vector":
             self.__stem_controller.line_scan_vector = line_scan_graphic.vector
 
-    def get_dependents(self, item) -> typing.Sequence:
+    def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
         if item in graphics:
             return list(set(graphics) - {item})
@@ -1095,13 +1095,16 @@ class DriftView(EventLoopMonitor):
             if self.__graphic:
                 self.__remove_graphic()
 
-    def __remove_graphic(self):
-        self.__graphic_property_changed_listener.close()
-        self.__graphic_property_changed_listener = None
-        self.__graphic_about_to_be_removed_listener.close()
-        self.__graphic_about_to_be_removed_listener = None
-        self.__graphic_display_item.remove_graphic(self.__graphic)
-        self.__graphic_display_item = None
+    def __remove_graphic(self) -> None:
+        if self.__graphic_property_changed_listener:
+            self.__graphic_property_changed_listener.close()
+            self.__graphic_property_changed_listener = None
+        if self.__graphic_about_to_be_removed_listener:
+            self.__graphic_about_to_be_removed_listener.close()
+            self.__graphic_about_to_be_removed_listener = None
+        if self.__graphic_display_item and self.__graphic:
+            self.__graphic_display_item.remove_graphic(self.__graphic)
+            self.__graphic_display_item = None
         self.__graphic = None
 
     def __graphic_about_to_be_removed(self) -> None:
@@ -1121,13 +1124,11 @@ class DriftView(EventLoopMonitor):
 class ScanContextController:
     """Manage probe view, subscan, and drift area for each instrument (STEMController) that gets registered."""
 
-    def __init__(self, document_model, event_loop):
+    def __init__(self, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop) -> None:
         assert event_loop is not None
         self.__document_model = document_model
         self.__event_loop = event_loop
         # be sure to keep a reference or it will be closed immediately.
-        self.__instrument_added_event_listener = None
-        self.__instrument_removed_event_listener = None
         self.__instrument_added_event_listener = HardwareSource.HardwareSourceManager().instrument_added_event.listen(self.register_instrument)
         self.__instrument_removed_event_listener = HardwareSource.HardwareSourceManager().instrument_removed_event.listen(self.unregister_instrument)
         for instrument in HardwareSource.HardwareSourceManager().instruments:
@@ -1139,11 +1140,11 @@ class ScanContextController:
         for instrument in HardwareSource.HardwareSourceManager().instruments:
             self.unregister_instrument(instrument)
         self.__instrument_added_event_listener.close()
-        self.__instrument_added_event_listener = None
+        self.__instrument_added_event_listener = typing.cast(typing.Any, None)
         self.__instrument_removed_event_listener.close()
-        self.__instrument_removed_event_listener = None
+        self.__instrument_removed_event_listener = typing.cast(typing.Any, None)
 
-    def register_instrument(self, instrument):
+    def register_instrument(self, instrument: typing.Any) -> None:
         # if this is a stem controller, add a probe view
         if hasattr(instrument, "probe_position"):
             instrument._probe_view = ProbeView(instrument, self.__document_model, self.__event_loop)
@@ -1154,7 +1155,7 @@ class ScanContextController:
         if hasattr(instrument, "drift_region"):
             instrument._drift_view = DriftView(instrument, self.__document_model, self.__event_loop)
 
-    def unregister_instrument(self, instrument):
+    def unregister_instrument(self, instrument: typing.Any) -> None:
         if hasattr(instrument, "_probe_view"):
             instrument._probe_view.close()
             instrument._probe_view = None
@@ -1172,11 +1173,11 @@ class ScanContextController:
 # the plan is to migrate away from the hardware manager as a registration system.
 # but keep this here until that migration is complete.
 
-def component_registered(component, component_types):
+def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
     if "stem_controller" in component_types:
         HardwareSource.HardwareSourceManager().register_instrument(component.instrument_id, component)
 
-def component_unregistered(component, component_types):
+def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
     if "stem_controller" in component_types:
         HardwareSource.HardwareSourceManager().unregister_instrument(component.instrument_id)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # system imports
 import numpy
+import numpy.typing
 import typing
 
 # local libraries
@@ -10,6 +11,8 @@ from nion.instrumentation import Acquisition
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
+
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 
 class DataItemDataChannel(Acquisition.DataChannel):
@@ -61,7 +64,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
     def get_data_item(self, channel: Acquisition.Channel) -> DataItem.DataItem:
         return self.__data_item_map[channel]
 
-    def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+    def update_data(self, channel: Acquisition.Channel, source_data: _NDArray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_item = self.__data_item_map.get(channel, None)
         if data_item:
             source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data)

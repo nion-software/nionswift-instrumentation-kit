@@ -7,6 +7,7 @@ import datetime
 import functools
 import gettext
 import numpy
+import numpy.typing
 import typing
 
 # local libraries
@@ -18,6 +19,8 @@ from nion.utils import Geometry
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DocumentModel
+
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 _ = gettext.gettext
 
@@ -54,7 +57,7 @@ class DriftLogger:
                 display_item._set_display_layer_properties(2, label=_("m"), stroke_color=display_item.get_display_layer_property(2, "fill_color"), fill_color=None)
             self.__data_item = data_item
 
-    def __update_drift_log_data_item(self, delta_nm_data: numpy.ndarray) -> None:
+    def __update_drift_log_data_item(self, delta_nm_data: _NDArray) -> None:
         # must be called on main thread
         # check __drift_changed_event_listener to see if the logger has been closed
         if self.__drift_changed_event_listener:
