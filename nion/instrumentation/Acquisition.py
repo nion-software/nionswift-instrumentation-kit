@@ -1621,7 +1621,8 @@ class MaskedSumOperator(DataStreamOperator):
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         data_and_metadata = channel_data.data_and_metadata
         mask_array = self.__mask.get_mask_array(data_and_metadata.data_shape)
-        summed_data = numpy.array((data_and_metadata.data * mask_array).sum(), dtype=data_and_metadata.data_dtype)
+        data = data_and_metadata.data
+        summed_data = numpy.array((data * mask_array).sum(), dtype=data_and_metadata.data_dtype)  # type: ignore
         summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
                                                              intensity_calibration=data_and_metadata.intensity_calibration,
                                                              data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),

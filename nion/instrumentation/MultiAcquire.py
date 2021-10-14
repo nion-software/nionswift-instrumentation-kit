@@ -108,7 +108,7 @@ class ScanDataChannel:
                 data_shape = (frames,) + scan_size
             data_descriptor = DataAndMetadata.DataDescriptor(frames > 1 and not sum_frames, 0, len(scan_size))
             data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
-        dimensional_calibrations = scan_calibrations
+        dimensional_calibrations: typing.Tuple[Calibration.Calibration, ...] = scan_calibrations
         if frames > 1 and not sum_frames:
             dimensional_calibrations = (Calibration.Calibration(),) + tuple(dimensional_calibrations)
         data_item.dimensional_calibrations = dimensional_calibrations
@@ -201,9 +201,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
     def __calculate_axes_order_and_data_shape(self, axes_descriptor: scan_base.AxesDescriptor, scan_shape: Geometry.IntSize, camera_readout_size: typing.Tuple[int, ...]) -> typing.Tuple[typing.List[int], typing.Tuple[int, ...]]:
         # axes_descriptor provides the information needed to re-order the axes of the result data approprietly.
-        axes_order = []
+        axes_order: typing.List[int] = []
         if axes_descriptor.sequence_axes:
-            axes_order.extend(axes_descriptor.sequence_axes)
+            axes_order.append(axes_descriptor.sequence_axes)
         if axes_descriptor.collection_axes:
             axes_order.extend(axes_descriptor.collection_axes)
         if axes_descriptor.data_axes:
@@ -441,10 +441,10 @@ class SISequenceAcquisitionHandler:
     def __init__(self,
                  camera: camera_base.CameraHardwareSource,
                  camera_data_channel: CameraDataChannel,
-                 camera_frame_parameters: dict,
+                 camera_frame_parameters: camera_base.CameraFrameParameters,
                  scan_controller: scan_base.ScanHardwareSource,
                  scan_data_channel: ScanDataChannel,
-                 scan_frame_parameters: dict,
+                 scan_frame_parameters: scan_base.ScanFrameParameters,
                  si_sequence_behavior: typing.Optional[SISequenceBehavior] = None):
 
         self.__camera = camera
@@ -626,7 +626,7 @@ class MultiAcquireController:
     def __calculate_total_acquisition_time(self, spectrum_parameters, settings, scan_parameters=None, include_shift_delay=False):
         total_time = 0
         if scan_parameters is not None:
-            scan_size = scan_parameters['size']
+            scan_size = scan_parameters.size
         else:
             scan_size = (1, 1)
         for parameters in spectrum_parameters:

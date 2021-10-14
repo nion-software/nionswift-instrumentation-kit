@@ -501,10 +501,10 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (300, 300)
+            frame_parameters_0.size = Geometry.IntSize(300, 300)
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             frame_parameters_1 = scan_hardware_source.get_frame_parameters(1)
-            frame_parameters_1.size = (500, 500)
+            frame_parameters_1.size = Geometry.IntSize(500, 500)
             scan_hardware_source.set_frame_parameters(1, frame_parameters_1)
             scan_hardware_source.set_selected_profile_index(0)
             self._acquire_one(document_controller, scan_hardware_source)
@@ -517,10 +517,10 @@ class TestScanControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (300, 300)
+            frame_parameters_0.size = Geometry.IntSize(300, 300)
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             frame_parameters_1 = scan_hardware_source.get_frame_parameters(1)
-            frame_parameters_1.size = (500, 500)
+            frame_parameters_1.size = Geometry.IntSize(500, 500)
             scan_hardware_source.set_frame_parameters(1, frame_parameters_1)
             scan_hardware_source.set_selected_profile_index(0)
             scan_hardware_source.start_playing()
@@ -533,10 +533,10 @@ class TestScanControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (300, 300)
+            frame_parameters_0.size = Geometry.IntSize(300, 300)
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             frame_parameters_1 = scan_hardware_source.get_frame_parameters(1)
-            frame_parameters_1.size = (500, 500)
+            frame_parameters_1.size = Geometry.IntSize(500, 500)
             scan_hardware_source.set_frame_parameters(1, frame_parameters_1)
             scan_hardware_source.set_selected_profile_index(0)
             scan_hardware_source.start_playing()
@@ -550,7 +550,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             # verify that the frame parameters are applied to the _next_ frame.
             frame_parameters_2 = scan_hardware_source.get_frame_parameters(2)
-            frame_parameters_2.size = (500, 500)
+            frame_parameters_2.size = Geometry.IntSize(500, 500)
             frame_time = frame_parameters_2.pixel_time_us * 500 * 500 / 1000000.0
             scan_hardware_source.start_recording()
             time.sleep(frame_time * 0.6)
@@ -593,7 +593,7 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (200, 200)
+            frame_parameters_0.size = Geometry.IntSize(200, 200)
             scan_hardware_source.set_current_frame_parameters(frame_parameters_0)
             scan_hardware_source.set_channel_enabled(1, True)
             scan_hardware_source.start_playing()
@@ -611,7 +611,7 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (200, 200)
+            frame_parameters_0.size = Geometry.IntSize(200, 200)
             scan_hardware_source.set_record_frame_parameters(frame_parameters_0)
             scan_hardware_source.set_channel_enabled(1, True)
             scan_hardware_source.start_recording()
@@ -644,7 +644,7 @@ class TestScanControlClass(unittest.TestCase):
                 frame_parameters_ref[0] = frame_parameters
             scan_state_controller.on_frame_parameters_changed = frame_parameters_changed
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = (200, 200)
+            frame_parameters_0.size = Geometry.IntSize(200, 200)
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             self.assertIsNotNone(frame_parameters_ref[0])
             self.assertEqual(frame_parameters_ref[0].size, (200, 200))
@@ -719,7 +719,7 @@ class TestScanControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = 1024, 1024
+            frame_parameters_0.size = Geometry.IntSize(1024, 1024)
             frame_parameters_0.pixel_time_us = 2
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             scan_hardware_source.start_playing()
@@ -760,7 +760,7 @@ class TestScanControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = 32768, 32768
+            frame_parameters_0.size = Geometry.IntSize(32768, 32768)
             frame_parameters_0.pixel_time_us = 1
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             scan_hardware_source.start_playing()
@@ -772,7 +772,7 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             original_size = frame_parameters_0.size
             original_pixel_time_us = frame_parameters_0.pixel_time_us
-            frame_parameters_0.size = 8192, 8192
+            frame_parameters_0.size = Geometry.IntSize(8192, 8192)
             frame_parameters_0.pixel_time_us = 1
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             scan_hardware_source.start_playing(sync_timeout=3.0)
@@ -1415,13 +1415,13 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             frame_parameters = copy.copy(scan_hardware_source.get_current_frame_parameters())
-            frame_parameters.subscan_pixel_size = 128, 128
-            frame_parameters.subscan_fractional_size = 0.5, 0.5
-            frame_parameters.subscan_fractional_center = 0.5, 0.5
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(128, 128)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(0.5, 0.5)
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(0.5, 0.5)
             xdata = scan_hardware_source.record_immediate(frame_parameters, [0])[0]
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
-            frame_parameters.subscan_pixel_size = 256, 256
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(256, 256)
             xdata = scan_hardware_source.record_immediate(frame_parameters, [0])[0]
             self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
