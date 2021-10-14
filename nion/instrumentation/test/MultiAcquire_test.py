@@ -154,7 +154,7 @@ class TestMultiAcquire(unittest.TestCase):
                 self.assertAlmostEqual(val, calibrated_intensities[0], delta=200)
 
     def test_acquire_multi_eels_spectrum_image(self):
-        scan_size = Geometry.IntSize(10, 10)
+        scan_size = Geometry.IntSize(6, 6)
         masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
 
         for sum_frames in [True, False]:
@@ -284,7 +284,7 @@ class TestMultiAcquire(unittest.TestCase):
                             self.assertLess(starttime - endtime, total_acquisition_time)
 
     def test_acquire_multi_eels_spectrum_image_applies_shift_for_each_frame(self):
-        scan_size = Geometry.IntSize(10, 10)
+        scan_size = Geometry.IntSize(6, 6)
 
         settings = {'x_shifter': 'C10', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',

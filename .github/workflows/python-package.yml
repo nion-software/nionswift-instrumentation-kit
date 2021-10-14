@@ -42,9 +42,8 @@ jobs:
       run: |
         python -m unittest discover -s nion/instrumentation/test -p "*_test.py" -v
         # use mypy -p to work around mypy issue 8944
-        mypy --namespace-packages --ignore-missing-imports --follow-imports=silent \
-          -p nion.instrumentation \
-          -p nionswift_plugin.nion_instrumentation_ui
+        mypy --namespace-packages --ignore-missing-imports --follow-imports=silent -p nionswift_plugin.nion_instrumentation_ui -p nion.instrumentation
+        mypy --namespace-packages --ignore-missing-imports --follow-imports=silent --strict -p nion.instrumentation --exclude '/test'
     - name: Upload Artifacts
       uses: actions/upload-artifact@v2
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.8'

@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import numpy
+import numpy.typing
 import os
 import threading
 import time
@@ -22,59 +23,62 @@ from nion.instrumentation import stem_controller
 from nion.utils import Event
 from nion.utils import Geometry
 
+_NDArray = numpy.typing.NDArray[typing.Any]
+
 _ = gettext.gettext
 
-class MultiEELSSettings(dict):
-    def __init__(self, *args, **kwargs):
+class MultiEELSSettings(typing.Dict[str, typing.Any]):
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         self.settings_changed_event = Event.Event()
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value: typing.Any) -> None:
         old_value = self.__getitem__(key)
         super().__setitem__(key, value)
         if value != old_value:
             self.settings_changed_event.fire()
 
-    def __copy__(self):
+    def __copy__(self) -> MultiEELSSettings:
         return MultiEELSSettings(super().copy())
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> MultiEELSSettings:
         return MultiEELSSettings(copy.deepcopy(super().copy()))
 
-    def copy(self):
+    def copy(self) -> MultiEELSSettings:
         return self.__copy__()
 
-    def update(self, *args, **kwargs):
+    def update(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().update(*args, **kwargs)
         self.settings_changed_event.fire()
 
 
-class MultiEELSParameters(list):
-    def __init__(self, *args, **kwargs):
+class MultiEELSParameters(typing.List[typing.Dict[str, typing.Any]]):
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         super().__init__(*args, **kwargs)
         self.parameters_changed_event = Event.Event()
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index: typing.Any, value: typing.Any) -> None:
         old_value = self.__getitem__(index)
         super().__setitem__(index, value)
         if old_value != value:
             self.parameters_changed_event.fire()
 
-    def append(self, value):
+    def append(self, value: typing.Any) -> None:
         super().append(value)
         self.parameters_changed_event.fire()
 
-    def pop(self, index=-1):
-        super().pop(index)
+    def pop(self, index: int = -1) -> typing.Any:
+        result = super().pop(index)
         self.parameters_changed_event.fire()
+        return result
 
-    def __copy__(self):
+    def __copy__(self) -> MultiEELSParameters:
         return MultiEELSParameters(super().copy())
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> MultiEELSParameters:
         return MultiEELSParameters(copy.deepcopy(super().copy()))
 
-    def copy(self):
+    def copy(self) -> MultiEELSParameters:
         return self.__copy__()
 
 
@@ -82,12 +86,12 @@ class ScanDataChannel:
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_names: typing.Sequence[str],
-                 grab_sync_info: scan_base.GrabSynchronizedInfo,
-                 multi_acquire_parameters: list, multi_acquire_settings: dict, current_parameters_index: int):
+                 grab_sync_info: scan_base.GrabSynchronizedInfo, multi_acquire_parameters: MultiEELSParameters,
+                 multi_acquire_settings: MultiEELSSettings, current_parameters_index: int) -> None:
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
-        self.__data_item_transactions: list = []
-        self.__data_and_metadata = None
+        self.__data_item_transactions: typing.List[DocumentModel.Transaction] = []
+        self.__data_and_metadata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.__multi_acquire_parameters = multi_acquire_parameters
         self.__multi_acquire_settings = multi_acquire_settings
         self.__current_parameters_index = current_parameters_index
@@ -116,8 +120,8 @@ class ScanDataChannel:
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
-        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
-        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
+        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
         data_item.metadata = data_item_metadata
         return data_item
 
@@ -127,7 +131,7 @@ class ScanDataChannel:
             self.__data_item_transactions.append(self.__document_model.item_transaction(data_item))
             self.__document_model.begin_data_item_live(data_item)
 
-    def update(self, data_and_metadata_list: typing.Sequence[DataAndMetadata.DataAndMetadata], state: str, view_id) -> None:
+    def update(self, data_and_metadata_list: typing.Sequence[DataAndMetadata.DataAndMetadata], state: str, view_id: typing.Optional[str]) -> None:
         frames = self.__multi_acquire_parameters[self.__current_parameters_index]['frames']
         sum_frames = self.__multi_acquire_settings['sum_frames']
         for i, data_and_metadata in enumerate(data_and_metadata_list):
@@ -145,8 +149,8 @@ class ScanDataChannel:
                 data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
             intensity_calibration = data_and_metadata.intensity_calibration
             metadata = dict(copy.deepcopy(data_and_metadata.metadata))
-            metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
-            metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+            metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
+            metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
             data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
                                                          intensity_calibration,
                                                          dimensional_calibrations,
@@ -183,10 +187,9 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_name: str,
-                 grab_sync_info: scan_base.GrabSynchronizedInfo,
-                 multi_acquire_parameters: list, multi_acquire_settings: dict,
-                 current_parameters_index: int,
-                 stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None):
+                 grab_sync_info: scan_base.GrabSynchronizedInfo, multi_acquire_parameters: MultiEELSParameters,
+                 multi_acquire_settings: MultiEELSSettings, current_parameters_index: int,
+                 stack_metadata_keys: typing.Optional[typing.Sequence[typing.Sequence[str]]] = None) -> None:
         self.__document_model = document_model
         self.__grab_sync_info = grab_sync_info
         self.__data_item_transaction: typing.Optional[DocumentModel.Transaction] = None
@@ -257,8 +260,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
-        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
-        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
+        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
         data_item.metadata = data_item_metadata
         return data_item
 
@@ -266,7 +269,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
     def data_item(self) -> DataItem.DataItem:
         return self.__data_item
 
-    def update_progress(self, last_complete_line):
+    def update_progress(self, last_complete_line: int) -> None:
         current_time = 0
         current_frame = self.current_frames_index
         scan_size = tuple(self.__grab_sync_info.scan_size)
@@ -284,7 +287,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
         self.__data_item_transaction = self.__document_model.item_transaction(self.__data_item)
         self.__document_model.begin_data_item_live(self.__data_item)
 
-    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id) -> None:
+    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id: typing.Optional[str]) -> None:
         # This method is always called with a collection of 1d or 2d data. Re-order axes as required and remove length-1-axes.
 
         axes_descriptor = self.__grab_sync_info.axes_descriptor
@@ -358,8 +361,8 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
                                data_and_metadata.dimensional_calibrations[-1].scale / exposure_s / _number_frames)
             intensity_calibration = Calibration.Calibration(scale=intensity_scale)
 
-        metadata["MultiAcquire.settings"] = copy.deepcopy(self.__multi_acquire_settings)
-        metadata["MultiAcquire.parameters"] = copy.deepcopy(self.__multi_acquire_parameters[self.__current_parameters_index])
+        metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
+        metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
         # This is needed for metadata that changes with each spectrum image in the stack and needs to be preserved.
         # One usecase is the storage information that comes with virtual detector data that has the full dataset saved
         # in the background. Currently the camera defines which metadata keys to stack and we copy that information
@@ -423,12 +426,12 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
 
 
 class SequenceBehavior:
-    def __init__(self, multi_acquire_controller: 'MultiAcquireController', current_parameters_index: int):
+    def __init__(self, multi_acquire_controller: 'MultiAcquireController', current_parameters_index: int) -> None:
         self.__multi_acquire_controller = multi_acquire_controller
         self.__current_parameters_index = current_parameters_index
         self.__last_shift = 0
 
-    def prepare_frame(self):
+    def prepare_frame(self) -> None:
         if self.__multi_acquire_controller.active_settings['shift_each_sequence_slice']:
             self.__multi_acquire_controller.shift_x(self.__last_shift)
             self.__last_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index]['offset_x']
@@ -445,7 +448,7 @@ class SISequenceAcquisitionHandler:
                  scan_controller: scan_base.ScanHardwareSource,
                  scan_data_channel: ScanDataChannel,
                  scan_frame_parameters: scan_base.ScanFrameParameters,
-                 si_sequence_behavior: typing.Optional[SISequenceBehavior] = None):
+                 si_sequence_behavior: typing.Optional[SISequenceBehavior] = None) -> None:
 
         self.__camera = camera
         self.camera_data_channel = camera_data_channel
@@ -457,7 +460,7 @@ class SISequenceAcquisitionHandler:
         self.abort_event = threading.Event()
         self.finish_fn: typing.Optional[typing.Callable[[], None]] = None
 
-    def run(self, number_frames: int):
+    def run(self, number_frames: int) -> None:
         for frame in range(number_frames):
             if self.abort_event.is_set():
                 break
@@ -482,7 +485,7 @@ class SISequenceAcquisitionHandler:
 
 
 class MultiAcquireController:
-    def __init__(self, stem_controller: stem_controller.STEMController, savepath=None):
+    def __init__(self, stem_controller: stem_controller.STEMController, savepath: typing.Optional[str] = None) -> None:
         self.spectrum_parameters = MultiEELSParameters(
                                    [{'index': 0, 'offset_x': 0, 'exposure_ms': 1, 'frames': 1},
                                     {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
@@ -497,7 +500,7 @@ class MultiAcquireController:
         self.scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
         self.zeros = {'x': 0.0, 'focus': 0.0}
         self.scan_calibrations = [{'offset': 0, 'scale': 1, 'units': ''}, {'offset': 0, 'scale': 1, 'units': ''}]
-        self.__progress_counter = 0
+        self.__progress_counter = 0.0
         self.acquisition_state_changed_event = Event.Event()
         self.new_scan_data_ready_event = Event.Event()
         self.progress_updated_event = Event.Event()
@@ -511,20 +514,20 @@ class MultiAcquireController:
         self.__spectrum_parameters_changed_event_listener = self.spectrum_parameters.parameters_changed_event.listen(self.save_parameters)
 
     @property
-    def active_settings(self):
+    def active_settings(self) -> MultiEELSSettings:
         return self.__active_settings
 
     @property
-    def active_spectrum_parameters(self):
+    def active_spectrum_parameters(self) -> MultiEELSParameters:
         return self.__active_spectrum_parameters
 
-    def save_settings(self):
+    def save_settings(self) -> None:
         if self.__savepath:
             os.makedirs(self.__savepath, exist_ok=True)
             with open(os.path.join(self.__savepath, 'settings.json'), 'w+') as f:
                 json.dump(self.settings, f)
 
-    def load_settings(self):
+    def load_settings(self) -> None:
         if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'settings.json')):
             with open(os.path.join(self.__savepath, 'settings.json')) as f:
                 settings_dict = json.load(f)
@@ -535,33 +538,32 @@ class MultiAcquireController:
                     settings_dict['processing'] = 'sum_project' if bin_spectra else None
                 self.settings.update(settings_dict)
 
-    def save_parameters(self):
+    def save_parameters(self) -> None:
         if self.__savepath:
             os.makedirs(self.__savepath, exist_ok=True)
             with open(os.path.join(self.__savepath, 'spectrum_parameters.json'), 'w+') as f:
                 json.dump(self.spectrum_parameters, f)
 
-    def load_parameters(self):
+    def load_parameters(self) -> None:
         if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'spectrum_parameters.json')):
             with open(os.path.join(self.__savepath, 'spectrum_parameters.json')) as f:
                 self.spectrum_parameters[:] = json.load(f)
 
-    def add_spectrum(self, parameters=None):
-        if parameters is None:
-            parameters = self.spectrum_parameters[-1].copy()
+    def add_spectrum(self) -> None:
+        parameters = self.spectrum_parameters[-1].copy()
         parameters['index'] = len(self.spectrum_parameters)
         self.spectrum_parameters.append(parameters)
 
-    def remove_spectrum(self):
+    def remove_spectrum(self) -> None:
         assert len(self.spectrum_parameters) > 1, 'Number of spectra cannot become smaller than 1.'
         self.spectrum_parameters.pop()
 
-    def get_offset_x(self, index):
+    def get_offset_x(self, index: int) -> float:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
-        d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        return d['offset_x']
+        d = self.spectrum_parameters[index]
+        return typing.cast(float, d['offset_x'])
 
-    def set_offset_x(self, index, offset_x):
+    def set_offset_x(self, index: int, offset_x: float) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
         parameters = dict(copy.deepcopy(d))
@@ -569,12 +571,12 @@ class MultiAcquireController:
             parameters['offset_x'] = offset_x
             self.spectrum_parameters[index] = parameters
 
-    def get_exposure_ms(self, index):
+    def get_exposure_ms(self, index: int) -> float:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        return d['exposure_ms']
+        return typing.cast(float, d['exposure_ms'])
 
-    def set_exposure_ms(self, index, exposure_ms):
+    def set_exposure_ms(self, index: int, exposure_ms: float) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
         parameters = dict(copy.deepcopy(d))
@@ -582,12 +584,12 @@ class MultiAcquireController:
             parameters['exposure_ms'] = exposure_ms
             self.spectrum_parameters[index] = parameters
 
-    def get_frames(self, index):
+    def get_frames(self, index: int) -> int:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        return d['frames']
+        return typing.cast(int, d['frames'])
 
-    def set_frames(self, index, frames):
+    def set_frames(self,index: int, frames: int) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
         parameters = dict(copy.deepcopy(d))
@@ -595,7 +597,7 @@ class MultiAcquireController:
             parameters['frames'] = frames
             self.spectrum_parameters[index] = parameters
 
-    def shift_x(self, eV):
+    def shift_x(self, eV: float) -> None:
         if callable(self.__active_settings['x_shifter']):
             self.__active_settings['x_shifter'](self.zeros['x'] + eV)
         elif self.__active_settings['x_shifter']:
@@ -605,16 +607,16 @@ class MultiAcquireController:
             return
         time.sleep(self.__active_settings['x_shift_delay'])
 
-    def adjust_focus(self, x_shift_ev):
+    def adjust_focus(self, x_shift_ev: float) -> None:
         pass
 
-    def blank_beam(self):
+    def blank_beam(self) -> None:
         self.__set_beam_blanker(True)
 
-    def unblank_beam(self):
+    def unblank_beam(self) -> None:
         self.__set_beam_blanker(False)
 
-    def __set_beam_blanker(self, blanker_on):
+    def __set_beam_blanker(self, blanker_on: bool) -> None:
         if callable(self.__active_settings['blanker']):
             self.__active_settings['blanker'](blanker_on)
         elif self.__active_settings['blanker']:
@@ -623,12 +625,14 @@ class MultiAcquireController:
             return
         time.sleep(self.__active_settings['blanker_delay'])
 
-    def __calculate_total_acquisition_time(self, spectrum_parameters, settings, scan_parameters=None, include_shift_delay=False):
+    def __calculate_total_acquisition_time(self, spectrum_parameters: MultiEELSParameters, settings: MultiEELSSettings,
+                                           scan_parameters: typing.Optional[scan_base.ScanFrameParameters] = None,
+                                           include_shift_delay: bool = False) -> float:
         total_time = 0
         if scan_parameters is not None:
             scan_size = scan_parameters.size
         else:
-            scan_size = (1, 1)
+            scan_size = Geometry.IntSize(1, 1)
         for parameters in spectrum_parameters:
             total_time += scan_size[1] * scan_size[0] * parameters['frames'] * parameters['exposure_ms']
             if include_shift_delay:
@@ -640,11 +644,11 @@ class MultiAcquireController:
             total_time *= 2
         return total_time
 
-    def __get_progress_maximum(self):
+    def __get_progress_maximum(self) -> float:
         return self.__calculate_total_acquisition_time(self.__active_spectrum_parameters, self.__active_settings,
                                                        getattr(self, 'scan_parameters', None))
 
-    def get_total_acquisition_time(self):
+    def get_total_acquisition_time(self) -> typing.Tuple[float, float]:
         scan_parameters = self.scan_controller.get_current_frame_parameters() if self.scan_controller else None
         acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, None, True) * 0.001
         si_acquisition_time = self.__calculate_total_acquisition_time(self.spectrum_parameters, self.settings, scan_parameters, True) * 0.001
@@ -653,29 +657,34 @@ class MultiAcquireController:
             si_acquisition_time *= 0.5
         return acquisition_time, si_acquisition_time
 
-    def increment_progress_counter(self, time):
+    def increment_progress_counter(self, time: float) -> None:
         self.__progress_counter += time
         self.progress_updated_event.fire(0, self.__get_progress_maximum(), self.__progress_counter)
 
-    def set_progress_counter(self, value, minimum=0, maximum=None):
+    def set_progress_counter(self, value: float, minimum: float = 0.0, maximum: typing.Optional[float] = None) -> None:
         self.__progress_counter = value
         if maximum is None:
             maximum = self.__get_progress_maximum()
         self.progress_updated_event.fire(minimum, maximum, value)
 
-    def reset_progress_counter(self):
+    def reset_progress_counter(self) -> None:
         self.set_progress_counter(0, 0, 100)
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.abort_event.set()
         try:
-            self.scan_controller.grab_synchronized_abort()
-            self.camera.acquire_sequence_cancel()
+            if self.scan_controller:
+                self.scan_controller.grab_synchronized_abort()
+            if self.camera:
+                self.camera.acquire_sequence_cancel()
         except Exception as e:
             print(e)
 
-    def acquire_multi_eels_spectrum(self):
+    def acquire_multi_eels_spectrum(self) -> typing.Mapping[str, typing.Any]:
         start_frame_parameters = None
+        camera = self.camera
+        assert camera
+        data_dict_list = []
         try:
             if hasattr(self, 'scan_parameters'):
                 delattr(self, 'scan_parameters')
@@ -684,25 +693,25 @@ class MultiAcquireController:
             self.__active_spectrum_parameters = copy.deepcopy(self.spectrum_parameters)
             self.abort_event.clear()
             self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'single spectrum'})
-            data_dict_list = []
             if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
                 self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
                 # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
                 # we still want to go back to the initial value of the control, so we "back up" the zero point here
                 self.zeros['x_start'] = self.zeros['x']
-            start_frame_parameters = self.camera.get_current_frame_parameters()
+            start_frame_parameters = camera.get_current_frame_parameters()
 
-            data: typing.Optional[numpy.ndarray] = None
+            data: typing.Optional[_NDArray] = None
             for parameters in self.__active_spectrum_parameters:
                 if self.abort_event.is_set():
                     break
 
-                frame_parameters = self.camera.get_current_frame_parameters()
+                frame_parameters = camera.get_current_frame_parameters()
                 frame_parameters.exposure_ms =  parameters['exposure_ms']
                 frame_parameters.processing = self.__active_settings['processing']
-                self.camera.set_current_frame_parameters(frame_parameters)
+                camera.set_current_frame_parameters(frame_parameters)
                 if self.__active_settings['shift_each_sequence_slice']:
-                    data_element = None
+                    # data_element is a train wreck here. declare as typing.Any until the code can be sensibly reorganized.
+                    data_element: typing.Any = None
                     for i in range(parameters['frames']):
                         if self.abort_event.is_set():
                             break
@@ -710,8 +719,10 @@ class MultiAcquireController:
                             self.shift_x(parameters['offset_x'])
                             # If we shift each slice we need to save the current state after each frame
                             self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
-                        xdata_list = self.camera.grab_next_to_start()
-                        data_element = ImportExportManager.create_data_element_from_extended_data(xdata_list[0])
+                        xdata_list = camera.grab_next_to_start()
+                        xdata0 = xdata_list[0]
+                        assert xdata0
+                        data_element = ImportExportManager.create_data_element_from_extended_data(xdata0)
                         if i == 0:
                             if self.__active_settings['processing'] == 'sum_project':
                                 shape = (parameters['frames'], data_element['data'].shape[-1])
@@ -719,11 +730,11 @@ class MultiAcquireController:
                                 shape = (parameters['frames'],) + data_element['data'].shape
                             data = numpy.empty(shape, dtype=data_element['data'].dtype)
                         if self.__active_settings['processing'] == 'sum_project' and data_element['data'].ndim == 2:
-                            data[i] = numpy.sum(data_element['data'], axis=0)
+                            data[i] = numpy.sum(data_element['data'], axis=0)  # type: ignore
                             if 'spatial_calibrations' in data_element:
                                 data_element['spatial_calibrations'] = [data_element['spatial_calibrations'][-1],]
                         else:
-                            data[i] = data_element['data']
+                            data[i] = data_element['data']  # type: ignore
                         self.increment_progress_counter(parameters['exposure_ms'])
                     if data_element:
                         data_element['data'] = data
@@ -733,8 +744,8 @@ class MultiAcquireController:
 
                 else:
                     self.shift_x(parameters['offset_x'])
-                    self.camera.acquire_sequence_prepare(parameters['frames'])
-                    data_element = self.camera.acquire_sequence(parameters['frames'])
+                    camera.acquire_sequence_prepare(parameters['frames'])
+                    data_element = list(camera.acquire_sequence(parameters['frames']))
                     self.increment_progress_counter(parameters['frames'] * parameters['exposure_ms'])
 
                 if data_element:
@@ -771,8 +782,8 @@ class MultiAcquireController:
 
                 if self.__active_settings['auto_dark_subtract']:
                     self.blank_beam()
-                    self.camera.acquire_sequence_prepare(parameters['frames'])
-                    dark_data_element = self.camera.acquire_sequence(parameters['frames'])
+                    camera.acquire_sequence_prepare(parameters['frames'])
+                    dark_data_element = camera.acquire_sequence(parameters['frames'])
                     self.unblank_beam()
                     if dark_data_element:
                         dark_data = dark_data_element[0]['data']
@@ -796,7 +807,7 @@ class MultiAcquireController:
         finally:
             self.acquisition_state_changed_event.fire({'message': 'end', 'description': 'single spectrum'})
             if start_frame_parameters:
-                self.camera.set_current_frame_parameters(start_frame_parameters)
+                camera.set_current_frame_parameters(start_frame_parameters)
             # When each frame was shifted we want to use the backed up initial value when shifting back to zero so
             # that we can actually go fully back to the start.
             if 'x_start' in self.zeros:
@@ -815,7 +826,7 @@ class MultiAcquireController:
                            'settings_list': settings_list}
         return multi_eels_data
 
-    def start_multi_acquire_spectrum_image(self, get_acquisition_handler_fn: typing.Callable[[list, int, dict], SISequenceAcquisitionHandler]):
+    def start_multi_acquire_spectrum_image(self, get_acquisition_handler_fn: typing.Callable[[typing.Sequence[typing.Dict[str, typing.Any]], int, typing.Mapping[str, typing.Any]], SISequenceAcquisitionHandler]) -> None:
         self.__active_settings = copy.deepcopy(self.settings)
         self.__active_spectrum_parameters = copy.deepcopy(self.spectrum_parameters)
         self.reset_progress_counter()
@@ -832,7 +843,7 @@ class MultiAcquireController:
                     break
                 if not self.__active_settings['shift_each_sequence_slice']:
                     self.shift_x(parameters['offset_x'])
-                acquisition_handler = get_acquisition_handler_fn(list(self.__active_spectrum_parameters), parameters['index'], dict(self.__active_settings))
+                acquisition_handler = get_acquisition_handler_fn(self.__active_spectrum_parameters, parameters['index'], self.__active_settings)
                 acquisition_handler.abort_event = self.abort_event
                 # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
                 self.scan_parameters = acquisition_handler.scan_frame_parameters

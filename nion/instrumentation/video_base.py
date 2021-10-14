@@ -12,28 +12,32 @@ import typing
 
 # third party libraries
 import numpy
+import numpy.typing
 
 # local libraries
 from nion.instrumentation import HardwareSource
+from nion.swift.model import ImportExportManager
 from nion.utils import ListModel
 from nion.utils import Registry
 from nion.utils import StructuredModel
 
+_NDArray = numpy.typing.NDArray[typing.Any]
 
-class AbstractVideoCamera(abc.ABC):
 
-    @abc.abstractmethod
+class AbstractVideoCamera(typing.Protocol):
+
+    camera_id: typing.Optional[str]
+    camera_name: typing.Optional[str]
+
     def close(self) -> None:
         """Close the camera."""
         ...
 
-    @abc.abstractmethod
     def start_acquisition(self) -> None:
         """Start live acquisition. Required before using acquire_image."""
         ...
 
-    @abc.abstractmethod
-    def acquire_data(self) -> numpy.ndarray:
+    def acquire_data(self) -> _NDArray:
         """Acquire the most recent image and return a data element dict.
 
         The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
@@ -44,20 +48,18 @@ class AbstractVideoCamera(abc.ABC):
         """
         ...
 
-    @abc.abstractmethod
     def stop_acquisition(self) -> None:
         """Stop live acquisition."""
         ...
 
-    @abc.abstractmethod
-    def update_settings(self, settings: dict) -> None:
+    def update_settings(self, settings: typing.Mapping[str, typing.Any]) -> None:
         """Update the settings."""
         ...
 
 
 class AcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, hardware_source_id: str, camera: AbstractVideoCamera, display_name: str):
+    def __init__(self, hardware_source_id: str, camera: AbstractVideoCamera, display_name: str) -> None:
         super().__init__(True)
         self.__hardware_source_id = hardware_source_id
         self.__camera = camera
@@ -69,7 +71,7 @@ class AcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera.start_acquisition()
         return True
 
-    def _acquire_data_elements(self):
+    def _acquire_data_elements(self) -> typing.Sequence[ImportExportManager.DataElementType]:
         data = self.__camera.acquire_data()
         data_element = {
             "version": 1,
@@ -88,7 +90,7 @@ class AcquisitionTask(HardwareSource.AcquisitionTask):
 
 class VideoHardwareSource(HardwareSource.ConcreteHardwareSource):
 
-    def __init__(self, camera: AbstractVideoCamera):
+    def __init__(self, camera: AbstractVideoCamera) -> None:
         super().__init__(getattr(camera, "camera_id"), getattr(camera, "camera_name"))
         self.features["is_video"] = True
         self.add_data_channel()
@@ -111,15 +113,17 @@ class VideoHardwareSource(HardwareSource.ConcreteHardwareSource):
         return AcquisitionTask(self.hardware_source_id, self.__camera, self.display_name)
 
 
+class VideoDeviceFactoryLike(typing.Protocol):
+    factory_id: str
+    def make_video_device(self, settings: typing.Mapping[str, typing.Any]) -> typing.Optional[AbstractVideoCamera]: ...
+    def describe_settings(self) -> typing.Sequence[typing.Mapping[str, typing.Any]]: ...
+
+
 class VideoDeviceInstance:
-    def __init__(self, video_device_factory, video_device, settings):
+    def __init__(self, video_device_factory: typing.Optional[VideoDeviceFactoryLike], video_device: typing.Optional[AbstractVideoCamera], settings: typing.Mapping[str, typing.Any]) -> None:
         self.video_device_factory = video_device_factory
         self.video_device = video_device
         self.settings = settings
-
-
-class VideoFactoryLike(typing.Protocol):
-    pass
 
 
 class VideoConfiguration:
@@ -137,15 +141,15 @@ class VideoConfiguration:
         self.__instances: typing.List[VideoDeviceInstance] = list()
 
         # the list of video device factories. this is populated by responding to the registry messages.
-        self.__video_device_factories: typing.List[VideoFactoryLike] = list()
+        self.__video_device_factories: typing.List[VideoDeviceFactoryLike] = list()
 
-        def component_registered(component, component_types):
+        def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
             if "video_device_factory" in component_types:
                 if not component in self.__video_device_factories:
                     self.__video_device_factories.append(component)
                 self.__make_video_devices()
 
-        def component_unregistered(component, component_types):
+        def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
             if "video_device_factory" in component_types:
                 if component in self.__video_device_factories:
                     self.__video_device_factories.remove(component)
@@ -162,19 +166,20 @@ class VideoConfiguration:
         self.__component_unregistered_listener.close()
         self.__component_unregistered_listener = typing.cast(typing.Any, None)
 
-    def _remove_video_device(self, video_device):
+    def _remove_video_device(self, video_device: AbstractVideoCamera) -> None:
         for instance in self.__instances:
             if instance.video_device == video_device:
                 self.__instances.remove(instance)
                 break
 
-    def __make_video_devices(self):
+    def __make_video_devices(self) -> None:
         for video_device_factory in self.__video_device_factories:
             for instance in self.__instances:
                 if not instance.video_device:
                     instance.video_device_factory = video_device_factory
-                    instance.video_device = video_device_factory.make_video_device(instance.settings)
-                    if instance.video_device:
+                    video_device = video_device_factory.make_video_device(instance.settings)
+                    if video_device:
+                        instance.video_device = video_device
                         Registry.register_component(instance.video_device, {"video_device"})
 
     def load(self, config_file: pathlib.Path) -> None:
@@ -191,16 +196,17 @@ class VideoConfiguration:
         except Exception as e:
             pass
 
-    def __save(self):
+    def __save(self) -> None:
         # atomically overwrite
-        temp_filepath = self.__config_file.with_suffix(".temp")
-        with open(temp_filepath, "w") as fp:
-            json.dump([instance.settings for instance in self.__instances], fp, skipkeys=True, indent=4)
-        os.replace(temp_filepath, self.__config_file)
+        if self.__config_file:
+            temp_filepath = self.__config_file.with_suffix(".temp")
+            with open(temp_filepath, "w") as fp:
+                json.dump([instance.settings for instance in self.__instances], fp, skipkeys=True, indent=4)
+            os.replace(temp_filepath, self.__config_file)
 
-    def get_settings_model(self, hardware_source):
+    def get_settings_model(self, hardware_source: VideoHardwareSource) -> typing.Optional[StructuredModel.ModelLike]:
         for instance in self.__instances:
-            if instance.video_device == hardware_source.video_device:
+            if instance.video_device and instance.video_device == hardware_source.video_device:
                 fields = [
                     StructuredModel.define_field("driver", StructuredModel.STRING),
                     StructuredModel.define_field("device_id", StructuredModel.STRING),
@@ -211,28 +217,30 @@ class VideoConfiguration:
                     "device_id": instance.video_device.camera_id,
                     "name": instance.video_device.camera_name,
                 }
-                for setting_description in instance.video_device_factory.describe_settings():
-                    setting_name = setting_description["name"]
-                    fields.append(StructuredModel.define_field(setting_name, setting_description["type"]))
-                    setting_value = instance.settings.get(setting_name, None)
-                    if setting_value is not None:
-                        values[setting_name] = setting_value
+                video_device_factory = instance.video_device_factory
+                if video_device_factory:
+                    for setting_description in video_device_factory.describe_settings():
+                        setting_name = setting_description["name"]
+                        fields.append(StructuredModel.define_field(setting_name, setting_description["type"]))
+                        setting_value = instance.settings.get(setting_name, None)
+                        if setting_value is not None:
+                            values[setting_name] = setting_value
 
                 schema = StructuredModel.define_record("settings", fields)
                 model = StructuredModel.build_model(schema, value=values)
                 return model
         return None
 
-    def set_settings_model(self, hardware_source, settings_model):
+    def set_settings_model(self, hardware_source: VideoHardwareSource, settings_model: StructuredModel.ModelLike) -> None:
         video_device = hardware_source.video_device
         for instance in self.__instances:
             if instance.video_device == video_device:
-                instance.settings = settings_model.to_dict_value()
+                instance.settings = typing.cast(typing.Mapping[str, typing.Any], settings_model.to_dict_value())
                 video_device.update_settings(instance.settings)
-                video_device.camera_id = settings_model.device_id
-                video_device.camera_name = settings_model.name
-                hardware_source.hardware_source_id = settings_model.device_id
-                hardware_source.display_name = settings_model.name
+                video_device.camera_id = getattr(settings_model, "device_id")
+                video_device.camera_name = getattr(settings_model, "name")
+                hardware_source.hardware_source_id = getattr(settings_model, "device_id")
+                hardware_source.display_name = getattr(settings_model, "name")
                 self.__save()
                 break
 
@@ -245,13 +253,13 @@ class VideoConfiguration:
             n += 1
         return device_id
 
-    def create_hardware_source(self, video_device_factory):
+    def create_hardware_source(self, video_device_factory: VideoDeviceFactoryLike) -> None:
         settings = {"driver": video_device_factory.factory_id, "device_id": self.__generate_device_id()}
         self.__instances.append(VideoDeviceInstance(video_device_factory, None, settings))
         self.__make_video_devices()
         self.__save()
 
-    def remove_hardware_source(self, hardware_source):
+    def remove_hardware_source(self, hardware_source: VideoHardwareSource) -> None:
         hardware_source.abort_playing()
         component = hardware_source.video_device
         Registry.unregister_component(component)
@@ -263,18 +271,18 @@ video_configuration = VideoConfiguration()
 _component_registered_listener = None
 _component_unregistered_listener = None
 
-def run():
-    def component_registered(component, component_types):
+def run() -> None:
+    def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
         if "video_device" in component_types:
             hardware_source = VideoHardwareSource(component)
             Registry.register_component(hardware_source, {"hardware_source", "video_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
             video_configuration.video_sources.append_item(hardware_source)
 
-    def component_unregistered(component, component_types):
+    def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
         if "video_device" in component_types:
             for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
-                if getattr(hardware_source, "video_device", None) and hardware_source.video_device == component:
+                if isinstance(hardware_source, VideoHardwareSource) and getattr(hardware_source, "video_device", None) and hardware_source.video_device == component:
                     video_configuration.video_sources.remove_item(video_configuration.video_sources.items.index(hardware_source))
                     video_configuration._remove_video_device(component)
                     Registry.unregister_component(hardware_source)
