@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 import pathlib
+import typing
 
 from . import AcquisitionPanel
 from . import CameraControlPanel
@@ -15,8 +18,11 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import video_base
 
+if typing.TYPE_CHECKING:
+    from nion.swift.model import DocumentModel
 
-configuration_location = None
+
+configuration_location: typing.Optional[pathlib.Path] = None
 
 
 class STEMControllerExtension:
@@ -24,12 +30,12 @@ class STEMControllerExtension:
     # required for Swift to recognize this as an extension class.
     extension_id = "nion.stem_controller"
 
-    def __init__(self, api_broker):
+    def __init__(self, api_broker: typing.Any) -> None:
         # grab the api object.
         api = api_broker.get_api(version="1", ui_version="1")
         self.__scan_context_controller = None
 
-        def document_model_available(document_model):
+        def document_model_available(document_model: DocumentModel.DocumentModel) -> None:
             self.__scan_context_controller = stem_controller.ScanContextController(document_model, api.application._application.event_loop)
 
         self.__document_model_available_event_listener = api.application._application.document_model_available_event.listen(document_model_available)
@@ -47,12 +53,13 @@ class STEMControllerExtension:
         self.__document_model_available_event_listener = None
 
 
-def run():
+def run() -> None:
     global configuration_location
-    camera_base.run(configuration_location)
-    scan_base.run()
-    video_base.run()
-    CameraControlPanel.run()
-    ScanControlPanel.run()
-    MultipleShiftEELSAcquire.run()
-    VideoControlPanel.run()
+    if configuration_location:
+        camera_base.run(configuration_location)
+        scan_base.run()
+        video_base.run()
+        CameraControlPanel.run()
+        ScanControlPanel.run()
+        MultipleShiftEELSAcquire.run()
+        VideoControlPanel.run()

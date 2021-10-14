@@ -106,7 +106,7 @@ class ComboBoxHandler:
 
     def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.OptionalSortKeyCallable,
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
-                 selection_storage_model: Model.PropertyModel):
+                 selection_storage_model: Model.PropertyModel[str]) -> None:
         # create a filtered list model with the sort key and filter key.
         self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
         self.sorted_items.sort_key = sort_key
@@ -125,7 +125,7 @@ class ComboBoxHandler:
 
         # update the selected item. this function should not refer to self.
         def update_selected_item(c: ListModel.ListPropertyModel, index_model: Model.PropertyModel[int],
-                                 v: Stream.ValueStream, k: str) -> None:
+                                 v: Stream.ValueStream[int], k: str) -> None:
             index = index_model.value or 0
             item = c.value[index] if 0 <= index < len(c.value) else None
             v.value = item
@@ -182,7 +182,7 @@ class ComponentComboBoxHandler:
     component identifier) and components_key (a string used to maintain the list of component instances).
     """
 
-    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str):
+    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str) -> None:
         # store these values for bookkeeping
         self.__component_name = component_base
         self.__component_factory_name = f"{component_base}-factory"
@@ -249,10 +249,10 @@ class ComponentComboBoxHandler:
         self.__components.close()
         self.__components = typing.cast(typing.Any, None)
 
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == self.__component_name:
-            return item
+            return typing.cast(Declarative.HandlerLike, item)
         if component_id == "combo_box":
             return self._combo_box_handler
         return None
@@ -345,7 +345,7 @@ class ControlValuesRange:
     step: float
 
 
-class SeriesControlHandler:
+class SeriesControlHandler(Declarative.HandlerLike):
     """Declarative component handler for count/start/step control UI.
 
     control_customization is the control being controlled.
@@ -376,6 +376,9 @@ class SeriesControlHandler:
         row_items.append(u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90))
         row_items.append(u.create_stretch())
         self.ui_view = u.create_row(*row_items, spacing=8)
+
+    def close(self) -> None:
+        pass
 
     def get_control_values_range(self) -> ControlValuesRange:
         """Return control info (count, start, step)."""
@@ -438,7 +441,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "1d"),
+                                                          ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "1d"),
                                                           operator.attrgetter("control_id"),
                                                           self.__selection_storage_model)
         u = Declarative.DeclarativeUI()
@@ -472,7 +475,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         self.__control_handlers = typing.cast(typing.Any, None)
         super().close()
 
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "control_combo_box":
             return self._control_combo_box_handler
@@ -551,7 +554,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: x.control_description.control_type == "2d"),
+                                                          ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "2d"),
                                                           operator.attrgetter("control_id"),
                                                           self.__selection_storage_model)
         # the axis storage model is a property model made by observing the axis_id in the configuration.
@@ -603,7 +606,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         self.__selection_storage_model = typing.cast(typing.Any, None)
         super().close()
 
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "control_combo_box":
             return self._control_combo_box_handler
@@ -680,7 +683,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
 
 
-class MultiAcquireEntryHandler:
+class MultiAcquireEntryHandler(Declarative.HandlerLike):
     """Declarative component handler for a section in a multiple acquire method component."""
 
     def __init__(self, container: typing.Any, item: Schema.Entity):
@@ -696,6 +699,9 @@ class MultiAcquireEntryHandler:
             u.create_stretch(),
             spacing=8
         )
+
+    def close(self) -> None:
+        pass
 
 
 class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -736,7 +742,7 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
             ),
         )
 
-    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "section":
             assert container is not None
@@ -1365,7 +1371,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.scan_width = typing.cast(typing.Any, None)
         super().close()
 
-    def create_handler(self, component_id: str, **kwargs):
+    def create_handler(self, component_id: str, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return HardwareSourceHandler(self.__camera_hardware_source_choice)
@@ -1476,15 +1482,15 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__hardware_source.get_expected_dimensions(self.__frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, typing.cast(numpy.dtype, numpy.float32)))
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, self.__frame_parameters.exposure_ms / 1000)
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__hardware_source.abort_playing(sync_timeout=5.0)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__record_task = scan_base.RecordTask(self.__hardware_source, self.__frame_parameters)
-        self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)
+        self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
 
     def _finish_stream(self) -> None:
         if self.__record_task:
@@ -1498,7 +1504,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         if self.__record_task.is_finished:
             # data metadata describes the data being sent from this stream: shape, data type, and descriptor
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, numpy.float32)), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, numpy.float32), data_descriptor=data_descriptor)
             source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
             state = Acquisition.DataStreamStateEnum.COMPLETE
             xdatas = self.__record_task.grab()
@@ -1567,7 +1573,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         self.__camera_hardware_source_channel_model = typing.cast(typing.Any, None)
         super().close()
 
-    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return HardwareSourceHandler(self.__camera_hardware_source_choice)
@@ -1609,7 +1615,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
                                                                         operator=Acquisition.SumOperator(axis=0))
         elif camera_frame_parameters.processing == "sum_masked":
-            active_masks = typing.cast(camera_base.CameraFrameParameters, camera_frame_parameters).active_masks
+            active_masks = camera_frame_parameters.active_masks
             if active_masks:
                 operator = Acquisition.StackedDataStreamOperator(
                     [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
@@ -1675,7 +1681,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         super().close()
 
-    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "scan-component":
             return HardwareSourceHandler(self.__scan_hardware_source_choice)
@@ -1851,7 +1857,7 @@ acquisition_configuration: typing.Optional[AcquisitionConfiguration] = None
 
 # when the registry gets a "application" object, call this function. this function configures
 # the file path and creates/destroys the acquisition_configuration global variable.
-def handle_application_changed(is_register: bool, component, component_types: typing.Set[str]) -> None:
+def handle_application_changed(is_register: bool, component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
     if "application" in component_types:
         application: typing.Optional[Application.BaseApplication] = component if is_register else None
         global acquisition_configuration
@@ -1907,14 +1913,16 @@ class AcquisitionController:
             Stream.PropertyChangedEventStream(self.is_acquiring_model, "value"),
             lambda b: _("Acquire") if not b else _("Cancel")))
 
-        class StreamStreamer(Stream.ValueStream):
+        T = typing.TypeVar('T')
+
+        class StreamStreamer(Stream.ValueStream[T], typing.Generic[T]):
             """A utility stream for stream a set of streams. There must be a better way!"""
 
-            def __init__(self, streams_stream: Stream.AbstractStream[Stream.AbstractStream]):
+            def __init__(self, streams_stream: Stream.AbstractStream[Stream.AbstractStream[T]]) -> None:
                 super().__init__()
                 self.__streams_stream = streams_stream.add_ref()
                 self.__sub_stream_listener: typing.Optional[Event.EventListener] = None
-                self.__sub_stream: typing.Optional[Stream.AbstractStream] = None
+                self.__sub_stream: typing.Optional[Stream.AbstractStream[T]] = None
                 self.__listener = self.__streams_stream.value_stream.listen(weak_partial(StreamStreamer.__attach_stream, self))
                 self.__attach_stream(self.__streams_stream.value)
 
@@ -1929,7 +1937,7 @@ class AcquisitionController:
                     self.__sub_stream.remove_ref()
                     self.__sub_stream = None
 
-            def __attach_stream(self, value_stream: typing.Optional[Stream.AbstractStream]) -> None:
+            def __attach_stream(self, value_stream: typing.Optional[Stream.AbstractStream[T]]) -> None:
                 # watching the stream of streams, this gets called with a new stream when it changes.
                 if self.__sub_stream_listener:
                     self.__sub_stream_listener.close()
@@ -1951,13 +1959,13 @@ class AcquisitionController:
         # component. this may have a acquire_valid_value_stream property. the stream streamer listens to that stream
         # and sends its value as its own value when it changes. argh!
         self.button_enabled_model = Model.StreamValueModel(StreamStreamer(
-            Stream.MapStream(self.__acquisition_device_component.selected_item_value_stream,
+            Stream.MapStream[typing.Any, typing.Any](self.__acquisition_device_component.selected_item_value_stream,
                              lambda c: getattr(c, "acquire_valid_value_stream", Stream.ConstantStream(True)))
         ))
 
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
-        self.__progress_task = typing.cast(asyncio.Task, None)
-        self.__acquisition = typing.cast(Acquisition.Acquisition, None)
+        self.__progress_task: typing.Optional[asyncio.Task[None]] = None
+        self.__acquisition: typing.Optional[Acquisition.Acquisition] = None
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -2003,7 +2011,7 @@ class AcquisitionController:
                              data_stream: Acquisition.DataStream,
                              title_base: str,
                              channel_names: typing.Dict[Acquisition.Channel, str],
-                             drift_tracker: typing.Optional[scan_base.DriftTracker]):
+                             drift_tracker: typing.Optional[scan_base.DriftTracker]) -> None:
         """Perform acquisition of of the data stream."""
 
         # define a callback method to display the data item.
@@ -2026,17 +2034,19 @@ class AcquisitionController:
 
         # define a method that gets called when the async acquisition method finished. this closes the various
         # objects and updates the UI as 'complete'.
-        def finish_grab_async():
-            self.__acquisition.close()
-            self.__acquisition = typing.cast(typing.Any, None)
+        def finish_grab_async() -> None:
+            if self.__acquisition:
+                self.__acquisition.close()
+                self.__acquisition = typing.cast(typing.Any, None)
             self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
             if self.__scan_drift_logger:
                 self.__scan_drift_logger.close()
                 self.__scan_drift_logger = typing.cast(typing.Any, None)
             self.is_acquiring_model.value = False
-            self.__progress_task.cancel()
-            self.__progress_task = typing.cast(typing.Any, None)
+            if self.__progress_task:
+                self.__progress_task.cancel()
+                self.__progress_task = typing.cast(typing.Any, None)
             self.progress_value_model.value = 100
 
         # manage the 'is_acquiring' state.
@@ -2044,9 +2054,11 @@ class AcquisitionController:
 
         # define a task to update progress every 250ms.
         if not self.__progress_task:
-            async def update_progress():
+            async def update_progress() -> None:
                 while True:
-                    self.progress_value_model.value = int(100 * self.__acquisition.progress)
+                    if self.__acquisition:
+                        progress = self.__acquisition.progress
+                        self.progress_value_model.value = int(100 * progress)
                     await asyncio.sleep(0.25)
 
             self.__progress_task = asyncio.get_event_loop().create_task(update_progress())
@@ -2054,7 +2066,7 @@ class AcquisitionController:
         # start async acquire.
         self.__acquisition.acquire_async(event_loop=self.document_controller.event_loop, on_completion=finish_grab_async)
 
-    def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return self.__acquisition_device_component
@@ -2066,7 +2078,7 @@ class AcquisitionController:
 class AcquisitionPanel(Panel.Panel):
     """The acquisition panel holds the declarative component acquisition controller."""
 
-    def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: dict):
+    def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
         super().__init__(document_controller, panel_id, "acquisition-panel")
         self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller))
 
@@ -2130,11 +2142,11 @@ class AcquisitionPreferencePanel:
         self.identifier = "nion.acquisition-panel"
         self.label = _("Acquisition")
 
-    def build(self, ui: UserInterfaceModule.UserInterface, event_loop=None, **kwargs):
+    def build(self, ui: UserInterfaceModule.UserInterface, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> Declarative.DeclarativeWidget:
         u = Declarative.DeclarativeUI()
 
-        class ControlDescriptionHandler:
-            def __init__(self, item: AcquisitionPreferences.ControlDescription):
+        class ControlDescriptionHandler(Declarative.HandlerLike):
+            def __init__(self, item: AcquisitionPreferences.ControlDescription) -> None:
                 self.delay_converter = Converter.PhysicalValueToStringConverter("ms", 1000, "{:.0f}")
                 self.item = item
                 self.ui_view = u.create_column(
@@ -2148,11 +2160,14 @@ class AcquisitionPreferencePanel:
                     spacing=8
                 )
 
+            def close(self) -> None:
+                pass
+
         class Handler:
             def __init__(self) -> None:
                 self.sorted_controls = ListModel.FilteredListModel(container=AcquisitionPreferences.acquisition_preferences, items_key="control_customizations")
                 self.sorted_controls.sort_key = operator.attrgetter("name")
-                self.sorted_controls.filter = ListModel.PredicateFilter(lambda x: x.is_customizable)
+                self.sorted_controls.filter = ListModel.PredicateFilter(lambda x: bool(x.is_customizable))
                 self.ui_view = u.create_column(
                     u.create_row(
                         u.create_label(text="Name", width=120),
@@ -2171,7 +2186,7 @@ class AcquisitionPreferencePanel:
                 self.sorted_controls.close()
                 self.sorted_controls = typing.cast(typing.Any, None)
 
-            def create_handler(self, component_id: str, container=None, item=None, **kwargs):
+            def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
                 # this is called to construct contained declarative component handlers within this handler.
                 if component_id == "control-component":
                     assert container is not None
@@ -2179,7 +2194,7 @@ class AcquisitionPreferencePanel:
                     return ControlDescriptionHandler(item)
                 return None
 
-        return Declarative.DeclarativeWidget(ui, event_loop, Handler())
+        return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler())
 
 
 # register the preference panel.
@@ -2191,7 +2206,7 @@ class AcquisitionPanelExtension:
     # required for Swift to recognize this as an extension class.
     extension_id = "nion.instrumentation-kit.acquisition-panel"
 
-    def __init__(self, api_broker):
+    def __init__(self, api_broker: typing.Any) -> None:
         Workspace.WorkspaceManager().register_panel(AcquisitionPanel, "acquisition-panel", _("Acquisition"), ["left", "right"], "right", {"min-width": 320, "height": 60})
 
     def close(self) -> None:

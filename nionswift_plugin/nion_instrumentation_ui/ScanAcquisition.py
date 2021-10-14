@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 # system imports
@@ -18,6 +17,7 @@ from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift import DocumentController
@@ -72,7 +72,7 @@ class ScanAcquisitionProcessing(enum.Enum):
 
 class ScanAcquisitionController:
 
-    def __init__(self, api, document_controller: Facade.DocumentWindow, scan_hardware_source, camera_hardware_source, scan_specifier: ScanSpecifier):
+    def __init__(self, api: typing.Any, document_controller: Facade.DocumentWindow, scan_hardware_source: Facade.HardwareSource, camera_hardware_source: Facade.HardwareSource, scan_specifier: ScanSpecifier) -> None:
         self.__api = api
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
@@ -144,7 +144,7 @@ class ScanAcquisitionController:
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
         self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, scan_hardware_source.drift_tracker, event_loop)
 
-        def finish_grab_async():
+        def finish_grab_async() -> None:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
             self.__scan_acquisition = typing.cast(typing.Any, None)
@@ -171,7 +171,7 @@ class ScanAcquisitionController:
 
 
 # see http://stackoverflow.com/questions/1094841/reusable-library-to-get-human-readable-version-of-file-size
-def sizeof_fmt(num, suffix='B'):
+def sizeof_fmt(num: float, suffix: str = 'B') -> str:
     for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
         if abs(num) < 1024.0:
             return "%3.1f%s%s" % (num, unit, suffix)
@@ -179,7 +179,7 @@ def sizeof_fmt(num, suffix='B'):
     return "%.1f%s%s" % (num, 'Y', suffix)
 
 
-def calculate_time_size(camera_hardware_source, scan_count, scan_pixels, camera_width, camera_height, is_summed, exposure_time):
+def calculate_time_size(camera_hardware_source: camera_base.CameraHardwareSource, scan_count: int, scan_pixels: int, camera_width: int, camera_height: int, is_summed: bool, exposure_time: float) -> typing.Tuple[str, str]:
     acquire_pixel_count = scan_pixels
     storage_pixel_count = scan_pixels
     camera_frame_parameters = camera_hardware_source.get_frame_parameters(0).as_dict()
@@ -190,7 +190,7 @@ def calculate_time_size(camera_hardware_source, scan_count, scan_pixels, camera_
         storage_memory = storage_pixel_count * camera_width * 4
     else:
         storage_memory = storage_pixel_count * camera_height * camera_width * 4
-    acquire_sequence_metrics = camera_hardware_source.get_acquire_sequence_metrics(camera_frame_parameters)
+    acquire_sequence_metrics = camera_hardware_source.get_acquire_sequence_metrics(camera_base.CameraFrameParameters(camera_frame_parameters))
     acquisition_time = acquire_sequence_metrics.get("acquisition_time", exposure_time * acquire_pixel_count) * scan_count  # in seconds
     acquisition_memory = acquire_sequence_metrics.get("acquisition_memory", acquire_pixel_count * camera_width * camera_height * 4)  # in bytes
     storage_memory = acquire_sequence_metrics.get("storage_memory", storage_memory)  # in bytes
@@ -209,50 +209,53 @@ def calculate_time_size(camera_hardware_source, scan_count, scan_pixels, camera_
 
 class PanelDelegate:
 
-    def __init__(self, api):
+    def __init__(self, api: typing.Any) -> None:
         self.__api = api
         self.panel_id = "scan-acquisition-panel"
         self.panel_name = _("Spectrum Imaging / 4d Scan Acquisition")
         self.panel_positions = ["left", "right"]
         self.panel_position = "right"
-        self.__scan_acquisition_controller = None
+        self.__scan_acquisition_controller: typing.Optional[ScanAcquisitionController] = None
         self.__acquisition_state = SequenceState.idle
-        self.__acquisition_state_changed_event_listener = None
+        self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__line_scan_acquisition_controller = None
-        self.__eels_frame_parameters_changed_event_listener = None
-        self.__camera_hardware_changed_event_listener = None
-        self.__scan_hardware_changed_event_listener = None
-        self.__exposure_time_ms_value_model = None
-        self.__scan_hardware_source_choice_model = None
-        self.__scan_hardware_source_choice = None
-        self.__camera_hardware_source_choice_model = None
-        self.__camera_hardware_source_choice = None
-        self.__styles_list_model = None
-        self.__styles_list_property_model = None
+        self.__eels_frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__camera_hardware_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__scan_hardware_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__exposure_time_ms_value_model: typing.Optional[Model.PropertyModel[float]] = None
+        self.__scan_hardware_source_choice_model: typing.Optional[Model.PropertyModel[str]] = None
+        self.__scan_hardware_source_choice: typing.Optional[HardwareSourceChoice.HardwareSourceChoice] = None
+        self.__camera_hardware_source_choice_model: typing.Optional[Model.PropertyModel[str]] = None
+        self.__camera_hardware_source_choice: typing.Optional[HardwareSourceChoice.HardwareSourceChoice] = None
+        self.__styles_list_model: typing.Optional[ListModel.ListModel[ScanAcquisitionProcessing]] = None
+        self.__styles_list_property_model: typing.Optional[ListModel.ListPropertyModel] = None
         self.__scan_count = 1
         self.__camera_width = 0
         self.__camera_height = 0
         self.__scan_specifier = ScanSpecifier()
         self.__scan_width = 32  # the width/length of the scan in pixels
         self.__scan_pixels = 0  # the total number of scan pixels
-        self.__progress_task = typing.cast(asyncio.Task, None)
+        self.__progress_task = typing.cast(asyncio.Task[None], None)
+        self.__style_combo_box: typing.Optional[Facade.ComboBoxWidget] = None
 
     def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
         stem_controller_ = typing.cast(stem_controller.STEMController, Registry.get_component("stem_controller"))
 
-        self.__scan_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_hardware_source_id")
+        self.__scan_hardware_source_choice_model = ui._ui.create_persistent_string_model("scan_acquisition_hardware_source_id")
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning", False))
-        self.__camera_hardware_source_choice_model = typing.cast(UserInterfaceModule.UserInterface, ui._ui).create_persistent_string_model("scan_acquisition_camera_hardware_source_id")
+        self.__camera_hardware_source_choice_model = ui._ui.create_persistent_string_model("scan_acquisition_camera_hardware_source_id")
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera", False))
 
         self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
 
         def update_context() -> None:
+            assert self.__scan_hardware_source_choice
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
             scan_context = scan_hardware_source.scan_context
 
             scan_context_size = scan_context.size
+            exposure_ms = self.__exposure_time_ms_value_model.value or 0.0 if self.__exposure_time_ms_value_model else 0.0
             if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
                 assert scan_context_size
                 calibration = scan_context.calibration
@@ -285,7 +288,7 @@ class PanelDelegate:
                 scan_str = _("Scan (2D)")
                 scan_width = self.__scan_width
                 scan_height = int(self.__scan_width * height / width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
                 drift_scans = scan_hardware_source.calculate_drift_scans()
                 drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
@@ -309,7 +312,7 @@ class PanelDelegate:
                 scan_str = _("Scan (2D)")
                 scan_width = self.__scan_width
                 scan_height = int(self.__scan_width * height / width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, self.__exposure_time_ms_value_model.value / 1000) if scan_hardware_source else 0
+                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
                 drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
                 drift_scans = scan_hardware_source.calculate_drift_scans()
                 drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
@@ -355,7 +358,7 @@ class PanelDelegate:
 
         column = ui.create_column_widget()
 
-        self.__styles_list_model = ListModel.ListModel(items=[ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE])
+        self.__styles_list_model = ListModel.ListModel[ScanAcquisitionProcessing](items=[ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE])
         self.__styles_list_property_model = ListModel.ListPropertyModel(self.__styles_list_model)
         self.__style_combo_box = ui.create_combo_box_widget(self.__styles_list_property_model.value, item_text_getter=operator.attrgetter("value.display_name"))
         self.__style_combo_box._widget.set_property("min-width", 100)
@@ -385,11 +388,11 @@ class PanelDelegate:
         self.__scan_label_widget = ui.create_label_widget()
 
         class ComboBoxWidget:
-            def __init__(self, widget):
+            def __init__(self, widget: UserInterfaceModule.ComboBoxWidget) -> None:
                 self.__combo_box_widget = widget
 
             @property
-            def _widget(self):
+            def _widget(self) -> UserInterfaceModule.ComboBoxWidget:
                 return self.__combo_box_widget
 
         camera_row = ui.create_row_widget()
@@ -476,19 +479,20 @@ class PanelDelegate:
         column.add_spacing(8)
         column.add_stretch()
 
-        def camera_hardware_source_changed(hardware_source):
+        def camera_hardware_source_changed(hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
+            styles_list_model = self.__styles_list_model
             self.disconnect_camera_hardware_source()
-            if hardware_source:
+            if hardware_source and styles_list_model:
                 self.connect_camera_hardware_source(hardware_source)
                 if hardware_source.features.get("has_masked_sum_option"):
-                    self.__styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE, ScanAcquisitionProcessing.SUM_MASKED]
+                    styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE, ScanAcquisitionProcessing.SUM_MASKED]
                 else:
-                    self.__styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE]
+                    styles_list_model.items = [ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisitionProcessing.NONE]
 
         self.__camera_hardware_changed_event_listener = self.__camera_hardware_source_choice.hardware_source_changed_event.listen(camera_hardware_source_changed)
         camera_hardware_source_changed(self.__camera_hardware_source_choice.hardware_source)
 
-        def style_current_item_changed(current_item):
+        def style_current_item_changed(current_item: str) -> None:
             self.__update_estimate()
 
         self.__style_combo_box.on_current_item_changed = style_current_item_changed
@@ -525,7 +529,7 @@ class PanelDelegate:
                     self.__progress_task = typing.cast(typing.Any, None)
                     self.__progress_bar.value = 100
                 if not is_idle and not self.__progress_task:
-                    async def update_progress():
+                    async def update_progress() -> None:
                         while True:
                             if self.__scan_acquisition_controller:
                                 self.__progress_bar.value = int(100 * self.__scan_acquisition_controller.progress)
@@ -535,8 +539,9 @@ class PanelDelegate:
 
             if acquisition_state == SequenceState.idle:
                 self.__scan_acquisition_controller = None
-                self.__acquisition_state_changed_event_listener.close()
-                self.__acquisition_state_changed_event_listener = None
+                if self.__acquisition_state_changed_event_listener:
+                    self.__acquisition_state_changed_event_listener.close()
+                    self.__acquisition_state_changed_event_listener = None
                 document_controller._document_window.event_loop.create_task(update_state(True))
             else:
                 document_controller._document_window.event_loop.create_task(update_state(False))
@@ -546,13 +551,19 @@ class PanelDelegate:
                 if self.__scan_acquisition_controller:
                     self.__scan_acquisition_controller.cancel()
             else:
-                if self.__scan_hardware_source_choice.hardware_source:
-                    scan_hardware_source = self.__api.get_hardware_source_by_id(self.__scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+                scan_hardware_source_choice = self.__scan_hardware_source_choice
+                assert scan_hardware_source_choice
+                if scan_hardware_source_choice.hardware_source:
+                    scan_hardware_source = self.__api.get_hardware_source_by_id(
+                        scan_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
                 else:
                     scan_hardware_source = None
 
-                if self.__camera_hardware_source_choice.hardware_source:
-                    camera_hardware_source = self.__api.get_hardware_source_by_id(self.__camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
+                camera_hardware_source_choice = self.__camera_hardware_source_choice
+                assert camera_hardware_source_choice
+                if camera_hardware_source_choice.hardware_source:
+                    camera_hardware_source = self.__api.get_hardware_source_by_id(
+                        camera_hardware_source_choice.hardware_source.hardware_source_id, version="1.0")
                 else:
                     camera_hardware_source = None
 
@@ -560,7 +571,8 @@ class PanelDelegate:
                     self.__scan_acquisition_controller = ScanAcquisitionController(self.__api, document_controller, scan_hardware_source, camera_hardware_source, self.__scan_specifier)
                     self.__acquisition_state_changed_event_listener = self.__scan_acquisition_controller.acquisition_state_changed_event.listen(acquisition_state_changed)
                     scan_processing = ScanProcessing(self.__scan_processing_widget.current_index in (0, 2), self.__scan_processing_widget.current_index in (1, 2))
-                    self.__scan_acquisition_controller.start(self.__style_combo_box.current_item, scan_processing)
+                    scan_acquisition_processing = self.__style_combo_box.current_item if self.__style_combo_box and self.__style_combo_box.current_item else ScanAcquisitionProcessing.NONE
+                    self.__scan_acquisition_controller.start(scan_acquisition_processing, scan_processing)
 
         self.__acquire_button.on_clicked = acquire_sequence
 
@@ -570,24 +582,25 @@ class PanelDelegate:
 
         return column
 
-    def __update_estimate(self):
-        if self.__exposure_time_ms_value_model:
-            camera_hardware_source = self.__camera_hardware_source_choice.hardware_source
+    def __update_estimate(self) -> None:
+        camera_hardware_source = self.__camera_hardware_source_choice.hardware_source if self.__camera_hardware_source_choice else None
+        if self.__exposure_time_ms_value_model and isinstance(camera_hardware_source, camera_base.CameraHardwareSource):
             camera_width = self.__camera_width
             camera_height = self.__camera_height
-            is_summed = self.__style_combo_box.current_index == 0
-            exposure_time = self.__exposure_time_ms_value_model.value / 1000
+            is_summed = self.__style_combo_box is not None and self.__style_combo_box.current_index == 0
+            exposure_time = self.__exposure_time_ms_value_model.value / 1000 if self.__exposure_time_ms_value_model and self.__exposure_time_ms_value_model.value else 0.0
             time_str, size_str = calculate_time_size(camera_hardware_source, self.__scan_count, self.__scan_pixels, camera_width, camera_height, is_summed, exposure_time)
             self.__estimate_label_widget.text = "{0} / {1}".format(time_str, size_str)
         else:
             self.__estimate_label_widget.text = None
 
-    def connect_camera_hardware_source(self, camera_hardware_source):
+    def connect_camera_hardware_source(self, camera_hardware_source: HardwareSource.HardwareSource) -> None:
+        assert isinstance(camera_hardware_source, camera_base.CameraHardwareSource)
 
-        self.__exposure_time_ms_value_model = Model.PropertyModel()
+        self.__exposure_time_ms_value_model = Model.PropertyModel[float]()
 
-        def update_exposure_time_ms(exposure_time_ms):
-            if exposure_time_ms > 0:
+        def update_exposure_time_ms(exposure_time_ms: typing.Optional[float]) -> None:
+            if exposure_time_ms is not None and exposure_time_ms > 0 and isinstance(camera_hardware_source, camera_base.CameraHardwareSource):
                 frame_parameters = camera_hardware_source.get_frame_parameters(0)
                 frame_parameters.exposure_ms = exposure_time_ms
                 camera_hardware_source.set_frame_parameters(0, frame_parameters)
@@ -597,22 +610,23 @@ class PanelDelegate:
 
         exposure_time_ms_value_binding = Binding.PropertyBinding(self.__exposure_time_ms_value_model, "value", converter=Converter.FloatToStringConverter("{0:.1f}"))
 
-        def eels_profile_parameters_changed(profile_index, frame_parameters):
-            if profile_index == 0:
+        def eels_profile_parameters_changed(profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
+            if profile_index == 0 and isinstance(camera_hardware_source, camera_base.CameraHardwareSource):
                 expected_dimensions = camera_hardware_source.get_expected_dimensions(frame_parameters.binning)
                 self.__camera_width = expected_dimensions[1]
                 self.__camera_height = expected_dimensions[0]
-                self.__exposure_time_ms_value_model.value = frame_parameters.exposure_ms
+                if self.__exposure_time_ms_value_model:
+                    self.__exposure_time_ms_value_model.value = frame_parameters.exposure_ms
                 self.__update_estimate()
 
         self.__eels_frame_parameters_changed_event_listener = camera_hardware_source.frame_parameters_changed_event.listen(eels_profile_parameters_changed)
 
         eels_profile_parameters_changed(0, camera_hardware_source.get_frame_parameters(0))
 
-        self.__exposure_time_widget._widget.bind_text(exposure_time_ms_value_binding)  # the widget will close the binding
+        typing.cast(UserInterfaceModule.LineEditWidget, self.__exposure_time_widget._widget).bind_text(exposure_time_ms_value_binding)  # the widget will close the binding
 
-    def disconnect_camera_hardware_source(self):
-        self.__exposure_time_widget._widget.unbind_text()
+    def disconnect_camera_hardware_source(self) -> None:
+        typing.cast(UserInterfaceModule.LineEditWidget, self.__exposure_time_widget._widget).unbind_text()
         if self.__eels_frame_parameters_changed_event_listener:
             self.__eels_frame_parameters_changed_event_listener.close()
             self.__eels_frame_parameters_changed_event_listener = None
@@ -665,7 +679,7 @@ class ScanAcquisitionExtension:
     # required for Swift to recognize this as an extension class.
     extension_id = "nion.instrumentation-kit.scan-acquisition"
 
-    def __init__(self, api_broker):
+    def __init__(self, api_broker: typing.Any) -> None:
         # grab the api object.
         api = api_broker.get_api(version=API.version, ui_version=UserInterface.version)
         # be sure to keep a reference or it will be closed immediately.

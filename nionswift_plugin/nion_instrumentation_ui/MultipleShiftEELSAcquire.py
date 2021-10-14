@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # standard libraries
 import functools
 import gettext
@@ -8,20 +10,30 @@ import time
 import typing
 
 import numpy
+import numpy.typing
 
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
+from nion.instrumentation import camera_base
+from nion.instrumentation import stem_controller as STEMController
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import DataItem
 from nion.swift.model import Graphics
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
+from nion.utils import Geometry
 from nion.utils import Registry
 
 from . import HardwareSourceChoice
+
+if typing.TYPE_CHECKING:
+    from nion.swift import DocumentController
+    from nion.swift import Task
+
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 _ = gettext.gettext
 
@@ -49,21 +61,22 @@ class AcquireController(metaclass=Utility.Singleton):
         super().__init__()
         self.__acquire_thread: typing.Optional[threading.Thread] = None
 
-    def start_threaded_acquire_and_sum(self, stem_controller, camera,
+    def start_threaded_acquire_and_sum(self,
+                                       stem_controller: STEMController.STEMController,
+                                       camera: camera_base.CameraHardwareSource,
                                        number_frames: int,
                                        energy_offset: float,
                                        sleep_time: int,
                                        dark_ref_enabled: bool,
-                                       dark_ref_data: typing.Optional[
-                                           numpy.ndarray],
+                                       dark_ref_data: typing.Optional[_NDArray],
                                        cross_cor: bool,
-                                       document_controller,
-                                       final_layout_fn):
+                                       document_controller: DocumentController.DocumentController,
+                                       final_layout_fn: typing.Callable[[], None]) -> None:
         if self.__acquire_thread and self.__acquire_thread.is_alive():
             logging.debug("Already acquiring")
             return
 
-        def set_offset_energy(energy_offset: float, sleep_time=1):
+        def set_offset_energy(energy_offset: float, sleep_time: float = 1) -> None:
             current_energy = stem_controller.GetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the
             # desired value (or until timeout)
@@ -77,44 +90,48 @@ class AcquireController(metaclass=Utility.Singleton):
 
         def acquire_dark(number_frames: int,
                          sleep_time: int,
-                         task_object=None):
+                         task_object: typing.Optional[Task.TaskContextManager] = None) -> typing.Optional[_NDArray]:
             # Sleep to allow the afterglow to die away
             if task_object is not None:
                 task_object.update_progress(_("Pausing..."), None)
             time.sleep(sleep_time)
             # Initialize the dark sum and loop through the number of
             # desired frames
-            dark_sum = None
+            dark_sum: typing.Optional[_NDArray] = None
             for frame_index in range(number_frames):
                 if dark_sum is None:
                     # use a frame to start to make sure we're
                     # getting a blanked frame
-                    dark_sum = (
-                        camera.get_next_xdatas_to_start()[0].data)
+                    xdatas = camera.get_next_xdatas_to_start()
+                    xdata0 = xdatas[0] if xdatas else None
+                    dark_sum = xdata0.data if xdata0 else None
                 else:
                     # but now use next frame to finish since we can
                     # know it's already blanked
-                    dark_sum += (
-                        camera.get_next_xdatas_to_finish()[0].data)
+                    xdatas = camera.get_next_xdatas_to_finish()
+                    xdata0 = xdatas[0] if xdatas else None
+                    if xdata0 and xdata0.data:
+                        dark_sum += xdata0.data
                 if task_object is not None:
                     # Update task panel with progress acquiring dark
                     # reference
-                    task_object.update_progress(
-                        _("Grabbing dark data frame {}.").format(
-                            frame_index + 1),
-                        (frame_index + 1, number_frames), None)
+                    task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
+                                                (frame_index + 1, number_frames), None)
             return dark_sum
 
         def acquire_series(number_frames: int,
                            energy_offset: float,
                            dark_ref_enabled: bool,
-                           dark_ref_data: typing.Optional[numpy.ndarray],
-                           task_object=None) -> DataItem.DataItem:
+                           dark_ref_data: typing.Optional[_NDArray],
+                           task_object: typing.Optional[Task.TaskContextManager] = None) -> DataItem.DataItem:
             logging.info("Starting image acquisition.")
 
             # grab one frame to get image size
-            first_xdata = camera.get_next_xdatas_to_start()[0]
-            first_data = first_xdata.data
+            first_xdatas = camera.get_next_xdatas_to_start()
+            first_xdata = first_xdatas[0] if first_xdatas else None
+            first_data = first_xdata.data if first_xdata else None
+            assert first_xdata is not None
+            assert first_data is not None
 
             # Initialize an empty stack to fill with acquired data
             image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
@@ -123,47 +140,35 @@ class AcquireController(metaclass=Utility.Singleton):
 
             # loop through the frames and fill in the empty stack from the
             # camera
-            if energy_offset == 0.:
-                for frame_index in range(number_frames):
-                    if frame_index == 0:
-                        # grab the first frame, checking the camera connection
-                        # is good first
-                        image_stack_data[frame_index] = (
-                            camera.get_next_xdatas_to_start()[0].data)
-                    else:
-                        # grab the following frames
-                        image_stack_data[frame_index] = (
-                            camera.get_next_xdatas_to_finish()[0].data)
-                    if task_object is not None:
-                        # Update the task panel with the progress
-                        task_object.update_progress(
-                            _("Grabbing EELS data frame {}.").format(
-                                frame_index + 1),
-                            (frame_index + 1, number_frames), None)
-            else:
-                for frame_index in range(number_frames):
+            for frame_index in range(number_frames):
+                if energy_offset == 0.:
                     set_offset_energy(energy_offset, 1)
-                    # use next frame to start to make sure we're getting a
-                    # frame with the new energy offset
-                    if frame_index == 0:
-                        image_stack_data[frame_index] = (
-                            camera.get_next_xdatas_to_start()[0].data)
-                    else:
-                        # grab the following frames
-                        image_stack_data[frame_index] = (
-                            camera.get_next_xdatas_to_finish()[0].data)
-                    if task_object is not None:
-                        # Update the task panel with the progress
-                        task_object.update_progress(
-                            _("Grabbing EELS data frame {}.").format(
-                                frame_index + 1),
-                            (frame_index + 1, number_frames), None)
+                # use next frame to start to make sure we're getting a
+                # frame with the new energy offset
+                if frame_index == 0:
+                    xdatas = camera.get_next_xdatas_to_start()
+                    xdata0 = xdatas[0] if xdatas else None
+                    data = xdata0.data if xdata0 else None
+                    assert data is not None
+                    image_stack_data[frame_index] = data
+                else:
+                    # grab the following frames
+                    xdatas = camera.get_next_xdatas_to_finish()
+                    xdata0 = xdatas[0] if xdatas else None
+                    data = xdata0.data if xdata0 else None
+                    assert data is not None
+                    image_stack_data[frame_index] = data
+                if task_object is not None:
+                    # Update the task panel with the progress
+                    task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
+                                                (frame_index + 1, number_frames), None)
 
             # Blank the beam
             stem_controller.SetValWait(blank_control, 1.0, 200)
             # load dark ref file
             if dark_ref_enabled:
                 # User desires a dark reference to be applied
+                dark_sum: typing.Optional[_NDArray] = None
                 if dark_ref_data is not None:
                     # User has provided a valid dark reference file
                     if task_object is not None:
@@ -173,11 +178,10 @@ class AcquireController(metaclass=Utility.Singleton):
                 else:
                     # User has not provided a valid dark reference, so a
                     # dark reference will be acquired
-                    dark_sum = acquire_dark(number_frames,
-                                            sleep_time,
-                                            task_object)
+                    dark_sum = acquire_dark(number_frames, sleep_time, task_object)
                 # Apply dark reference data to the image stack
-                image_stack_data -= dark_sum / number_frames
+                if dark_sum is not None:
+                    image_stack_data -= dark_sum / number_frames
 
             stem_controller.SetVal(energy_adjust_control, reference_energy)
 
@@ -199,7 +203,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
             return image_stack_data_item
 
-        def align_stack(stack: numpy.ndarray, task_object=None):
+        def align_stack(stack: _NDArray, task_object: typing.Optional[Task.TaskContextManager] = None) -> typing.Tuple[_NDArray, _NDArray]:
             # Calculate cross-correlation of the image stack
             number_frames = stack.shape[0]
             if task_object is not None:
@@ -235,51 +239,52 @@ class AcquireController(metaclass=Utility.Singleton):
                 _slice_xdata = DataAndMetadata.new_data_and_metadata(_slice)
                 shifted_slice_data = xd.shift(_slice_xdata, shifts[index])
                 assert shifted_slice_data
-                sum_image += shifted_slice_data.data  # type: ignore
+                sum_image += shifted_slice_data.data
             return sum_image, shifts
 
-        def show_in_panel(data_item, document_controller, display_panel_id):
+        def show_in_panel(data_item: DataItem.DataItem, document_controller: DocumentController.DocumentController, display_panel_id: str) -> None:
             document_controller.document_model.append_data_item(data_item)
-            display_item = (
-                document_controller.document_model.get_display_item_for_data_item(
-                    data_item))
-            document_controller.workspace_controller.display_display_item_in_display_panel(display_item, display_panel_id)
+            display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+            workspace_controller = document_controller.workspace_controller
+            if display_item and workspace_controller:
+                workspace_controller.display_display_item_in_display_panel(display_item, display_panel_id)
 
-        def add_line_profile(data_item, document_controller, display_panel_id,
-                             midpoint=0.5, integration_width=.25):
+        def add_line_profile(data_item: DataItem.DataItem, document_controller: DocumentController.DocumentController,
+                             display_panel_id: str, midpoint: float = 0.5, integration_width: float = 0.25) -> None:
             logging.debug("midpoint: {:.4f}".format(midpoint))
             logging.debug("width: {:.4f}".format(integration_width))
 
             # next, line profile through center of crop
             # please don't copy this bad example code!
             crop_region = Graphics.RectangleGraphic()
-            crop_region.center = (midpoint, 0.5)
-            crop_region.size = (integration_width, 1)
+            crop_region.center = Geometry.FloatPoint(midpoint, 0.5)
+            crop_region.size = Geometry.FloatSize(integration_width, 1)
             crop_region.is_bounds_constrained = True
-            display_item = (
-                document_controller.document_model.get_display_item_for_data_item(
-                    data_item))
+            display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+            assert display_item
             display_item.add_graphic(crop_region)
-            eels_data_item = document_controller.document_model.get_projection_new(display_item, display_item.data_item, crop_region)
+            display_data_item = display_item.data_item
+            assert display_data_item
+            eels_data_item = document_controller.document_model.get_projection_new(display_item, display_data_item, crop_region)
             if eels_data_item:
                 eels_data_item.title = _("EELS Summed")
-                eels_display_item = (
-                    document_controller.document_model.get_display_item_for_data_item(
-                        eels_data_item))
+                eels_display_item = document_controller.document_model.get_display_item_for_data_item(eels_data_item)
+                assert eels_display_item
                 document_controller.show_display_item(eels_display_item)
             else:
                 eels_display_item = None
 
-            document_controller.workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
+            workspace_controller = document_controller.workspace_controller
+            if workspace_controller and eels_display_item:
+                workspace_controller.display_display_item_in_display_panel(eels_display_item, display_panel_id)
 
         def acquire_stack_and_sum(number_frames: int,
                                   energy_offset: float,
                                   dark_ref_enabled: bool,
-                                  dark_ref_data: typing.Optional[
-                                      numpy.ndarray],
+                                  dark_ref_data: typing.Optional[_NDArray],
                                   cross_cor: bool,
-                                  document_controller,
-                                  final_layout_fn):
+                                  document_controller: DocumentController.DocumentController,
+                                  final_layout_fn: typing.Callable[[], None]) -> None:
             # grab the document model and workspace for convenience
             with document_controller.create_task_context_manager(
                     _("Multiple Shift EELS Acquire"), "table") as task:
@@ -293,13 +298,13 @@ class AcquireController(metaclass=Utility.Singleton):
                 stack_data_item.title = _("Spectrum Stack")
 
                 # align and sum the stack
-                data_element = dict()
+                data_element: typing.Dict[str, typing.Any] = dict()
                 stack_data = stack_data_item.data
                 if stack_data is not None:
                     if cross_cor:
                         # Apply cross-correlation between subsequent acquired
                         # images and align the image stack
-                        summed_image, _ = align_stack(stack_data, task)
+                        summed_image, _1 = align_stack(stack_data, task)
                     else:
                         # If user does not desire the cross-correlation to happen
                         # then simply sum the stack (eg, when acquiring dark data)
@@ -328,7 +333,7 @@ class AcquireController(metaclass=Utility.Singleton):
                         data_element))
 
                 dispersive_sum = numpy.sum(summed_image, axis=1)
-                differential = numpy.diff(dispersive_sum)
+                differential = numpy.diff(dispersive_sum)  # type: ignore
                 top = numpy.argmax(differential)
                 bottom = numpy.argmin(differential)
                 _midpoint = numpy.mean([bottom, top])/dispersive_sum.shape[0]
@@ -368,7 +373,7 @@ class AcquireController(metaclass=Utility.Singleton):
 
 class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
-    def __init__(self, document_controller, panel_id, properties):
+    def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
         super().__init__(document_controller, panel_id, name)
 
         ui = document_controller.ui
@@ -376,28 +381,24 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.__eels_camera_choice_model = ui.create_persistent_string_model("eels_camera_hardware_source_id")
         self.__eels_camera_choice = HardwareSourceChoice.HardwareSourceChoice(
             self.__eels_camera_choice_model,
-            lambda hardware_source: hardware_source.features.get("is_eels_camera"))
+            lambda hardware_source: hardware_source.features.get("is_eels_camera", False))
 
         # Define the entry and checkbox widgets for the dialog box
         # TODO: how to get text to align right?
-        self.number_frames = self.ui.create_line_edit_widget(
-            properties={"width": 30})
+        self.number_frames = self.ui.create_line_edit_widget(properties={"width": 30})
         self.number_frames.text = "30"
         # TODO: how to get text to align right?
-        self.energy_offset = self.ui.create_line_edit_widget(
-            properties={"width": 50})
+        self.energy_offset = self.ui.create_line_edit_widget(properties={"width": 50})
         self.energy_offset.text = "0"
 
         self.dark_ref_choice = self.ui.create_check_box_widget()
         self.dark_ref_choice.checked = True
         self.cross_cor_choice = self.ui.create_check_box_widget()
         self.cross_cor_choice.checked = True
-        self.dark_file = self.ui.create_line_edit_widget(
-            properties={"width": 250})
+        self.dark_file = self.ui.create_line_edit_widget(properties={"width": 250})
         self.dark_file.text = ""
         self.acquire_button = ui.create_push_button_widget(_("Start"))
-        self.sleep_time = self.ui.create_line_edit_widget(
-            properties={"width": 50})
+        self.sleep_time = self.ui.create_line_edit_widget(properties={"width": 50})
         self.sleep_time.text = "15"
 
         # Dialog row to hold the dropdown to select a camera
@@ -444,20 +445,21 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         dialog_row_a.add_stretch()
         dialog_row_a.add(self.acquire_button)
 
-        self.acquire_button.on_clicked = lambda: self.acquire(
-            int(self.number_frames.text),
-            float(self.energy_offset.text),
-            int(self.sleep_time.text),
-            bool(self.dark_ref_choice.checked),
-            pathlib.Path(),  # stand-in dark reference
-#            pathlib.Path(self.dark_file.text),
-            bool(self.cross_cor_choice.checked)
+        def handle_acquire_clicked() -> None:
+            self.acquire(
+                int(self.number_frames.text or "0"),
+                float(self.energy_offset.text or "0"),
+                int(self.sleep_time.text or "0"),
+                bool(self.dark_ref_choice.checked),
+                pathlib.Path(),  # stand-in dark reference
+                #            pathlib.Path(self.dark_file.text),
+                bool(self.cross_cor_choice.checked)
             )
 
+        self.acquire_button.on_clicked = handle_acquire_clicked
+
         # create a column in the dialog box
-        properties["margin"] = 6
-        properties["spacing"] = 2
-        column = ui.create_column_widget(properties=properties)
+        column = ui.create_column_widget(properties={"margin": 6, "spacing": 2})
 
         # Add the rows to the created column
         column.add(camera_row)
@@ -475,9 +477,9 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
 
     def close(self) -> None:
         self.__eels_camera_choice.close()
-        self.__eels_camera_choice = None
+        self.__eels_camera_choice = typing.cast(typing.Any, None)
         self.__eels_camera_choice_model.close()
-        self.__eels_camera_choice_model = None
+        self.__eels_camera_choice_model = typing.cast(typing.Any, None)
         super().close()
 
     def acquire(self,
@@ -486,19 +488,20 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 sleep_time: int,
                 dark_ref_choice: bool,
                 dark_file: pathlib.Path,
-                cross_cor_choice: bool):
+                cross_cor_choice: bool) -> None:
         if number_frames <= 0:
             return
         # Function to set up and start acquisition
-        eels_camera = self.__eels_camera_choice.hardware_source
+        eels_camera = typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.__eels_camera_choice.hardware_source)
         if eels_camera:
             # setup the workspace layout
-            self.__configure_start_workspace(
-                self.document_controller.workspace_controller,
-                eels_camera.hardware_source_id)
+            workspace_controller = self.document_controller.workspace_controller
+            assert workspace_controller
+            self.__configure_start_workspace(workspace_controller, eels_camera.hardware_source_id)
             # start the EELS acquisition
             eels_camera.start_playing()
-            stem_controller = Registry.get_component("stem_controller")
+            stem_controller = typing.cast(typing.Optional[STEMController.STEMController], Registry.get_component("stem_controller"))
+            assert stem_controller
             if dark_ref_choice is False:
                 # Dark reference is undesired
                 dark_ref_data = None
@@ -523,19 +526,13 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 self.document_controller,
                 functools.partial(self.set_final_layout))
 
-    def set_final_layout(self):
+    def set_final_layout(self) -> None:
         # change to the EELS workspace layout
-        self.__configure_final_workspace(
-            self.document_controller.workspace_controller)
+        workspace_controller = self.document_controller.workspace_controller
+        if workspace_controller:
+            self.__configure_final_workspace(workspace_controller)
 
-    def __create_canvas_widget_from_image_panel(self, image_panel):
-        canvas_widget = self.ui.create_canvas_widget()
-        canvas_widget.canvas_item.add_canvas_item(image_panel.canvas_item)
-        image_row = self.ui.create_row_widget()
-        image_row.add(canvas_widget)
-        return image_row
-
-    def __configure_final_workspace(self, workspace_controller):
+    def __configure_final_workspace(self, workspace_controller: Workspace.Workspace) -> None:
         spectrum_display = {"type": "image",
                             "selected": True,
                             "display_panel_id": "multiple_shift_eels_spectrum"}
@@ -557,8 +554,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                                               layout,
                                               "multiple_shift_eels_results")
 
-    def __configure_start_workspace(self, workspace_controller,
-                                    hardware_source_id):
+    def __configure_start_workspace(self, workspace_controller: Workspace.Workspace, hardware_source_id: str) -> None:
         spectrum_display = {'type': 'image',
                             'hardware_source_id': hardware_source_id,
                             'controller_type': 'camera-live',
@@ -575,7 +571,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                                               )
 
 
-def run():
+def run() -> None:
     panel_name = name+"-control-panel"
     workspace_manager = Workspace.WorkspaceManager()
     workspace_manager.register_panel(MultipleShiftEELSAcquireControlView,

@@ -591,7 +591,7 @@ class Mask:
                     mask[part_mask] = poly[part_mask]
         return mask
 
-    def copy(self) -> 'Mask':
+    def copy(self) -> Mask:
         return Mask.from_dict(copy.deepcopy(self.to_dict()))
 
 
@@ -741,9 +741,7 @@ class PartialData:
         self.valid_rows = valid_rows
 
 
-GlobalPartialData = PartialData
-
-
+@typing.runtime_checkable
 class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     """Define the camera hardware source protocol.
 
@@ -751,9 +749,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
      The public methods are intended to be stable as much as possible. When
      """
-
-    # define PartialData for backward compatibility
-    class PartialData(GlobalPartialData): pass
 
     # protected methods
 
@@ -763,8 +758,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool: ...
     def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]: ...
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> GlobalPartialData: ...
-    def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> GlobalPartialData: ...
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData: ...
+    def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_synchronized_end(self) -> None: ...
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None: ...
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]: ...
@@ -1049,23 +1044,23 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> GlobalPartialData:
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
         if callable(acquire_synchronized_begin):
-            return typing.cast(GlobalPartialData, acquire_synchronized_begin(camera_frame_parameters, scan_shape))
+            return typing.cast(PartialData, acquire_synchronized_begin(camera_frame_parameters, scan_shape))
         else:
             data_elements = self.acquire_synchronized(scan_shape)
             if len(data_elements) > 0:
                 data_elements[0]["data"] = data_elements[0]["data"].reshape(*scan_shape, *(data_elements[0]["data"].shape[1:]))
                 xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_elements[0])
-                return CameraHardwareSource.PartialData(xdata, True, False, scan_shape[0])
-        return CameraHardwareSource.PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
+                return PartialData(xdata, True, False, scan_shape[0])
+        return PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
         acquire_synchronized_continue = getattr(self.__camera, "acquire_synchronized_continue", None)
         if callable(acquire_synchronized_continue):
             return typing.cast(PartialData, acquire_synchronized_continue(update_period=update_period))
-        return CameraHardwareSource.PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
+        return PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
 
     def acquire_synchronized_end(self) -> None:
         acquire_synchronized_end = getattr(self.__camera, "acquire_synchronized_end", None)
@@ -1324,11 +1319,12 @@ class CameraFrameParameters:
         if isinstance(args[0], dict):
             d.update(args[0])
         d.update(kwargs)
-        self.exposure_ms = d.get("exposure_ms", 125)
-        self.binning = d.get("binning", 1)
-        self.processing = d.get("processing")
-        self.integration_count = d.get("integration_count")
-        self.active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in d.get("active_masks", [])]
+        self.exposure_ms = d.pop("exposure_ms", 125)
+        self.binning = d.pop("binning", 1)
+        self.processing = d.pop("processing", None)
+        self.integration_count = d.pop("integration_count", 1)
+        self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in d.pop("active_masks", [])]
+        self.__extra = d
 
     def __copy__(self) -> CameraFrameParameters:
         return copy.deepcopy(self)
@@ -1339,13 +1335,35 @@ class CameraFrameParameters:
         return deepcopy
 
     def as_dict(self) -> typing.Dict[str, typing.Any]:
-        return {
+        d = {
             "exposure_ms": self.exposure_ms,
             "binning": self.binning,
             "processing": self.processing,
             "integration_count": self.integration_count,
             "active_masks": [mask.as_dict() for mask in self.active_masks],
         }
+        d.update(self.__extra)
+        return d
+
+    def __getitem__(self, item: str) -> typing.Any:
+        if hasattr(self, item):
+            return getattr(self, item)
+        else:
+            return self.__extra[item]
+
+    def __setitem__(self, key: str, value: typing.Any) -> None:
+        if hasattr(self, key):
+            setattr(self, key, value)
+        else:
+            self.__extra[key] = value
+
+    @property
+    def active_masks(self) -> typing.Sequence[Mask]:
+        return self.__active_masks
+
+    @active_masks.setter
+    def active_masks(self, value: typing.Union[typing.Sequence[Mask], typing.List[typing.Dict[str, typing.Any]]]) -> None:
+        self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in value]
 
 
 def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, str], key: str) -> typing.Optional[typing.Union[float, str]]:
