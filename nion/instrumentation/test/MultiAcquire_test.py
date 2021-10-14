@@ -7,6 +7,7 @@ from nion.instrumentation import camera_base
 from nion.swift import Application
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.ui import TestUI
+from nion.utils import Geometry
 
 from nion.instrumentation import MultiAcquire
 
@@ -153,7 +154,7 @@ class TestMultiAcquire(unittest.TestCase):
                 self.assertAlmostEqual(val, calibrated_intensities[0], delta=200)
 
     def test_acquire_multi_eels_spectrum_image(self):
-        scan_size = (10, 10)
+        scan_size = Geometry.IntSize(10, 10)
         masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
 
         for sum_frames in [True, False]:
@@ -182,7 +183,7 @@ class TestMultiAcquire(unittest.TestCase):
                             scan_hardware_source = test_context.scan_hardware_source
                             scan_hardware_source.set_enabled_channels([0, 1])
                             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                            scan_frame_parameters['size'] = scan_size
+                            scan_frame_parameters.size = scan_size
                             scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
 
                             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
@@ -194,7 +195,7 @@ class TestMultiAcquire(unittest.TestCase):
                                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                                 camera_frame_parameters.processing = multi_acquire_settings['processing']
                                 camera_frame_parameters.active_masks = masks
-                                scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
+                                scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                                     camera=camera_hardware_source,
                                                                                                     camera_frame_parameters=camera_frame_parameters)
@@ -259,8 +260,8 @@ class TestMultiAcquire(unittest.TestCase):
                             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
                                 with self.subTest():
                                     camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
-                                    total_shape = tuple(scan_frame_parameters['size'])
-                                    haadf_shape = tuple(scan_frame_parameters['size'])
+                                    total_shape = tuple(scan_frame_parameters.size)
+                                    haadf_shape = tuple(scan_frame_parameters.size)
                                     index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
                                     if parameters[index]['frames'] > 1 and not settings['sum_frames']:
                                         total_shape = (parameters[index]['frames'],) + total_shape
@@ -283,7 +284,7 @@ class TestMultiAcquire(unittest.TestCase):
                             self.assertLess(starttime - endtime, total_acquisition_time)
 
     def test_acquire_multi_eels_spectrum_image_applies_shift_for_each_frame(self):
-        scan_size = (10, 10)
+        scan_size = Geometry.IntSize(10, 10)
 
         settings = {'x_shifter': 'C10', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',
@@ -305,7 +306,7 @@ class TestMultiAcquire(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_enabled_channels([0, 1])
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            scan_frame_parameters['size'] = scan_size
+            scan_frame_parameters.size = scan_size
             scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
 
             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
@@ -316,7 +317,7 @@ class TestMultiAcquire(unittest.TestCase):
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                 camera_frame_parameters.processing = multi_acquire_settings['processing']
-                scan_frame_parameters.setdefault('scan_id', str(uuid.uuid4()))
+                scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,
                                                                                     camera_frame_parameters=camera_frame_parameters)
@@ -382,8 +383,8 @@ class TestMultiAcquire(unittest.TestCase):
             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
                 with self.subTest():
                     camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
-                    total_shape = tuple(scan_frame_parameters['size'])
-                    haadf_shape = tuple(scan_frame_parameters['size'])
+                    total_shape = tuple(scan_frame_parameters.size)
+                    haadf_shape = tuple(scan_frame_parameters.size)
                     index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
                     if parameters[index]['frames'] > 1 and not settings['sum_frames']:
                         total_shape = (parameters[index]['frames'],) + total_shape

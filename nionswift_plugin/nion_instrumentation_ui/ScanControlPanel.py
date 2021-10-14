@@ -477,9 +477,9 @@ class ScanControlStateController:
         size = frame_parameters.size
         if self.__linked:
             if field == "width":
-                size = size[1], size[1]
+                size = Geometry.IntSize(size.width, size.width)
             else:
-                size = size[0], size[0]
+                size = Geometry.IntSize(size.height, size.height)
         frame_parameters.size = size
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
@@ -493,32 +493,32 @@ class ScanControlStateController:
 
     def handle_width_changed(self, width_str):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(frame_parameters.size[0]), int(width_str)
+        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(width_str))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_decrease_width(self):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(frame_parameters.size[0]), int(frame_parameters.size[1]/2)
+        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]/2))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_increase_width(self):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(frame_parameters.size[0]), int(frame_parameters.size[1]*2)
+        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]*2))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_height_changed(self, height_str):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(height_str), int(frame_parameters.size[1])
+        frame_parameters.size = Geometry.IntSize(int(height_str), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_decrease_height(self):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(frame_parameters.size[0]/2), int(frame_parameters.size[1])
+        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]/2), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_increase_height(self):
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = int(frame_parameters.size[0]*2), int(frame_parameters.size[1])
+        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]*2), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_time_changed(self, time_str):

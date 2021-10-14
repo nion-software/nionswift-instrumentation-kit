@@ -355,7 +355,7 @@ class STEMController(Observable.Observable):
             self.__drift_settings = value
             self.notify_property_changed("drift_settings")
 
-    def disconnect_probe_connections(self):
+    def disconnect_probe_connections(self) -> None:
         self.__scan_context_channel_map = dict()
         self.scan_context_data_items_changed_event.fire()
 
@@ -414,7 +414,7 @@ class STEMController(Observable.Observable):
     def set_probe_position(self, new_probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         self.probe_position = new_probe_position
 
-    def validate_probe_position(self):
+    def validate_probe_position(self) -> None:
         """Validate the probe position.
 
         This is called when the user switches from not controlling to controlling the position."""
@@ -542,7 +542,7 @@ class STEMController(Observable.Observable):
 
     # high level commands
 
-    def change_stage_position(self, *, dy: int=None, dx: int=None):
+    def change_stage_position(self, *, dy: typing.Optional[float] = None, dx: typing.Optional[float] = None) -> None:
         """Shift the stage by dx, dy (meters). Do not wait for confirmation."""
         raise NotImplementedError()
 

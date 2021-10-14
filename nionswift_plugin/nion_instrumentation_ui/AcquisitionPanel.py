@@ -1405,7 +1405,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         scan_size = scan_context_description.scan_size
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
-        scan_frame_parameters["scan_id"] = str(uuid.uuid4())
+        scan_frame_parameters.scan_id = uuid.uuid4()
 
         # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
         # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
@@ -1501,7 +1501,9 @@ class CameraFrameDataStream(Acquisition.DataStream):
             data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, numpy.float32)), data_descriptor=data_descriptor)
             source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
             state = Acquisition.DataStreamStateEnum.COMPLETE
-            data = self.__record_task.grab()[0].data
+            xdatas = self.__record_task.grab()
+            xdata = xdatas[0] if xdatas else None
+            data = xdata.data if xdata else None
             assert data is not None
             data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
                                                                 source_data_slice, state)
@@ -1690,7 +1692,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         scan_uuid = uuid.uuid4()
         scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
-        scan_frame_parameters["scan_id"] = str(scan_uuid)
+        scan_frame_parameters.scan_id = scan_uuid
 
         # gather the scan metadata.
         scan_metadata: typing.Dict[str, typing.Any] = dict()

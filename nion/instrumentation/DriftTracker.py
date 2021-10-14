@@ -90,23 +90,23 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         # this method must be thread safe
         # start with the context frame parameters and adjust for the drift region
         frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
-        context_size = Geometry.FloatSize.make(frame_parameters.size)
+        context_size = frame_parameters.size.to_float_size()
         drift_channel_id = self.__scan_hardware_source.drift_channel_id
         drift_region = self.__scan_hardware_source.drift_region
         drift_rotation = self.__scan_hardware_source.drift_rotation
         if drift_channel_id is not None and drift_region is not None:
             drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
             assert drift_channel_index is not None
-            frame_parameters.subscan_pixel_size = int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4)
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4))
             if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
-                frame_parameters.subscan_fractional_size = drift_region.height, drift_region.width
-                frame_parameters.subscan_fractional_center = drift_region.center.y, drift_region.center.x
+                frame_parameters.subscan_fractional_size = Geometry.FloatSize(drift_region.height, drift_region.width)
+                frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)
                 frame_parameters.subscan_rotation = drift_rotation
                 # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
                 drift_tracker = self.__scan_hardware_source.drift_tracker
                 utc_time = utc_time or datetime.datetime.utcnow()
                 delta_nm = drift_tracker.predict_drift(utc_time)
-                frame_parameters.center_nm = tuple(Geometry.FloatPoint.make(frame_parameters.center_nm) - delta_nm)
+                frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 xdata0 = xdatas[0]
                 if xdata0:
