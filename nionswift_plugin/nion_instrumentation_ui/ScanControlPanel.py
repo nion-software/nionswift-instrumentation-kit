@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # standard libraries
 import asyncio
 import copy
@@ -5,14 +7,16 @@ import functools
 import gettext
 import logging
 import logging.handlers
+import math
 import pkgutil
 import sys
 import typing
 
 # third party libraries
-import math
+# None
 
 # local libraries
+from nion.data import DataAndMetadata
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -31,6 +35,12 @@ from nion.utils import Geometry
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
+    from nion.swift.model import DisplayItem
+    from nion.swift.model import DocumentModel
+    from nion.swift.model import Persistence
+    from nion.ui import DrawingContext
+    from nion.ui import UserInterface
+    from nion.utils import Event
 
 
 _ = gettext.gettext
@@ -87,7 +97,6 @@ class ScanControlStateController:
         handle_play_pause_clicked()
         handle_abort_clicked()
         handle_record_clicked()
-        handle_simulate_clicked()
         handle_subscan_enabled(enabled)
         handle_enable_channel(channel_index, enabled)
         handle_settings_button_clicked(api_broker)
@@ -123,7 +132,6 @@ class ScanControlStateController:
         on_record_button_state_changed(visible, enabled)
         on_record_abort_button_state_changed(visible, enabled)
         on_capture_button_state_changed(visible, enabled)
-        on_simulate_button_state_changed(visible, enabled)
         on_display_new_data_item(data_item)
         (thread) on_channel_state_changed(channel_index, channel_id, channel_name, enabled)
         (thread) on_data_channel_state_changed(data_channel_index, data_channel_id, data_channel_name, enabled)
@@ -139,24 +147,24 @@ class ScanControlStateController:
 
     profiles = { _("Puma"): 0, _("Rabbit"): 1, _("Frame"): 2 }
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, queue_task, document_model, channel_id: typing.Optional[str]):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, queue_task: typing.Callable[[typing.Callable[[], None]], None], document_model: DocumentModel.DocumentModel, channel_id: typing.Optional[str]) -> None:
         self.__scan_hardware_source = scan_hardware_source
         self.queue_task = queue_task
         self.__document_model = document_model
         self.__channel_id = channel_id
         self.__linked = True
-        self.__profile_changed_event_listener = None
-        self.__frame_parameters_changed_event_listener = None
-        self.__data_item_states_changed_event_listener = None
-        self.__acquisition_state_changed_event_listener = None
-        self.__probe_state_changed_event_listener = None
-        self.__channel_state_changed_event_listener = None
-        self.__subscan_state_changed_listener = None
-        self.__line_scan_state_changed_listener = None
-        self.__drift_channel_id_listener = None
-        self.__drift_region_listener = None
-        self.__drift_settings_listener = None
-        self.__scan_context_changed_listener = None
+        self.__profile_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__data_item_states_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__probe_state_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__subscan_state_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__line_scan_state_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__drift_channel_id_listener: typing.Optional[Event.EventListener] = None
+        self.__drift_region_listener: typing.Optional[Event.EventListener] = None
+        self.__drift_settings_listener: typing.Optional[Event.EventListener] = None
+        self.__scan_context_changed_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState, stem_controller.LineScanState], None]] = None
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
@@ -170,22 +178,21 @@ class ScanControlStateController:
         self.on_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_record_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_record_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
-        self.on_data_item_states_changed : typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping]], None]] = None
-        self.on_simulate_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
+        self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
         self.on_probe_state_changed : typing.Optional[typing.Callable[[str, typing.Optional[Geometry.FloatPoint]], None]] = None
         self.on_positioned_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_ac_line_sync_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_capture_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_display_new_data_item : typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
 
-        self.__captured_xdatas_available_event = None
+        self.__captured_xdatas_available_listener: typing.Optional[Event.EventListener] = None
 
         self.data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
 
     def close(self) -> None:
-        if self.__captured_xdatas_available_event:
-            self.__captured_xdatas_available_event.close()
-            self.__captured_xdatas_available_event = None
+        if self.__captured_xdatas_available_listener:
+            self.__captured_xdatas_available_listener.close()
+            self.__captured_xdatas_available_listener = None
         if self.__profile_changed_event_listener:
             self.__profile_changed_event_listener.close()
             self.__profile_changed_event_listener = None
@@ -236,7 +243,6 @@ class ScanControlStateController:
         self.on_record_button_state_changed = None
         self.on_record_abort_button_state_changed = None
         self.on_data_item_states_changed = None
-        self.on_simulate_button_state_changed = None
         self.on_probe_state_changed = None
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
@@ -244,24 +250,24 @@ class ScanControlStateController:
         self.on_display_new_data_item = None
         self.__scan_hardware_source = typing.cast(typing.Any, None)
 
-    def __update_scan_button_state(self):
+    def __update_scan_button_state(self) -> None:
         if self.on_scan_button_state_changed:
             is_any_channel_enabled = any(self.__channel_enabled)
             enabled = self.__scan_hardware_source is not None and is_any_channel_enabled
             self.on_scan_button_state_changed(enabled, "stop" if self.is_playing else "scan")
 
-    def __update_abort_button_state(self):
+    def __update_abort_button_state(self) -> None:
         if self.on_abort_button_state_changed:
             self.on_abort_button_state_changed(self.is_playing, self.is_playing)
         if self.on_capture_button_state_changed:
-            self.on_capture_button_state_changed(self.is_playing, not self.__captured_xdatas_available_event)
+            self.on_capture_button_state_changed(self.is_playing, not self.__captured_xdatas_available_listener)
 
-    def __update_record_button_state(self):
+    def __update_record_button_state(self) -> None:
         if self.on_record_button_state_changed:
             is_any_channel_enabled = any(self.__channel_enabled)
             self.on_record_button_state_changed(True, not self.is_recording and is_any_channel_enabled)
 
-    def __update_record_abort_button_state(self):
+    def __update_record_abort_button_state(self) -> None:
         if self.on_record_abort_button_state_changed:
             self.on_record_abort_button_state_changed(self.is_recording, self.is_recording)
 
@@ -276,19 +282,19 @@ class ScanControlStateController:
 
     # received from the scan controller when the profile changes.
     # thread safe
-    def __update_profile_index(self, profile_index):
+    def __update_profile_index(self, profile_index: int) -> None:
         for (k,v) in ScanControlStateController.profiles.items():
             if v == profile_index:
                 self.__update_profile_state(k)
                 self.__update_frame_parameters(self.__scan_hardware_source.selected_profile_index, self.__scan_hardware_source.get_frame_parameters(profile_index))
 
-    def __update_buttons(self):
+    def __update_buttons(self) -> None:
         self.__update_scan_button_state()
         self.__update_abort_button_state()
         self.__update_record_button_state()
         self.__update_record_abort_button_state()
 
-    def initialize_state(self):
+    def initialize_state(self) -> None:
         """ Call this to initialize the state of the UI after everything has been connected. """
         if self.__scan_hardware_source:
             stem_controller = self.__scan_hardware_source.stem_controller
@@ -369,9 +375,6 @@ class ScanControlStateController:
             self.__update_profile_index(self.__scan_hardware_source.selected_profile_index)
         if self.on_linked_changed:
             self.on_linked_changed(self.__linked)
-        if self.on_simulate_button_state_changed:
-            use_simulator = self.__scan_hardware_source.use_hardware_simulator
-            self.on_simulate_button_state_changed(use_simulator, use_simulator)
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(list())
         probe_state = self.__scan_hardware_source.probe_state
@@ -379,12 +382,12 @@ class ScanControlStateController:
         self.__probe_state_changed(probe_state, probe_position)
 
     # must be called on ui thread
-    def handle_change_profile(self, profile_label):
+    def handle_change_profile(self, profile_label: str) -> None:
         if profile_label in ScanControlStateController.profiles:
             self.__scan_hardware_source.set_selected_profile_index(ScanControlStateController.profiles[profile_label])
 
     # must be called on ui thread
-    def handle_play_pause_clicked(self):
+    def handle_play_pause_clicked(self) -> None:
         """ Call this when the user clicks the play/pause button. """
         if self.__scan_hardware_source:
             if self.is_playing:
@@ -393,45 +396,42 @@ class ScanControlStateController:
                 self.__scan_hardware_source.start_playing()
 
     # must be called on ui thread
-    def handle_abort_clicked(self):
+    def handle_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
         if self.__scan_hardware_source:
             self.__scan_hardware_source.abort_playing()
 
     # must be called on ui thread
-    def handle_record_clicked(self, callback_fn):
+    def handle_record_clicked(self, callback_fn: typing.Callable[[DataItem.DataItem], None]) -> None:
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
         if self.__scan_hardware_source:
 
-            def finish_record(data_and_metadata_list):
+            def finish_record(data_and_metadata_list: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
                 record_index = self.__scan_hardware_source.record_index
                 for data_and_metadata in data_and_metadata_list:
-                    data_item = DataItem.DataItem()
-                    data_item.ensure_data_source()
+                    if data_and_metadata:
+                        data_item = DataItem.DataItem()
+                        data_item.ensure_data_source()
 
-                    data_and_metadata = copy.deepcopy(data_and_metadata)  # low level may be reused; copy here
-                    display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
-                    display_name = display_name if display_name else _("Record")
-                    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
-                    title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
-                    data_item.title = "{} {}".format(title_base, record_index)
+                        data_and_metadata = copy.deepcopy(data_and_metadata)  # low level may be reused; copy here
+                        display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                        display_name = display_name if display_name else _("Record")
+                        channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
+                        title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
+                        data_item.title = "{} {}".format(title_base, record_index)
 
-                    data_item.set_xdata(data_and_metadata)
-                    callback_fn(data_item)
+                        data_item.set_xdata(data_and_metadata)
+                        callback_fn(data_item)
                 self.__scan_hardware_source.record_index += 1
 
             self.__scan_hardware_source.record_async(finish_record)
 
     # must be called on ui thread
-    def handle_record_abort_clicked(self):
+    def handle_record_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
         if self.__scan_hardware_source:
             self.__scan_hardware_source.abort_recording()
-
-    # must be called on ui thread
-    def handle_simulate_clicked(self):
-        self.__scan_hardware_source.start_simulator()
 
     # must be called on ui thread
     def handle_subscan_enabled(self, enabled: bool) -> None:
@@ -448,32 +448,32 @@ class ScanControlStateController:
         self.__scan_hardware_source.drift_enabled = enabled
 
     # must be called on ui thread
-    def handle_enable_channel(self, channel_index, enabled):
+    def handle_enable_channel(self, channel_index: int, enabled: bool) -> None:
         self.__scan_hardware_source.set_channel_enabled(channel_index, enabled)
 
     # must be called on ui thread
-    def handle_settings_button_clicked(self, api_broker):
+    def handle_settings_button_clicked(self, api_broker: typing.Any) -> None:
         self.__scan_hardware_source.open_configuration_interface(api_broker)
 
     # must be called on ui thread
-    def handle_shift_click(self, hardware_source_id, mouse_position, camera_shape, logger: logging.Logger) -> bool:
+    def handle_shift_click(self, hardware_source_id: str, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> bool:
         if hardware_source_id == self.__scan_hardware_source.hardware_source_id:
             self.__scan_hardware_source.shift_click(mouse_position, camera_shape, logger)
             return True
         return False
 
-    def handle_positioned_check_box(self, checked):
+    def handle_positioned_check_box(self, checked: bool) -> None:
         if checked:
             self.__scan_hardware_source.validate_probe_position()
         else:
             self.__scan_hardware_source.probe_position = None
 
-    def handle_ac_line_sync_check_box(self, checked):
+    def handle_ac_line_sync_check_box(self, checked: bool) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.ac_line_sync = checked
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def __update_frame_size(self, frame_parameters, field):
+    def __update_frame_size(self, frame_parameters: scan_base.ScanFrameParameters, field: str) -> None:
         size = frame_parameters.size
         if self.__linked:
             if field == "width":
@@ -483,7 +483,7 @@ class ScanControlStateController:
         frame_parameters.size = size
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_linked_changed(self, linked):
+    def handle_linked_changed(self, linked: bool) -> None:
         self.__linked = bool(linked)
         if self.on_linked_changed:
             self.on_linked_changed(self.__linked)
@@ -491,115 +491,116 @@ class ScanControlStateController:
             frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
             self.__update_frame_size(frame_parameters, "height")
 
-    def handle_width_changed(self, width_str):
+    def handle_width_changed(self, width_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(width_str))
         self.__update_frame_size(frame_parameters, "width")
 
-    def handle_decrease_width(self):
+    def handle_decrease_width(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]/2))
         self.__update_frame_size(frame_parameters, "width")
 
-    def handle_increase_width(self):
+    def handle_increase_width(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]*2))
         self.__update_frame_size(frame_parameters, "width")
 
-    def handle_height_changed(self, height_str):
+    def handle_height_changed(self, height_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(height_str), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
-    def handle_decrease_height(self):
+    def handle_decrease_height(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]/2), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
-    def handle_increase_height(self):
+    def handle_increase_height(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]*2), int(frame_parameters.size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
-    def handle_time_changed(self, time_str):
+    def handle_time_changed(self, time_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.pixel_time_us = float(time_str)
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_decrease_time(self):
+    def handle_decrease_time(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.pixel_time_us = frame_parameters.pixel_time_us * 0.5
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_increase_time(self):
+    def handle_increase_time(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.pixel_time_us = frame_parameters.pixel_time_us * 2.0
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_fov_changed(self, fov_str):
+    def handle_fov_changed(self, fov_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.fov_nm = float(fov_str)
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_decrease_fov(self):
+    def handle_decrease_fov(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.fov_nm = frame_parameters.fov_nm * 0.5
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_increase_fov(self):
+    def handle_increase_fov(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.fov_nm = frame_parameters.fov_nm * 2.0
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_rotation_changed(self, rotation_str):
+    def handle_rotation_changed(self, rotation_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.rotation_rad = float(rotation_str) * math.pi / 180.0
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def handle_increase_pmt_clicked(self, channel_index):
+    def handle_increase_pmt_clicked(self, channel_index: int) -> None:
         self.__scan_hardware_source.increase_pmt(channel_index)
 
-    def handle_decrease_pmt_clicked(self, channel_index):
+    def handle_decrease_pmt_clicked(self, channel_index: int) -> None:
         self.__scan_hardware_source.decrease_pmt(channel_index)
 
-    def handle_capture_clicked(self):
-        def receive_new_xdatas(xdatas):
-            if self.__captured_xdatas_available_event:
-                self.__captured_xdatas_available_event.close()
-                self.__captured_xdatas_available_event = None
+    def handle_capture_clicked(self) -> None:
+        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+            if self.__captured_xdatas_available_listener:
+                self.__captured_xdatas_available_listener.close()
+                self.__captured_xdatas_available_listener = None
             for xdata in xdatas:
-                def add_data_item(data_item):
+                def add_data_item(data_item: DataItem.DataItem) -> None:
                     if self.on_display_new_data_item:
                         self.on_display_new_data_item(data_item)
 
-                data_item = DataItem.new_data_item(xdata)
-                display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
-                display_name = display_name if display_name else _("Capture")
-                channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
-                data_item.title = "%s (%s)" % (display_name, channel_name) if channel_name else display_name
-                self.queue_task(functools.partial(add_data_item, data_item))
+                if xdata:
+                    data_item = DataItem.new_data_item(xdata)
+                    display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                    display_name = display_name if display_name else _("Capture")
+                    channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
+                    data_item.title = "%s (%s)" % (display_name, channel_name) if channel_name else display_name
+                    self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
-        self.__captured_xdatas_available_event = self.__scan_hardware_source.xdatas_available_event.listen(receive_new_xdatas)
+        self.__captured_xdatas_available_listener = self.__scan_hardware_source.xdatas_available_event.listen(receive_new_xdatas)
         self.__update_buttons()
 
     # must be called on ui thread
-    def handle_periodic(self):
+    def handle_periodic(self) -> None:
         if self.__scan_hardware_source and getattr(self.__scan_hardware_source, "periodic", None):
             self.__scan_hardware_source.periodic()
 
     @property
-    def is_playing(self):
+    def is_playing(self) -> bool:
         """ Returns whether the hardware source is playing or not. """
         return self.__scan_hardware_source.is_playing if self.__scan_hardware_source else False
 
     @property
-    def is_recording(self):
+    def is_recording(self) -> bool:
         """ Returns whether the hardware source is playing or not. """
         return self.__scan_hardware_source.is_recording if self.__scan_hardware_source else False
 
     @property
-    def display_name(self):
+    def display_name(self) -> str:
         """ Returns the display name for the hardware source. """
         return self.__scan_hardware_source.display_name if self.__scan_hardware_source else _("N/A")
 
@@ -611,14 +612,14 @@ class ScanControlStateController:
         return self.__scan_hardware_source.get_channel_enabled(channel_index)
 
     # this message comes from the data buffer. it will always be invoked on a thread.
-    def __acquisition_state_changed(self, is_playing):
-        if self.__captured_xdatas_available_event:
-            self.__captured_xdatas_available_event.close()
-            self.__captured_xdatas_available_event = None
+    def __acquisition_state_changed(self, is_playing: bool) -> None:
+        if self.__captured_xdatas_available_listener:
+            self.__captured_xdatas_available_listener.close()
+            self.__captured_xdatas_available_listener = None
         self.queue_task(self.__update_buttons)
 
     # this message comes from the hardware source. may be called from thread.
-    def __data_item_states_changed(self, data_item_states):
+    def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
         if self.on_data_item_states_changed:
             self.on_data_item_states_changed(data_item_states)
 
@@ -647,7 +648,7 @@ class ScanControlStateController:
 
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
-    def __init__(self, icon_id):
+    def __init__(self, icon_id: str) -> None:
         super().__init__()
         self.__icon_id = icon_id
         self.wants_mouse_events = True
@@ -656,19 +657,19 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.fill_style = "rgb(128, 128, 128)"
         self.fill_style_pressed = "rgb(64, 64, 64)"
         self.fill_style_disabled = "rgb(192, 192, 192)"
-        self.border_style = None
-        self.border_style_pressed = None
-        self.border_style_disabled = None
+        self.border_style: typing.Optional[str] = None
+        self.border_style_pressed: typing.Optional[str] = None
+        self.border_style_disabled: typing.Optional[str] = None
         self.stroke_style = "#FFF"
         self.stroke_width = 3.0
-        self.on_button_clicked = None
-        self.size_to_content()
+        self.on_button_clicked: typing.Optional[typing.Callable[[], None]] = None
+        self.__size_to_content()
 
     def close(self) -> None:
         self.on_button_clicked = None
         super().close()
 
-    def size_to_content(self, horizontal_padding=None, vertical_padding=None):
+    def __size_to_content(self, horizontal_padding: typing.Optional[int] = None, vertical_padding: typing.Optional[int] = None) -> None:
         """ Size the canvas item to the text content. """
 
         if horizontal_padding is None:
@@ -679,32 +680,37 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18 + 2 * horizontal_padding, 18 + 2 * vertical_padding)))
 
-    def mouse_entered(self):
+    def mouse_entered(self) -> bool:
         self.__mouse_inside = True
         self.update()
+        return True
 
-    def mouse_exited(self):
+    def mouse_exited(self) -> bool:
         self.__mouse_inside = False
         self.update()
+        return True
 
-    def mouse_pressed(self, x, y, modifiers):
+    def mouse_pressed(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = True
         self.update()
+        return True
 
-    def mouse_released(self, x, y, modifiers):
+    def mouse_released(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = False
         self.update()
+        return True
 
-    def mouse_clicked(self, x, y, modifiers):
+    def mouse_clicked(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         if self.enabled:
             if self.on_button_clicked:
                 self.on_button_clicked()
         return True
 
-    def _repaint(self, drawing_context):
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
+        canvas_size = self.canvas_size
+        if not canvas_size:
+            return
         with drawing_context.saver():
-            import math
-            canvas_size = self.canvas_size
             center_x = canvas_size.width * 0.5
             center_y = canvas_size.height * 0.5
             drawing_context.begin_path()
@@ -753,7 +759,7 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
 
 class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
 
-    def __init__(self, char: str):
+    def __init__(self, char: str) -> None:
         super().__init__()
         self.__char = char
         self.wants_mouse_events = True
@@ -773,31 +779,37 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.on_button_clicked = None
         super().close()
 
-    def mouse_entered(self):
+    def mouse_entered(self) -> bool:
         self.__mouse_inside = True
         self.update()
+        return True
 
-    def mouse_exited(self):
+    def mouse_exited(self) -> bool:
         self.__mouse_inside = False
         self.update()
+        return True
 
-    def mouse_pressed(self, x, y, modifiers):
+    def mouse_pressed(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = True
         self.update()
+        return True
 
-    def mouse_released(self, x, y, modifiers):
+    def mouse_released(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = False
         self.update()
+        return True
 
-    def mouse_clicked(self, x, y, modifiers):
+    def mouse_clicked(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         if self.enabled:
             if callable(self.on_button_clicked):
                 self.on_button_clicked()
         return True
 
-    def _repaint(self, drawing_context):
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
+        canvas_size = self.canvas_size
+        if not canvas_size:
+            return
         with drawing_context.saver():
-            canvas_size = self.canvas_size
             center_x = int(canvas_size.width * 0.5)
             center_y = int(canvas_size.height * 0.5)
             drawing_context.begin_path()
@@ -835,7 +847,7 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
 
 class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
 
-    def __init__(self, ui, event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, ui: UserInterface.UserInterface, event_loop: asyncio.AbstractEventLoop) -> None:
         super().__init__()
         self.ui = ui
         self.__event_loop = event_loop
@@ -851,9 +863,8 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
         self.stroke_style = "#000"
         self.border_enabled = False
         self.enabled = True
-        self.__tracking_canvas_item = None
         self.on_mouse_delta : typing.Optional[typing.Callable[[Geometry.IntPoint], None]] = None
-        self.__label_canvas_item = None
+        self.__label_canvas_item: typing.Optional[CanvasItem.StaticTextCanvasItem] = None
 
     @property
     def text(self) -> str:
@@ -866,29 +877,33 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
         if self.__label_canvas_item:
             self.__label_canvas_item.text = value
 
-    def mouse_entered(self):
+    def mouse_entered(self) -> bool:
         self.__mouse_inside = True
         self.update()
+        return True
 
-    def mouse_exited(self):
+    def mouse_exited(self) -> bool:
         self.__mouse_inside = False
         self.update()
+        return True
 
-    def mouse_pressed(self, x, y, modifiers):
+    def mouse_pressed(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = True
         self.update()
+        return True
 
-    def mouse_released(self, x, y, modifiers):
+    def mouse_released(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         self.__mouse_pressed = False
         self.update()
+        return True
 
-    def mouse_clicked(self, x, y, modifiers):
+    def mouse_clicked(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
         if self.enabled:
             # create the popup window content
             background_canvas_item = CanvasItem.BackgroundCanvasItem("#00FA9A")
             self.__label_canvas_item = CanvasItem.StaticTextCanvasItem()
 
-            def mouse_position_changed_by(mouse_delta):
+            def mouse_position_changed_by(mouse_delta: Geometry.IntPoint) -> None:
                 if callable(self.on_mouse_delta):
                     self.on_mouse_delta(mouse_delta)
 
@@ -900,9 +915,11 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
             MouseTrackingCanvasItem.start_mouse_tracker(self.ui, self.__event_loop, canvas_item, mouse_position_changed_by, global_pos, Geometry.IntSize(20, 80))
         return True
 
-    def _repaint(self, drawing_context):
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
+        canvas_size = self.canvas_size
+        if not canvas_size:
+            return
         with drawing_context.saver():
-            canvas_size = self.canvas_size
             center_x = int(canvas_size.width * 0.5)
             center_y = int(canvas_size.height * 0.5)
             drawing_context.begin_path()
@@ -952,9 +969,10 @@ class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
         super().__init__()
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(w=10, h=30)))
 
-    def _repaint(self, drawing_context):
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
         canvas_size = self.canvas_size
-
+        if not canvas_size:
+            return
         with drawing_context.saver():
             drawing_context.begin_path()
             if self.check_state == "checked":
@@ -988,7 +1006,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     controller.
     """
 
-    def __init__(self, document_controller: "DocumentController.DocumentController", scan_controller: scan_base.ScanHardwareSource):
+    def __init__(self, document_controller: DocumentController.DocumentController, scan_controller: scan_base.ScanHardwareSource) -> None:
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
 
@@ -996,7 +1014,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.__state_controller = ScanControlStateController(scan_controller, document_controller.queue_task, document_controller.document_model, None)
 
-        self.__shift_click_state = None
+        self.__shift_click_state: typing.Optional[str] = None
 
         ui = document_controller.ui
 
@@ -1006,8 +1024,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
 
-        def handle_record_data_item(data_item):
-            def perform():
+        def handle_record_data_item(data_item: DataItem.DataItem) -> None:
+            def perform() -> None:
                 document_controller.document_model.append_data_item(data_item)
                 result_display_panel = document_controller.next_result_display_panel()
                 if result_display_panel:
@@ -1020,7 +1038,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         open_controls_button = CanvasItem.BitmapButtonCanvasItem(CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png"))
         open_controls_widget = ui.create_canvas_widget(properties={"height": 24, "width": 24})
         open_controls_widget.canvas_item.add_canvas_item(open_controls_button)
-        simulate_button = ui.create_push_button_widget(_("Simulate"))
         profile_label = ui.create_label_widget(_("Scan profile: "), properties={"margin": 4})
         profile_combo = ui.create_combo_box_widget(properties={"min-width": 72})
         play_state_label = ui.create_label_widget()
@@ -1043,67 +1060,67 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         button_row1.add_stretch()
         button_row1.add(open_controls_widget)
 
-        def handle_width_changed(text):
+        def handle_width_changed(text: str) -> None:
             self.__state_controller.handle_width_changed(text)
             width_field.request_refocus()
 
-        def handle_decrease_width():
+        def handle_decrease_width() -> None:
             self.__state_controller.handle_decrease_width()
             width_field.request_refocus()
 
-        def handle_increase_width():
+        def handle_increase_width() -> None:
             self.__state_controller.handle_increase_width()
             width_field.request_refocus()
 
         width_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         width_field.on_editing_finished = handle_width_changed
 
-        def handle_height_changed(text):
+        def handle_height_changed(text: str) -> None:
             self.__state_controller.handle_height_changed(text)
             height_field.request_refocus()
 
-        def handle_decrease_height():
+        def handle_decrease_height() -> None:
             self.__state_controller.handle_decrease_height()
             height_field.request_refocus()
 
-        def handle_increase_height():
+        def handle_increase_height() -> None:
             self.__state_controller.handle_increase_height()
             height_field.request_refocus()
 
         height_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         height_field.on_editing_finished = handle_height_changed
 
-        def handle_time_changed(text):
+        def handle_time_changed(text: str) -> None:
             self.__state_controller.handle_time_changed(text)
             time_field.request_refocus()
 
-        def handle_decrease_time():
+        def handle_decrease_time() -> None:
             self.__state_controller.handle_decrease_time()
             time_field.request_refocus()
 
-        def handle_increase_time():
+        def handle_increase_time() -> None:
             self.__state_controller.handle_increase_time()
             time_field.request_refocus()
 
         time_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         time_field.on_editing_finished = handle_time_changed
 
-        def handle_fov_changed(text):
+        def handle_fov_changed(text: str) -> None:
             self.__state_controller.handle_fov_changed(text)
             fov_field.request_refocus()
 
-        def handle_decrease_fov():
+        def handle_decrease_fov() -> None:
             self.__state_controller.handle_decrease_fov()
             time_field.request_refocus()
 
-        def handle_increase_fov():
+        def handle_increase_fov() -> None:
             self.__state_controller.handle_increase_fov()
             time_field.request_refocus()
 
         fov_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
         fov_field.on_editing_finished = handle_fov_changed
 
-        def handle_rotation_changed(text):
+        def handle_rotation_changed(text: str) -> None:
             self.__state_controller.handle_rotation_changed(text)
             rotation_field.request_refocus()
 
@@ -1171,7 +1188,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         link_checkbox = LinkedCheckBoxCanvasItem()
         link_canvas_widget.canvas_item.add_canvas_item(link_checkbox)
 
-        def handle_linked_changed(linked):
+        def handle_linked_changed(linked: bool) -> None:
             self.__state_controller.handle_linked_changed(linked)
             if linked:
                 width_field.request_refocus()
@@ -1311,10 +1328,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         record_row.add_stretch()
         record_row.add(record_state_label)
 
-        simulatate_row = ui.create_row_widget(properties={"spacing": 2})
-        simulatate_row.add(simulate_button, alignment="left")
-        simulatate_row.add_stretch()
-
         row5 = ui.create_row_widget(properties={"spacing": 2})
         row5.add(probe_state_label)
         row5.add_stretch()
@@ -1330,7 +1343,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         column_widget.add(drift_row)
         column_widget.add(scan_row)
         column_widget.add(record_row)
-        column_widget.add(simulatate_row)
         column_widget.add(thumbnail_row)
         column_widget.add(row5)
         column_widget.add(row7)
@@ -1342,13 +1354,12 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def ac_line_sync_check_state_changed(check_state: str) -> None:
             self.__state_controller.handle_ac_line_sync_check_box(check_state == "checked")
 
-        simulate_button.on_clicked = self.__state_controller.handle_simulate_clicked
         open_controls_button.on_button_clicked = functools.partial(self.__state_controller.handle_settings_button_clicked, PlugInManager.APIBroker())
         profile_combo.on_current_text_changed = self.__state_controller.handle_change_profile
         positioned_check_box.on_check_state_changed = positioned_check_state_changed
         ac_line_sync_check_box.on_check_state_changed = ac_line_sync_check_state_changed
 
-        def profiles_changed(items):
+        def profiles_changed(items: typing.Sequence[typing.Any]) -> None:
             profile_combo.items = items
 
         # thread safe
@@ -1356,7 +1367,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # the current_text must be set on ui thread
             self.document_controller.queue_task(lambda: setattr(profile_combo, "current_text", profile_label))
 
-        def frame_parameters_changed(frame_parameters):
+        def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParameters) -> None:
             width_field.text = str(int(frame_parameters.size[1]))
             height_field.text = str(int(frame_parameters.size[0]))
             time_field.text = str("{0:.2f}".format(float(frame_parameters.pixel_time_us)))
@@ -1387,18 +1398,13 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # abort_button.visible = visible
             abort_button.enabled = enabled
 
-        def record_button_state_changed(visible, enabled):
+        def record_button_state_changed(visible: bool, enabled: bool) -> None:
             record_button.visible = visible
             record_button.enabled = enabled
 
-        def record_abort_button_state_changed(visible, enabled):
+        def record_abort_button_state_changed(visible: bool, enabled: bool) -> None:
             # record_abort_button.visible = visible
             record_abort_button.enabled = enabled
-
-        def simulate_button_state_changed(visible, enabled):
-            simulatate_row.visible = visible
-            simulate_button.visible = visible
-            simulate_button.enabled = enabled
 
         def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
@@ -1416,7 +1422,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             else:
                 play_state_label.text = map_channel_state_to_text["stopped"]
 
-        def probe_state_changed(probe_state, probe_position):
+        def probe_state_changed(probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
             map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
             if probe_state != "scanning":
                 if probe_position is not None:
@@ -1427,10 +1433,10 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 probe_position_str = ""
             probe_state_label.text = map_probe_state_to_text.get(probe_state, "") + probe_position_str
 
-        def positioned_check_box_changed(checked):
+        def positioned_check_box_changed(checked: bool) -> None:
             positioned_check_box.check_state = "checked" if checked else "unchecked"
 
-        def ac_line_sync_check_box_changed(checked):
+        def ac_line_sync_check_box_changed(checked: bool) -> None:
             ac_line_sync_check_box.check_state = "checked" if checked else "unchecked"
 
         def channel_state_changed(channel_index: int, enabled: bool, is_subscan_channel: bool) -> None:
@@ -1451,7 +1457,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             data_item_thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(ui, document_model, data_item_reference)
             thumbnail_widget = DataItemThumbnailWidget.DataItemThumbnailWidget(ui, data_item_thumbnail_source, Geometry.IntSize(width=48, height=48))
 
-            def thumbnail_widget_drag(mime_data, thumbnail, hot_spot_x, hot_spot_y):
+            def thumbnail_widget_drag(mime_data: UserInterface.MimeData, thumbnail: typing.Optional[DrawingContext.RGBA32Type], hot_spot_x: int, hot_spot_y: int) -> None:
                 column_widget.drag(mime_data, thumbnail, hot_spot_x, hot_spot_y)
 
             thumbnail_widget.on_drag = thumbnail_widget_drag
@@ -1460,7 +1466,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             channel_enabled_check_box_widget = ui.create_check_box_widget(name)
             channel_enabled_check_box_widget.checked = enabled
 
-            def checked_changed(checked):
+            def checked_changed(checked: bool) -> None:
                 self.__state_controller.handle_enable_channel(channel_index, checked)
 
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
@@ -1501,7 +1507,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
         self.__state_controller.on_record_button_state_changed = record_button_state_changed
         self.__state_controller.on_record_abort_button_state_changed = record_abort_button_state_changed
-        self.__state_controller.on_simulate_button_state_changed = simulate_button_state_changed
         self.__state_controller.on_probe_state_changed = lambda a, b: self.document_controller.queue_task(lambda: probe_state_changed(a, b))
         self.__state_controller.on_positioned_check_box_changed = lambda a: self.document_controller.queue_task(lambda: positioned_check_box_changed(a))
         self.__state_controller.on_ac_line_sync_check_box_changed = lambda a: self.document_controller.queue_task(lambda: ac_line_sync_check_box_changed(a))
@@ -1534,17 +1539,17 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
-    def image_panel_mouse_pressed(self, display_panel, display_item, image_position, modifiers):
+    def image_panel_mouse_pressed(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
         data_item = display_panel.data_item if display_panel else None
-        hardware_source_id = data_item and data_item.metadata.get("hardware_source", dict()).get("hardware_source_id")
         logger = logging.getLogger("camera_control_ui")
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
-        if self.__shift_click_state == "shift":
+        camera_shape = data_item.dimensional_shape if data_item else ()
+        if data_item and len(camera_shape) == 2 and self.__shift_click_state == "shift":
+            hardware_source_id = data_item.metadata.get("hardware_source", dict()).get("hardware_source_id", str())
             mouse_position = image_position
-            camera_shape = data_item.dimensional_shape
-            self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, camera_shape, logger)
+            self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
             logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
@@ -1552,43 +1557,44 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             return self.__mouse_pressed
         return False
 
-    def image_panel_mouse_released(self, display_panel, display_item, image_position, modifiers):
+    def image_panel_mouse_released(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
         mouse_pressed = self.__mouse_pressed
         self.__mouse_pressed = False
         return mouse_pressed
 
-    def image_panel_key_pressed(self, display_panel, key):
+    def image_panel_key_pressed(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
         if key.text.lower() == "s":
             self.__shift_click_state = "shift"
         else:
             self.__shift_click_state = None
         return False
 
-    def image_panel_key_released(self, display_panel, key):
+    def image_panel_key_released(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
         self.__shift_click_state = None
         return False
 
 
 class ScanControlPanel(Panel.Panel):
 
-    def __init__(self, document_controller, panel_id, properties):
+    def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
         super().__init__(document_controller, panel_id, "scan-control-panel")
         ui = document_controller.ui
-        self.widget = ui.create_column_widget()
-        self.__scan_control_widget = None
+        self.__column_widget = ui.create_column_widget()
+        self.widget = self.__column_widget
+        self.__scan_control_widget: typing.Optional[ScanControlWidget] = None
         self.__hardware_source_id = properties["hardware_source_id"]
         # listen for any hardware added or removed messages, and refresh the list
         self.__build_widget()
         HardwareSource.HardwareSourceManager().aliases_updated.append(self.__build_widget)
 
-    def __build_widget(self):
+    def __build_widget(self) -> None:
         if not self.__scan_control_widget:
             scan_controller = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
-            if scan_controller:
+            if isinstance(scan_controller, scan_base.ScanHardwareSource):
                 self.__scan_control_widget = ScanControlWidget(self.document_controller, scan_controller)
-                self.widget.add(self.__scan_control_widget)
-                self.widget.add_spacing(12)
-                self.widget.add_stretch()
+                self.__column_widget.add(self.__scan_control_widget)
+                self.__column_widget.add_spacing(12)
+                self.__column_widget.add_stretch()
 
     def close(self) -> None:
         HardwareSource.HardwareSourceManager().aliases_updated.remove(self.__build_widget)
@@ -1602,9 +1608,10 @@ class ScanDisplayPanelController:
 
     type = "scan-live"
 
-    def __init__(self, display_panel, hardware_source_id, data_channel_id):
+    def __init__(self, display_panel: DisplayPanel.DisplayPanel, hardware_source_id: str, data_channel_id: str) -> None:
         assert hardware_source_id is not None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
+        assert isinstance(hardware_source, scan_base.ScanHardwareSource)
         self.type = ScanDisplayPanelController.type
 
         self.__hardware_source_id = hardware_source_id
@@ -1612,14 +1619,14 @@ class ScanDisplayPanelController:
 
         # configure the user interface
         self.__display_name = str()
-        self.__channel_index = None
+        self.__channel_index = 0
         self.__channel_name = str()
         self.__channel_enabled = False
         self.__scan_button_enabled = False
         self.__scan_button_play_button_state = "scan"
         self.__abort_button_visible = False
         self.__abort_button_enabled = False
-        self.__data_item_states = list()
+        self.__data_item_states: typing.List[typing.Mapping[str, typing.Any]] = list()
         self.__display_panel = display_panel
         self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
@@ -1672,13 +1679,13 @@ class ScanDisplayPanelController:
         # configure the hardware source state controller
         self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model, data_channel_id)
 
-        def update_display_name():
+        def update_display_name() -> None:
             new_text = "%s (%s)" % (self.__display_name, self.__channel_name)
             if hardware_source_display_name_canvas_item.text != new_text:
                 hardware_source_display_name_canvas_item.text = new_text
                 hardware_source_display_name_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_play_button():
+        def update_play_button() -> None:
             map_play_button_state_to_text = {"scan": _("Scan"), "stop": _("Stop")}
             scan_button_text = map_play_button_state_to_text[self.__scan_button_play_button_state]
             new_enabled = self.__channel_enabled and self.__scan_button_enabled
@@ -1688,7 +1695,7 @@ class ScanDisplayPanelController:
                 scan_button_canvas_item.text = new_text
                 scan_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_abort_button():
+        def update_abort_button() -> None:
             abort_button_visible = self.__channel_enabled and self.__abort_button_visible
             abort_button_enabled = self.__channel_enabled and self.__abort_button_enabled
             new_text = _("Abort") if abort_button_visible else str()
@@ -1697,7 +1704,7 @@ class ScanDisplayPanelController:
                 abort_button_canvas_item.enabled = abort_button_enabled
                 abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_status_text():
+        def update_status_text() -> None:
             # first check whether we're closed or not; this particular method may be queued to the
             # front thread and may execute after closing.
             if not self.__display_panel:
@@ -1723,19 +1730,19 @@ class ScanDisplayPanelController:
                 status_text_canvas_item.text = new_text
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_channel_enabled_check_box():
+        def update_channel_enabled_check_box() -> None:
             channel_enabled_check_box.check_state = "checked" if self.__channel_enabled else "unchecked"
 
-        def display_name_changed(display_name):
+        def display_name_changed(display_name: str) -> None:
             self.__display_name = display_name
             update_display_name()
 
-        def scan_button_state_changed(enabled, play_button_state):
+        def scan_button_state_changed(enabled: bool, play_button_state: str) -> None:
             self.__scan_button_enabled = enabled
             self.__scan_button_play_button_state = play_button_state
             update_play_button()
 
-        def abort_button_state_changed(visible, enabled):
+        def abort_button_state_changed(visible: bool, enabled: bool) -> None:
             self.__abort_button_visible = visible
             self.__abort_button_enabled = enabled
             update_abort_button()
@@ -1747,6 +1754,7 @@ class ScanDisplayPanelController:
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
+                assert isinstance(hardware_source, scan_base.ScanHardwareSource)
                 self.__channel_index = hardware_source.get_channel_index_for_data_channel_index(data_channel_index)
                 self.__channel_name = channel_name
                 self.__channel_enabled = enabled
@@ -1755,7 +1763,7 @@ class ScanDisplayPanelController:
                 update_abort_button()
                 update_channel_enabled_check_box()
 
-        def update_capture_button(visible, enabled):
+        def update_capture_button(visible: bool, enabled: bool) -> None:
             if visible:
                 capture_button.enabled = enabled
                 capture_button.text = _("Capture")
@@ -1765,7 +1773,7 @@ class ScanDisplayPanelController:
                 capture_button.text = str()
                 capture_button.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def display_new_data_item(data_item):
+        def display_new_data_item(data_item: DataItem.DataItem) -> None:
             document_controller = display_panel.document_controller
             document_controller.document_model.append_data_item(data_item)
             result_display_panel = document_controller.next_result_display_panel()
@@ -1783,7 +1791,7 @@ class ScanDisplayPanelController:
 
         display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
 
-        def channel_enabled_check_box_check_state_changed(check_state):
+        def channel_enabled_check_box_check_state_changed(check_state: str) -> None:
             self.__state_controller.handle_enable_channel(self.__channel_index, check_state == "checked")
 
         scan_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_pause_clicked
@@ -1799,16 +1807,16 @@ class ScanDisplayPanelController:
 
     def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
-        self.__display_panel = None
+        self.__display_panel = typing.cast(typing.Any, None)
         self.__state_controller.close()
-        self.__state_controller = None
+        self.__state_controller = typing.cast(typing.Any, None)
 
-    def save(self, d):
+    def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
         if self.__data_channel_id is not None:
             d["channel_id"] = self.__data_channel_id
 
-    def key_pressed(self, key):
+    def key_pressed(self, key: UserInterface.Key) -> bool:
         if key.text == " ":
             self.__state_controller.handle_play_pause_clicked()
             return True
@@ -1817,26 +1825,26 @@ class ScanDisplayPanelController:
             return True
         return False
 
-    def key_released(self, key):
+    def key_released(self, key: UserInterface.Key) -> bool:
         return False
 
     @property
-    def channel_id(self):
+    def channel_id(self) -> str:
         return self.__data_channel_id
 
     @property
-    def hardware_source_id(self):
+    def hardware_source_id(self) -> str:
         return self.__hardware_source_id
 
 
-hardware_source_added_event_listener = None
-hardware_source_removed_event_listener = None
+hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
+hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None
 
-def run():
+def run() -> None:
     global hardware_source_added_event_listener, hardware_source_removed_event_listener
     scan_control_panels = dict()
 
-    def register_scan_panel(hardware_source):
+    def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
         # NOTE: if scan control panel is not appearing, stop here and make sure aliases.ini is present in the workspace
         if hardware_source.features.get("is_scanning", False):
             panel_id = "scan-control-panel-" + hardware_source.hardware_source_id
@@ -1846,32 +1854,36 @@ def run():
                 def __init__(self) -> None:
                     self.priority = 2
 
-                def build_menu(self, display_type_menu, selected_display_panel):
+                def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
                     # return a list of actions that have been added to the menu.
+                    assert isinstance(hardware_source, scan_base.ScanHardwareSource)
                     actions = list()
                     for channel_index in range(hardware_source.data_channel_count):
                         channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
-                        def switch_to_live_controller(hardware_source, channel_id):
-                            d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
-                            selected_display_panel.change_display_panel_content(d)
+                        def switch_to_live_controller(hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
+                            if selected_display_panel:
+                                d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
+                                selected_display_panel.change_display_panel_content(d)
 
                         display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
                         action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, channel_id))
-                        action.checked = isinstance(selected_display_panel.display_panel_controller, ScanDisplayPanelController) and selected_display_panel.display_panel_controller.channel_id == channel_id and selected_display_panel.display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
+                        display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
+                        action.checked = isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.channel_id == channel_id and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
                         actions.append(action)
                     return actions
 
-                def make_new(self, controller_type, display_panel, d):
+                def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[ScanDisplayPanelController]:
                     # make a new display panel controller, typically called to restore contents of a display panel.
                     # controller_type will match the type property of the display panel controller when it was saved.
                     # d is the dictionary that is saved when the display panel controller closes.
-                    hardware_source_id = d.get("hardware_source_id")
-                    channel_id = d.get("channel_id")
+                    hardware_source_id = typing.cast(str, d.get("hardware_source_id"))
+                    channel_id = typing.cast(str, d.get("channel_id"))
                     if controller_type == ScanDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
                         return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
                     return None
 
-                def match(self, document_model, data_item: DataItem.DataItem) -> typing.Optional[typing.Mapping]:
+                def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
+                    assert isinstance(hardware_source, scan_base.ScanHardwareSource)
                     for channel_index in range(hardware_source.data_channel_count):
                         channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
                         if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
@@ -1884,7 +1896,7 @@ def run():
             properties = {"hardware_source_id": hardware_source.hardware_source_id}
             Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", properties)
 
-    def unregister_scan_panel(hardware_source):
+    def unregister_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
         if hardware_source.features.get("is_scanning", False):
             factory_id = "scan-live-" + hardware_source.hardware_source_id
             DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory(factory_id)
