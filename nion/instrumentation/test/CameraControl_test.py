@@ -165,6 +165,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(2))
                 time.sleep(self.exposure * 1.1)
                 hardware_source.set_selected_profile_index(1)
+                hardware_source.get_next_xdatas_to_start()  # skip one frame during testing to avoid timing variance
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(1))
             finally:
                 hardware_source.abort_playing()
