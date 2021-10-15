@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import json
 import random
 import time
 import unittest
@@ -939,6 +940,8 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(8, frame_parameters["extra"])
             frame_parameters_copy = camera_base.CameraFrameParameters(frame_parameters.as_dict())
             self.assertEqual(8, frame_parameters_copy["extra"])
+            # test dict is writeable to json
+            json.dumps(frame_parameters.as_dict())
 
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):

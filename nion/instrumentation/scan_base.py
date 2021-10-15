@@ -52,66 +52,67 @@ class ScanFrameParameters:
             d.update(args[0])
         d.update(kwargs)
         self.scan_id: typing.Optional[uuid.UUID] = None
-        self.size = Geometry.IntSize(512, 512)
+        self.__size = Geometry.IntSize(512, 512)
         if "size" in d:
-            size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.get("size"))
+            size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.pop("size"))
             if size_tuple:
                 self.size = Geometry.IntSize.make(size_tuple)
-        self.center_nm = Geometry.FloatPoint()
+        self.__center_nm = Geometry.FloatPoint()
         if "center_nm" in d:
-            center_nm_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.get("center_nm"))
+            center_nm_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.pop("center_nm"))
             if center_nm_tuple:
                 self.center_nm = Geometry.FloatPoint.make(center_nm_tuple)
-        self.fov_size_nm: typing.Optional[Geometry.FloatSize] = None
+        self.__fov_size_nm: typing.Optional[Geometry.FloatSize] = None
         if "fov_size_nm" in d:
-            fov_size_nm_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.get("fov_size_nm"))
+            fov_size_nm_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.pop("fov_size_nm"))
             if fov_size_nm_tuple:
                 self.fov_size_nm = Geometry.FloatSize.make(fov_size_nm_tuple)  # this is a device level parameter; not used at the user level
-        self.pixel_time_us: float = d.get("pixel_time_us", 10)
-        self.fov_nm: float = d.get("fov_nm", 8)
-        self.rotation_rad = d.get("rotation_rad", 0)
-        self.subscan_pixel_size: typing.Optional[Geometry.IntSize] = None
+        self.pixel_time_us: float = d.pop("pixel_time_us", 10)
+        self.fov_nm: float = d.pop("fov_nm", 8)
+        self.rotation_rad = d.pop("rotation_rad", 0)
+        self.__subscan_pixel_size: typing.Optional[Geometry.IntSize] = None
         if "subscan_pixel_size" in d:
-            subscan_pixel_size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.get("subscan_pixel_size"))
+            subscan_pixel_size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.pop("subscan_pixel_size"))
             if subscan_pixel_size_tuple:
                 self.subscan_pixel_size = Geometry.IntSize.make(subscan_pixel_size_tuple)
-        self.subscan_fractional_size: typing.Optional[Geometry.FloatSize] = None
+        self.__subscan_fractional_size: typing.Optional[Geometry.FloatSize] = None
         if "subscan_fractional_size" in d:
-            subscan_fractional_size_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.get("subscan_fractional_size"))
+            subscan_fractional_size_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.pop("subscan_fractional_size"))
             if subscan_fractional_size_tuple:
                 self.subscan_fractional_size = Geometry.FloatSize.make(subscan_fractional_size_tuple)
-        self.subscan_fractional_center: typing.Optional[Geometry.FloatPoint] = None
+        self.__subscan_fractional_center: typing.Optional[Geometry.FloatPoint] = None
         if "subscan_fractional_center" in d:
-            subscan_fractional_center_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.get("subscan_fractional_center"))
+            subscan_fractional_center_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.pop("subscan_fractional_center"))
             if subscan_fractional_center_tuple:
                 self.subscan_fractional_center = Geometry.FloatPoint.make(subscan_fractional_center_tuple)
-        self.subscan_rotation: float = d.get("subscan_rotation", 0.0)
-        self.channel_modifier: typing.Optional[str] = d.get("channel_modifier")
-        self.channel_override: typing.Optional[str] = d.get("channel_override")
-        self.external_clock_wait_time_ms: int = d.get("external_clock_wait_time_ms", 0)
-        self.external_clock_mode: int = d.get("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
-        self.external_scan_mode: int = d.get("external_scan_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
-        self.external_scan_ratio: float = d.get("external_scan_ratio", 1.0)
-        self.ac_line_sync: bool = d.get("ac_line_sync", False)
-        self.ac_frame_sync: bool = d.get("ac_frame_sync", True)
-        self.flyback_time_us: float = d.get("flyback_time_us", 30.0)
+        self.subscan_rotation: float = d.pop("subscan_rotation", 0.0)
+        self.channel_modifier: typing.Optional[str] = d.pop("channel_modifier", None)
+        self.channel_override: typing.Optional[str] = d.pop("channel_override", None)
+        self.external_clock_wait_time_ms: int = d.pop("external_clock_wait_time_ms", 0)
+        self.external_clock_mode: int = d.pop("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.external_scan_mode: int = d.pop("external_scan_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
+        self.external_scan_ratio: float = d.pop("external_scan_ratio", 1.0)
+        self.ac_line_sync: bool = d.pop("ac_line_sync", False)
+        self.ac_frame_sync: bool = d.pop("ac_frame_sync", True)
+        self.flyback_time_us: float = d.pop("flyback_time_us", 30.0)
         # do not use these outside of scan_base
-        self.top_left_override: typing.Optional[Geometry.IntPoint] = None
+        self.__top_left_override: typing.Optional[Geometry.IntPoint] = None
         if "top_left_override" in d:
-            top_left_override_tuple = typing.cast(typing.Optional[Geometry.PointIntTuple], d.get("top_left_override"))
+            top_left_override_tuple = typing.cast(typing.Optional[Geometry.PointIntTuple], d.pop("top_left_override"))
             if top_left_override_tuple:
                 self.top_left_override = Geometry.IntPoint.make(top_left_override_tuple)
-        self.data_shape_override: typing.Optional[Geometry.IntSize] = None
+        self.__data_shape_override: typing.Optional[Geometry.IntSize] = None
         if "data_shape_override" in d:
-            data_shape_override_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.get("data_shape_override"))
+            data_shape_override_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.pop("data_shape_override"))
             if data_shape_override_tuple:
                 self.data_shape_override = Geometry.IntSize.make(data_shape_override_tuple)
-        self.state_override: typing.Optional[str] = d.get("state_override", None)
-        self.section_rect: typing.Optional[Geometry.IntRect] = None
+        self.state_override: typing.Optional[str] = d.pop("state_override", None)
+        self.__section_rect: typing.Optional[Geometry.IntRect] = None
         if "section_rect" in d:
-            section_rect_tuple = typing.cast(typing.Optional[Geometry.RectIntTuple], d.get("section_rect"))
+            section_rect_tuple = typing.cast(typing.Optional[Geometry.RectIntTuple], d.pop("section_rect"))
             if section_rect_tuple:
                 self.section_rect = Geometry.IntRect.make(section_rect_tuple)
+        self.__extra = d
 
     def __copy__(self) -> ScanFrameParameters:
         return copy.deepcopy(self)
@@ -120,6 +121,78 @@ class ScanFrameParameters:
         deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
         memo[id(self)] = deepcopy
         return deepcopy
+
+    @property
+    def size(self) -> Geometry.IntSize:
+        return self.__size
+
+    @size.setter
+    def size(self, value: Geometry.IntSizeTuple) -> None:
+        self.__size = Geometry.IntSize.make(value)
+
+    @property
+    def center_nm(self) -> Geometry.FloatPoint:
+        return self.__center_nm
+
+    @center_nm.setter
+    def center_nm(self, value: Geometry.FloatPointTuple) -> None:
+        self.__center_nm = Geometry.FloatPoint.make(value)
+
+    @property
+    def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
+        return self.__fov_size_nm
+
+    @fov_size_nm.setter
+    def fov_size_nm(self, value: typing.Optional[Geometry.FloatSizeTuple]) -> None:
+        self.__fov_size_nm = Geometry.FloatSize.make(value) if value else None
+
+    @property
+    def subscan_pixel_size(self) -> typing.Optional[Geometry.IntSize]:
+        return self.__subscan_pixel_size
+
+    @subscan_pixel_size.setter
+    def subscan_pixel_size(self, value: typing.Optional[Geometry.IntSizeTuple]) -> None:
+        self.__subscan_pixel_size = Geometry.IntSize.make(value) if value else None
+
+    @property
+    def subscan_fractional_size(self) -> typing.Optional[Geometry.FloatSize]:
+        return self.__subscan_fractional_size
+
+    @subscan_fractional_size.setter
+    def subscan_fractional_size(self, value: typing.Optional[Geometry.FloatSizeTuple]) -> None:
+        self.__subscan_fractional_size = Geometry.FloatSize.make(value) if value else None
+
+    @property
+    def subscan_fractional_center(self) -> typing.Optional[Geometry.FloatPoint]:
+        return self.__subscan_fractional_center
+
+    @subscan_fractional_center.setter
+    def subscan_fractional_center(self, value: typing.Optional[Geometry.FloatPointTuple]) -> None:
+        self.__subscan_fractional_center = Geometry.FloatPoint.make(value) if value else None
+
+    @property
+    def top_left_override(self) -> typing.Optional[Geometry.IntPoint]:
+        return self.__top_left_override
+
+    @top_left_override.setter
+    def top_left_override(self, value: typing.Optional[Geometry.IntPointTuple]) -> None:
+        self.__top_left_override = Geometry.IntPoint.make(value) if value else None
+
+    @property
+    def data_shape_override(self) -> typing.Optional[Geometry.IntSize]:
+        return self.__data_shape_override
+
+    @data_shape_override.setter
+    def data_shape_override(self, value: typing.Optional[Geometry.IntSize]) -> None:
+        self.__data_shape_override = Geometry.IntSize.make(value) if value else None
+
+    @property
+    def section_rect(self) -> typing.Optional[Geometry.IntRect]:
+        return self.__section_rect
+
+    @section_rect.setter
+    def section_rect(self, value: typing.Optional[Geometry.IntRect]) -> None:
+        self.__section_rect = Geometry.IntRect.make(value) if value else None
 
     def as_dict(self) -> typing.Dict[str, typing.Any]:
         d: typing.Dict[str, typing.Any] = {
@@ -165,7 +238,21 @@ class ScanFrameParameters:
         if self.section_rect:
             d["section_rect"] = self.section_rect.as_tuple()
 
+        d.update(self.__extra)
+
         return d
+
+    def __getitem__(self, item: str) -> typing.Any:
+        if hasattr(self, item):
+            return getattr(self, item)
+        else:
+            return self.__extra[item]
+
+    def __setitem__(self, key: str, value: typing.Any) -> None:
+        if hasattr(self, key):
+            setattr(self, key, value)
+        else:
+            self.__extra[key] = value
 
     def __repr__(self) -> str:
         return "size pixels: " + str(self.size) +\
