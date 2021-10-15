@@ -14,6 +14,7 @@ import time
 import typing
 
 # local libraries
+from nion.data import DataAndMetadata
 from nion.instrumentation import camera_base
 from nion.instrumentation import HardwareSource
 from nion.swift import DataItemThumbnailWidget
@@ -30,7 +31,6 @@ from nion.utils import Geometry
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
-    from nion.data import DataAndMetadata
     from nion.swift.model import DisplayItem
     from nion.swift.model import DocumentModel
     from nion.swift.model import Persistence
