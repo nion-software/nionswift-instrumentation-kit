@@ -101,7 +101,7 @@ class TestMultiAcquire(unittest.TestCase):
             elapsed = time.time() - t0
             progress_event_listener.close()
 
-            self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+            self.assertLess(elapsed, total_acquisition_time + 1.0, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
             self.assertEqual(len(data_dict['data_element_list']), len(parameters))
             self.assertAlmostEqual(progress, 1.0, places=1)
             self.assertAlmostEqual(data_dict['data_element_list'][0]['metadata']['instrument']['defocus'], 9e-7)
