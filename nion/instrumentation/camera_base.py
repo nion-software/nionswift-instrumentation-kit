@@ -580,7 +580,7 @@ class Mask:
                     elif value == "grad_y":
                         value = [[0, 1], [0, 0]]
                     if hasattr(graphic, "center"):
-                        center = graphic.center
+                        center = getattr(graphic, "center")
                     else:
                         center = (0.5, 0.5)
                     center_coords = (center[0] * data_shape[0], center[1] * data_shape[1])

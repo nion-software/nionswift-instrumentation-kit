@@ -820,11 +820,14 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         return graphic
 
     def _update_graphic(self, graphic: Graphics.Graphic) -> None:
-        if graphic.position != self.__stem_controller.probe_position:
-            graphic.position = self.__stem_controller.probe_position
+        assert isinstance(graphic, Graphics.PointGraphic)
+        probe_position = self.__stem_controller.probe_position
+        if probe_position and graphic.position != probe_position:
+            graphic.position = probe_position
 
     def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
         if name == "position":
+            assert isinstance(graphic, Graphics.PointGraphic)
             self.__stem_controller.probe_position = Geometry.FloatPoint.make(graphic.position)
 
     def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
@@ -902,15 +905,19 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         return subscan_graphic
 
     def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
-        if subscan_graphic.bounds != tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region)):
-            subscan_graphic.bounds = tuple(typing.cast(Geometry.FloatRect, self.__stem_controller.subscan_region))
+        assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
+        subscan_region = self.__stem_controller.subscan_region
+        if subscan_region and subscan_graphic.bounds != subscan_region:
+            subscan_graphic.bounds = subscan_region
         if subscan_graphic.rotation != self.__stem_controller.subscan_rotation:
             subscan_graphic.rotation = self.__stem_controller.subscan_rotation
 
     def _graphic_property_changed(self, subscan_graphic: Graphics.Graphic, name: str) -> None:
         if name == "bounds":
+            assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
             self.__stem_controller.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
         if name == "rotation":
+            assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
             self.__stem_controller.subscan_rotation = subscan_graphic.rotation
 
     def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
@@ -978,13 +985,19 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         return line_scan_graphic
 
     def _update_graphic(self, line_scan_graphic: Graphics.Graphic) -> None:
+        assert isinstance(line_scan_graphic, Graphics.LineTypeGraphic)
         line_scan_vector = self.__stem_controller.line_scan_vector
-        if line_scan_vector and line_scan_graphic.vector != line_scan_vector:
+        graphic_vector = line_scan_graphic.vector
+        graphic_vector_tuple = graphic_vector[0].as_tuple(), graphic_vector[1].as_tuple()
+        if line_scan_vector and graphic_vector_tuple != line_scan_vector:
             line_scan_graphic.vector = Geometry.FloatPoint.make(line_scan_vector[0]), Geometry.FloatPoint.make(line_scan_vector[1])
 
     def _graphic_property_changed(self, line_scan_graphic: Graphics.Graphic, name: str) -> None:
         if name == "vector":
-            self.__stem_controller.line_scan_vector = line_scan_graphic.vector
+            assert isinstance(line_scan_graphic, Graphics.LineTypeGraphic)
+            graphic_vector = line_scan_graphic.vector
+            graphic_vector_tuple = graphic_vector[0].as_tuple(), graphic_vector[1].as_tuple()
+            self.__stem_controller.line_scan_vector = graphic_vector_tuple
 
     def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
