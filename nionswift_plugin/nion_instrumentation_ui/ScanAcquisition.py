@@ -235,7 +235,7 @@ class PanelDelegate:
         self.__scan_specifier = ScanSpecifier()
         self.__scan_width = 32  # the width/length of the scan in pixels
         self.__scan_pixels = 0  # the total number of scan pixels
-        self.__progress_task = typing.cast(asyncio.Task[None], None)
+        self.__progress_task: typing.Optional[asyncio.Task[None]] = None
         self.__style_combo_box: typing.Optional[Facade.ComboBoxWidget] = None
 
     def create_panel_widget(self, ui: Facade.UserInterface, document_controller: Facade.DocumentWindow) -> Facade.ColumnWidget:
@@ -526,7 +526,7 @@ class PanelDelegate:
                 update_context()  # update the cancel button
                 if is_idle and self.__progress_task:
                     self.__progress_task.cancel()
-                    self.__progress_task = typing.cast(typing.Any, None)
+                    self.__progress_task = None
                     self.__progress_bar.value = 100
                 if not is_idle and not self.__progress_task:
                     async def update_progress() -> None:
