@@ -568,7 +568,7 @@ class Mask:
             graphic = Graphics.factory(graphic_type_lookup)
             graphic.read_from_mime_data(graphic_dict)
             if graphic:
-                part_mask = graphic.get_mask(tuple(data_shape)).astype(bool)
+                part_mask = graphic.get_mask(tuple(data_shape)).astype(bool)  # type: ignore
                 if inverted:
                     part_mask = numpy.logical_not(part_mask)
                 if isinstance(value, (float, int)):
