@@ -1541,13 +1541,13 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     # must be called on ui thread
     def image_panel_mouse_pressed(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
         data_item = display_panel.data_item if display_panel else None
+        hardware_source_id = data_item.metadata.get("hardware_source", dict()).get("hardware_source_id") if data_item else str()
         logger = logging.getLogger("camera_control_ui")
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
         camera_shape = data_item.dimensional_shape if data_item else ()
-        if data_item and len(camera_shape) == 2 and self.__shift_click_state == "shift":
-            hardware_source_id = data_item.metadata.get("hardware_source", dict()).get("hardware_source_id", str())
+        if data_item and hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
             mouse_position = image_position
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
             logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
