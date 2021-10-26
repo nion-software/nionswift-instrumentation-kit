@@ -2080,7 +2080,10 @@ class AcquisitionPanel(Panel.Panel):
 
     def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
         super().__init__(document_controller, panel_id, "acquisition-panel")
-        self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller))
+        if Registry.get_component("stem_controller"):
+            self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller))
+        else:
+            self.widget = document_controller.ui.create_column_widget()
 
 
 class DeviceController(abc.ABC):

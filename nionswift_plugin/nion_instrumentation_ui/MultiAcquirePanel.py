@@ -313,7 +313,8 @@ class MultiAcquirePanelDelegate:
         # note: anything created here should be disposed in close.
         # this method may be called more than once.
 
-        assert self.stem_controller
+        if not self.stem_controller:
+            return ui.create_column_widget()
 
         self.line_edit_widgets = dict()
         self._stem_controller = None

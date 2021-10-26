@@ -249,9 +249,24 @@ class PanelDelegate:
         self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
 
+        def clear_scan_context_fields() -> None:
+            self.__roi_description.text = _("Scan context not active")
+            self.__scan_label_widget.text = None
+            self.__scan_specifier.scan_context = stem_controller.ScanContext()
+            self.__scan_specifier.scan_count = 1
+            self.__scan_specifier.size = None
+            self.__scan_specifier.drift_interval_lines = 0
+            self.__scan_specifier.drift_interval_scans = 0
+            self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
+            self.__scan_pixels = 0
+
         def update_context() -> None:
             assert self.__scan_hardware_source_choice
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
+            if not scan_hardware_source:
+                clear_scan_context_fields()
+                return
+
             scan_context = scan_hardware_source.scan_context
 
             scan_context_size = scan_context.size
@@ -325,15 +340,7 @@ class PanelDelegate:
                 self.__scan_specifier.drift_interval_scans = drift_scans
                 self.__acquire_button._widget.enabled = True
             else:
-                self.__roi_description.text = _("Scan context not active")
-                self.__scan_label_widget.text = None
-                self.__scan_specifier.scan_context = stem_controller.ScanContext()
-                self.__scan_specifier.scan_count = 1
-                self.__scan_specifier.size = None
-                self.__scan_specifier.drift_interval_lines = 0
-                self.__scan_specifier.drift_interval_scans = 0
-                self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
-                self.__scan_pixels = 0
+                clear_scan_context_fields()
 
             self.__scan_count_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_count)
 
