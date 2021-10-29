@@ -215,9 +215,12 @@ class ComponentComboBoxHandler:
             component = component_factory(component_entity)
             self.__components.append_item(component)
 
+        def sort_key(o: typing.Any) -> typing.Any:
+            return "Z" + o.display_name if o.display_name != "None" else "A"
+
         # make a combo box handler.
         # this gets closed by the declarative machinery.
-        self._combo_box_handler = ComboBoxHandler(self.__components, "items", operator.attrgetter("display_name"),
+        self._combo_box_handler = ComboBoxHandler(self.__components, "items", sort_key,
                                                   None, operator.attrgetter("component_id"),
                                                   self.__selected_component_id_model)
 
@@ -292,7 +295,7 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
     component_id = "basic-acquire"
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Basic Acquire"))
+        super().__init__(_("None"))
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             spacing=8
@@ -314,7 +317,7 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
     component_id = "sequence-acquire"
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Sequence Acquire"))
+        super().__init__(_("Sequence"))
         self.configuration = configuration
         self.count_converter = Converter.IntegerToStringConverter()
         u = Declarative.DeclarativeUI()
@@ -427,7 +430,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
     component_id = "series-acquire"
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Series Acquire"))
+        super().__init__(_("1D Ramp"))
         assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         # the control UI is constructed as a stack with one item for each control_id.
@@ -539,7 +542,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
     component_id = "tableau-acquire"
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Tableau Acquire"))
+        super().__init__(_("2D Ramp"))
         assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         # the control UIs are constructed as a stack with one item for each control_id.
@@ -718,7 +721,7 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
     component_id = "multiple-acquire"
 
     def __init__(self, configuration: Schema.Entity):
-        super().__init__(_("Multiple Acquire"))
+        super().__init__(_("Multiple"))
         self.configuration = configuration
         # ensure that there are always a few example sections.
         if len(self.configuration.sections) == 0:
@@ -1895,12 +1898,12 @@ class AcquisitionController:
         # pass the configuration and desired accessor strings for each.
         # these get closed by the declarative machinery
         self.__acquisition_method_component = ComponentComboBoxHandler("acquisition-method-component",
-                                                                       _("Acquisition Method"),
+                                                                       _("Iterator Method"),
                                                                        acquisition_configuration,
                                                                        "acquisition_method_component_id",
                                                                        "acquisition_method_components")
         self.__acquisition_device_component = ComponentComboBoxHandler("acquisition-device-component",
-                                                                       _("Acquisition Device"),
+                                                                       _("Detector"),
                                                                        acquisition_configuration,
                                                                        "acquisition_device_component_id",
                                                                        "acquisition_device_components")
@@ -2068,10 +2071,10 @@ class AcquisitionController:
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
+        if component_id == "acquisition-method-component":
+            return self.__acquisition_method_component
         if component_id == "acquisition-device-component":
             return self.__acquisition_device_component
-        elif component_id == "acquisition-method-component":
-            return self.__acquisition_method_component
         return None
 
 
