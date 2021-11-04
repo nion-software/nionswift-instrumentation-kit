@@ -507,25 +507,46 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
                 # get the control values range from the control handler.
                 control_values_range = control_handler.get_control_values_range()
                 if control_values_range.count > 1:
-                    # define an action function to apply control values during acquisition
-                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
-                               device_map: typing.Mapping[str, DeviceController],
-                               starts: typing.Sequence[float], steps: typing.Sequence[float],
-                               index: typing.Sequence[int]) -> None:
-                        # look up the device controller in the device_map using the device_id in the control description
-                        control_description = control_customization.control_description
-                        assert control_description
-                        device_controller = device_map.get(control_description.device_id)
-                        if device_controller:
-                            # calculate the current value (in each dimension) and send the result to the
-                            # device controller. the device controller may be a camera, scan, or stem device
-                            # controller.
-                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
-                            device_controller.set_values(control_customization, values)
+                    class ActionDelegate(Acquisition.ActionDataStreamDelegate):
+                        def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                                     device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
+                                     steps: typing.Sequence[float]) -> None:
+                            self.control_customization = control_customization
+                            self.device_map = device_map
+                            self.starts = starts
+                            self.steps = steps
+                            self.original_values: typing.Sequence[float] = list()
+
+                        def start(self) -> None:
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                self.original_values = device_controller.get_values(self.control_customization)
+
+                        # define an action function to apply control values during acquisition
+                        def perform(self, index: Acquisition.ShapeType) -> None:
+                            # look up the device controller in the device_map using the device_id in the control description
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                # calculate the current value (in each dimension) and send the result to the
+                                # device controller. the device controller may be a camera, scan, or stem device
+                                # controller.
+                                values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                                device_controller.set_values(self.control_customization, values)
+
+                        def finish(self) -> None:
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                device_controller.set_values(self.control_customization, self.original_values)
 
                     # configure the action function and data stream using weak_partial to carefully control ref counts
-                    action_fn = weak_partial(action, control_customization, device_map, [control_values_range.start], [control_values_range.step])
-                    data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn), control_values_range.count)
+                    action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step])
+                    data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_delegate), control_values_range.count)
         return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
 
 
@@ -653,36 +674,60 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
                 y_control_values_range = y_control_handler.get_control_values_range()
                 x_control_values_range = x_control_handler.get_control_values_range()
                 if x_control_values_range.count > 1 or y_control_values_range.count > 1:
-                    # define an action function to apply control values during acquisition
-                    def action(control_customization: AcquisitionPreferences.ControlCustomization,
-                               device_map: typing.Mapping[str, DeviceController],
-                               starts: typing.Sequence[float], steps: typing.Sequence[float],
-                               axis_id: str, index: typing.Sequence[int]) -> None:
-                        # look up the device controller in the device_map using the device_id in the control description
-                        control_description = control_customization.control_description
-                        assert control_description
-                        device_controller = device_map.get(control_description.device_id)
-                        if device_controller:
+                    class ActionDelegate(Acquisition.ActionDataStreamDelegate):
+                        def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                                     device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
+                                     steps: typing.Sequence[float], axis_id: typing.Optional[str]) -> None:
+                            self.control_customization = control_customization
+                            self.device_map = device_map
+                            self.starts = starts
+                            self.steps = steps
+                            self.axis_id = axis_id
+                            self.original_values: typing.Sequence[float] = list()
+
+                        def start(self) -> None:
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                self.original_values = device_controller.get_values(self.control_customization, self.__resolve_axis())
+
+                        # define an action function to apply control values during acquisition
+                        def perform(self, index: Acquisition.ShapeType) -> None:
+                            # look up the device controller in the device_map using the device_id in the control description
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                # calculate the current value (in each dimension) and send the result to the
+                                # device controller. the device controller may be a camera, scan, or stem device
+                                # controller.
+                                values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                                device_controller.set_values(self.control_customization, values, self.__resolve_axis())
+
+                        def finish(self) -> None:
+                            control_description = self.control_customization.control_description
+                            assert control_description
+                            device_controller = self.device_map.get(control_description.device_id)
+                            if device_controller:
+                                device_controller.set_values(self.control_customization, self.original_values, self.__resolve_axis())
+
+                        def __resolve_axis(self) -> stem_controller.AxisType:
                             # resolve the axis for the 2d control
-                            axis: typing.Optional[stem_controller.AxisType] = ("x", "y")
+                            axis: stem_controller.AxisType = ("x", "y")
                             for axis_description in typing.cast(STEMDeviceController,
-                                                                device_map["stem"]).stem_controller.axis_descriptions:
-                                if axis_id == axis_description.axis_id:
+                                                                self.device_map[
+                                                                    "stem"]).stem_controller.axis_descriptions:
+                                if self.axis_id == axis_description.axis_id:
                                     axis = axis_description.axis_type
-                            # calculate the current value (in each dimension) and send the result to the
-                            # device controller. the device controller may be a camera, scan, or stem device
-                            # controller.
-                            values = [start + step * i for start, step, i in zip(starts, steps, index)]
-                            device_controller.set_values(control_customization, values, axis)
+                            return axis
 
                     # configure the action function and data stream using weak_partial to carefully control ref counts
-                    action_fn = weak_partial(action, control_customization, device_map,
-                                             [y_control_values_range.start, x_control_values_range.start],
-                                             [y_control_values_range.step, x_control_values_range.step], axis_id)
-                    data_stream = Acquisition.CollectedDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
-                                                                  (y_control_values_range.count, x_control_values_range.count), (
-                                                                      Calibration.Calibration(),
-                                                                      Calibration.Calibration()))
+                    action_delegate = ActionDelegate(control_customization, device_map, [y_control_values_range.start, x_control_values_range.start], [y_control_values_range.step, x_control_values_range.step], axis_id)
+                    data_stream = Acquisition.CollectedDataStream(
+                        Acquisition.ActionDataStream(data_stream, action_delegate),
+                        (y_control_values_range.count, x_control_values_range.count),
+                        (Calibration.Calibration(), Calibration.Calibration()))
         return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
 
 
@@ -784,20 +829,39 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         assert control_description_exposure
         # for each section, build the data stream.
         for item in self.configuration.sections:
-            # define an action function to apply control values during acquisition
-            def action(offset_value: float, exposure_value: float, index: typing.Sequence[int]) -> None:
-                if stem_value_controller:
-                    stem_value_controller.set_values(control_customization_energy_offset, [offset_value])
-                if camera_value_controller:
-                    camera_value_controller.set_values(control_customization_exposure, [exposure_value])
+            class ActionDelegate(Acquisition.ActionDataStreamDelegate):
+                def __init__(self, offset_value: float, exposure_value: float) -> None:
+                    self.offset_value = offset_value
+                    self.exposure_value = exposure_value
+                    self.original_energy_offset_values: typing.Sequence[float] = list()
+                    self.original_exposure_values: typing.Sequence[float] = list()
+
+                def start(self) -> None:
+                    if stem_value_controller:
+                        self.original_energy_offset_values = stem_value_controller.get_values(control_customization_energy_offset)
+                    if camera_value_controller:
+                        self.original_exposure_values = camera_value_controller.get_values(control_customization_exposure)
+
+                # define an action function to apply control values during acquisition
+                def perform(self, index: Acquisition.ShapeType) -> None:
+                    if stem_value_controller:
+                        stem_value_controller.set_values(control_customization_energy_offset, [self.offset_value])
+                    if camera_value_controller:
+                        camera_value_controller.set_values(control_customization_exposure, [self.exposure_value])
+
+                def finish(self) -> None:
+                    if stem_value_controller:
+                        stem_value_controller.set_values(control_customization_energy_offset, self.original_energy_offset_values)
+                    if camera_value_controller:
+                        camera_value_controller.set_values(control_customization_exposure, self.original_exposure_values)
 
             # configure the action function and data stream using weak_partial to carefully control ref counts
             multi_acquire_entry = typing.cast(Schema.Entity, item)
-            action_fn = functools.partial(action,
-                                          multi_acquire_entry.offset * control_description_energy_offset.multiplier,
-                                          multi_acquire_entry.exposure * control_description_exposure.multiplier)
-            data_streams.append(Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_fn),
-                                                               max(1, multi_acquire_entry.count)))
+            action_delegate = ActionDelegate(multi_acquire_entry.offset * control_description_energy_offset.multiplier,
+                                             multi_acquire_entry.exposure * control_description_exposure.multiplier)
+            data_streams.append(
+                Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_delegate),
+                                               max(1, multi_acquire_entry.count)))
 
         # create a sequential data stream from the section data streams.
         sequential_data_stream = Acquisition.SequentialDataStream(data_streams)
@@ -2091,6 +2155,9 @@ class AcquisitionPanel(Panel.Panel):
 
 class DeviceController(abc.ABC):
     @abc.abstractmethod
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]: ...
+
+    @abc.abstractmethod
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None: ...
 
 
@@ -2099,6 +2166,16 @@ class STEMDeviceController(DeviceController):
         stem_controller_component = Registry.get_component('stem_controller')
         assert stem_controller_component
         self.stem_controller = typing.cast(stem_controller.STEMController, stem_controller_component)
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_description.control_type == "1d":
+            return [self.stem_controller.GetVal(control_customization.device_control_id)]
+        elif control_description.control_type == "2d":
+            assert axis is not None
+            self.stem_controller.GetVal2D(control_customization.device_control_id, axis=axis).as_tuple()
+        raise ValueError()
 
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
@@ -2119,6 +2196,13 @@ class CameraDeviceController(DeviceController):
         self.camera_hardware_source = camera_hardware_source
         self.camera_frame_parameters = camera_frame_parameters
 
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "exposure":
+            return [self.camera_frame_parameters.exposure_ms]
+        raise ValueError()
+
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
         assert control_description
@@ -2130,6 +2214,13 @@ class ScanDeviceController(DeviceController):
     def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "field_of_view":
+            return [self.scan_frame_parameters.fov_nm]
+        raise ValueError()
 
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
