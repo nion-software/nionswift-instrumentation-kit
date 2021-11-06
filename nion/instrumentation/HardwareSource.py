@@ -1554,6 +1554,52 @@ class ViewTask:
         return self.__data_channel_buffer.grab_earliest()
 
 
+class RecordTask:
+    """Run acquisition in a thread and record the result."""
+
+    def __init__(self, hardware_source: HardwareSource, frame_parameters: FrameParameters) -> None:
+        self.__hardware_source = hardware_source
+
+        assert not self.__hardware_source.is_recording
+
+        if frame_parameters:
+            self.__hardware_source.set_record_frame_parameters(frame_parameters)
+
+        self.__data_and_metadata_list: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+        # synchronize start of thread; if this sync doesn't occur, the task can be closed before the acquisition
+        # is started. in that case a deadlock occurs because the abort doesn't apply and the thread is waiting
+        # for the acquisition.
+        self.__recording_started = threading.Event()
+
+        def record_thread() -> None:
+            self.__hardware_source.start_recording()
+            self.__recording_started.set()
+            self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
+            self.__hardware_source.stop_recording(sync_timeout=3.0)
+
+        self.__thread = threading.Thread(target=record_thread)
+        self.__thread.start()
+        self.__recording_started.wait()
+
+    def close(self) -> None:
+        if self.__thread.is_alive():
+            self.__hardware_source.abort_recording()
+            self.__thread.join()
+        self.__data_and_metadata_list = typing.cast(typing.Any, None)
+        self.__recording_started = typing.cast(typing.Any, None)
+
+    @property
+    def is_finished(self) -> bool:
+        return not self.__thread.is_alive()
+
+    def grab(self) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        self.__thread.join()
+        return self.__data_and_metadata_list
+
+    def cancel(self) -> None:
+        self.__hardware_source.abort_recording()
+
+
 @contextlib.contextmanager
 def get_data_generator_by_id(hardware_source_id: str, sync: bool = True) -> typing.Iterator[typing.Callable[[], typing.Optional[_NDArray]]]:
     """
