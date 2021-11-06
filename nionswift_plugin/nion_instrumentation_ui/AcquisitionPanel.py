@@ -333,9 +333,9 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
 
     def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
-        width = max(1, self.configuration.count) if self.configuration.count else 1
-        if width > 1:
-            return AcquisitionMethodResult(Acquisition.SequenceDataStream(data_stream, width), _("Sequence"), channel_names)
+        length = max(1, self.configuration.count) if self.configuration.count else 1
+        if length > 1:
+            return AcquisitionMethodResult(data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
         else:
             return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
 
@@ -1533,7 +1533,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         super().__init__()
         self.__hardware_source = camera_hardware_source
         self.__frame_parameters = frame_parameters
-        self.__record_task = typing.cast(scan_base.RecordTask, None)
+        self.__record_task = typing.cast(HardwareSource.RecordTask, None)
         self.__record_count = 0
         self.__frame_shape = camera_hardware_source.get_expected_dimensions(frame_parameters.binning)
         self.__channel = Acquisition.Channel(self.__hardware_source.hardware_source_id)
@@ -1556,7 +1556,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__hardware_source.abort_playing(sync_timeout=5.0)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        self.__record_task = scan_base.RecordTask(self.__hardware_source, self.__frame_parameters)
+        self.__record_task = HardwareSource.RecordTask(self.__hardware_source, self.__frame_parameters)
         self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
 
     def _finish_stream(self) -> None:
@@ -1584,7 +1584,10 @@ class CameraFrameDataStream(Acquisition.DataStream):
             self._sequence_next(self.__channel)
             self.__record_count -= 1
             if self.__record_count > 0:
-                self.__record_task = scan_base.RecordTask(self.__hardware_source, self.__frame_parameters)
+                self.__record_task = HardwareSource.RecordTask(self.__hardware_source, self.__frame_parameters)
+
+    def wrap_in_sequence(self, length: int) -> Acquisition.SequenceDataStream:
+        return Acquisition.SequenceDataStream(self, length)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):

@@ -544,6 +544,9 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         self.data_available_event.fire(data_stream_event)
 
+    def wrap_in_sequence(self, length: int) -> SequenceDataStream:
+        return SequenceDataStream(self, length)
+
 
 class CollectedDataStream(DataStream):
     """Collect a data stream of chunks into a collection of those chunks.
