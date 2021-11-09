@@ -2054,12 +2054,11 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
         super().__init__(data_stream)
         self.__camera_data_channel = camera_data_channel
         self.__channel = channel
-        self.__src_offset = 0
-        self.__dst_offset = 0
+        self.__dst_index = 0
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         super()._start_stream(stream_args)
-        self.__dst_offset = 0
+        self.__dst_index = 0
 
     def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel is None or self.__channel == data_stream_event.channel:
@@ -2079,24 +2078,67 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
                 data = data_stream_event.source_data[..., numpy.newaxis]
                 dimensional_calibrations = tuple(data_stream_event.data_metadata.dimensional_calibrations) + (Calibration.Calibration(),)
                 data_descriptor = DataAndMetadata.DataDescriptor(False, data_stream_event.data_metadata.data_descriptor.datum_dimension_count, 1)
-            assert data_stream_event.source_slice[1].stop is None or data_stream_event.source_slice[1].stop == data_shape.width
-            height = data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
-            if self.__camera_data_channel:
-                source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
-                                                                                 data_stream_event.data_metadata.intensity_calibration,
-                                                                                 dimensional_calibrations,
-                                                                                 data_stream_event.data_metadata.metadata,
-                                                                                 data_stream_event.data_metadata.timestamp,
-                                                                                 data_descriptor,
-                                                                                 data_stream_event.data_metadata.timezone,
-                                                                                 data_stream_event.data_metadata.timezone_offset)
-                width = data_shape[1]
-                dst_rect = Geometry.IntRect.from_tlhw(self.__dst_offset, 0, height, width)
-                src_rect = Geometry.IntRect.from_tlhw(data_stream_event.source_slice[0].start, 0, height, width)
-                data_channel_view_id = None
-                self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect,
-                                                  src_rect, data_channel_view_id)
-            self.__dst_offset += height
+            start_index = Acquisition.ravel_slice_start(data_stream_event.source_slice[0:2], data_shape.as_tuple())
+            stop_index = Acquisition.ravel_slice_stop(data_stream_event.source_slice[0:2], data_shape.as_tuple())
+            src_row = data_stream_event.source_slice[0].start
+            width = data_shape[1]
+            if self.__dst_index % width:
+                length = min(width - self.__dst_index % width, stop_index - start_index)
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, self.__dst_index % width, 1, length)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, 0, 1, length)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += 1
+                start_index += length
+                self.__dst_index += length
+            if stop_index - start_index >= width:
+                assert data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 2 or (data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 0 and data_stream_event.data_metadata.data_descriptor.datum_dimension_count == 2)
+                assert data_stream_event.source_slice[1].stop is None  # or data_stream_event.source_slice[1].stop == data_shape.width
+                height = (stop_index - start_index) // width
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, 0, height, width)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, 0, height, width)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += height
+                start_index += height * width
+                self.__dst_index += height * width
+            if start_index < stop_index:
+                length = stop_index - start_index
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, 0, 1, length)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, start_index % width, 1, length)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += 1
+                start_index += length
+                self.__dst_index += length
+
         super()._fire_data_available(data_stream_event)
 
 
