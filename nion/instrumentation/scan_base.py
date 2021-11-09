@@ -2082,6 +2082,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
             stop_index = Acquisition.ravel_slice_stop(data_stream_event.source_slice[0:2], data_shape.as_tuple())
             src_row = data_stream_event.source_slice[0].start
             width = data_shape[1]
+            # handle the case where a partial row has been acquired; try to finish the row
             if self.__dst_index % width:
                 length = min(width - self.__dst_index % width, stop_index - start_index)
                 if self.__camera_data_channel:
@@ -2100,6 +2101,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
                 src_row += 1
                 start_index += length
                 self.__dst_index += length
+            # handle the case where one or more full rows remain; send full rows.
             if stop_index - start_index >= width:
                 assert data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 2 or (data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 0 and data_stream_event.data_metadata.data_descriptor.datum_dimension_count == 2)
                 assert data_stream_event.source_slice[1].stop is None  # or data_stream_event.source_slice[1].stop == data_shape.width
@@ -2120,6 +2122,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
                 src_row += height
                 start_index += height * width
                 self.__dst_index += height * width
+            # handle remaining data as a partial row.
             if start_index < stop_index:
                 length = stop_index - start_index
                 if self.__camera_data_channel:
@@ -2262,7 +2265,7 @@ def make_sequence_data_stream(
         include_raw: bool = True,
         include_summed: bool = False) -> Acquisition.DataStream:
 
-    stem_controller = Registry.get_component("stem_controller")
+    stem_controller = typing.cast(stem_controller_module.STEMController, Registry.get_component("stem_controller"))
 
     instrument_metadata: typing.Dict[str, typing.Any] = dict()
     update_instrument_properties(instrument_metadata, stem_controller, None)
