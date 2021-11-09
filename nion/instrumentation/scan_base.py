@@ -2193,8 +2193,10 @@ def make_synchronized_scan_data_stream(
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
                                   "instrument": copy.deepcopy(instrument_metadata)}
     camera_data_stream = camera_base.CameraFramesDataStream(camera_hardware_source, camera_frame_parameters,
-                                                            scan_hardware_source.flyback_pixels,
-                                                            additional_camera_metadata)
+                                                            camera_base.CameraDeviceSynchronizedStream(camera_hardware_source,
+                                                                                           camera_frame_parameters,
+                                                                                           scan_hardware_source.flyback_pixels,
+                                                                                           additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
@@ -2248,6 +2250,64 @@ def make_synchronized_scan_data_stream(
         data_stream = ChannelDataStream(collector, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id))
     else:
         data_stream = collector
+    # return the top level stream
+    return data_stream
+
+
+def make_sequence_data_stream(
+        camera_hardware_source: camera_base.CameraHardwareSource,
+        camera_frame_parameters: camera_base.CameraFrameParameters,
+        count: int,
+        camera_data_channel: typing.Optional[SynchronizedDataChannelInterface] = None,
+        include_raw: bool = True,
+        include_summed: bool = False) -> Acquisition.DataStream:
+
+    stem_controller = Registry.get_component("stem_controller")
+
+    instrument_metadata: typing.Dict[str, typing.Any] = dict()
+    update_instrument_properties(instrument_metadata, stem_controller, None)
+
+    additional_camera_metadata = {"instrument": copy.deepcopy(instrument_metadata)}
+    camera_data_stream = camera_base.CameraFramesDataStream(camera_hardware_source, camera_frame_parameters,
+                                                            camera_base.CameraDeviceSequenceStream(
+                                                                camera_hardware_source,
+                                                                camera_frame_parameters,
+                                                                additional_camera_metadata))
+    processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
+    if camera_frame_parameters.processing == "sum_project":
+        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+    elif camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks:
+            operator = Acquisition.StackedDataStreamOperator(
+                [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
+        else:
+            operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
+    sequence: Acquisition.DataStream = Acquisition.SequenceDataStream(processed_camera_data_stream, count)
+    if camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks and len(active_masks) > 1:
+            sequence = Acquisition.FramedDataStream(sequence, operator=Acquisition.MoveAxisDataStreamOperator(
+                processed_camera_data_stream.channels[0]))
+    # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
+    if count > 1:
+        assert include_raw or include_summed
+        if include_raw and include_summed:
+            # AccumulateDataStream sums the successive frames in each channel
+            monitor = Acquisition.MonitorDataStream(sequence, "raw")
+            sequence = Acquisition.AccumulatedDataStream(sequence)
+            sequence = Acquisition.CombinedDataStream([sequence, monitor])
+        elif include_summed:
+            sequence = Acquisition.AccumulatedDataStream(sequence)
+        # include_raw is the default behavior
+    # the optional ChannelDataStream updates the camera data channel for the stream matching 999
+    data_stream: Acquisition.DataStream
+    if camera_data_channel:
+        data_stream = ChannelDataStream(sequence, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id))
+    else:
+        data_stream = sequence
     # return the top level stream
     return data_stream
 
