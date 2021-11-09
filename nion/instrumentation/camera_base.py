@@ -778,6 +778,16 @@ class CameraSettings:
 
 
 class PartialData:
+    """Represents data returned from acquisition.
+
+    The xdata should be the entire data array.
+
+    valid_count gives the number of valid pixels.
+
+    valid_rows is deprecated and does not need to be supplied if valid_count is supplied.
+
+    is_complete and is_canceled should be set as required.
+    """
     def __init__(self, xdata: DataAndMetadata.DataAndMetadata, is_complete: bool, is_canceled: bool,
                  valid_rows: typing.Optional[int] = None, valid_count: typing.Optional[int] = None) -> None:
         self.xdata = xdata
@@ -1232,13 +1242,13 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         acquire_sequence_begin = getattr(self.__camera, "acquire_sequence_begin", None)
         if callable(acquire_sequence_begin):
-            return acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
+            return typing.cast(PartialData, acquire_sequence_begin(camera_frame_parameters, count, **kwargs))
         raise NotImplementedError()
 
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData:
         acquire_sequence_continue = getattr(self.__camera, "acquire_sequence_continue", None)
         if callable(acquire_sequence_continue):
-            return acquire_sequence_continue()
+            return typing.cast(PartialData, acquire_sequence_continue())
         raise NotImplementedError()
 
     def acquire_sequence_end(self) -> None:
@@ -1456,21 +1466,32 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
 
 @dataclasses.dataclass
 class CameraDeviceStreamPartialData:
+    """Represents the data returned from get_next_data in the CameraDeviceStreamInterface."""
     valid_index: int
     is_complete: bool
     xdata: DataAndMetadata.DataAndMetadata
 
 
 class CameraDeviceStreamInterface(typing.Protocol):
+    """An interface to a camera device to help implementation in a data stream."""
+
     def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None: ...
+
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None: ...
+
     def finish_stream(self) -> None: ...
+
     def abort_stream(self) -> None: ...
-    def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]: ...
-    def continue_data(self, partial_data: typing.Optional[PartialData]) -> None: ...
+
+    def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
+        """Return the partial data; return None if nothing is available."""
+        ...
+
+    def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None: ...
 
 
 class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
+    """An interface using the 'synchronized' style methods of the camera."""
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, flyback_pixels: int = 0, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
@@ -1548,11 +1569,12 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             data_calibrations = self.__camera_hardware_source.get_camera_calibrations(self.__camera_frame_parameters)
             data_intensity_calibration = self.__camera_hardware_source.get_camera_intensity_calibration(self.__camera_frame_parameters)
             cropped_xdata = crop_and_calibrate(uncropped_xdata, self.__flyback_pixels, None, data_calibrations, data_intensity_calibration, metadata)
+            # convert the valid count to valid index. valid count includes flyback pixels. valid index does not.
             valid_index = valid_count // (width + self.__flyback_pixels) * width + max(0, valid_count % (width + self.__flyback_pixels) - self.__flyback_pixels)
             return CameraDeviceStreamPartialData(valid_index, is_complete, cropped_xdata)
         return None
 
-    def continue_data(self, partial_data: typing.Optional[PartialData]) -> None:
+    def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None:
         # acquire the next section and continue
         if not partial_data or not partial_data.is_complete:
             self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue()
@@ -1561,6 +1583,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
 
 
 class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
+    """An interface using the 'sequence' style methods of the camera."""
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
@@ -1631,7 +1654,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             return CameraDeviceStreamPartialData(valid_count, is_complete, cropped_xdata)
         return None
 
-    def continue_data(self, partial_data: typing.Optional[PartialData]) -> None:
+    def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None:
         # acquire the next section and continue
         if not partial_data or not partial_data.is_complete:
             self.__partial_data_info = self.__camera_hardware_source.acquire_sequence_continue()
@@ -1640,7 +1663,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
 
 
 class CameraFramesDataStream(Acquisition.DataStream):
-    """A data stream of individual camera frames, for use in synchronized acquisition."""
+    """A data stream of individual camera frames, for use in synchronized/sequence acquisition."""
 
     def __init__(self, camera_hardware_source: CameraHardwareSource,
                  camera_frame_parameters: CameraFrameParameters,

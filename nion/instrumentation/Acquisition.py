@@ -545,6 +545,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.data_available_event.fire(data_stream_event)
 
     def wrap_in_sequence(self, length: int) -> DataStream:
+        """Wrap this data stream in a sequence of length."""
         return SequenceDataStream(self, length)
 
 
