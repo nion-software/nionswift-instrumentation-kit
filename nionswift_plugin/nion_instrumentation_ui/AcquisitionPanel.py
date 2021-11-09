@@ -1586,8 +1586,9 @@ class CameraFrameDataStream(Acquisition.DataStream):
             if self.__record_count > 0:
                 self.__record_task = HardwareSource.RecordTask(self.__hardware_source, self.__frame_parameters)
 
-    def wrap_in_sequence(self, length: int) -> Acquisition.SequenceDataStream:
-        return Acquisition.SequenceDataStream(self, length)
+    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
+        return scan_base.make_sequence_data_stream(self.__hardware_source, self.__frame_parameters, length)
+        # return Acquisition.SequenceDataStream(self, length)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
