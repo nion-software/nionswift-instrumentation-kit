@@ -1488,7 +1488,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # configure the scan uuid and scan frame parameters.
         scan_count = 1
         scan_size = scan_context_description.scan_size
-        scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
+        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
         scan_frame_parameters.scan_id = uuid.uuid4()
 
@@ -1779,7 +1779,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
 
         # configure the scan uuid and scan frame parameters.
         scan_uuid = uuid.uuid4()
-        scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
+        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
         scan_frame_parameters.scan_id = scan_uuid
 
