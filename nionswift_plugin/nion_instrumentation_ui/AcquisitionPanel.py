@@ -20,6 +20,7 @@ import gettext
 import logging
 import operator
 import pathlib
+import pkgutil
 import numpy
 import time
 import typing
@@ -44,6 +45,7 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import Schema
 from nion.ui import Application
+from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import PreferencesDialog
 from nion.ui import UserInterface as UserInterfaceModule
@@ -182,10 +184,12 @@ class ComponentComboBoxHandler:
     component identifier) and components_key (a string used to maintain the list of component instances).
     """
 
-    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str) -> None:
+    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str, extra_top_right: typing.Optional[Declarative.HandlerLike] = None) -> None:
         # store these values for bookkeeping
         self.__component_name = component_base
         self.__component_factory_name = f"{component_base}-factory"
+
+        self.__extra_top_right = extra_top_right
 
         # create a list model for the component handlers
         self.__components = ListModel.ListModel[ComponentHandler]()
@@ -232,10 +236,16 @@ class ComponentComboBoxHandler:
         # TODO: listen for components being registered/unregistered
 
         u = Declarative.DeclarativeUI()
+
+        extras = list()
+        if extra_top_right:
+            extras.append(u.create_component_instance(identifier="extra"))
+
         component_type_row = u.create_row(
             u.create_label(text=title),
             u.create_component_instance(identifier="combo_box"),
             u.create_stretch(),
+            *extras,
             spacing=8
         )
         component_page = u.create_stack(
@@ -258,6 +268,8 @@ class ComponentComboBoxHandler:
             return typing.cast(Declarative.HandlerLike, item)
         if component_id == "combo_box":
             return self._combo_box_handler
+        if component_id == "extra":
+            return self.__extra_top_right
         return None
 
     @property
@@ -1949,6 +1961,23 @@ component_unregistered_event_listener = Registry.listen_component_unregistered_e
 Registry.fire_existing_component_registered_events("application")
 
 
+class PreferencesButtonHandler:
+
+    def __init__(self, document_controller: DocumentController.DocumentController):
+        self.document_controller = document_controller
+        sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
+        assert sliders_icon_24_png is not None
+        self._sliders_icon_24_png = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
+        u = Declarative.DeclarativeUI()
+        self.ui_view = u.create_image(image="@binding(_sliders_icon_24_png)", width=24, height=24, on_clicked="handle_preferences")
+
+    def close(self) -> None:
+        pass
+
+    def handle_preferences(self, widget: UserInterfaceModule.Widget) -> None:
+        self.document_controller.open_preferences()
+
+
 class AcquisitionController:
     """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
 
@@ -1969,7 +1998,8 @@ class AcquisitionController:
                                                                        _("Iterator Method"),
                                                                        acquisition_configuration,
                                                                        "acquisition_method_component_id",
-                                                                       "acquisition_method_components")
+                                                                       "acquisition_method_components",
+                                                                       PreferencesButtonHandler(document_controller))
         self.__acquisition_device_component = ComponentComboBoxHandler("acquisition-device-component",
                                                                        _("Detector"),
                                                                        acquisition_configuration,
