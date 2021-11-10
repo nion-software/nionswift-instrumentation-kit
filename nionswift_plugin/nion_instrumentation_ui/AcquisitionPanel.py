@@ -535,7 +535,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
                                 # device controller. the device controller may be a camera, scan, or stem device
                                 # controller.
                                 values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
-                                device_controller.set_values(self.control_customization, values)
+                                device_controller.update_values(self.control_customization, self.original_values, values)
 
                         def finish(self) -> None:
                             control_description = self.control_customization.control_description
@@ -2162,10 +2162,16 @@ class DeviceController(abc.ABC):
     def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]: ...
 
     @abc.abstractmethod
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None: ...
+
+    @abc.abstractmethod
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None: ...
 
 
 class STEMDeviceController(DeviceController):
+    # NOTE: the STEM device controller treats all values as delta's from starting control value
+    # This was decided in discussion with Nion engineers.
+
     def __init__(self) -> None:
         stem_controller_component = Registry.get_component('stem_controller')
         assert stem_controller_component
@@ -2180,6 +2186,20 @@ class STEMDeviceController(DeviceController):
             assert axis is not None
             self.stem_controller.GetVal2D(control_customization.device_control_id, axis=axis).as_tuple()
         raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_description.control_type == "1d":
+            self.stem_controller.SetValAndConfirm(control_customization.device_control_id, original_values[0] + values[0], 1.0, 5000)
+            time.sleep(control_customization.delay)
+        elif control_description.control_type == "2d":
+            assert axis is not None
+            self.stem_controller.SetVal2DAndConfirm(control_customization.device_control_id,
+                                                    Geometry.FloatPoint(y=original_values[0], x=original_values[1]) + Geometry.FloatPoint(y=values[0], x=values[1]),
+                                                    1.0, 5000,
+                                                    axis=axis)
+            time.sleep(control_customization.delay)
 
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
@@ -2207,6 +2227,9 @@ class CameraDeviceController(DeviceController):
             return [self.camera_frame_parameters.exposure_ms]
         raise ValueError()
 
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
+
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
         assert control_description
@@ -2225,6 +2248,9 @@ class ScanDeviceController(DeviceController):
         if control_customization.control_id == "field_of_view":
             return [self.scan_frame_parameters.fov_nm]
         raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
 
     def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
         control_description = control_customization.control_description
