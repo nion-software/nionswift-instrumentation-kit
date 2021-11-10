@@ -33,7 +33,7 @@ _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float
 _ = gettext.gettext
 
 
-class PMTType(enum.Enum):
+class PMTType(enum.IntEnum):
     DF = 0
     BF = 1
 
