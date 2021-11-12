@@ -1,11 +1,17 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.19.6 (UNRELEASED)
+0.20.0 (2011-11-12)
 -------------------
-- Drop support for Python 3.7.
+- Add preliminary acquisition panel for more complex sequence/collection acquisitions.
+- Acquisition panel includes 1D ramp (series), 2D ramp (tableau), and other options.
+- Add preliminary drift tracker, both manual and automatic. Work in progress.
 - Add virtual detector option to MultiAcquire.
 - Add option to apply shift for each frame in MultiAcquire.
+- Remove unused and incomplete monitor button in camera panel.
+- Improve internal documentation by utilizing Python protocols for various interfaces.
+- Improve reliability and code quality by enabling Python strict typing.
+- Drop support for Python 3.7.
 
 0.19.5 (2021-04-12)
 -------------------
