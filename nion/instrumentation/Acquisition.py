@@ -1400,6 +1400,14 @@ class FramedDataStream(DataStream):
         return self
 
     @property
+    def operator(self) -> typing.Optional[DataStreamOperator]:
+        return self.__operator
+
+    @property
+    def data_stream(self) -> DataStream:
+        return self.__data_stream
+
+    @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         return tuple(self.__operator.get_channels(self.input_channels))
 

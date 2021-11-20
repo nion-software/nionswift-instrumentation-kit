@@ -347,7 +347,14 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
         length = max(1, self.configuration.count) if self.configuration.count else 1
         if length > 1:
-            return AcquisitionMethodResult(data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
+            # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
+            # has the option of doing the processing itself and the operator will not be applied to the result. in
+            # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
+            # on the entire sequence. there is probably a better way to abstract this in the future.
+            if isinstance(data_stream, Acquisition.FramedDataStream) and isinstance(data_stream.operator, Acquisition.SumOperator):
+                return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
+            else:
+                return AcquisitionMethodResult(data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
         else:
             return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
 
