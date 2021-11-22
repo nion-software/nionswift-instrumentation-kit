@@ -30,6 +30,7 @@ import numpy
 # local imports
 from nion.data import Core
 from nion.data import DataAndMetadata
+from nion.swift.model import Activity
 from nion.swift.model import DataItem
 from nion.swift.model import DisplayItem
 from nion.swift.model import Graphics
@@ -455,6 +456,7 @@ class AcquisitionTask:
         self.stop_event = Event.Event()
         self.data_elements_changed_event = Event.Event()
         self.finished_callback_fn: typing.Optional[_FinishedCallbackType] = None
+        self.activity: typing.Optional[Activity.Activity] = None
 
     def __mark_as_finished(self) -> None:
         self.__finished = True
@@ -997,6 +999,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                         logging.debug("{} Error: {}".format(task_id.capitalize(), e))
                         traceback.print_exc()
                 if task.is_finished:
+                    Activity.activity_finished(self.__tasks[task_id].activity)
+                    self.__tasks[task_id].activity = None
                     del self.__tasks[task_id]
                     self.__data_elements_changed_event_listeners[task_id].close()
                     del self.__data_elements_changed_event_listeners[task_id]
@@ -1132,6 +1136,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__data_elements_changed_event_listeners[task_id] = task.data_elements_changed_event.listen(functools.partial(self.__data_elements_changed, task))
         self.__start_event_listeners[task_id] = task.start_event.listen(self.__start)
         self.__stop_event_listeners[task_id] = task.stop_event.listen(self.__stop)
+        task.activity = Activity.Activity(self.hardware_source_id + "_" + task_id, f"{self.display_name} ({task_id})")
+        Activity.append_activity(task.activity)
         self.__tasks[task_id] = task
         # TODO: sync the thread start by waiting for an event on the task which gets set when the acquire thread starts executing the task
         self.__acquire_thread_trigger.set()
