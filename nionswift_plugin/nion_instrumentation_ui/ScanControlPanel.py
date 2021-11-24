@@ -1839,72 +1839,85 @@ class ScanDisplayPanelController:
 
 hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
 hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None
+scan_control_panels = dict()
+
+
+def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    # NOTE: if scan control panel is not appearing, stop here and make sure aliases.ini is present in the workspace
+    if hardware_source.features.get("is_scanning", False):
+        panel_id = "scan-control-panel-" + hardware_source.hardware_source_id
+        scan_control_panels[hardware_source.hardware_source_id] = panel_id
+
+        class ScanDisplayPanelControllerFactory:
+            def __init__(self) -> None:
+                self.priority = 2
+
+            def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
+                # return a list of actions that have been added to the menu.
+                assert isinstance(hardware_source, scan_base.ScanHardwareSource)
+                actions = list()
+                for channel_index in range(hardware_source.data_channel_count):
+                    channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
+                    def switch_to_live_controller(hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
+                        if selected_display_panel:
+                            d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
+                            selected_display_panel.change_display_panel_content(d)
+
+                    display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
+                    action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, channel_id))
+                    display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
+                    action.checked = isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.channel_id == channel_id and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
+                    actions.append(action)
+                return actions
+
+            def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[ScanDisplayPanelController]:
+                # make a new display panel controller, typically called to restore contents of a display panel.
+                # controller_type will match the type property of the display panel controller when it was saved.
+                # d is the dictionary that is saved when the display panel controller closes.
+                hardware_source_id = typing.cast(str, d.get("hardware_source_id"))
+                channel_id = typing.cast(str, d.get("channel_id"))
+                if controller_type == ScanDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
+                    return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
+                return None
+
+            def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
+                assert isinstance(hardware_source, scan_base.ScanHardwareSource)
+                for channel_index in range(hardware_source.data_channel_count):
+                    channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
+                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
+                        return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
+                return None
+
+        factory_id = "scan-live-" + hardware_source.hardware_source_id
+        DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory(factory_id, ScanDisplayPanelControllerFactory())
+        name = hardware_source.display_name + " " + _("Scan Control")
+        properties = {"hardware_source_id": hardware_source.hardware_source_id}
+        Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", properties)
+
+def unregister_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    if hardware_source.features.get("is_scanning", False):
+        factory_id = "scan-live-" + hardware_source.hardware_source_id
+        DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory(factory_id)
+        panel_id = scan_control_panels.pop(hardware_source.hardware_source_id)
+        if panel_id:
+            Workspace.WorkspaceManager().unregister_panel(panel_id)
+
 
 def run() -> None:
-    global hardware_source_added_event_listener, hardware_source_removed_event_listener
-    scan_control_panels = dict()
-
-    def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        # NOTE: if scan control panel is not appearing, stop here and make sure aliases.ini is present in the workspace
-        if hardware_source.features.get("is_scanning", False):
-            panel_id = "scan-control-panel-" + hardware_source.hardware_source_id
-            scan_control_panels[hardware_source.hardware_source_id] = panel_id
-
-            class ScanDisplayPanelControllerFactory:
-                def __init__(self) -> None:
-                    self.priority = 2
-
-                def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
-                    # return a list of actions that have been added to the menu.
-                    assert isinstance(hardware_source, scan_base.ScanHardwareSource)
-                    actions = list()
-                    for channel_index in range(hardware_source.data_channel_count):
-                        channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
-                        def switch_to_live_controller(hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
-                            if selected_display_panel:
-                                d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
-                                selected_display_panel.change_display_panel_content(d)
-
-                        display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
-                        action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, channel_id))
-                        display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
-                        action.checked = isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.channel_id == channel_id and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
-                        actions.append(action)
-                    return actions
-
-                def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[ScanDisplayPanelController]:
-                    # make a new display panel controller, typically called to restore contents of a display panel.
-                    # controller_type will match the type property of the display panel controller when it was saved.
-                    # d is the dictionary that is saved when the display panel controller closes.
-                    hardware_source_id = typing.cast(str, d.get("hardware_source_id"))
-                    channel_id = typing.cast(str, d.get("channel_id"))
-                    if controller_type == ScanDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
-                        return ScanDisplayPanelController(display_panel, hardware_source_id, channel_id)
-                    return None
-
-                def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
-                    assert isinstance(hardware_source, scan_base.ScanHardwareSource)
-                    for channel_index in range(hardware_source.data_channel_count):
-                        channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
-                        if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
-                            return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
-                    return None
-
-            factory_id = "scan-live-" + hardware_source.hardware_source_id
-            DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory(factory_id, ScanDisplayPanelControllerFactory())
-            name = hardware_source.display_name + " " + _("Scan Control")
-            properties = {"hardware_source_id": hardware_source.hardware_source_id}
-            Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", properties)
-
-    def unregister_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        if hardware_source.features.get("is_scanning", False):
-            factory_id = "scan-live-" + hardware_source.hardware_source_id
-            DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory(factory_id)
-            panel_id = scan_control_panels.get(hardware_source.hardware_source_id)
-            if panel_id:
-                Workspace.WorkspaceManager().unregister_panel(panel_id)
-
+    global hardware_source_added_event_listener, hardware_source_removed_event_listener, scan_control_panels
     hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_scan_panel)
     hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_scan_panel)
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
         register_scan_panel(hardware_source)
+
+
+def stop() -> None:
+    global hardware_source_added_event_listener, hardware_source_removed_event_listener, scan_control_panels
+    if hardware_source_added_event_listener:
+        hardware_source_added_event_listener.close()
+        hardware_source_added_event_listener = None
+    if hardware_source_removed_event_listener:
+        hardware_source_removed_event_listener.close()
+        hardware_source_removed_event_listener = None
+    for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
+        unregister_scan_panel(hardware_source)

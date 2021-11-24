@@ -517,6 +517,7 @@ class TestHardwareSourceClass(unittest.TestCase):
         class SimpleTestContext(TestContext.MemoryProfileContext):
             def __init__(self) -> None:
                 super().__init__()
+                HardwareSource.run()
                 self.document_controller = self.create_document_controller(auto_close=False)
                 self.document_model = self.document_controller.document_model
                 self.hardware_source = SimpleHardwareSource()
@@ -524,7 +525,9 @@ class TestHardwareSourceClass(unittest.TestCase):
                 HardwareSource.HardwareSourceManager().register_hardware_source(self.hardware_source)
 
             def close(self) -> None:
+                self.document_controller.periodic()
                 self.document_controller.close()
+                HardwareSource.stop()
                 super().close()
 
         return SimpleTestContext()
@@ -547,11 +550,18 @@ class TestHardwareSourceClass(unittest.TestCase):
         class LinePlotTestContext(TestContext.MemoryProfileContext):
             def __init__(self) -> None:
                 super().__init__()
-                self.document_controller = self.create_document_controller()
+                HardwareSource.run()
+                self.document_controller = self.create_document_controller(auto_close=False)
                 self.document_model = self.document_controller.document_model
                 self.hardware_source = LinePlotHardwareSource(shape, processed)
                 self.hardware_source.exposure = 0.01
                 HardwareSource.HardwareSourceManager().register_hardware_source(self.hardware_source)
+
+            def close(self) -> None:
+                self.document_controller.periodic()
+                self.document_controller.close()
+                HardwareSource.stop()
+                super().close()
 
         return LinePlotTestContext()
 
@@ -560,7 +570,8 @@ class TestHardwareSourceClass(unittest.TestCase):
         class ScanTestContext(TestContext.MemoryProfileContext):
             def __init__(self) -> None:
                 super().__init__()
-                self.document_controller = self.create_document_controller()
+                HardwareSource.run()
+                self.document_controller = self.create_document_controller(auto_close=False)
                 self.document_model = self.document_controller.document_model
                 self.hardware_source = ScanHardwareSource()
                 self.hardware_source.exposure = 0.01
@@ -568,6 +579,12 @@ class TestHardwareSourceClass(unittest.TestCase):
                 self.hardware_source.blanked = False
                 self.hardware_source.positioned = False
                 HardwareSource.HardwareSourceManager().register_hardware_source(self.hardware_source)
+
+            def close(self) -> None:
+                self.document_controller.periodic()
+                self.document_controller.close()
+                HardwareSource.stop()
+                super().close()
 
         return ScanTestContext()
 
@@ -687,13 +704,11 @@ class TestHardwareSourceClass(unittest.TestCase):
     def test_exception_during_record_halts_scan(self):
         with self.__scan_test_context() as scan_test_context:
             hardware_source = scan_test_context.hardware_source
-            document_controller = scan_test_context.document_controller
             _test_exception_during_record_halts_playback(self, hardware_source, hardware_source.sleep)
 
     def test_able_to_restart_scan_after_exception_scan(self):
         with self.__scan_test_context() as scan_test_context:
             hardware_source = scan_test_context.hardware_source
-            document_controller = scan_test_context.document_controller
             _test_able_to_restart_view_after_exception(self, hardware_source, hardware_source.sleep)
 
     def test_record_starts_and_finishes_in_reasonable_time(self):

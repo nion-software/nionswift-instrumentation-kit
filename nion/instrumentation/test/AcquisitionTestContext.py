@@ -14,20 +14,35 @@ from nionswift_plugin.usim import ScanDevice
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
-    def __init__(self, instrument: stem_controller.STEMController, scan_hardware_source, camera_hardware_source):
+    def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025):
         super().__init__()
+
+        # HardwareSource.run()
+        # camera_base.run(configuration_location)
+        # scan_base.run()
+        # video_base.run()
+        # CameraControlPanel.run()
+        # ScanControlPanel.run()
+        # MultipleShiftEELSAcquire.run()
+        # VideoControlPanel.run()
+
+        HardwareSource.run()
+        instrument = self.setup_stem_controller()
+        ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
+        scan_base.run()
+        scan_hardware_source = Registry.get_component("scan_hardware_source")
+        camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
         HardwareSource.HardwareSourceManager().hardware_sources = []
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
-        self.document_controller = self.create_document_controller(auto_close=False)
-        self.document_model = self.document_controller.document_model
         self.instrument = instrument
         self.scan_hardware_source = scan_hardware_source
         self.camera_hardware_source = camera_hardware_source
         HardwareSource.HardwareSourceManager().register_hardware_source(self.camera_hardware_source)
         HardwareSource.HardwareSourceManager().register_hardware_source(self.scan_hardware_source)
-        self.scan_context_controller = stem_controller.ScanContextController(self.document_model,
-                                                                             self.document_controller.event_loop)
+        self.document_controller = self.create_document_controller(auto_close=False)
+        self.document_model = self.document_controller.document_model
+        stem_controller.register_event_loop(self.document_controller.event_loop)
         self.__exit_stack: typing.List[typing.Any] = list()
 
     def close(self) -> None:
@@ -35,31 +50,23 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         self.document_controller.close()
         for ex in self.__exit_stack:
             ex.close()
-        self.scan_context_controller.close()
-        self.scan_context_controller = typing.cast(typing.Any, None)
-        self.scan_hardware_source.close()
+        stem_controller.unregister_event_loop()
         self.camera_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
+        ScanDevice.stop()
+        scan_base.stop()
+        Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
         HardwareSource.HardwareSourceManager()._close_instruments()
+        HardwareSource.stop()
         super().close()
 
     def push(self, ex) -> None:
         self.__exit_stack.append(ex)
 
-
-class AcquisitionTestContextBehavior:
-
     def setup_stem_controller(self) -> stem_controller.STEMController:
         instrument = InstrumentDevice.Instrument("usim_stem_controller")
         Registry.register_component(instrument, {"stem_controller"})
         return instrument
-
-    def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController) -> scan_base.ScanHardwareSource:
-        instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
-        scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, ScanDevice.Device(instrument),
-                                                                    "usim_scan_device", "uSim Scan")
-        return scan_hardware_source
 
     def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> HardwareSource.HardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
@@ -84,8 +91,4 @@ class AcquisitionTestContextBehavior:
 
 
 def test_context(*, is_eels: bool = False, camera_exposure: float = 0.025) -> AcquisitionTestContext:
-    behavior = AcquisitionTestContextBehavior()
-    instrument = behavior.setup_stem_controller()
-    scan_hardware_source = behavior.setup_scan_hardware_source(instrument)
-    camera_hardware_source = behavior.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
-    return AcquisitionTestContext(instrument, scan_hardware_source, camera_hardware_source)
+    return AcquisitionTestContext(is_eels=is_eels, camera_exposure=camera_exposure)
