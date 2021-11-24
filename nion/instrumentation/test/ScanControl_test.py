@@ -24,6 +24,7 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Geometry
+from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 
 """
@@ -39,6 +40,19 @@ class TestScanControlClass(unittest.TestCase):
 
     def setUp(self):
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+
+    def tearDown(self) -> None:
+        self.assertEqual(0, len(Registry.get_components_by_type("hardware_source_manager")))
+        self.assertEqual(0, len(Registry.get_components_by_type("stem_controller")))
+        self.assertEqual(0, len(Registry.get_components_by_type("scan_device")))
+        self.assertEqual(0, len(Registry.get_components_by_type("scan_hardware_source")))
+        self.assertEqual(0, len(Registry.get_components_by_type("hardware_source")))
+        self.assertEqual(0, len(Registry.get_components_by_type("document_model")))
+        self.assertEqual(0, stem_controller.ScanContextController.count)
+        self.assertEqual(0, stem_controller.ProbeView.count)
+        self.assertEqual(0, stem_controller.SubscanView.count)
+        self.assertEqual(0, stem_controller.LineScanView.count)
+        self.assertEqual(0, stem_controller.DriftView.count)
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)
@@ -787,8 +801,8 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_closing_display_panel_with_scan_controller_shuts_down_controller_correctly(self):
         # NOTE: this is a duplicate of test_closing_display_panel_with_display_controller_shuts_down_controller_correctly
-        ScanControlPanel.run()
         with self.__test_context() as test_context:
+            ScanControlPanel.run()
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             d = {"type": "splitter", "orientation": "vertical", "splits": [0.5, 0.5], "children": [
@@ -812,6 +826,7 @@ class TestScanControlClass(unittest.TestCase):
                 document_controller.periodic()
             finally:
                 scan_hardware_source.abort_playing()
+            ScanControlPanel.stop()
 
     def test_probe_graphic_gets_closed(self):
         with self.__test_context() as test_context:
@@ -965,8 +980,8 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, scan_hardware_source._get_last_idle_position_for_test())
 
     def test_acquire_into_empty_scan_controlled_display_panel(self):
-        ScanControlPanel.run()
         with self.__test_context() as test_context:
+            ScanControlPanel.run()
             document_controller = test_context.document_controller
             stem_controller_ = test_context.instrument
             scan_hardware_source = test_context.scan_hardware_source
@@ -976,6 +991,7 @@ class TestScanControlClass(unittest.TestCase):
             stem_controller_.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
             scan_state_controller.handle_positioned_check_box(True)
             self._acquire_one(document_controller, scan_hardware_source)
+            ScanControlPanel.stop()
 
     def test_subscan_state_goes_from_invalid_to_disabled_upon_first_acquisition(self):
         with self.__test_context() as test_context:
@@ -1461,16 +1477,58 @@ class TestScanControlClass(unittest.TestCase):
     def test_reloading_document_cleans_display_items(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
+            document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
-            scan_state_controller = self.__create_state_controller(test_context)
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_state_controller.handle_subscan_enabled(True)
+            scan_hardware_source.subscan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = False
+            test_context.instrument.probe_position = Geometry.FloatPoint(0.5, 0.5)
+            document_controller.periodic()
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            self.assertEqual(4, len(document_model.display_items[0].graphics))
+            document_controller.close()
+            test_context.instrument.probe_position = None
+            scan_hardware_source.subscan_enabled = False
+            test_context.instrument.subscan_region = None
+            scan_hardware_source.line_scan_enabled = False
+            test_context.instrument.line_scan_vector = None
+            scan_hardware_source.drift_enabled = False
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            document_model = test_context.document_model
+            self.assertEqual(0, len(document_model.display_items[0].graphics))
+
+    def test_graphics_are_enabled_when_switching_project(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = False
+            test_context.instrument.probe_position = Geometry.FloatPoint(0.5, 0.5)
+            document_controller.periodic()
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            self.assertEqual(4, len(document_model.display_items[0].graphics))
             document_controller.close()
             test_context.document_controller = test_context.create_document_controller(auto_close=False)
             test_context.document_model = test_context.document_controller.document_model
             document_model = test_context.document_model
-            self.assertFalse(document_model.display_items[0].graphics)
+            self.assertEqual(4, len(document_model.display_items[0].graphics))
 
     def test_acquisition_preferences(self):
         dir = pathlib.Path.cwd() / "__Test"

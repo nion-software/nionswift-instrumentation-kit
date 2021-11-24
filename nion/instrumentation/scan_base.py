@@ -1700,6 +1700,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.hardware_source_id
 
     def clean_display_items(self, document_model: HardwareSource.HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
+        return
         for display_item in display_items:
             for graphic in copy.copy(display_item.graphics):
                 graphic_id = graphic.graphic_id
@@ -2367,8 +2368,9 @@ def run() -> None:
     def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
         if "scan_device" in component_types:
             scan_hardware_source = component.hardware_source
-            Registry.unregister_component(scan_hardware_source)
+            Registry.unregister_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
+            scan_hardware_source.close()
 
     global _component_registered_listener
     global _component_unregistered_listener
@@ -2378,3 +2380,14 @@ def run() -> None:
 
     for component in Registry.get_components_by_type("scan_device"):
         component_registered(component, {"scan_device"})
+
+
+def stop() -> None:
+    global _component_registered_listener
+    global _component_unregistered_listener
+    if _component_registered_listener:
+        _component_registered_listener.close()
+    if _component_unregistered_listener:
+        _component_unregistered_listener.close()
+    _component_registered_listener = None
+    _component_unregistered_listener = None

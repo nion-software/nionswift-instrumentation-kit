@@ -999,7 +999,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                         logging.debug("{} Error: {}".format(task_id.capitalize(), e))
                         traceback.print_exc()
                 if task.is_finished:
-                    Activity.activity_finished(self.__tasks[task_id].activity)
+                    activity = self.__tasks[task_id].activity
+                    if activity:
+                        Activity.activity_finished(activity)
                     self.__tasks[task_id].activity = None
                     del self.__tasks[task_id]
                     self.__data_elements_changed_event_listeners[task_id].close()
@@ -1803,9 +1805,6 @@ class MetadataDisplayComponent:
             d["info_items"] = info_items
 
 
-Registry.register_component(MetadataDisplayComponent(), {"metadata_display"})
-
-
 def matches_hardware_source(hardware_source_id: str, channel_id: typing.Optional[str], document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> bool:
     if not document_model.get_data_item_computation(data_item):
         hardware_source_metadata = data_item.metadata.get("hardware_source", dict())
@@ -1814,8 +1813,6 @@ def matches_hardware_source(hardware_source_id: str, channel_id: typing.Optional
         return data_item.category == "temporary" and hardware_source_id == data_item_hardware_source_id and channel_id == data_item_channel_id
     return False
 
-
-Registry.register_component(HardwareSourceManager(), {"hardware_source_manager"})
 
 hardware_source_bridges: typing.Dict[uuid.UUID, HardwareSourceBridge] = dict()
 
@@ -1833,5 +1830,22 @@ def handle_component_unregistered(component: typing.Any, component_types: typing
         hardware_source_bridges.pop(component.uuid).close()
 
 
-component_registered_event_listener = Registry.listen_component_registered_event(handle_component_registered)
-component_unregistered_event_listener = Registry.listen_component_unregistered_event(handle_component_unregistered)
+_component_registered_event_listener = None
+_component_unregistered_event_listener = None
+
+
+def run() -> None:
+    Registry.register_component(MetadataDisplayComponent(), {"metadata_display"})
+    Registry.register_component(HardwareSourceManager(), {"hardware_source_manager"})
+    global _component_registered_event_listener
+    global _component_unregistered_event_listener
+    _component_registered_event_listener = Registry.listen_component_registered_event(handle_component_registered)
+    _component_unregistered_event_listener = Registry.listen_component_unregistered_event(handle_component_unregistered)
+
+def stop() -> None:
+    Registry.unregister_component(Registry.get_component("metadata_display"), {"metadata_display"})
+    Registry.unregister_component(Registry.get_component("hardware_source_manager"), {"hardware_source_manager"})
+    global _component_registered_event_listener
+    global _component_unregistered_event_listener
+    _component_registered_event_listener = None
+    _component_unregistered_event_listener = None
