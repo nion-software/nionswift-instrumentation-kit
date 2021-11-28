@@ -75,8 +75,10 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         camera_name = "uSim Camera"
         camera_settings = CameraDevice.CameraSettings(camera_id)
         camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, instrument)
-        camera_hardware_source = camera_base.CameraHardwareSource2("usim_stem_controller", camera_device, camera_settings,
-                                                                   None, None)
+        if getattr(camera_device, "camera_version", 2) == 3:
+            camera_hardware_source = camera_base.CameraHardwareSource3("usim_stem_controller", camera_device, camera_settings, None, None)
+        else:
+            camera_hardware_source = camera_base.CameraHardwareSource2("usim_stem_controller", camera_device, camera_settings, None, None)
         if is_eels:
             camera_hardware_source.features["is_eels_camera"] = True
             camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0))))

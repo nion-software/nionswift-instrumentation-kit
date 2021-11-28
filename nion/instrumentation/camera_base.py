@@ -448,6 +448,376 @@ class CameraDevice(typing.Protocol):
         pass
 
 
+class CameraDevice3(typing.Protocol):
+    """Camera device.
+
+    Camera devices can support several modes of operation:
+        - continue acquire (acquire single images repeatedly for viewing)
+        - single acquire (acquire one image)
+        - sequence acquire (acquire n continuous images)
+        - synchronized acquire (synchronized with scan controller)
+
+    It is recommended to implement all optional methods that are not deprecated. Some methods are deprecated but still
+    valid for backward compatibility.
+
+    Properties that should be defined for the camera device:
+
+    camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
+    camera_name (required, the name of the camera. example: 'Bottom Camera')
+    camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
+    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
+    has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
+    """
+
+    def close(self) -> None:
+        """Close the camera."""
+        ...
+
+    @property
+    def camera_version(self) -> int:
+        return 3
+
+    @property
+    def sensor_dimensions(self) -> typing.Tuple[int, int]:
+        """Read-only property for the native sensor size (no binning).
+
+        Returns (height, width) in pixels.
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
+        raise NotImplementedError()
+
+    @property
+    def readout_area(self) -> typing.Tuple[int, int, int, int]:
+        """Return the detector readout area.
+
+        Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
+
+        There are restrictions on the valid values, depending on camera. This property should use the closest
+        appropriate values, rounding up when necessary.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        raise NotImplementedError()
+
+    @readout_area.setter
+    def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
+        """Set the detector readout area.
+
+        The coordinates, top, left, bottom, right, are specified in sensor coordinates.
+
+        There are restrictions on the valid values, depending on camera. This property should always return
+        valid values.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @property
+    def flip(self) -> bool:
+        """Return whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        raise NotImplementedError()
+
+    @flip.setter
+    def flip(self, do_flip: bool) -> None:
+        """Set whether data is flipped left-right (last dimension).
+
+        This is a global property, meaning it affects all profiles.
+        """
+        ...
+
+    @property
+    def is_dark_subtraction_enabled(self) -> bool:
+        """Return whether dark subtraction is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        return False
+
+    @is_dark_subtraction_enabled.setter
+    def is_dark_subtraction_enabled(self, is_dark_subtraction_enabled: bool) -> None:
+        """Set whether dark subtraction is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        pass
+
+    @property
+    def is_dark_subtraction_available(self) -> bool:
+        """Return whether dark subtraction is available on this camera.
+        """
+        return False
+
+    def set_dark_image(self, data: _NDArray, exposure: float, bin: int, t: int, l: int, b: int, r: int) -> bool:
+        """Set the dark image for the given exposure, bin, and readout area."""
+        return False
+
+    def remove_all_dark_images(self) -> None:
+        """Remove all dark reference images."""
+        pass
+
+    @property
+    def is_gain_normalization_enabled(self) -> bool:
+        """Return whether gain normalization is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        return False
+
+    @is_gain_normalization_enabled.setter
+    def is_gain_normalization_enabled(self, is_gain_normalization_enabled: bool) -> None:
+        """Set whether gain normalization is enabled.
+
+        This is a global property, meaning it affects all profiles.
+        """
+        pass
+
+    @property
+    def is_gain_normalization_available(self) -> bool:
+        """Return whether gain normalization is available on this camera.
+        """
+        return False
+
+    def set_gain_image(self, data: _NDArray, voltage: int, bin: int) -> bool:
+        """Set the gain image for the given voltage and binning."""
+        return False
+
+    def remove_all_gain_images(self) -> None:
+        """Remove all gain reference images."""
+        pass
+
+    @property
+    def binning_values(self) -> typing.List[int]:
+        """Return a list of valid binning values (int's).
+
+        This is a global property, meaning it affects all profiles, and is assumed to be constant.
+        """
+        raise NotImplementedError()
+
+    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
+        """Read-only property for the expected image size (binning and readout area included).
+
+        Returns (height, width).
+
+        Cameras are allowed to bin in one dimension and not the other.
+        """
+        ...
+
+    def set_frame_parameters(self, frame_parameters: typing.Any) -> None:
+        """Set the pending frame parameters (exposure_ms, binning, processing, integration_count).
+
+        processing and integration_count are optional, in which case they are handled at a higher level.
+        """
+        ...
+
+    @property
+    def calibration_controls(self) -> typing.Mapping[str, str]:
+        """Return lookup dict of calibration controls to be read from instrument controller for this device.
+
+        The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", "z", or "intensity",
+        <field> is "scale", "offset", or "units", and <type> is "control" or "value". If <type> is "control", then
+        the value for that axis/field will use the value of that key to read the calibration field value from the
+        instrument controller. If <type> is "value", then the calibration field value will be the value of that key.
+
+        For example, the dict with the following keys will read x_scale and x_offset from the instrument controller
+        values "cam_scale' and "cam_offset", but supply the units directly as "nm".
+
+        { "x_scale_control": "cam_scale", "x_offset_control": "cam_offset", "x_units_value": "nm" }
+
+        The dict can contain the key <axis>_origin_override with the value "center" to indicate that the origin is
+        at the center of the data for that axis.
+
+        { "x_scale_control": "cam_scale",
+          "x_offset_control": "cam_offset",
+          "x_units_value": "nm",
+          "x_origin_override": "center" }
+
+        In addition to the calibration controls, a "counts_per_electron" control or value can also be specified.
+
+        { "counts_per_electron_control": "Camera1_CountsPerElectron" }
+        """
+        return dict()
+
+    @property
+    def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]:
+        """Return metadata groups to be read from instrument controller and stored in metadata.
+
+        Metadata groups are a list of tuples where the first item is the destination path and the second item is the
+        control group name.
+
+        This method is optional. Default is to return an empty list.
+
+        Note: for backward compatibility, if the destination root is 'autostem', it is skipped and the rest of the path
+        is used. this can be removed in the future.
+        """
+        return list()
+
+    def start_live(self) -> None:
+        """Start live acquisition. Required before using acquire_image."""
+        ...
+
+    def stop_live(self) -> None:
+        """Stop live acquisition."""
+        ...
+
+    def acquire_image(self) -> ImportExportManager.DataElementType:
+        """Acquire the most recent image and return a data element dict.
+
+        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
+        with a dict. Inside the 'properties' dict you must include 'frame_number' as an int.
+
+        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
+        released (Python reference count goes to zero).
+
+        If integration_count is non-zero and is handled directly in this method, the 'properties' should also contain
+        a 'integration_count' value to indicate how many frames were integrated. If the value is missing, a default
+        value of 1 is assumed.
+
+        Calibrations can be directly by including a 'calibration_controls' dictionary that follows the guidelines
+        described under that property, by including keys 'intensity calibration' and 'spatial_calibrations', or by
+        doing nothing and falling back to the having the 'calibration_controls' property define the calibrations.
+
+        Use the 'calibration_controls' dictionary when the calibrations are read from the instrument and dependent on
+        the camera state. Use the 'calibration_controls' property when read from the instrument but independent of
+        camera state. Use 'intensity_calibration' and 'spatial_calibrations' when the calibrations are only dependent
+        on the camera state but not the instrument.
+
+        If the calibrations are specified with the 'intensity calibration' and 'spatial_calibrations' keys, the
+        `intensity_calibration` should be a dict with `offset`, `scale`, and `units` key and the `spatial_calibrations`
+        should be a list of dicts, one for each dimension, with the same keys.
+
+        Specifying calibrations directly using 'intensity_calibration' and 'spatial_calibrations' take precedence over
+        supplying `calibration_controls` in the data_element. And that takes precedence over using the
+        'calibration_controls' property.
+        """
+        ...
+
+    def get_acquire_sequence_metrics(self, frame_parameters: CameraFrameParameters) -> typing.Mapping[str, typing.Any]:
+        """Return the acquire sequence metrics for the frame parameters dict.
+
+        The frame parameters will contain extra keys 'acquisition_frame_count' and 'storage_frame_count' to indicate
+        the number of frames in the sequence.
+
+        The frame parameters will contain a key 'processing' set to 'sum_project' if 1D summing or binning
+        is requested.
+
+        The dictionary returned should include keys for 'acquisition_time' (in seconds), 'storage_memory' (in bytes) and
+         'acquisition_memory' (in bytes). The default values will be the exposure time times the acquisition frame
+         count and the camera readout size times the number of frames.
+        """
+        return dict()
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+        """Begin synchronized acquire.
+
+        The camera device can allocate memory to accommodate the scan_shape and begin acquisition immediately.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        ...
+
+    def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
+        """Continue synchronized acquire.
+
+        The camera device should wait up to update_period seconds for data and populate PartialData with data and
+        information about the acquisition.
+
+        Deprecated: The valid_rows field of PartialData indicates how many rows are valid in xdata. The
+        grab_synchronized method will keep track of the last valid row and copy data from the last valid row to
+        valid_rows into the acquisition data and then update last valid row with valid_rows.
+
+        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
+        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
+        data and then update last valid item with valid_count.
+
+        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+
+        Returns PartialData.
+        """
+        ...
+
+    def acquire_synchronized_end(self, **kwargs: typing.Any) -> None:
+        """Clean up synchronized acquire.
+
+        The camera device can clean up anything internal that was required for acquisition.
+
+        The memory returned during acquire_synchronized_begin or acquire_synchronized_continue must remain valid until
+        the last Python reference to that memory is released.
+        """
+        ...
+
+    def acquire_synchronized_cancel(self) -> None:
+        """Request to cancel a synchronized acquisition.
+
+        Future calls to acquire_synchronized_continue should have the is_cancelled flag set.
+        """
+        pass
+
+    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
+        """Begin sequence acquire.
+
+        The camera device can allocate memory to accommodate the count and begin acquisition immediately.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        pass
+
+    def acquire_sequence_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
+        """Continue sequence acquire.
+
+        The camera device should wait up to update_period seconds for data and populate PartialData with data and
+        information about the acquisition.
+
+        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
+        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
+        data and then update last valid item with valid_count.
+
+        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+
+        Returns PartialData.
+        """
+        pass
+
+    def acquire_sequence_end(self, **kwargs: typing.Any) -> None:
+        """Clean up sequence acquire.
+
+        The camera device can clean up anything internal that was required for acquisition.
+
+        The memory returned during acquire_sequence_begin or acquire_sequence_continue must remain valid until
+        the last Python reference to that memory is released.
+        """
+
+    def acquire_sequence_cancel(self) -> None:
+        """Request to cancel a sequence acquisition.
+
+        Future calls to acquire_sequence_continue should have the is_cancelled flag set.
+        """
+        pass
+
+    def show_config_window(self) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+    def show_configuration_dialog(self, api_broker: typing.Any) -> None:
+        """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+    def start_monitor(self) -> None:
+        """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
+        pass
+
+
 class InstrumentController(abc.ABC):
 
     @abc.abstractmethod
@@ -1386,6 +1756,424 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__camera_settings.open_configuration_interface(api_broker)
 
 
+class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
+
+    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
+        super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
+
+        # configure the event loop object
+        logger = logging.getLogger()
+        old_level = logger.level
+        logger.setLevel(logging.INFO)
+        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
+        logger.setLevel(old_level)
+
+        self.__camera_settings = camera_settings
+        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
+
+        self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
+        self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
+
+        # add optional support for settings. to enable auto settings handling, the camera settings object must define
+        # a settings_id property (which can just be the camera id), an apply_settings method which takes a settings
+        # dict read from the config file and applies it as the settings, and a settings_changed_event which must be
+        # fired when the settings changed (at which point they will be written to the config file).
+        self.__settings_changed_event_listener = None
+        if configuration_location and hasattr(self.__camera_settings, "settings_id"):
+            config_file = configuration_location / pathlib.Path(self.__camera_settings.settings_id + "_config.json")
+            logging.info("Camera device configuration: " + str(config_file))
+            if config_file.is_file():
+                with open(config_file) as f:
+                    settings_dict = json.load(f)
+                self.__camera_settings.apply_settings(settings_dict)
+
+            def settings_changed(settings_dict: typing.Mapping[str, typing.Any]) -> None:
+                # atomically overwrite
+                temp_filepath = config_file.with_suffix(".temp")
+                with open(temp_filepath, "w") as fp:
+                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
+                os.replace(temp_filepath, config_file)
+
+            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
+
+        self.__instrument_controller_id = instrument_controller_id
+        self.__instrument_controller: typing.Optional[InstrumentController] = None
+
+        self.__camera = camera
+        self.__camera_category = typing.cast(typing.Any, camera).camera_type
+        # signal type falls back to camera category if camera category is "eels" or "ronchigram". this is only for
+        # backward compatibility. new camera instances should define signal_type directly.
+        self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
+        self.processor = None
+
+        # configure the features. putting the features into this object is for convenience of access. the features
+        # should not be considered as part of this class. instead, the features should be thought of as being stored
+        # here as a convenient location where the UI has access to them.
+        self.features["is_camera"] = True
+        if camera_panel_type:
+            self.features["camera_panel_type"] = camera_panel_type
+        if camera_panel_delegate_type:
+            self.features["camera_panel_delegate_type"] = camera_panel_delegate_type
+        if self.__camera_category.lower() == "ronchigram":
+            self.features["is_ronchigram_camera"] = True
+        if self.__camera_category.lower() == "eels":
+            self.features["is_eels_camera"] = True
+        if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
+            self.processor = HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0)))
+        self.features["has_processed_channel"] = self.processor is not None
+        if hasattr(camera_settings, "masks"):
+            self.features["has_masked_sum_option"] = True
+        # future version will also include the processed channel type;
+        # candidates for the official name are "vertical_sum" or "vertical_projection_profile"
+
+        # add channels
+        self.add_data_channel()
+        if self.processor:
+            self.add_channel_processor(0, self.processor)
+
+        # define deprecated events. both are used in camera control panel. frame_parameter_changed_event used in scan acquisition.
+        self.profile_changed_event = Event.Event()
+        self.frame_parameters_changed_event = Event.Event()
+
+        self.__profile_changed_event_listener = self.__camera_settings.profile_changed_event.listen(self.profile_changed_event.fire)
+        self.__frame_parameters_changed_event_listener = self.__camera_settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
+
+        # define events
+        self.log_messages_event = Event.Event()
+
+        self.__frame_parameters = self.__camera_settings.get_current_frame_parameters()
+        self.__record_parameters = self.__camera_settings.get_record_frame_parameters()
+
+        self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
+
+        self.__grab_sequence_partial_data: typing.Optional[PartialData] = None
+        self.__grab_sequence_frame_parameters: typing.Optional[CameraFrameParameters] = None
+
+        # the periodic logger function retrieves any log messages from the camera. it is called during
+        # __handle_log_messages_event. any messages are sent out on the log_messages_event.
+        periodic_logger_fn = getattr(self.__camera, "periodic_logger_fn", None)
+        self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
+
+    def close(self) -> None:
+        Process.close_event_loop(self.__event_loop)
+        self.__event_loop = typing.cast(asyncio.AbstractEventLoop, None)
+        self.__periodic_logger_fn = None
+        super().close()
+        if self.__settings_changed_event_listener:
+            self.__settings_changed_event_listener.close()
+            self.__settings_changed_event_listener = None
+        self.__profile_changed_event_listener.close()
+        self.__profile_changed_event_listener = typing.cast(typing.Any, None)
+        self.__frame_parameters_changed_event_listener.close()
+        self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__current_frame_parameters_changed_event_listener.close()
+        self.__current_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__record_frame_parameters_changed_event_listener.close()
+        self.__record_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__camera_settings.close()
+        self.__camera_settings = typing.cast(typing.Any, None)
+        self.__camera.close()
+        self.__camera = typing.cast(typing.Any, None)
+
+    def periodic(self) -> None:
+        self.__event_loop.stop()
+        self.__event_loop.run_forever()
+        self.__handle_log_messages_event()
+
+    def __get_instrument_controller(self) -> InstrumentController:
+        if not self.__instrument_controller and self.__instrument_controller_id:
+            self.__instrument_controller = typing.cast(typing.Any, HardwareSource.HardwareSourceManager().get_instrument_by_id(self.__instrument_controller_id))
+        if not self.__instrument_controller and not self.__instrument_controller_id:
+            self.__instrument_controller = Registry.get_component("instrument_controller")
+        if not self.__instrument_controller and not self.__instrument_controller_id:
+            self.__instrument_controller = Registry.get_component("stem_controller")
+        if not self.__instrument_controller:
+            print(f"Instrument Controller ({self.__instrument_controller_id}) for ({self.hardware_source_id}) not found. Using proxy.")
+            from nion.instrumentation import stem_controller
+            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, stem_controller.STEMController())
+        return self.__instrument_controller
+
+    def __handle_log_messages_event(self) -> None:
+        if callable(self.__periodic_logger_fn):
+            messages, data_elements = self.__periodic_logger_fn()
+            if len(messages) > 0 or len(data_elements) > 0:
+                self.log_messages_event.fire(messages, data_elements)
+
+    def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        if "frame_parameters" in kwargs:
+            self.set_current_frame_parameters(kwargs["frame_parameters"])
+        elif len(args) == 1 and isinstance(args[0], dict):
+            self.set_current_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(args[0]))
+        super().start_playing(*args, **kwargs)
+
+    def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        self.start_playing()
+        return self.get_next_xdatas_to_start(timeout)
+
+    def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        self.start_playing()
+        return self.get_next_xdatas_to_finish(timeout)
+
+    def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool:
+        self.__grab_sequence_frame_parameters = self.get_current_frame_parameters()
+        self.__grab_sequence_partial_data = self.acquire_sequence_begin(self.__grab_sequence_frame_parameters, count)
+        return True
+
+    def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]:
+        self.start_playing()  # backwards compatibility
+        assert self.__grab_sequence_frame_parameters
+        assert self.__grab_sequence_partial_data
+        while not self.__grab_sequence_partial_data.is_complete and not self.__grab_sequence_partial_data.is_canceled:
+            self.__grab_sequence_partial_data = self.acquire_sequence_continue()
+        self.acquire_sequence_end()
+        data_element: typing.Dict[str, typing.Any] = {"data": self.__grab_sequence_partial_data.xdata.data}
+        self.__grab_sequence_partial_data = None
+        self.__update_data_element_for_sequence(data_element, self.__grab_sequence_frame_parameters)
+        self.__grab_sequence_frame_parameters = None
+        frames = [data_element]
+        xdatas = list()
+        for data_element in frames:
+            data_element["is_sequence"] = True
+            data_element["collection_dimension_count"] = 0
+            data_element["datum_dimension_count"] = len(data_element["data"].shape) - 1
+            xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+            xdatas.append(xdata)
+        return xdatas
+
+    def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
+        return None
+
+    def make_reference_key(self, **kwargs: typing.Any) -> str:
+        reference_key = kwargs.get("reference_key")
+        if reference_key:
+            return "_".join([self.hardware_source_id, str(reference_key)])
+        return self.hardware_source_id
+
+    @property
+    def camera_settings(self) -> CameraSettings:
+        return self.__camera_settings
+
+    @property
+    def camera(self) -> CameraDevice:
+        return self.__camera
+
+    @property
+    def sensor_dimensions(self) -> typing.Tuple[int, int]:
+        return self.__camera.sensor_dimensions
+
+    @property
+    def binning_values(self) -> typing.Sequence[int]:
+        return self.__camera.binning_values
+
+    @property
+    def readout_area(self) -> typing.Tuple[int, int, int, int]:
+        return self.__camera.readout_area
+
+    @readout_area.setter
+    def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
+        self.__camera.readout_area = readout_area_TLBR
+
+    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
+        return self.__camera.get_expected_dimensions(binning)
+
+    def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
+        if self.__signal_type == "eels":
+            if camera_frame_parameters.processing == "sum_project":
+                return _("EELS")
+            else:
+                return _("EELS Image")
+        elif self.__signal_type == "ronchigram":
+            return _("Ronchigram")
+        else:
+            return _("Camera Data")
+
+    def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
+        assert self.__frame_parameters is not None
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
+
+    def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
+        self.__acquisition_task = view_task
+
+    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
+        assert self.__record_parameters is not None
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+
+    def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
+        return self.__camera.acquire_synchronized_continue(update_period=update_period)
+
+    def acquire_synchronized_end(self) -> None:
+        self.__camera.acquire_synchronized_end()
+
+    def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
+        # prepare does nothing in camera device 3
+        pass
+
+    def acquire_sequence(self, n: int) -> typing.Sequence[ImportExportManager.DataElementType]:
+        frame_parameters = self.get_current_frame_parameters()
+        partial_data = self.acquire_sequence_begin(frame_parameters, n)
+        while not partial_data.is_complete and not partial_data.is_canceled:
+            partial_data = self.acquire_sequence_continue()
+        self.acquire_sequence_end()
+        data_element = {"data": partial_data.xdata.data}
+        self.__update_data_element_for_sequence(data_element, frame_parameters)
+        return [data_element]
+
+    def __update_data_element_for_sequence(self, data_element: ImportExportManager.DataElementType, frame_parameters: CameraFrameParameters) -> None:
+        binning = frame_parameters.binning
+        data_element["version"] = 1
+        data_element["state"] = "complete"
+        instrument_controller = self.__get_instrument_controller()
+        if "spatial_calibrations" not in data_element:
+            update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category,
+                                        data_element["data"].shape[1:], binning, binning)
+            if "spatial_calibrations" in data_element:
+                data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
+        update_intensity_calibration(data_element, instrument_controller, self.__camera)
+        update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
+        update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+
+    def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
+        update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
+        update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
+
+    def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
+        processing = camera_frame_parameters.processing
+        instrument_controller = self.__get_instrument_controller()
+        calibration_controls = self.__camera.calibration_controls
+        binning = camera_frame_parameters.binning
+        data_shape = self.get_expected_dimensions(binning)
+        if processing in {"sum_project", "sum_masked"}:
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (x_calibration,)
+        else:
+            y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (y_calibration, x_calibration)
+
+    def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
+        instrument_controller = self.__instrument_controller
+        assert instrument_controller
+        return build_calibration(instrument_controller, self.__camera.calibration_controls, "intensity")
+
+    def acquire_sequence_prepare(self, n: int) -> None:
+        # prepare does nothing in camera device 3
+        pass
+
+    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
+        return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
+
+    def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData:
+        return self.__camera.acquire_sequence_continue(update_period=update_period)
+
+    def acquire_sequence_end(self) -> None:
+        self.__camera.acquire_sequence_end()
+
+    def acquire_sequence_cancel(self) -> None:
+        self.__camera.acquire_sequence_cancel()
+
+    def get_acquire_sequence_metrics(self, frame_parameters: CameraFrameParameters) -> typing.Mapping[str, typing.Any]:
+        get_acquire_sequence_metrics = getattr(self.__camera, "get_acquire_sequence_metrics", None)
+        if callable(get_acquire_sequence_metrics):
+            return typing.cast(typing.Mapping[str, typing.Any], get_acquire_sequence_metrics(frame_parameters))
+        return dict()
+
+    def __current_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
+        acquisition_task = self.__acquisition_task
+        if isinstance(acquisition_task, CameraAcquisitionTask):
+            acquisition_task.set_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict()))
+        self.__frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+
+    def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__camera_settings.set_current_frame_parameters(frame_parameters)
+        # __current_frame_parameters_changed will be called by the controller
+
+    def get_current_frame_parameters(self) -> CameraFrameParameters:
+        return CameraFrameParameters(self.__frame_parameters.as_dict() if self.__frame_parameters else dict())
+
+    def __record_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
+        self.__record_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+
+    def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__camera_settings.set_record_frame_parameters(frame_parameters)
+        # __record_frame_parameters_changed will be called by the controller
+
+    def get_record_frame_parameters(self) -> HardwareSource.FrameParameters:
+        return CameraFrameParameters(self.__record_parameters.as_dict() if self.__record_parameters else dict())
+
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> CameraFrameParameters:
+        return self.__camera_settings.get_frame_parameters_from_dict(d)
+
+    def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None:
+        instrument_controller = self.__get_instrument_controller()
+        if callable(getattr(instrument_controller, "handle_shift_click", None)):
+            instrument_controller.handle_shift_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera, logger=logger)
+
+    def tilt_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None:
+        instrument_controller = self.__get_instrument_controller()
+        if callable(getattr(instrument_controller, "handle_tilt_click", None)):
+            instrument_controller.handle_tilt_click(mouse_position=mouse_position, data_shape=camera_shape, camera=self.camera, logger=logger)
+
+    def get_property(self, name: str) -> typing.Any:
+        return getattr(self.__camera, name)
+
+    def set_property(self, name: str, value: typing.Any) -> None:
+        setattr(self.__camera, name, value)
+
+    def get_api(self, version: str) -> typing.Any:
+        actual_version = "1.0.0"
+        if Utility.compare_versions(version, actual_version) > 0:
+            raise NotImplementedError("Camera API requested version %s is greater than %s." % (version, actual_version))
+
+        class CameraFacade:
+
+            def __init__(self) -> None:
+                pass
+
+        return CameraFacade()
+
+    # Compatibility functions
+
+    # used in camera control panel
+    @property
+    def modes(self) -> typing.Sequence[str]:
+        return self.__camera_settings.modes
+
+    # used in service scripts
+    def get_mode(self) -> str:
+        return self.__camera_settings.get_mode()
+
+    # used in service scripts
+    def set_mode(self, mode: str) -> None:
+        self.__camera_settings.set_mode(mode)
+
+    # used in api, tests, camera control panel
+    def set_frame_parameters(self, profile_index: int, frame_parameters: CameraFrameParameters) -> None:
+        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__camera_settings.set_frame_parameters(profile_index, frame_parameters)
+
+    # used in tuning, api, tests, camera control panel
+    def get_frame_parameters(self, profile_index: int) -> CameraFrameParameters:
+        return self.__camera_settings.get_frame_parameters(profile_index)
+
+    # used in api, tests, camera control panel
+    def set_selected_profile_index(self, profile_index: int) -> None:
+        self.__camera_settings.set_selected_profile_index(profile_index)
+
+    # used in api, camera control panel
+    @property
+    def selected_profile_index(self) -> int:
+        return self.__camera_settings.selected_profile_index
+
+    # used in camera control panel
+    def open_configuration_interface(self, api_broker: typing.Any) -> None:
+        self.__camera_settings.open_configuration_interface(api_broker)
+
+
 class CameraFrameParameters:
     """Example implementation for camera frame parameters; used in tests too."""
 
@@ -1901,7 +2689,12 @@ def run(configuration_location: pathlib.Path) -> None:
             camera_panel_type = getattr(camera_module, "camera_panel_type", None)  # a replacement camera panel
             camera_panel_delegate_type = getattr(camera_module, "camera_panel_delegate_type", None)  # a delegate for the default camera panel
             try:
-                camera_hardware_source = CameraHardwareSource2(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type, camera_panel_delegate_type)
+                camera_version = getattr(camera_device, "camera_version", 2)
+                camera_hardware_source: CameraHardwareSource
+                if camera_version == 3:
+                    camera_hardware_source = CameraHardwareSource3(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type, camera_panel_delegate_type)
+                else:
+                    camera_hardware_source = CameraHardwareSource2(instrument_controller_id, camera_device, camera_settings, configuration_location, camera_panel_type, camera_panel_delegate_type)
                 if hasattr(camera_module, "priority"):
                     setattr(camera_hardware_source, "priority", getattr(camera_module, "priority"))
                 component_types = {"hardware_source", "camera_hardware_source"}.union({camera_device.camera_type + "_camera_hardware_source"})

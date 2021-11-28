@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Add support for camera device 3 (no prepare methods).
+
 0.20.0 (2011-11-12)
 -------------------
 - Add preliminary acquisition panel for more complex sequence/collection acquisitions.
