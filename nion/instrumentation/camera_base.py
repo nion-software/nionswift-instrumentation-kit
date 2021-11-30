@@ -1469,7 +1469,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
-    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
@@ -1994,7 +1994,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
-    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 

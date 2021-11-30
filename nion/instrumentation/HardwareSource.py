@@ -827,7 +827,7 @@ class HardwareSource(typing.Protocol):
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None: ...
     def abort_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
     def stop_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
-    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None) -> None: ...
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> None: ...
     def abort_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
     def stop_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
@@ -1036,7 +1036,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     # subclasses should implement this method to create a non-continuous-style acquisition task.
     # create the view task
     # will be called from the UI thread and should return quickly.
-    def _create_acquisition_record_task(self) -> AcquisitionTask:
+    def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> AcquisitionTask:
         raise NotImplementedError()
 
     # subclasses can implement this method to get notification that the record task has been changed.
@@ -1210,9 +1210,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # call this to start acquisition
     # thread safe
-    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None) -> None:
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> None:
         if not self.is_recording:
-            record_task = self._create_acquisition_record_task()
+            record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters)
             old_finished_callback_fn = record_task.finished_callback_fn
 
             def finished(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
@@ -1570,9 +1570,6 @@ class RecordTask:
 
         assert not self.__hardware_source.is_recording
 
-        if frame_parameters:
-            self.__hardware_source.set_record_frame_parameters(frame_parameters)
-
         self.__data_and_metadata_list: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
         # synchronize start of thread; if this sync doesn't occur, the task can be closed before the acquisition
         # is started. in that case a deadlock occurs because the abort doesn't apply and the thread is waiting
@@ -1580,7 +1577,7 @@ class RecordTask:
         self.__recording_started = threading.Event()
 
         def record_thread() -> None:
-            self.__hardware_source.start_recording()
+            self.__hardware_source.start_recording(frame_parameters=frame_parameters)
             self.__recording_started.set()
             self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
             self.__hardware_source.stop_recording(sync_timeout=3.0)

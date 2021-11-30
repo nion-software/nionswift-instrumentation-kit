@@ -573,7 +573,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     @property
     def frame_parameters(self) -> typing.Optional[ScanFrameParameters]:
-        return self.__frame_parameters
+        return ScanFrameParameters(self.__frame_parameters.as_dict())
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
@@ -1445,11 +1445,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
-    def _create_acquisition_record_task(self) -> HardwareSource.AcquisitionTask:
-        assert self.__record_parameters is not None
+    def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
+        record_parameters = ScanFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
+        assert record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        frame_parameters = copy.deepcopy(self.__record_parameters)
+        frame_parameters = copy.deepcopy(record_parameters)
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
 
@@ -1535,7 +1536,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__record_parameters = ScanFrameParameters(frame_parameters.as_dict())
 
     def get_record_frame_parameters(self) -> HardwareSource.FrameParameters:
-        return self.__record_parameters
+        return ScanFrameParameters(self.__record_parameters.as_dict())
 
     @property
     def channel_count(self) -> int:
@@ -1868,6 +1869,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
                  camera_data_stream: typing.Optional[camera_base.CameraFramesDataStream] = None,
                  scan_behavior: typing.Optional[SynchronizedScanBehaviorInterface] = None):
         super().__init__()
+        scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__scan_frame_parameters_center_nm = Geometry.FloatPoint.make(scan_frame_parameters.center_nm)

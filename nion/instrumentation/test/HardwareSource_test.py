@@ -66,7 +66,7 @@ class SimpleHardwareSource(HardwareSource.ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(True, self.sleep, self.image)
 
-    def _create_acquisition_record_task(self) -> SimpleAcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(False, self.sleep, self.image)
 
 
@@ -114,7 +114,7 @@ class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> LinePlotAcquisitionTask:
         return LinePlotAcquisitionTask(self.shape, True, self.sleep)
 
-    def _create_acquisition_record_task(self) -> LinePlotAcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs) -> LinePlotAcquisitionTask:
         return LinePlotAcquisitionTask(self.shape, False, self.sleep)
 
 
@@ -131,7 +131,7 @@ class SummedHardwareSource(HardwareSource.ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(True, self.sleep, self.image)
 
-    def _create_acquisition_record_task(self) -> SimpleAcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(False, self.sleep, self.image)
 
 
@@ -259,7 +259,7 @@ class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> ScanAcquisitionTask:
         return ScanAcquisitionTask(True, self.sleep, self.channel_enabled_list, self.scanning_ref, self.suspended_ref, self.suspend_event, self.image)
 
-    def _create_acquisition_record_task(self) -> ScanAcquisitionTask:
+    def _create_acquisition_record_task(self, **kwargs) -> ScanAcquisitionTask:
         return ScanAcquisitionTask(False, self.sleep, self.channel_enabled_list, self.scanning_ref, self.suspended_ref, self.suspend_event, self.image)
 
 
