@@ -558,7 +558,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
         self.__frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
-        self.__frame_number = 0
+        self.__frame_number: typing.Optional[int] = None
         self.__scan_id: typing.Optional[uuid.UUID] = None
         self.__last_scan_id: typing.Optional[uuid.UUID] = None
         self.__fixed_scan_id = frame_parameters.scan_id
@@ -582,7 +582,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         if not any(self.__device.channels_enabled):
             return False
         self._resume_acquisition()
-        self.__frame_number = 0
+        self.__frame_number = None
         self.__scan_id = self.__fixed_scan_id
         return True
 
@@ -620,7 +620,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         start_time = time.time()
         while self.__device.is_scanning and time.time() - start_time < 1.0:
             time.sleep(0.01)
-        self.__frame_number = 0
+        self.__frame_number = None
         self.__scan_id = self.__fixed_scan_id
         self.__stem_controller._exit_scanning_state()
 
@@ -678,7 +678,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
         if complete or bad_frame:
             # proceed to next frame
-            self.__frame_number = 0
+            self.__frame_number = None
             self.__scan_id = self.__fixed_scan_id
             self.__pixels_to_skip = 0
 
@@ -725,7 +725,7 @@ class ScanDevice(typing.Protocol):
     def start_frame(self, is_continuous: bool) -> int: ...
     def cancel(self) -> None: ...
     def stop(self) -> None: ...
-    def read_partial(self, frame_number: int, pixels_to_skip: int) -> typing.Tuple[typing.Sequence[ImportExportManager.DataElementType], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], int, int]: ...
+    def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[ImportExportManager.DataElementType], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], int, int]: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def set_scan_context_probe_position(self, scan_context: stem_controller_module.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
