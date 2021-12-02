@@ -2182,6 +2182,7 @@ def make_synchronized_scan_data_stream(
         scan_count: int = 1,
         include_raw: bool = True,
         include_summed: bool = False,
+        enable_drift_tracker: bool = False,
         old_move_axis: bool = False) -> Acquisition.DataStream:
 
     scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
@@ -2238,7 +2239,8 @@ def make_synchronized_scan_data_stream(
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
-        collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
+        if enable_drift_tracker:
+            collector = DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed

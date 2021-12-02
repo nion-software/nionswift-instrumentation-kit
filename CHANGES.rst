@@ -4,6 +4,7 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 - Add support for camera device 3 (no prepare methods).
+- Make auto drift tracker during synchronized acquisition optional (default off).
 
 0.20.0 (2011-11-12)
 -------------------
