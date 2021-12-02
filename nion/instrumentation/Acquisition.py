@@ -2000,6 +2000,12 @@ def acquire(data_stream: DataStream) -> None:
         if data_stream.is_finished:
             assert data_stream.progress == 1.0
             data_stream._acquire_finished()
+    except Exception as e:
+        data_stream.abort_stream()
+        from nion.swift.model import Notification
+        Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition", "Acquisition Failed", str(e)))
+        import traceback
+        traceback.print_exc()
     finally:
         data_stream.finish_stream()
 
@@ -2025,7 +2031,6 @@ class Acquisition:
                 acquire(self.__data_stream)
                 self.__is_aborted = self.__data_stream.is_aborted
         finally:
-            self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
 
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:

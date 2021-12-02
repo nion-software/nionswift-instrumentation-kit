@@ -2239,7 +2239,7 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
     scan_shape = uncropped_xdata.collection_dimension_shape
     scan_calibrations = scan_calibrations or uncropped_xdata.collection_dimensional_calibrations
     uncropped_data = uncropped_xdata.data
-    assert uncropped_data is not None
+    assert uncropped_data is not None, "Device data was None."
     if flyback_pixels > 0:
         data = uncropped_data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
     else:
