@@ -699,15 +699,59 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     scan_specifier)
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
-
             document_controller.periodic()
             si_data_item = None
+            si_haadf_data_item = None
+            subscan_data_item = None
             for data_item in document_model.data_items:
                 if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
                     si_data_item = data_item
-                    break
+                if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
+                    si_haadf_data_item = data_item
+                if "SubScan" in data_item.title:
+                    subscan_data_item = data_item
             self.assertIsNotNone(si_data_item)
+            self.assertIsNotNone(si_haadf_data_item)
             self.assertEqual((4, 4, 512), si_data_item.data_shape)
+            self.assertTrue(numpy.array_equal(si_haadf_data_item.data, subscan_data_item.data))
+            metadata = si_data_item.metadata
+            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
+            self.assertEqual((4, 4), metadata["scan"]["scan_size"])
+
+    def test_scan_acquisition_controller_with_rect_and_sections(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+            scan_specifier.size = 4, 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False), section_height_override=2)
+            scan_acquisition_controller._wait()
+            document_controller.periodic()
+            si_data_item = None
+            si_haadf_data_item = None
+            subscan_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
+                    si_data_item = data_item
+                if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
+                    si_haadf_data_item = data_item
+                if "SubScan" in data_item.title:
+                    subscan_data_item = data_item
+            self.assertIsNotNone(si_data_item)
+            self.assertIsNotNone(si_haadf_data_item)
+            self.assertEqual((4, 4, 512), si_data_item.data_shape)
+            self.assertTrue(numpy.array_equal(si_haadf_data_item.data, subscan_data_item.data))
             metadata = si_data_item.metadata
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])

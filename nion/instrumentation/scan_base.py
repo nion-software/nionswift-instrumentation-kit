@@ -1912,23 +1912,30 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__sent_rows: typing.Dict[Acquisition.Channel, int] = dict()
         self.__available_rows: typing.Dict[Acquisition.Channel, int] = dict()
 
+        self.__started = False
+
         def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-            with self.__lock:
-                channel_index = data_channel.index
-                if scan_hardware_source.channel_count <= data_channel.index < scan_hardware_source.channel_count * 2:
-                    channel_index -= scan_hardware_source.channel_count
-                channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
-                valid_rows = data_and_metadata.metadata.get("hardware_source", dict()).get("valid_rows", 0)
-                available_rows = self.__available_rows.get(channel, 0)
-                if valid_rows > available_rows:
-                    if channel not in self.__buffers:
-                        self.__buffers[channel] = copy.deepcopy(data_and_metadata)
-                    buffer = self.__buffers[channel]
-                    assert buffer
-                    buffer_data = buffer.data
-                    assert buffer_data is not None
-                    buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
-                    self.__available_rows[channel] = valid_rows
+            # when data arrives here, it will be part of the overall data item, even if it is only a partial
+            # acquire of the data item. so the buffer data shape will reflect the overall data item.
+            if self.__started:
+                with self.__lock:
+                    channel_index = data_channel.index
+                    if scan_hardware_source.channel_count <= data_channel.index < scan_hardware_source.channel_count * 2:
+                        channel_index -= scan_hardware_source.channel_count
+                    channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
+                    # valid_rows will represent the number of valid rows within this section, not within the overall
+                    # data. so valid and available rows need to be offset by the section rect top.
+                    valid_rows = self.__section_rect.top + data_and_metadata.metadata.get("hardware_source", dict()).get("valid_rows", 0)
+                    available_rows = self.__available_rows.get(channel, self.__section_rect.top)
+                    if valid_rows > available_rows:
+                        if channel not in self.__buffers:
+                            self.__buffers[channel] = copy.deepcopy(data_and_metadata)
+                        buffer = self.__buffers[channel]
+                        assert buffer
+                        buffer_data = buffer.data
+                        assert buffer_data is not None
+                        buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
+                        self.__available_rows[channel] = valid_rows
 
         self.__data_channel_listeners = list()
         for data_channel in scan_hardware_source.data_channels:
@@ -1973,6 +1980,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size,
                                                       self.__fractional_area, self.__channel_modifier)
         self.__section_rect = section_rect
+        self.__started = True
         with self.__lock:
             self.__buffers.clear()
             self.__sent_rows.clear()
@@ -1983,6 +1991,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         if self.__record_task:
             self.__record_task.close()
             self.__record_task = typing.cast(typing.Any, None)
+        self.__started = False
 
     def _abort_stream(self) -> None:
         self.__scan_hardware_source.abort_recording()
@@ -1990,11 +1999,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def _send_next(self) -> None:
         with self.__lock:
             for channel in self.__buffers.keys():
-                sent_rows = self.__sent_rows.get(channel, 0)
-                available_rows = self.__available_rows.get(channel, 0)
+                sent_rows = self.__sent_rows.get(channel, self.__section_rect.top)
+                available_rows = self.__available_rows.get(channel, self.__section_rect.top)
                 if sent_rows < available_rows:
+                    # when we extract data from the buffer, extract only the part that is the section rect.
+                    # the buffer represents the entire data item; but only is updated with the section.
                     scan_data = self.__buffers[channel]
-                    is_complete = available_rows == self.__section_rect.height
+                    is_complete = available_rows == self.__section_rect.bottom
                     # only complete when the record task is finished. this prevents a race condition when restarting.
                     if not is_complete or (is_complete and self.__record_task.is_finished):
                         start = self.__section_rect.width * sent_rows

@@ -83,7 +83,7 @@ class ScanAcquisitionController:
         self.__scan_drift_logger = typing.cast(DriftTracker.DriftLogger, None)
         self.acquisition_state_changed_event = Event.Event()
 
-    def start(self, processing: ScanAcquisitionProcessing, scan_processing: ScanProcessing) -> None:
+    def start(self, processing: ScanAcquisitionProcessing, scan_processing: ScanProcessing, *, section_height_override: typing.Optional[int] = None) -> None:
         assert scan_processing.include_raw or scan_processing.include_summed
 
         document_window = self.__document_controller
@@ -124,7 +124,7 @@ class ScanAcquisitionController:
         data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller._document_controller)
 
         drift_correction_behavior : typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
-        section_height = None
+        section_height = section_height_override
         if self.__scan_specifier.drift_interval_lines > 0:
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
