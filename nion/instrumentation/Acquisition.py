@@ -2031,6 +2031,7 @@ class Acquisition:
                 acquire(self.__data_stream)
                 self.__is_aborted = self.__data_stream.is_aborted
         finally:
+            self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
 
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:

@@ -358,7 +358,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
-
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             for data_item in document_model.data_items:
                 self.assertEqual("Ned Flanders", Metadata.get_metadata_value(data_item, "stem.session.microscopist"))
 
@@ -639,6 +639,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             for data_item in document_model.data_items:
                 if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
@@ -669,6 +670,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             for data_item in document_model.data_items:
                 if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
@@ -700,6 +702,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             si_haadf_data_item = None
             subscan_data_item = None
@@ -738,6 +741,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False), section_height_override=2)
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             si_haadf_data_item = None
             subscan_data_item = None
@@ -775,8 +779,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     scan_specifier)
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.NONE, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
-
             document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             for data_item in document_model.data_items:
                 if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
@@ -813,6 +817,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_MASKED, ScanAcquisition.ScanProcessing(True, False))
                     scan_acquisition_controller._wait()
                     document_controller.periodic()
+                    self.assertFalse(any(d.is_live for d in document_model.data_items))
                     si_data_item = None
                     for data_item in document_model.data_items:
                         if "Spectrum Image" in data_item.title and "Ronchigram" in data_item.title:
