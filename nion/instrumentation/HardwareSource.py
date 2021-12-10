@@ -1098,13 +1098,14 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             src_channel_index = data_channel.src_channel_index
             if src_channel_index is not None:
                 src_data_channel = self.__data_channels[src_channel_index]
-                src_data_and_metadata = src_data_channel.data_and_metadata
-                data_channel_processor = data_channel.processor
-                if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
-                    processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
-                    data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
-                data_channels.append(data_channel)
-                xdatas.append(data_channel.data_and_metadata)
+                if src_data_channel in data_channels:
+                    src_data_and_metadata = src_data_channel.data_and_metadata
+                    data_channel_processor = data_channel.processor
+                    if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
+                        processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
+                        data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
+                    data_channels.append(data_channel)
+                    xdatas.append(data_channel.data_and_metadata)
         # all channel buffers are clean now
         for data_channel in self.__data_channels:
             data_channel.is_dirty = False
@@ -1124,6 +1125,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def __stop(self) -> None:
         for data_channel in self.__data_channels:
             data_channel.stop()
+        self.data_channel_states_updated.fire(list())
 
     # return whether task is running
     def is_task_running(self, task_id: str) -> bool:

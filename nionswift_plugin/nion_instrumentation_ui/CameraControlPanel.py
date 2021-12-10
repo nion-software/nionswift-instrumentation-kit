@@ -28,6 +28,8 @@ from nion.ui import Declarative
 from nion.ui import Dialog
 from nion.ui import Widgets
 from nion.utils import Geometry
+from nion.utils import Model
+from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
@@ -40,8 +42,14 @@ if typing.TYPE_CHECKING:
     from nion.ui import Window
     from nion.utils import Event
 
-
 _ = gettext.gettext
+
+map_channel_state_to_text = {
+    "stopped": _("Stopped"),
+    "complete": _("Acquiring"),
+    "partial": _("Acquiring"),
+    "marked": _("Stopping")
+}
 
 
 class CameraControlStateController:
@@ -100,7 +108,6 @@ class CameraControlStateController:
         on_capture_button_state_changed(visible, enabled)
         on_display_new_data_item(data_item)
         on_log_messages(messages, data_elements)
-        (thread) on_data_item_states_changed(data_item_states)
     """
 
     def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, queue_task: typing.Callable[[typing.Callable[[], None]], None], document_model: DocumentModel.DocumentModel) -> None:
@@ -121,7 +128,7 @@ class CameraControlStateController:
         self.on_frame_parameters_changed: typing.Optional[typing.Callable[[camera_base.CameraFrameParameters], None]] = None
         self.on_play_button_state_changed: typing.Optional[typing.Callable[[bool, str], None]] = None
         self.on_abort_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
-        self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
+        self.acquisition_state_model = Model.PropertyModel[str]("stopped")
         self.on_capture_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_display_new_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
         self.on_camera_current_changed: typing.Optional[typing.Callable[[typing.Optional[float]], None]] = None
@@ -165,7 +172,6 @@ class CameraControlStateController:
         self.on_frame_parameters_changed = None
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
-        self.on_data_item_states_changed = None
         self.on_capture_button_state_changed = None
         self.on_display_new_data_item = None
         self.on_log_messages = None
@@ -251,8 +257,6 @@ class CameraControlStateController:
             profile_items = self.__camera_hardware_source.modes
             self.on_profiles_changed(profile_items)
             self.__update_profile_index(self.__camera_hardware_source.selected_profile_index)
-        if callable(self.on_data_item_states_changed):
-            self.on_data_item_states_changed(list())
 
     # must be called on ui thread
     def handle_change_profile(self, profile_label: str) -> None:
@@ -366,8 +370,11 @@ class CameraControlStateController:
 
     # this message comes from the hardware source. may be called from thread.
     def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        if callable(self.on_data_item_states_changed):
-            self.on_data_item_states_changed(data_item_states)
+        if len(data_item_states) > 0:
+            data_item_state = data_item_states[0]
+            self.acquisition_state_model.value = data_item_state["channel_state"]
+        else:
+            self.acquisition_state_model.value = "stopped"
 
 
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
@@ -840,15 +847,14 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             # abort_button.visible = visible
             abort_button.enabled = enabled
 
-        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-            map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                                         "partial": _("Acquiring"), "marked": _("Stopping")}
-            if len(data_item_states) > 0:
-                data_item_state = data_item_states[0]
-                channel_state = data_item_state["channel_state"]
-                play_state_label.text = map_channel_state_to_text[channel_state]
-            else:
-                play_state_label.text = map_channel_state_to_text["stopped"]
+        def acquisition_state_changed(key: str) -> None:
+            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
+            # and add it to the window event loop.
+            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+                acquisition_state = acquisition_state or "stopped"
+                play_state_label.text = map_channel_state_to_text[acquisition_state]
+
+            self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
 
         def camera_current_changed(camera_current: typing.Optional[float]) -> None:
             if camera_current:
@@ -873,11 +879,14 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_frame_parameters_changed = frame_parameters_changed
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
-        self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
         self.__state_controller.on_camera_current_changed = camera_current_changed
         self.__state_controller.on_log_messages = log_messages
 
+        self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
+
         self.__state_controller.initialize_state()
+
+        acquisition_state_changed("value")
 
     # HACK: this is used to dump log messages to Swift.
     def periodic(self) -> None:
@@ -896,6 +905,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_released_event_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         super().close()
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
@@ -1013,7 +1023,6 @@ class CameraDisplayPanelController:
         self.__play_button_play_button_state = "play"
         self.__abort_button_visible = False
         self.__abort_button_enabled = False
-        self.__data_item_states: typing.List[typing.Mapping[str, typing.Any]] = list()
         self.__display_panel = display_panel
         self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
@@ -1070,16 +1079,15 @@ class CameraDisplayPanelController:
                 abort_button_canvas_item.enabled = abort_button_enabled
                 abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_status_text() -> None:
-            map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                                         "partial": _("Acquiring"), "marked": _("Stopping")}
-            for data_item_state in self.__data_item_states:
-                channel_state = data_item_state["channel_state"]
-                new_text = map_channel_state_to_text[channel_state]
-                if status_text_canvas_item.text != new_text:
-                    status_text_canvas_item.text = new_text
-                    status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
-                return
+        def acquisition_state_changed(key: str) -> None:
+            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
+            # and add it to the window event loop.
+            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+                acquisition_state = acquisition_state or "stopped"
+                status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
+                status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
+
+            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
 
         def display_name_changed(display_name: str) -> None:
             self.__display_name = display_name
@@ -1094,10 +1102,6 @@ class CameraDisplayPanelController:
             self.__abort_button_visible = visible
             self.__abort_button_enabled = enabled
             update_abort_button()
-
-        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-            self.__data_item_states = list(data_item_states)
-            update_status_text()
 
         def update_capture_button(visible: bool, enabled: bool) -> None:
             if visible:
@@ -1130,15 +1134,18 @@ class CameraDisplayPanelController:
         self.__state_controller.on_binning_values_changed = None
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
-        self.__state_controller.on_data_item_states_changed = data_item_states_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
         self.__state_controller.on_display_new_data_item = display_new_data_item
+
+        self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
 
         play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_pause_clicked
         abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
         capture_button.on_button_clicked = self.__state_controller.handle_capture_clicked
 
         self.__state_controller.initialize_state()
+
+        acquisition_state_changed("value")
 
         checkstate = self.__show_processed_checkbox.check_state if self.__show_processed_checkbox else "unchecked"
 
@@ -1149,6 +1156,7 @@ class CameraDisplayPanelController:
         self.__display_panel = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
