@@ -6,6 +6,7 @@ UNRELEASED
 - Add support for camera device 3 (no prepare methods).
 - Make auto drift tracker during synchronized acquisition optional (default off).
 - Improve error recovery and notification during acquisition errors.
+- Enable support for Python 3.10.
 
 0.20.0 (2011-11-12)
 -------------------
