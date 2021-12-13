@@ -1,14 +1,19 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
+0.20.1 (2021-12-13)
 ----------
+- Fix issue assembling scan channels during synchronized acquisition when split into sections (drift).
 - Add support for camera device 3 (no prepare methods).
+- Fix issue with camera state being incorrect in display panel control bar.
 - Make auto drift tracker during synchronized acquisition optional (default off).
 - Improve error recovery and notification during acquisition errors.
+- Improve handling of subscan/drift graphics when switching projects.
+- Fix sequence of spectra acquisition when optimized on device.
+- Show acquisition activity in activity panel.
 - Enable support for Python 3.10.
 
-0.20.0 (2011-11-12)
+0.20.0 (2021-11-12)
 -------------------
 - Add preliminary acquisition panel for more complex sequence/collection acquisitions.
 - Acquisition panel includes 1D ramp (series), 2D ramp (tableau), and other options.
