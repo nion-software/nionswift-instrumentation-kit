@@ -1,8 +1,8 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.20.1 (2021-12-13)
-----------
+0.20.2 (2021-12-13)
+-------------------
 - Fix issue assembling scan channels during synchronized acquisition when split into sections (drift).
 - Add support for camera device 3 (no prepare methods).
 - Fix issue with camera state being incorrect in display panel control bar.
