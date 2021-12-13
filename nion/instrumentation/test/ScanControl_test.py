@@ -445,7 +445,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual(1, len(test_context.document_model.data_items))
                 self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
                 scan_hardware_source.set_channel_enabled(1, True)
-                time.sleep(frame_time * 5.1)
+                scan_hardware_source.get_next_xdatas_to_start()  # grab at least one frame
                 test_context.document_controller.periodic()
                 self.assertEqual(2, len(test_context.document_model.data_items))
                 self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
