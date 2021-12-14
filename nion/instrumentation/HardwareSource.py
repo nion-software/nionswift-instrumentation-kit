@@ -506,7 +506,7 @@ class AcquisitionTask:
             except Exception as e:
                 # the task is finished if it doesn't execute
                 # logging.debug("exception")
-                self._stop_acquisition()
+                self._safe_stop_acquisition()
                 self.__mark_as_error()
                 raise
 
@@ -634,6 +634,17 @@ class AcquisitionTask:
     # must be thread safe
     def _stop_acquisition(self) -> None:
         self.stop_event.fire()
+
+    def _safe_stop_acquisition(self) -> None:
+        try:
+            self._stop_acquisition()
+        except Exception as e:
+            if callable(self._test_acquire_exception):
+                self._test_acquire_exception(e)
+            else:
+                import traceback
+                logging.debug(f"STOP Error: {e}")
+                traceback.print_exc()
 
     # subclasses are expected to implement this function efficiently since it will
     # be repeatedly called. in practice that means that subclasses MUST sleep (directly
@@ -1147,6 +1158,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             # hack to allow record to know when its data is finished
             if callable(task.finished_callback_fn):
                 task.finished_callback_fn(xdatas)
+
+        if is_error:
+            from nion.swift.model import Notification
+            Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition",
+                                                          "Acquisition Failed", "Acquisition has failed due to an error."))
 
     def __start(self) -> None:
         for data_channel in self.__data_channels:
