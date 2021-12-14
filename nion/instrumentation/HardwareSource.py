@@ -92,7 +92,6 @@ class HardwareSourceBridge:
         self.__data_channel_start_listeners: typing.Dict[str, typing.List[Event.EventListener]] = dict()
         self.__data_channel_stop_listeners: typing.Dict[str, typing.List[Event.EventListener]] = dict()
         self.__data_channel_states_updated_listeners: typing.Dict[str, Event.EventListener] = dict()
-        self.__hardware_source_call_soon_event_listeners: typing.Dict[str, Event.EventListener] = dict()
         self.__hardware_source_added_listener = HardwareSourceManager().hardware_source_added_event.listen(self.__hardware_source_added)
         self.__hardware_source_removed_listener = HardwareSourceManager().hardware_source_removed_event.listen(self.__hardware_source_removed)
         for hardware_source in HardwareSourceManager().hardware_sources:
@@ -127,9 +126,6 @@ class HardwareSourceBridge:
         self.__data_channel_updated_listeners = typing.cast(typing.Any, None)
         self.__data_channel_start_listeners = typing.cast(typing.Any, None)
         self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
-        for listener in self.__hardware_source_call_soon_event_listeners.values():
-            listener.close()
-        self.__hardware_source_call_soon_event_listeners = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
     def clean_display_items(self) -> None:
@@ -146,7 +142,6 @@ class HardwareSourceBridge:
         self.__document_model._call_soon(fn)
 
     def __hardware_source_added(self, hardware_source: HardwareSource) -> None:
-        self.__hardware_source_call_soon_event_listeners[hardware_source.hardware_source_id] = hardware_source.call_soon_event.listen(self.__call_soon)
         self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id] = hardware_source.data_channel_states_updated.listen(functools.partial(self.__data_channel_states_updated, hardware_source))
         for data_channel in hardware_source.data_channels:
             data_channel_updated_listener = data_channel.data_channel_updated_event.listen(functools.partial(self.__data_channel_updated, hardware_source, data_channel))
@@ -158,8 +153,6 @@ class HardwareSourceBridge:
             # NOTE: clean_display_items is called in __finish_project_read
 
     def __hardware_source_removed(self, hardware_source: HardwareSource) -> None:
-        self.__hardware_source_call_soon_event_listeners[hardware_source.hardware_source_id].close()
-        del self.__hardware_source_call_soon_event_listeners[hardware_source.hardware_source_id]
         self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id].close()
         del self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id]
         for listener in self.__data_channel_updated_listeners.get(hardware_source.hardware_source_id, list()):
@@ -902,7 +895,6 @@ class HardwareSource(typing.Protocol):
     xdatas_available_event: Event.Event
     abort_event: Event.Event
     acquisition_state_changed_event: Event.Event
-    call_soon_event: Event.Event
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
@@ -932,7 +924,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.abort_event = Event.Event()
         self.acquisition_state_changed_event = Event.Event()
         self.data_channel_state_changed_event = Event.Event()
-        self.call_soon_event = Event.Event()
         self.__break_for_closing = False
         self.__acquire_thread_trigger = threading.Event()
         self.__tasks: typing.Dict[str, AcquisitionTask] = dict()
@@ -980,9 +971,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             # acquire_thread should always be non-null here, otherwise close was called twice.
             self.__acquire_thread.join()
             self.__acquire_thread = None
-
-    def _call_soon(self, fn: typing.Callable[[], None]) -> None:
-        self.call_soon_event.fire_any(fn)
 
     def __acquire_thread_loop(self) -> None:
         # acquire_thread_trigger should be set whenever the task list change.
