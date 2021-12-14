@@ -29,7 +29,6 @@ from nion.ui import Dialog
 from nion.ui import Widgets
 from nion.utils import Geometry
 from nion.utils import Model
-from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:

@@ -32,6 +32,7 @@ from nion.ui import UserInterface
 from nion.ui import Widgets
 from nion.utils import Converter
 from nion.utils import Geometry
+from nion.utils import Model
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
@@ -39,11 +40,17 @@ if typing.TYPE_CHECKING:
     from nion.swift.model import DocumentModel
     from nion.swift.model import Persistence
     from nion.ui import DrawingContext
-    from nion.ui import UserInterface
     from nion.utils import Event
 
 
 _ = gettext.gettext
+
+map_channel_state_to_text = {
+    "stopped": _("Stopped"),
+    "complete": _("Acquiring"),
+    "partial": _("Acquiring"),
+    "marked": _("Stopping")
+}
 
 
 class ScanControlStateController:
@@ -135,7 +142,6 @@ class ScanControlStateController:
         on_display_new_data_item(data_item)
         (thread) on_channel_state_changed(channel_index, channel_id, channel_name, enabled)
         (thread) on_data_channel_state_changed(data_channel_index, data_channel_id, data_channel_name, enabled)
-        (thread) on_data_item_states_changed(data_item_states)
         (thread) on_probe_state_changed(probe_state, probe_position)  parked, scanning
         (thread) on_positioned_check_box_changed(checked)
         (thread) on_ac_line_sync_check_box_changed(checked)
@@ -178,12 +184,13 @@ class ScanControlStateController:
         self.on_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_record_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_record_abort_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
-        self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
         self.on_probe_state_changed : typing.Optional[typing.Callable[[str, typing.Optional[Geometry.FloatPoint]], None]] = None
         self.on_positioned_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_ac_line_sync_check_box_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_capture_button_state_changed : typing.Optional[typing.Callable[[bool, bool], None]] = None
         self.on_display_new_data_item : typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
+
+        self.acquisition_state_model = Model.PropertyModel[typing.Dict[str, typing.Optional[str]]](dict())
 
         self.__captured_xdatas_available_listener: typing.Optional[Event.EventListener] = None
 
@@ -242,7 +249,6 @@ class ScanControlStateController:
         self.on_abort_button_state_changed = None
         self.on_record_button_state_changed = None
         self.on_record_abort_button_state_changed = None
-        self.on_data_item_states_changed = None
         self.on_probe_state_changed = None
         self.on_positioned_check_box_changed = None
         self.on_ac_line_sync_check_box_changed = None
@@ -375,8 +381,6 @@ class ScanControlStateController:
             self.__update_profile_index(self.__scan_hardware_source.selected_profile_index)
         if self.on_linked_changed:
             self.on_linked_changed(self.__linked)
-        if self.on_data_item_states_changed:
-            self.on_data_item_states_changed(list())
         probe_state = self.__scan_hardware_source.probe_state
         probe_position = self.__scan_hardware_source.probe_position
         self.__probe_state_changed(probe_state, probe_position)
@@ -620,8 +624,10 @@ class ScanControlStateController:
 
     # this message comes from the hardware source. may be called from thread.
     def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        if self.on_data_item_states_changed:
-            self.on_data_item_states_changed(data_item_states)
+        acquisition_states: typing.Dict[str, typing.Optional[str]] = dict()
+        for data_item_state in data_item_states:
+            acquisition_states[data_item_state["channel_id"]] = data_item_state.get("channel_state", "stopped")
+        self.acquisition_state_model.value = acquisition_states
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         if self.on_probe_state_changed:
@@ -1406,6 +1412,19 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # record_abort_button.visible = visible
             record_abort_button.enabled = enabled
 
+        def acquisition_state_changed(key: str) -> None:
+            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
+            # and add it to the window event loop.
+            async def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
+                acquisition_state: typing.Optional[str] = None
+                for acquisition_state in acquisition_states.values():
+                    if acquisition_state != "stopped":
+                        break
+                acquisition_state = acquisition_state or "stopped"
+                play_state_label.text = map_channel_state_to_text[acquisition_state]
+
+            self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
+
         def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
             map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
                 "partial": _("Acquiring"), "marked": _("Stopping")}
@@ -1504,7 +1523,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__state_controller.on_linked_changed = linked_changed
         self.__state_controller.on_scan_button_state_changed = scan_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
-        self.__state_controller.on_data_item_states_changed = lambda a: self.document_controller.queue_task(lambda: data_item_states_changed(a))
         self.__state_controller.on_record_button_state_changed = record_button_state_changed
         self.__state_controller.on_record_abort_button_state_changed = record_abort_button_state_changed
         self.__state_controller.on_probe_state_changed = lambda a, b: self.document_controller.queue_task(lambda: probe_state_changed(a, b))
@@ -1518,7 +1536,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         for i in range(scan_controller.channel_count):
             thumbnail_group.add(ui.create_column_widget())
 
+        self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
+
         self.__state_controller.initialize_state()
+
+        acquisition_state_changed("value")
 
     def close(self) -> None:
         self.__key_pressed_event_listener.close()
@@ -1531,6 +1553,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_released_event_listener= typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         super().close()
 
     def periodic(self) -> None:
@@ -1626,7 +1649,6 @@ class ScanDisplayPanelController:
         self.__scan_button_play_button_state = "scan"
         self.__abort_button_visible = False
         self.__abort_button_enabled = False
-        self.__data_item_states: typing.List[typing.Mapping[str, typing.Any]] = list()
         self.__display_panel = display_panel
         self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
@@ -1704,32 +1726,6 @@ class ScanDisplayPanelController:
                 abort_button_canvas_item.enabled = abort_button_enabled
                 abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_status_text() -> None:
-            # first check whether we're closed or not; this particular method may be queued to the
-            # front thread and may execute after closing.
-            if not self.__display_panel:
-                return
-            map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                "partial": _("Acquiring"), "marked": _("Stopping")}
-            for data_item_state in self.__data_item_states:
-                if data_item_state["channel_id"] == self.__data_channel_id:
-                    data_item = data_item_state["data_item"]
-                    channel_state = data_item_state["channel_state"]
-                    partial_str = str()
-                    hardware_source_metadata = data_item.metadata.get("hardware_source", dict())
-                    scan_position = hardware_source_metadata.get("scan_position")
-                    if scan_position is not None:
-                        partial_str = " " + str(int(100 * scan_position["y"] / data_item.dimensional_shape[0])) + "%"
-                    new_text = map_channel_state_to_text[channel_state] + partial_str
-                    if status_text_canvas_item.text != new_text:
-                        status_text_canvas_item.text = new_text
-                        status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
-                    return
-            new_text = map_channel_state_to_text["stopped"]
-            if status_text_canvas_item.text != new_text:
-                status_text_canvas_item.text = new_text
-                status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
-
         def update_channel_enabled_check_box() -> None:
             channel_enabled_check_box.check_state = "checked" if self.__channel_enabled else "unchecked"
 
@@ -1747,10 +1743,15 @@ class ScanDisplayPanelController:
             self.__abort_button_enabled = enabled
             update_abort_button()
 
-        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-            # This will be called on a thread, but updating the status must occur on main thread.
-            self.__data_item_states = list(data_item_states)
-            display_panel.document_controller.queue_task(update_status_text)
+        def acquisition_state_changed(key: str) -> None:
+            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
+            # and add it to the window event loop.
+            async def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
+                acquisition_state = acquisition_states.get(self.__data_channel_id, None) or "stopped"
+                status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
+                status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
+
+            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
@@ -1784,7 +1785,6 @@ class ScanDisplayPanelController:
         self.__state_controller.on_display_name_changed = display_name_changed
         self.__state_controller.on_scan_button_state_changed = scan_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
-        self.__state_controller.on_data_item_states_changed = data_item_states_changed
         self.__state_controller.on_data_channel_state_changed = data_channel_state_changed
         self.__state_controller.on_capture_button_state_changed = update_capture_button
         self.__state_controller.on_display_new_data_item = display_new_data_item
@@ -1799,7 +1799,11 @@ class ScanDisplayPanelController:
         channel_enabled_check_box.on_check_state_changed = channel_enabled_check_box_check_state_changed
         capture_button.on_button_clicked = self.__state_controller.handle_capture_clicked
 
+        self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
+
         self.__state_controller.initialize_state()
+
+        acquisition_state_changed("value")
 
         # put these after initialize state so that channel index is initialized.
         decrease_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_decrease_pmt_clicked, self.__channel_index)
@@ -1810,6 +1814,7 @@ class ScanDisplayPanelController:
         self.__display_panel = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id

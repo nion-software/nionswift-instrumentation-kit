@@ -36,6 +36,13 @@ if typing.TYPE_CHECKING:
 
 _ = gettext.gettext
 
+map_channel_state_to_text = {
+    "stopped": _("Stopped"),
+    "complete": _("Acquiring"),
+    "partial": _("Acquiring"),
+    "marked": _("Stopping")
+}
+
 
 class VideoSourceStateController:
 
@@ -77,8 +84,9 @@ class VideoSourceStateController:
         self.on_display_name_changed: typing.Optional[typing.Callable[[str], None]] = None
         self.on_play_button_state_changed: typing.Optional[typing.Callable[[bool, str], None]] = None
         self.on_abort_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
-        self.on_data_item_states_changed: typing.Optional[typing.Callable[[typing.Sequence[typing.Mapping[str, typing.Any]]], None]] = None
         self.on_display_new_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
+
+        self.acquisition_state_model = Model.PropertyModel[str]("stopped")
 
         self.data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
 
@@ -108,7 +116,6 @@ class VideoSourceStateController:
         self.on_display_name_changed = None
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
-        self.on_data_item_states_changed = None
         self.on_display_new_data_item = None
         if self.__property_changed_event_listener:
             self.__property_changed_event_listener.close()
@@ -138,8 +145,6 @@ class VideoSourceStateController:
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
         self.__update_buttons()
-        if self.on_data_item_states_changed:
-            self.on_data_item_states_changed(list())
 
     def handle_play_clicked(self) -> None:
         """ Call this when the user clicks the play/pause button. """
@@ -170,8 +175,11 @@ class VideoSourceStateController:
 
     # this message comes from the hardware source. may be called from thread.
     def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        if self.on_data_item_states_changed:
-            self.on_data_item_states_changed(data_item_states)
+        if len(data_item_states) > 0:
+            data_item_state = data_item_states[0]
+            self.acquisition_state_model.value = data_item_state["channel_state"]
+        else:
+            self.acquisition_state_model.value = "stopped"
 
 
 class VideoDisplayPanelController:
@@ -195,7 +203,6 @@ class VideoDisplayPanelController:
         # configure the user interface
         self.__play_button_enabled = False
         self.__play_button_play_button_state = "play"
-        self.__data_item_states: typing.List[typing.Mapping[str, typing.Any]] = list()
         self.__display_panel = display_panel
         self.__display_panel.header_canvas_item.end_header_color = "#DAA520"
         self.__playback_controls_composition = CanvasItem.CanvasItemComposition()
@@ -233,20 +240,15 @@ class VideoDisplayPanelController:
             abort_button_canvas_item.enabled = enabled
             abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def update_status_text() -> None:
-            map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                "partial": _("Acquiring"), "marked": _("Stopping")}
-            for data_item_state in self.__data_item_states:
-                channel_state = data_item_state["channel_state"]
-                new_text = map_channel_state_to_text[channel_state]
-                if status_text_canvas_item.text != new_text:
-                    status_text_canvas_item.text = new_text
-                    status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
-                return
+        def acquisition_state_changed(key: str) -> None:
+            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
+            # and add it to the window event loop.
+            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+                acquisition_state = acquisition_state or "stopped"
+                status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
+                status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-            self.__data_item_states = list(data_item_states)
-            update_status_text()
+            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
 
         def display_new_data_item(data_item: DataItem.DataItem) -> None:
             result_display_panel = display_panel.document_controller.next_result_display_panel()
@@ -257,7 +259,6 @@ class VideoDisplayPanelController:
         self.__state_controller.on_display_name_changed = display_name_changed
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed
-        self.__state_controller.on_data_item_states_changed = data_item_states_changed
         self.__state_controller.on_display_new_data_item = display_new_data_item
 
         display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
@@ -265,13 +266,18 @@ class VideoDisplayPanelController:
         play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_clicked
         abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
 
+        self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
+
         self.__state_controller.initialize_state()
+
+        acquisition_state_changed("value")
 
     def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
