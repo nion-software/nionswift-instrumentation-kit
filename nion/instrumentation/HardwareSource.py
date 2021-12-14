@@ -241,25 +241,14 @@ class HardwareSourceBridge:
         self.__document_model._queue_data_item_update(data_item, data_and_metadata)
 
     def __data_channel_states_updated(self, hardware_source: HardwareSource, data_channels: typing.Sequence[DataChannel]) -> None:
-        data_item_states = list()
+        channel_map: typing.Dict[str, DataItem.DataItem] = dict()
         for data_channel in data_channels:
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
             data_item = data_item_reference.data_item
             channel_id = data_channel.channel_id
-            channel_data_state = data_channel.state
-            sub_area = data_channel.sub_area
-            # make sure to send out the complete frame
-            data_item_state: typing.Dict[str, typing.Any] = dict()
-            if channel_id is not None:
-                data_item_state["channel_id"] = channel_id
-            data_item_state["data_item"] = data_item
-            if channel_data_state:
-                data_item_state["channel_state"] = channel_data_state
-            if sub_area:
-                data_item_state["sub_area"] = sub_area
-            data_item_states.append(data_item_state)
-        # temporary until things get cleaned up
-        hardware_source.data_item_states_changed(data_item_states)
+            if channel_id and data_item:
+                channel_map[channel_id] = data_item
+        hardware_source.data_channel_map_updated(channel_map)
 
 
 # Keeps track of all registered hardware sources and instruments.
@@ -920,7 +909,7 @@ class HardwareSource(typing.Protocol):
     def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
-    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None: ...
+    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None: ...
     def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
     def get_record_frame_parameters(self) -> FrameParameters: ...
 
@@ -1051,9 +1040,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             if break_for_closing:
                 break
 
-    # subclasses can implement this method which is called when the data items used for acquisition change.
-    # NOTE: this is called from DocumentModel!
-    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
+    # subclasses can implement this method which is called when the data channels are updated.
+    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
         pass
 
     # subclasses should implement this method to create a continuous-style acquisition task.
@@ -1152,6 +1140,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             data_channel.is_dirty = False
 
         self.data_channel_states_updated.fire(data_channels)
+
         if is_complete:
             # xdatas are may still be pointing to memory in low level code here
             self.xdatas_available_event.fire(xdatas)

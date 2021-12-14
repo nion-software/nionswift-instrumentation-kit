@@ -368,14 +368,6 @@ class STEMController(Observable.Observable):
             self.scan_context_data_items_changed_event.fire()
 
     @property
-    def scan_context_data_items(self) -> typing.Sequence[DataItem.DataItem]:
-        return list(self.__scan_context_channel_map.values())
-
-    @property
-    def scan_context_channel_map(self) -> typing.Mapping[str, DataItem.DataItem]:
-        return self.__scan_context_channel_map
-
-    @property
     def scan_context(self) -> ScanContext:
         return self.__scan_context
 

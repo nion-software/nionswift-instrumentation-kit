@@ -1809,13 +1809,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
-    def data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        channel_ids = {self.get_channel_state(channel_index).channel_id for channel_index in range(self.channel_count)}
-        channel_map: typing.Dict[str, DataItem.DataItem] = dict()
-        for data_item_state in data_item_states:
-            if data_item_state.get("channel_id") in channel_ids:
-                channel_map[typing.cast(str, data_item_state.get("channel_id"))] = typing.cast("DataItem.DataItem", data_item_state.get("data_item"))
-        self.__stem_controller._update_scan_channel_map(channel_map)
+    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
+        self.__stem_controller._update_scan_channel_map(data_channel_map)
 
     @property
     def use_hardware_simulator(self) -> bool:
