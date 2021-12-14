@@ -40,7 +40,8 @@ map_channel_state_to_text = {
     "stopped": _("Stopped"),
     "complete": _("Acquiring"),
     "partial": _("Acquiring"),
-    "marked": _("Stopping")
+    "marked": _("Stopping"),
+    "error": _("Error"),
 }
 
 
@@ -53,7 +54,6 @@ class VideoSourceStateController:
 
     Hardware source should support the following API:
         (acquisition)
-            (event) data_item_states_changed_event(data_item_states)
             (event) acquisition_state_changed_event(is_acquiring)
             (read-only property) hardware_source_id
             (read-only property) is_playing
@@ -79,8 +79,8 @@ class VideoSourceStateController:
         self.__hardware_source = hardware_source
         self.queue_task = queue_task
         self.__document_model = document_model
-        self.__data_item_states_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__data_channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed: typing.Optional[typing.Callable[[str], None]] = None
         self.on_play_button_state_changed: typing.Optional[typing.Callable[[bool, str], None]] = None
         self.on_abort_button_state_changed: typing.Optional[typing.Callable[[bool, bool], None]] = None
@@ -110,9 +110,7 @@ class VideoSourceStateController:
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
             self.__acquisition_state_changed_event_listener = None
-        if self.__data_item_states_changed_event_listener:
-            self.__data_item_states_changed_event_listener.close()
-            self.__data_item_states_changed_event_listener = None
+        self.__data_channel_state_changed_event_listener = None
         self.on_display_name_changed = None
         self.on_play_button_state_changed = None
         self.on_abort_button_state_changed = None
@@ -140,7 +138,7 @@ class VideoSourceStateController:
     def initialize_state(self) -> None:
         """ Call this to initialize the state of the UI after everything has been connected. """
         if self.__hardware_source:
-            self.__data_item_states_changed_event_listener = self.__hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
+            self.__data_channel_state_changed_event_listener = self.__hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
             self.__acquisition_state_changed_event_listener = self.__hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
         if self.on_display_name_changed:
             self.on_display_name_changed(self.display_name)
@@ -173,13 +171,11 @@ class VideoSourceStateController:
     def __acquisition_state_changed(self, is_playing: bool) -> None:
         self.queue_task(self.__update_buttons)
 
-    # this message comes from the hardware source. may be called from thread.
-    def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        if len(data_item_states) > 0:
-            data_item_state = data_item_states[0]
-            self.acquisition_state_model.value = data_item_state["channel_state"]
+    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
+        if data_channel.is_started:
+            self.acquisition_state_model.value = data_channel.state
         else:
-            self.acquisition_state_model.value = "stopped"
+            self.acquisition_state_model.value = "error" if data_channel.is_error else "stopped"
 
 
 class VideoDisplayPanelController:

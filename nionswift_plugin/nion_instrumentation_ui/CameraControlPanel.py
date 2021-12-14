@@ -47,7 +47,8 @@ map_channel_state_to_text = {
     "stopped": _("Stopped"),
     "complete": _("Acquiring"),
     "partial": _("Acquiring"),
-    "marked": _("Stopping")
+    "marked": _("Stopping"),
+    "error": _("Error"),
 }
 
 
@@ -57,7 +58,6 @@ class CameraControlStateController:
 
     Camera controller should support the following API:
         (acquisition)
-            (event) data_item_states_changed_event(data_item_states)
             (event) acquisition_state_changed_event(is_acquiring)
             (read-only property) hardware_source_id
             (read-only property) is_playing
@@ -117,9 +117,9 @@ class CameraControlStateController:
         self.__document_model = document_model
         self.__profile_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
-        self.__data_item_states_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__log_messages_event_listener: typing.Optional[Event.EventListener] = None
+        self.__data_channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed: typing.Optional[typing.Callable[[str], None]] = None
         self.on_binning_values_changed: typing.Optional[typing.Callable[[typing.Sequence[int]], None]] = None
         self.on_profiles_changed: typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
@@ -158,9 +158,7 @@ class CameraControlStateController:
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
             self.__acquisition_state_changed_event_listener = None
-        if self.__data_item_states_changed_event_listener:
-            self.__data_item_states_changed_event_listener.close()
-            self.__data_item_states_changed_event_listener = None
+        self.__data_channel_state_changed_event_listener = None
         if self.__log_messages_event_listener:
             self.__log_messages_event_listener.close()
             self.__log_messages_event_listener = None
@@ -244,7 +242,7 @@ class CameraControlStateController:
         if self.__camera_hardware_source:
             self.__profile_changed_event_listener = self.__camera_hardware_source.profile_changed_event.listen(self.__update_profile_index)
             self.__frame_parameters_changed_event_listener = self.__camera_hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
-            self.__data_item_states_changed_event_listener = self.__camera_hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
+            self.__data_channel_state_changed_event_listener = self.__camera_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
             self.__acquisition_state_changed_event_listener = self.__camera_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__log_messages_event_listener = self.__camera_hardware_source.log_messages_event.listen(self.__log_messages)
         if callable(self.on_display_name_changed):
@@ -367,13 +365,11 @@ class CameraControlStateController:
         if callable(self.on_log_messages):
             self.on_log_messages(messages, data_elements)
 
-    # this message comes from the hardware source. may be called from thread.
-    def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        if len(data_item_states) > 0:
-            data_item_state = data_item_states[0]
-            self.acquisition_state_model.value = data_item_state["channel_state"]
+    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
+        if data_channel.is_started:
+            self.acquisition_state_model.value = data_channel.state
         else:
-            self.acquisition_state_model.value = "stopped"
+            self.acquisition_state_model.value = "error" if data_channel.is_error else "stopped"
 
 
 class IconCanvasItem(CanvasItem.TextButtonCanvasItem):

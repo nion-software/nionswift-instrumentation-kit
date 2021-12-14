@@ -253,12 +253,12 @@ class HardwareSourceBridge:
             if channel_id is not None:
                 data_item_state["channel_id"] = channel_id
             data_item_state["data_item"] = data_item
-            data_item_state["channel_state"] = channel_data_state
+            if channel_data_state:
+                data_item_state["channel_state"] = channel_data_state
             if sub_area:
                 data_item_state["sub_area"] = sub_area
             data_item_states.append(data_item_state)
         # temporary until things get cleaned up
-        hardware_source.data_item_states_changed_event.fire(data_item_states)
         hardware_source.data_item_states_changed(data_item_states)
 
 
@@ -460,7 +460,11 @@ class AcquisitionTask:
 
     def __mark_as_finished(self) -> None:
         self.__finished = True
-        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping)
+        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, False)
+
+    def __mark_as_error(self) -> None:
+        self.__finished = True
+        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, True)
 
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
@@ -503,7 +507,7 @@ class AcquisitionTask:
                 # the task is finished if it doesn't execute
                 # logging.debug("exception")
                 self._stop_acquisition()
-                self.__mark_as_finished()
+                self.__mark_as_error()
                 raise
 
     # called from the hardware source
@@ -567,7 +571,7 @@ class AcquisitionTask:
                 break
 
         # notify that data elements have changed. at this point data_elements may contain data stored in low level code.
-        self.data_elements_changed_event.fire(data_elements, self.__view_id, complete, self.__is_stopping)
+        self.data_elements_changed_event.fire(data_elements, self.__view_id, complete, self.__is_stopping, False)
 
         if complete:
             self.__frame_index += 1
@@ -685,9 +689,11 @@ class DataChannel:
         self.__dest_sub_area: typing.Optional[Geometry.IntRect] = None
         self.__data_and_metadata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.is_dirty = False
+        self.__is_error = False
         self.data_channel_updated_event = Event.Event()
         self.data_channel_start_event = Event.Event()
         self.data_channel_stop_event = Event.Event()
+        self.data_channel_state_changed_event = Event.Event()
 
     @property
     def index(self) -> int:
@@ -730,11 +736,22 @@ class DataChannel:
         return self.__data_and_metadata
 
     @property
+    def is_error(self) -> bool:
+        return self.__is_error
+
+    @is_error.setter
+    def is_error(self, value: bool) -> None:
+        if value != self.__is_error:
+            self.__is_error = value
+            self.data_channel_state_changed_event.fire()
+
+    @property
     def is_started(self) -> bool:
         return self.__start_count > 0
 
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: typing.Optional[DataAndMetadata.ShapeType], dest_sub_area: typing.Optional[Geometry.IntRectTuple], sub_area: typing.Optional[Geometry.IntRectTuple], view_id: typing.Optional[str]) -> None:
         """Called from hardware source when new data arrives."""
+        old_state = self.__state
         self.__state = state
         self.__data_shape = data_shape or data_and_metadata.data_shape
 
@@ -796,18 +813,24 @@ class DataChannel:
         self.data_channel_updated_event.fire(new_extended_data)
         self.is_dirty = True
 
+        if old_state != self.__state:
+            self.data_channel_state_changed_event.fire()
+
     def start(self) -> None:
         """Called from hardware source when data starts streaming."""
         old_start_count = self.__start_count
         self.__start_count += 1
         if old_start_count == 0:
+            self.is_error = False
             self.data_channel_start_event.fire()
+            self.data_channel_state_changed_event.fire()
 
     def stop(self) -> None:
         """Called from hardware source when data stops streaming."""
         self.__start_count -= 1
         if self.__start_count == 0:
             self.data_channel_stop_event.fire()
+            self.data_channel_state_changed_event.fire()
 
 
 class Instrument(typing.Protocol):
@@ -875,10 +898,10 @@ class HardwareSource(typing.Protocol):
     # private. do not use outside of instrumentation-kit.
 
     data_channel_states_updated: Event.Event
+    data_channel_state_changed_event: Event.Event
     xdatas_available_event: Event.Event
     abort_event: Event.Event
     acquisition_state_changed_event: Event.Event
-    data_item_states_changed_event: Event.Event
     call_soon_event: Event.Event
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None: ...
@@ -902,12 +925,13 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
         self.__data_channels: typing.List[DataChannel] = list()
+        self.__data_channel_state_changed_listeners: typing.List[Event.EventListener] = list()
         self.__features: typing.Dict[str, typing.Any] = dict()
         self.data_channel_states_updated = Event.Event()
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
         self.acquisition_state_changed_event = Event.Event()
-        self.data_item_states_changed_event = Event.Event()
+        self.data_channel_state_changed_event = Event.Event()
         self.call_soon_event = Event.Event()
         self.__break_for_closing = False
         self.__acquire_thread_trigger = threading.Event()
@@ -923,6 +947,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     def close(self) -> None:
         self.close_thread()
+        self.__data_channel_state_changed_listeners = typing.cast(typing.Any, None)
 
     @property
     def features(self) -> typing.Dict[str, typing.Any]:
@@ -1046,7 +1071,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def _record_task_updated(self, record_task: typing.Optional[AcquisitionTask]) -> None:
         pass
 
-    def __data_elements_changed(self, task: AcquisitionTask, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_complete: bool, is_stopping: bool) -> None:
+    def __data_elements_changed(self, task: AcquisitionTask, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_complete: bool, is_stopping: bool, is_error: bool) -> None:
         """Called in response to a data_elements_changed event from the task.
 
         data_elements is a list of data_elements; may be an empty list
@@ -1082,8 +1107,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             channel_index = next((data_channel.index for data_channel in self.__data_channels if data_channel.channel_id == channel_id), 0)
             data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
             # data_and_metadata data may still point to low level code memory at this point.
-            channel_state = data_element.get("state", "complete")
-            if channel_state != "complete" and is_stopping:
+            channel_state = data_element.get("state", "complete" if not is_error else "error")
+            if channel_state != "complete" and is_stopping and not is_error:
                 channel_state = "marked"
             data_shape = data_element.get("data_shape")
             dest_sub_area = data_element.get("dest_sub_area")
@@ -1101,13 +1126,18 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 if src_data_channel in data_channels:
                     src_data_and_metadata = src_data_channel.data_and_metadata
                     data_channel_processor = data_channel.processor
-                    if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
-                        processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
-                        data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
+                    if not is_error:
+                        if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
+                            processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
+                            data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
+                    else:
+                        assert data_channel.data_and_metadata
+                        data_channel.update(data_channel.data_and_metadata, "error", None, None, None, view_id)
                     data_channels.append(data_channel)
                     xdatas.append(data_channel.data_and_metadata)
         # all channel buffers are clean now
         for data_channel in self.__data_channels:
+            data_channel.is_error = is_error
             data_channel.is_dirty = False
 
         self.data_channel_states_updated.fire(data_channels)
@@ -1307,11 +1337,18 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def data_channels(self) -> typing.Sequence[DataChannel]:
         return self.__data_channels
 
+    def __data_channel_state_changed(self, data_channel: DataChannel) -> None:
+        self.data_channel_state_changed_event.fire(data_channel)
+
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None:
-        self.__data_channels.append(DataChannel(self, len(self.__data_channels), channel_id, name))
+        data_channel = DataChannel(self, len(self.__data_channels), channel_id, name)
+        self.__data_channels.append(data_channel)
+        self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
 
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
-        self.__data_channels.append(DataChannel(self, len(self.__data_channels), processor.processor_id, None, channel_index, processor))
+        data_channel = DataChannel(self, len(self.__data_channels), processor.processor_id, None, channel_index, processor)
+        self.__data_channels.append(data_channel)
+        self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
 
     def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
         """Clean the display items associated with this data channel.

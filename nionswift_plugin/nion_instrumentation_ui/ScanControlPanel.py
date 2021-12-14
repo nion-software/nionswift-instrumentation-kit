@@ -49,7 +49,8 @@ map_channel_state_to_text = {
     "stopped": _("Stopped"),
     "complete": _("Acquiring"),
     "partial": _("Acquiring"),
-    "marked": _("Stopping")
+    "marked": _("Stopping"),
+    "error": _("Error"),
 }
 
 
@@ -61,7 +62,6 @@ class ScanControlStateController:
 
     Scan controller should support the following API:
         (acquisition)
-            (event) data_item_states_changed_event(data_item_states)
             (event) acquisition_state_changed_event(is_acquiring)
             (read-only property) hardware_source_id
             (read-only property) is_playing
@@ -161,7 +161,6 @@ class ScanControlStateController:
         self.__linked = True
         self.__profile_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
-        self.__data_item_states_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__probe_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
@@ -171,6 +170,7 @@ class ScanControlStateController:
         self.__drift_region_listener: typing.Optional[Event.EventListener] = None
         self.__drift_settings_listener: typing.Optional[Event.EventListener] = None
         self.__scan_context_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__data_channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState, stem_controller.LineScanState], None]] = None
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
@@ -206,9 +206,7 @@ class ScanControlStateController:
         if self.__frame_parameters_changed_event_listener:
             self.__frame_parameters_changed_event_listener.close()
             self.__frame_parameters_changed_event_listener = None
-        if self.__data_item_states_changed_event_listener:
-            self.__data_item_states_changed_event_listener.close()
-            self.__data_item_states_changed_event_listener = None
+        self.__data_channel_state_changed_event_listener = None
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
             self.__acquisition_state_changed_event_listener = None
@@ -307,7 +305,7 @@ class ScanControlStateController:
 
             self.__profile_changed_event_listener = self.__scan_hardware_source.profile_changed_event.listen(self.__update_profile_index)
             self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
-            self.__data_item_states_changed_event_listener = self.__scan_hardware_source.data_item_states_changed_event.listen(self.__data_item_states_changed)
+            self.__data_channel_state_changed_event_listener = self.__scan_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
             self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__probe_state_changed_event_listener = self.__scan_hardware_source.probe_state_changed_event.listen(self.__probe_state_changed)
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
@@ -622,11 +620,14 @@ class ScanControlStateController:
             self.__captured_xdatas_available_listener = None
         self.queue_task(self.__update_buttons)
 
-    # this message comes from the hardware source. may be called from thread.
-    def __data_item_states_changed(self, data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-        acquisition_states: typing.Dict[str, typing.Optional[str]] = dict()
-        for data_item_state in data_item_states:
-            acquisition_states[data_item_state["channel_id"]] = data_item_state.get("channel_state", "stopped")
+    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
+        # the value (dict) does not get copied; so copy it here.
+        acquisition_states = copy.deepcopy(self.acquisition_state_model.value) or dict()
+        channel_id = data_channel.channel_id or "unknown"
+        if data_channel.is_started:
+            acquisition_states[channel_id] = data_channel.state
+        else:
+            acquisition_states[channel_id] = "error" if data_channel.is_error else "stopped"
         self.acquisition_state_model.value = acquisition_states
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
@@ -1423,23 +1424,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 acquisition_state = acquisition_state or "stopped"
                 play_state_label.text = map_channel_state_to_text[acquisition_state]
 
-            self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
-
-        def data_item_states_changed(data_item_states: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
-            map_channel_state_to_text = {"stopped": _("Stopped"), "complete": _("Acquiring"),
-                "partial": _("Acquiring"), "marked": _("Stopping")}
-            if len(data_item_states) > 0:
-                data_item_state = data_item_states[0]
-                data_item = data_item_state["data_item"]
-                channel_state = data_item_state["channel_state"]
-                partial_str = str()
-                hardware_source_metadata = data_item.metadata.get("hardware_source", dict())
-                scan_position = hardware_source_metadata.get("scan_position")
-                if scan_position is not None:
-                    partial_str = " " + str(int(100 * scan_position["y"] / data_item.dimensional_shape[0])) + "%"
-                play_state_label.text = map_channel_state_to_text[channel_state] + partial_str
-            else:
-                play_state_label.text = map_channel_state_to_text["stopped"]
+            acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
+            self.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states))
 
         def probe_state_changed(probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
             map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
@@ -1751,7 +1737,8 @@ class ScanDisplayPanelController:
                 status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
+            acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
+            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states))
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
