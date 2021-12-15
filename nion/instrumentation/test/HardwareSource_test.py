@@ -812,7 +812,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             document_model.append_data_item(data_item)
             document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, "a"), data_item)
             hardware_source.data_channels[0].update(DataAndMetadata.new_data_and_metadata(data), "complete", None, None, None, None)
-            hardware_source.sleep = 0.10
+            hardware_source.sleep = 0.20
             hardware_source.start_playing()
             time.sleep(0.02)
             hardware_source.abort_playing(sync_timeout=3.0)
