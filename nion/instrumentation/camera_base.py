@@ -1999,7 +1999,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
-        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape)
+        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape, **kwargs)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
         return self.__camera.acquire_synchronized_continue(update_period=update_period)
