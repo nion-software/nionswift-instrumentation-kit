@@ -366,7 +366,7 @@ class CameraControlStateController:
             self.on_log_messages(messages, data_elements)
 
     def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
-        if data_channel.is_started:
+        if data_channel.is_started and data_channel.state:
             self.acquisition_state_model.value = data_channel.state
         else:
             self.acquisition_state_model.value = "error" if data_channel.is_error else "stopped"

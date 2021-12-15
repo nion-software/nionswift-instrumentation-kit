@@ -624,7 +624,7 @@ class ScanControlStateController:
         # the value (dict) does not get copied; so copy it here.
         acquisition_states = copy.deepcopy(self.acquisition_state_model.value) or dict()
         channel_id = data_channel.channel_id or "unknown"
-        if data_channel.is_started:
+        if data_channel.is_started and data_channel.state:
             acquisition_states[channel_id] = data_channel.state
         else:
             acquisition_states[channel_id] = "error" if data_channel.is_error else "stopped"

@@ -960,7 +960,25 @@ class TestCameraControlClass(unittest.TestCase):
                 document_controller.periodic()
             self.assertEqual(state_controller.acquisition_state_model.value, "stopped")
 
-    def test_acquisition_state_after_exception_is_error(self):
+    def test_acquisition_state_after_exception_during_start(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            hardware_source = test_context.camera_hardware_source
+            def raise_exception():
+                raise Exception("Error during acquisition")
+            hardware_source._test_start_hook = raise_exception
+            hardware_source._test_acquire_exception = lambda *args: None
+            state_controller = self.__create_state_controller(test_context)
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish(5)
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
+            document_controller.periodic()
+            self.assertEqual(state_controller.acquisition_state_model.value, "error")
+
+    def test_acquisition_state_after_exception_during_execute(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source

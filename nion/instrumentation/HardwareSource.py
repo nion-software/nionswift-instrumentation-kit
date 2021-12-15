@@ -432,8 +432,9 @@ class AcquisitionTask:
         self.__minimum_period = 1 / 1000.0
         self.__frame_index = 0
         self.__view_id = str(uuid.uuid4()) if not continuous else None
-        self._test_acquire_exception = None
-        self._test_acquire_hook = None
+        self._test_acquire_exception: typing.Optional[typing.Callable[[Exception], None]] = None
+        self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
+        self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
         self.start_event = Event.Event()
         self.stop_event = Event.Event()
         self.data_elements_changed_event = Event.Event()
@@ -458,7 +459,7 @@ class AcquisitionTask:
                 self.__start()
             except Exception as e:
                 # the task is finished if it doesn't start
-                self.__mark_as_finished()
+                self.__mark_as_error()
                 raise
             self.__started = True
             # logging.debug("%s started", self)
@@ -517,6 +518,9 @@ class AcquisitionTask:
         self._mark_acquisition()
 
     def __start(self) -> None:
+        if callable(self._test_start_hook):
+            self._test_start_hook()
+
         if not self._start_acquisition():
             self.abort()
         self.__last_acquire_time = time.time() - self.__minimum_period
@@ -527,7 +531,7 @@ class AcquisitionTask:
         elapsed = time.time() - self.__last_acquire_time
         time.sleep(max(0.0, self.__minimum_period - elapsed))
 
-        if self._test_acquire_hook:
+        if callable(self._test_acquire_hook):
             self._test_acquire_hook()
 
         partial_data_elements = self._acquire_data_elements()
@@ -933,8 +937,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__acquire_thread: typing.Optional[threading.Thread] = threading.Thread(target=self.__acquire_thread_loop)
         self.__acquire_thread.daemon = True
         self.__acquire_thread.start()
-        self._test_acquire_exception = None
-        self._test_acquire_hook = None
+        self._test_acquire_exception: typing.Optional[typing.Callable[[Exception], None]] = None
+        self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
+        self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
 
     def close(self) -> None:
         self.close_thread()
@@ -1195,6 +1200,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         if not self.is_playing:
             view_task = self._create_acquisition_view_task()
+            view_task._test_start_hook = self._test_start_hook
             view_task._test_acquire_hook = self._test_acquire_hook
             self._view_task_updated(view_task)
             self.start_task('view', view_task)
