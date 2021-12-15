@@ -735,15 +735,15 @@ class TestScanControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = Geometry.IntSize(1024, 1024)
+            frame_parameters_0.size = Geometry.IntSize(256, 256)
             frame_parameters_0.pixel_time_us = 2
             scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
             scan_hardware_source.start_playing()
             data_list = list()
             for _ in range(16):
                 data_list.append(scan_hardware_source.get_next_xdatas_to_finish()[0].data)
-            for row in range(0, 1024, 32):
-                s = slice(row, row+32), slice(0, 1024)
+            for row in range(0, 256, 32):
+                s = slice(row, row+32), slice(0, 256)
                 for data in data_list[1:]:
                     self.assertFalse(numpy.array_equal(data_list[0][s], data[s]))
 
