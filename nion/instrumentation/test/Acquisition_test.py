@@ -138,7 +138,7 @@ class MultiFrameDataStream(Acquisition.DataStream):
 
     n is the number of frames to send at once.
     """
-    def __init__(self, frame_count: int, frame_shape: Acquisition.ShapeType, channel: Acquisition.Channel, count: typing.Optional[int] = None, do_processing: bool = False):
+    def __init__(self, frame_count: int, frame_shape: Acquisition.ShapeType, channel: Acquisition.Channel, count: typing.Optional[int] = None, do_processing: bool = False, counts: typing.Optional[typing.Sequence[int]] = None):
         super().__init__(frame_count)
         assert len(frame_shape) == 2
         # frame counts are used for allocating and returning test data
@@ -149,6 +149,8 @@ class MultiFrameDataStream(Acquisition.DataStream):
         self.__channel = channel
         # count is the number of chunks sent at once
         self.__count = count or 1
+        self.__counts = counts
+        self.__counts_index = 0
         self.__do_processing = do_processing
         self.data = numpy.random.randn(self.__frame_count, *self.__frame_shape)
 
@@ -174,7 +176,11 @@ class MultiFrameDataStream(Acquisition.DataStream):
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
             data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
-        count = min(self.__count, self.__frame_count - self.__frame_index)
+        if self.__counts:
+            count = self.__counts[self.__counts_index]
+            self.__counts_index += 1
+        else:
+            count = min(self.__count, self.__frame_count - self.__frame_index)
         source_data_slice: typing.Tuple[slice, ...] = (slice(0, count), slice(None), slice(None))
         if self.__do_processing:
             source_data_slice = source_data_slice[:-1]
@@ -313,6 +319,22 @@ class TestAcquisitionClass(unittest.TestCase):
                     Acquisition.acquire(maker)
                     expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
                     self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+
+    def test_camera_collection_acquisition_with_inconsistent_grouping(self):
+        # in this case the collector is acting only to arrange the data, not to provide any scan
+        collection_shape = (12, 12)
+        # the 32 will be 10 from previous row; 12 in complete row; 10 in next row
+        # this triggered an error
+        counts = (2, 24, 32, 86)
+        channel = Acquisition.Channel("0")
+        data_stream = MultiFrameDataStream(numpy.product(collection_shape), (2, 2), channel, counts=counts)
+        collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
+                                                    [Calibration.Calibration(), Calibration.Calibration()])
+        maker = Acquisition.FramedDataStream(collector)
+        with maker.ref():
+            Acquisition.acquire(maker)
+            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_scan_sequence_acquisition(self):
         sequence_len = 4

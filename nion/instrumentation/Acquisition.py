@@ -784,7 +784,7 @@ class CollectedDataStream(DataStream):
                     assert 0 <= slice_stop <= self.__collection_shape[0]
                     source_slice_shape = get_slice_shape(data_stream_event.source_slice, old_source_data.shape)
                     source_slice_length = source_slice_shape[0]
-                    row_count = source_slice_length // collection_sub_slice_row_length
+                    row_count = (source_slice_length - source_index) // collection_sub_slice_row_length
                     next_source_index = source_index + row_count * collection_sub_slice_row_length
                     new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
                     new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
