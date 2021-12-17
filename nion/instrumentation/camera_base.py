@@ -1242,7 +1242,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
 class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
 
-    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
+    def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
         # configure the event loop object
@@ -1758,7 +1758,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
 class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
 
-    def __init__(self, instrument_controller_id: str, camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
+    def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
         # configure the event loop object
@@ -2680,9 +2680,9 @@ def run(configuration_location: pathlib.Path) -> None:
     def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
         if "camera_module" in component_types:
             camera_module = component
-            instrument_controller_id = getattr(camera_module, "instrument_controller_id", None)
+            instrument_controller_id = typing.cast(typing.Optional[str], getattr(camera_module, "instrument_controller_id", None))
             # TODO: remove next line when backwards compatibility no longer needed
-            instrument_controller_id = instrument_controller_id or getattr(camera_module, "stem_controller_id", None)
+            instrument_controller_id = instrument_controller_id or typing.cast(typing.Optional[str], getattr(camera_module, "stem_controller_id", None))
             # grab the settings and camera panel info from the camera module
             camera_settings = camera_module.camera_settings
             camera_device = camera_module.camera_device

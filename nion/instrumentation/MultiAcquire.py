@@ -67,7 +67,7 @@ class MultiEELSParameters(typing.List[typing.Dict[str, typing.Any]]):
         super().append(value)
         self.parameters_changed_event.fire()
 
-    def pop(self, index: int = -1) -> typing.Any:
+    def pop(self, index: typing.SupportsIndex = -1) -> typing.Any:
         result = super().pop(index)
         self.parameters_changed_event.fire()
         return result
