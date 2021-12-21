@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import pathlib
+import random
 import shutil
 import threading
 import time
@@ -733,6 +734,8 @@ class TestScanControlClass(unittest.TestCase):
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
         with self.__test_context() as test_context:
+            numpy.random.seed(999)
+            random.seed(999)
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             frame_parameters_0.size = Geometry.IntSize(256, 256)
@@ -742,10 +745,13 @@ class TestScanControlClass(unittest.TestCase):
             data_list = list()
             for _ in range(16):
                 data_list.append(scan_hardware_source.get_next_xdatas_to_finish()[0].data)
+                numpy.random.seed()
+                random.seed()
             for row in range(0, 256, 32):
                 s = slice(row, row+32), slice(0, 256)
-                for data in data_list[1:]:
-                    self.assertFalse(numpy.array_equal(data_list[0][s], data[s]))
+                for i, data in enumerate(data_list[1:]):
+                    print(f"#{i} {row} {numpy.sum(data_list[0][s])} {numpy.sum(data[s])} {id(data)} {id(data_list[0])}")
+                    self.assertFalse(numpy.array_equal(data_list[0][s], data[s]), f"fail #{i} section {row} {id(data)} {id(data_list[0])}")
 
     def test_changing_width_when_linked_changes_height_too(self):
         with self.__test_context() as test_context:
