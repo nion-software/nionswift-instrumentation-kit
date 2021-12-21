@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.20.3 (2021-12-21)
+-------------------
+- Fix issue handling partial acquisition during synchronized/sequence acquisition.
+- Improve error handling and notifications after errors.
+
 0.20.2 (2021-12-13)
 -------------------
 - Fix issue assembling scan channels during synchronized acquisition when split into sections (drift).
