@@ -43,7 +43,7 @@ class DriftLogger:
         # must be called on main thread
         if not self.__data_item:
             drift_data_frame = self.__drift_tracker.drift_data_frame
-            delta_nm_data = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+            delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
             data_item = DataItem.DataItem(delta_nm_data)
             data_item.title = f"Drift Log"
             self.__document_model.append_data_item(data_item)
@@ -68,7 +68,7 @@ class DriftLogger:
 
     def __drift_changed(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
         drift_data_frame = self.__drift_tracker.drift_data_frame
-        delta_nm_data = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+        delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
         self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, delta_nm_data))
 
 

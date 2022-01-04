@@ -1233,7 +1233,7 @@ class DataAndMetadataDataChannel(DataChannel):
     def __make_data(self, channel: Channel, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data.get(channel, None)
         if not data_and_metadata:
-            data = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
+            data: numpy.typing.NDArray[typing.Any] = numpy.zeros(data_metadata.data_shape, data_metadata.data_dtype)
             data_descriptor = data_metadata.data_descriptor
             data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
                                                                       data_metadata.intensity_calibration,
@@ -1596,7 +1596,7 @@ class SumOperator(DataStreamOperator):
             assert data is not None
             data_dtype = data_and_metadata.data_dtype
             assert data_dtype is not None
-            summed_data = numpy.array(data.sum(), dtype=data_dtype)
+            summed_data: numpy.typing.NDArray[typing.Any] = numpy.array(data.sum(), dtype=data_dtype)
             summed_xdata = DataAndMetadata.new_data_and_metadata(summed_data,
                                                                  intensity_calibration=data_and_metadata.intensity_calibration,
                                                                  data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),

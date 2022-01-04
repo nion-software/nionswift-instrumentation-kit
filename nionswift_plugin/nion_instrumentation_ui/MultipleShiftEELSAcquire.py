@@ -134,7 +134,7 @@ class AcquireController(metaclass=Utility.Singleton):
             assert first_data is not None
 
             # Initialize an empty stack to fill with acquired data
-            image_stack_data = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
+            image_stack_data: numpy.typing.NDArray[numpy.float_] = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
 
             reference_energy = stem_controller.GetVal(energy_adjust_control)
 
@@ -213,7 +213,7 @@ class AcquireController(metaclass=Utility.Singleton):
             shifts = numpy.zeros((number_frames, 2))
             # initial reference slice is first slice
             ref = stack[0][:]
-            ref_shift = numpy.array([0, 0])
+            ref_shift: numpy.typing.NDArray[typing.Any] = numpy.array([0, 0])
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(

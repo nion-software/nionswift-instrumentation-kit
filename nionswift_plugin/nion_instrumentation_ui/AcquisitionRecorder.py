@@ -174,7 +174,7 @@ class Controller:
                                                                          xdata.data_descriptor.collection_dimension_count,
                                                                          xdata.data_descriptor.datum_dimension_count)
                         # TODO: ugly typing.
-                        data = numpy.vstack(list(typing.cast(DataAndMetadata.DataAndMetadata, xdata_group[i])._data_ex for xdata_group in xdata_group_list[-valid_count:])).reshape(valid_count, *shapes[i])
+                        data: numpy.typing.NDArray[typing.Any] = numpy.vstack(list(typing.cast(DataAndMetadata.DataAndMetadata, xdata_group[i])._data_ex for xdata_group in xdata_group_list[-valid_count:])).reshape(valid_count, *shapes[i])
                         xdata = DataAndMetadata.new_data_and_metadata(data,
                                                                       intensity_calibration=intensity_calibration,
                                                                       dimensional_calibrations=dimensional_calibrations,
