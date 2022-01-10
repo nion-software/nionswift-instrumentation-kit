@@ -1836,7 +1836,7 @@ scan_control_panels = dict()
 
 def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
     # NOTE: if scan control panel is not appearing, stop here and make sure aliases.ini is present in the workspace
-    if hardware_source.features.get("is_scanning", False):
+    if hardware_source.features.get("is_scanning", False) and hardware_source.hardware_source_id != "orsay_scan_device":
         panel_id = "scan-control-panel-" + hardware_source.hardware_source_id
         scan_control_panels[hardware_source.hardware_source_id] = panel_id
 
@@ -1887,7 +1887,7 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
         Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", properties)
 
 def unregister_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-    if hardware_source.features.get("is_scanning", False):
+    if hardware_source.features.get("is_scanning", False) and hardware_source.hardware_source_id != "orsay_scan_device":
         factory_id = "scan-live-" + hardware_source.hardware_source_id
         DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory(factory_id)
         panel_id = scan_control_panels.pop(hardware_source.hardware_source_id)

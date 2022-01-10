@@ -961,20 +961,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__line_scan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_state_changed)
         self.__line_scan_vector_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
 
-        ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
         self.__device.on_device_state_changed = self.__device_state_changed
 
-        # add data channel for each device channel
-        channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
-        for channel_info in channel_info_list:
-            self.add_data_channel(channel_info.channel_id, channel_info.name)
-        # add an associated sub-scan channel for each device channel
-        for channel_index, channel_info in enumerate(channel_info_list):
-            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
-            self.add_data_channel(subscan_channel_id, subscan_channel_name)
-        self.add_data_channel("drift", _("Drift"))
-
+        self.set_profiles_and_channels()
         self.__last_idle_position: typing.Optional[Geometry.FloatPoint] = None  # used for testing
 
         # configure the initial profiles from the device
@@ -996,6 +986,30 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.acquisition_state_changed_event = Event.Event()
 
         self.drift_tracker = DriftTracker()
+
+    #
+    # Marcel placed this in a separate function so that it can be overriden.
+    #
+    def set_profiles_and_channels(self) -> None:
+        # configure the initial profiles from the device
+        self.__profiles: typing.List[ScanFrameParameters] = list()
+        self.__profiles.extend(self.__get_initial_profiles())
+        self.__current_profile_index = self.__get_initial_profile_index()
+        self.__frame_parameters = self.__profiles[0]
+        self.__record_parameters = self.__profiles[2]
+
+        # add data channel for each device channel
+        ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
+        channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
+        for channel_info in channel_info_list:
+            self.add_data_channel(channel_info.channel_id, channel_info.name)
+        # add an associated sub-scan channel for each device channel
+        for channel_index, channel_info in enumerate(channel_info_list):
+            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
+            self.add_data_channel(subscan_channel_id, subscan_channel_name)
+        self.add_data_channel("drift", _("Drift"))
+
+
 
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
@@ -2358,7 +2372,8 @@ _component_unregistered_listener = None
 
 def run() -> None:
     def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-        if "scan_device" in component_types:
+        if "scan_device" in component_types and component.scan_device_id != "orsay_scan_device":
+            # if "scan_device" in component_types:
             stem_controller: typing.Optional[stem_controller_module.STEMController] = None
             stem_controller_id = getattr(component, "stem_controller_id", None)
             if not stem_controller and stem_controller_id:
@@ -2374,9 +2389,12 @@ def run() -> None:
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
             component.hardware_source = scan_hardware_source
+            # add it now to be sure that the good one is used when multiple scan sources exist
+            stem_controller.set_scan_controller(scan_hardware_source)
 
     def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-        if "scan_device" in component_types:
+        if "scan_device" in component_types and component.scan_device_id != "orsay_scan_device":
+            # if "scan_device" in component_types:
             scan_hardware_source = component.hardware_source
             Registry.unregister_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)

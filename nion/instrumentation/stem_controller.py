@@ -733,7 +733,8 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
         if scan_controller:
             for data_channel in scan_controller.data_channels:
                 channel_id = data_channel.channel_id
-                if channel_id and not channel_id.endswith("subscan") and channel_id != "drift":
+                if channel_id and not channel_id.endswith("subscan") and channel_id != "drift"\
+                        and not data_channel.name.endswith("spim"):
                     data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, channel_id)
                     if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
                         return True
@@ -1210,7 +1211,8 @@ class ScanContextController:
         self.__instrument_added_event_listener = HardwareSource.HardwareSourceManager().instrument_added_event.listen(self.register_instrument)
         self.__instrument_removed_event_listener = HardwareSource.HardwareSourceManager().instrument_removed_event.listen(self.unregister_instrument)
         for instrument in HardwareSource.HardwareSourceManager().instruments:
-            self.register_instrument(instrument)
+            if instrument.instrument_id != "external_scan_controller":
+                self.register_instrument(instrument)
 
     def close(self) -> None:
         # any instrument that was registered needs to be unregistered.
@@ -1257,7 +1259,7 @@ _pending_document_models: typing.List[DocumentModel.DocumentModel] = list()
 
 
 def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-    if "stem_controller" in component_types:
+    if "stem_controller" in component_types and component.instrument_id != "external_scan_controller":
         HardwareSource.HardwareSourceManager().register_instrument(component.instrument_id, component)
     if "document_model" in component_types:
         document_model = typing.cast(DocumentModel.DocumentModel, component)
@@ -1268,7 +1270,7 @@ def component_registered(component: Registry._ComponentType, component_types: ty
 
 
 def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-    if "stem_controller" in component_types:
+    if "stem_controller" in component_types and component.instrument_id != "external_scan_controller":
         HardwareSource.HardwareSourceManager().unregister_instrument(component.instrument_id)
     if "document_model" in component_types:
         document_model = typing.cast(DocumentModel.DocumentModel, component)
