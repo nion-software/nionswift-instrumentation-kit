@@ -204,7 +204,7 @@ class CameraDevice(typing.Protocol):
         ...
 
     @property
-    def calibration_controls(self) -> typing.Mapping[str, str]:
+    def calibration_controls(self) -> typing.Mapping[str, typing.Union[str, int, float]]:
         """Return lookup dict of calibration controls to be read from instrument controller for this device.
 
         The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", "z", or "intensity",
@@ -614,7 +614,7 @@ class CameraDevice3(typing.Protocol):
         ...
 
     @property
-    def calibration_controls(self) -> typing.Mapping[str, str]:
+    def calibration_controls(self) -> typing.Mapping[str, typing.Union[str, int, float]]:
         """Return lookup dict of calibration controls to be read from instrument controller for this device.
 
         The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", "z", or "intensity",
@@ -2575,9 +2575,9 @@ class CameraFramesDataStream(Acquisition.DataStream):
             self.__camera_device_stream_interface.continue_data(partial_data)
 
 
-def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, str], key: str) -> typing.Optional[typing.Union[float, str]]:
+def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
     if key + "_control" in calibration_controls:
-        valid, value = instrument_controller.TryGetVal(calibration_controls[key + "_control"])
+        valid, value = instrument_controller.TryGetVal(typing.cast(str, calibration_controls[key + "_control"]))
         if valid:
             return value
     if key + "_value" in calibration_controls:
@@ -2585,7 +2585,7 @@ def get_instrument_calibration_value(instrument_controller: InstrumentController
     return None
 
 
-def build_calibration(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, str], prefix: str, relative_scale: float = 1, data_len: int = 0) -> Calibration.Calibration:
+def build_calibration(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], prefix: str, relative_scale: float = 1, data_len: int = 0) -> Calibration.Calibration:
     scale = typing.cast(float, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "scale"))
     scale = scale * relative_scale if scale is not None else scale
     offset = typing.cast(float, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "offset"))
@@ -2595,7 +2595,7 @@ def build_calibration(instrument_controller: InstrumentController, calibration_c
     return Calibration.Calibration(offset, scale, units)
 
 
-def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, str], prefix: str, relative_scale: float = 1, data_len: int = 0) -> typing.Dict[str, typing.Any]:
+def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], prefix: str, relative_scale: float = 1, data_len: int = 0) -> typing.Dict[str, typing.Any]:
     return build_calibration(instrument_controller, calibration_controls, prefix, relative_scale, data_len).rpc_dict
 
 
