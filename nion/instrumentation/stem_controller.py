@@ -460,6 +460,23 @@ class STEMController(Observable.Observable):
             return setattr(self, name, value)
         return self.set_control_output(name, value)
 
+    def _get_config_property(self, name: str) -> typing.Any:
+        """Get a configuration property.
+
+        Concrete STEM controllers can optionally return configuration properties using this method.
+        A specific use case is for configuration of a simulated device for testing.
+        """
+        raise NotImplementedError()
+
+    def _set_config_property(self, name: str, value: typing.Any) -> None:
+        """Set a configuration property.
+
+        Most configuration properties are immutable. However, devices may choose to allow them to be
+        changed programmatically for various reasons. A specific use case is for configuration of
+        a simulated device for testing.
+        """
+        raise NotImplementedError()
+
     def apply_metadata_groups(self, properties: typing.MutableMapping[str, typing.Any], metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None:
         """Apply metadata groups to properties.
 
