@@ -29,6 +29,8 @@ from nion.utils import Registry
 if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
+    from . import camera_base
+    from . import scan_base
 
 _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
 
@@ -186,9 +188,9 @@ class STEMController(Observable.Observable):
         self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
-        self.__ronchigram_camera: typing.Optional[HardwareSource.HardwareSource] = None
-        self.__eels_camera: typing.Optional[HardwareSource.HardwareSource] = None
-        self.__scan_controller: typing.Optional[HardwareSource.HardwareSource] = None
+        self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
 
     def close(self) -> None:
         self.__scan_context_channel_map = typing.cast(typing.Any, None)
@@ -212,36 +214,36 @@ class STEMController(Observable.Observable):
     # configuration methods
 
     @property
-    def ronchigram_camera(self) -> typing.Optional[HardwareSource.HardwareSource]:
+    def ronchigram_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
-        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
                            Registry.get_component("ronchigram_camera_hardware_source"))
 
     def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
-        self.__ronchigram_camera = camera
+        self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
-    def eels_camera(self) -> typing.Optional[HardwareSource.HardwareSource]:
+    def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__eels_camera:
             return self.__eels_camera
-        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
                            Registry.get_component("eels_camera_hardware_source"))
 
     def set_eels_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_eels_camera", False)
-        self.__eels_camera = camera
+        self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
-    def scan_controller(self) -> typing.Optional[HardwareSource.HardwareSource]:
+    def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
         if self.__scan_controller:
             return self.__scan_controller
-        return typing.cast(typing.Optional[HardwareSource.HardwareSource],
+        return typing.cast(typing.Optional["scan_base.ScanHardwareSource"],
                            Registry.get_component("scan_hardware_source"))
 
     def set_scan_controller(self, scan_controller: typing.Optional[HardwareSource.HardwareSource]) -> None:
-        self.__scan_controller = scan_controller
+        self.__scan_controller = typing.cast(typing.Optional["scan_base.ScanHardwareSource"], scan_controller)
 
     # end configuration methods
 
@@ -514,7 +516,7 @@ class STEMController(Observable.Observable):
     def GetVal2D(self, s: str, default_value: typing.Optional[Geometry.FloatPoint] = None, *, axis: AxisType) -> Geometry.FloatPoint:
         raise Exception(f"No 2D element named '{s}' exists! Cannot get value.")
 
-    def SetVal2D(self, s:str, value: Geometry.FloatPoint, *, axis: AxisType) -> bool:
+    def SetVal2D(self, s:str, value: Geometry.FloatPoint, *, axis: typing.Optional[AxisType] = None) -> bool:
         return False
 
     def SetVal2DAndConfirm(self, s: str, val: Geometry.FloatPoint, tolfactor: float, timeout_ms: int, *, axis: AxisType) -> bool:

@@ -12,6 +12,7 @@ from nion.instrumentation import camera_base
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
 from nion.swift import Application
+from nion.swift import DocumentController
 from nion.swift import Facade
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
@@ -38,7 +39,7 @@ class TestCameraControlClass(unittest.TestCase):
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
         self.exposure = 1.0
 
-    def _acquire_one(self, document_controller, hardware_source):
+    def _acquire_one(self, document_controller: DocumentController.DocumentController, hardware_source: camera_base.CameraHardwareSource) -> None:
         hardware_source.start_playing()
         try:
             start_time = time.time()

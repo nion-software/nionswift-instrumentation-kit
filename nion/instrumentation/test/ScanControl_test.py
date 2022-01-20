@@ -99,7 +99,7 @@ class TestScanControlClass(unittest.TestCase):
     def __test_context(self) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context()
 
-    def _test_context(self):
+    def _test_context(self) -> AcquisitionTestContext.AcquisitionTestContext:
         return self.__test_context()
 
     ## STANDARD ACQUISITION TESTS ##

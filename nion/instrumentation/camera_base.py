@@ -328,10 +328,10 @@ class CameraDevice(typing.Protocol):
         """
         return list()
 
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         """Begin synchronized acquire.
 
-        The camera device can allocate memory to accommodate the scan_shape and begin acquisition immediately.
+        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
 
         The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
         False, is_canceled set to False, and valid_rows and valid_count set to 0.
@@ -710,10 +710,10 @@ class CameraDevice3(typing.Protocol):
         """
         return dict()
 
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         """Begin synchronized acquire.
 
-        The camera device can allocate memory to accommodate the scan_shape and begin acquisition immediately.
+        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
 
         The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
         False, is_canceled set to False, and valid_rows and valid_count set to 0.
@@ -1184,7 +1184,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool: ...
     def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]: ...
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData: ...
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData: ...
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_synchronized_end(self) -> None: ...
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None: ...
@@ -1473,16 +1473,16 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
         if callable(acquire_synchronized_begin):
-            return typing.cast(PartialData, acquire_synchronized_begin(camera_frame_parameters, scan_shape))
+            return typing.cast(PartialData, acquire_synchronized_begin(camera_frame_parameters, collection_shape))
         else:
-            data_elements = self.acquire_synchronized(scan_shape)
+            data_elements = self.acquire_synchronized(collection_shape)
             if len(data_elements) > 0:
-                data_elements[0]["data"] = data_elements[0]["data"].reshape(*scan_shape, *(data_elements[0]["data"].shape[1:]))
+                data_elements[0]["data"] = data_elements[0]["data"].reshape(*collection_shape, *(data_elements[0]["data"].shape[1:]))
                 xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_elements[0])
-                return PartialData(xdata, True, False, scan_shape[0])
+                return PartialData(xdata, True, False, collection_shape[0])
         return PartialData(DataAndMetadata.new_data_and_metadata(numpy.zeros(())), True, True, 0)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
@@ -1998,8 +1998,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         assert self.__record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
 
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, scan_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
-        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, scan_shape, **kwargs)
+    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
+        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
         return self.__camera.acquire_synchronized_continue(update_period=update_period)
@@ -2236,14 +2236,14 @@ def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback
                        data_intensity_calibration: typing.Optional[Calibration.Calibration],
                        metadata: DataAndMetadata.MetadataType) -> DataAndMetadata.DataAndMetadata:
     data_shape = uncropped_xdata.data_shape
-    scan_shape = uncropped_xdata.collection_dimension_shape
+    collection_shape = uncropped_xdata.collection_dimension_shape
     scan_calibrations = scan_calibrations or uncropped_xdata.collection_dimensional_calibrations
     uncropped_data = uncropped_xdata.data
     assert uncropped_data is not None, "Device data was None."
     if flyback_pixels > 0:
-        data = uncropped_data.reshape(*scan_shape, *data_shape[len(scan_shape):])[:, flyback_pixels:scan_shape[1], :]
+        data = uncropped_data.reshape(*collection_shape, *data_shape[len(collection_shape):])[:, flyback_pixels:collection_shape[1], :]
     else:
-        data = uncropped_data.reshape(*scan_shape, *data_shape[len(scan_shape):])
+        data = uncropped_data.reshape(*collection_shape, *data_shape[len(collection_shape):])
     dimensional_calibrations = tuple(scan_calibrations) + tuple(data_calibrations)
     return DataAndMetadata.new_data_and_metadata(data, data_intensity_calibration,
                                                  dimensional_calibrations,
@@ -2312,13 +2312,13 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             camera_frame_parameters.active_masks = [typing.cast(Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
             operator.apply()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
-        self.__camera_hardware_source.acquire_synchronized_prepare(scan_shape)
+        collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
+        self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape)
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
-        scan_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
-        self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, scan_shape)
+        collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
+        self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, collection_shape)
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_synchronized_end()
