@@ -409,20 +409,18 @@ class ScanControlStateController:
         assert callable(callback_fn)
         if self.__scan_hardware_source:
 
-            def finish_record(data_and_metadata_list: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+            def finish_record(data_promise_list: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
                 record_index = self.__scan_hardware_source.record_index
-                for data_and_metadata in data_and_metadata_list:
+                for data_promise in data_promise_list:
+                    data_and_metadata = data_promise.xdata
                     if data_and_metadata:
                         data_item = DataItem.DataItem()
                         data_item.ensure_data_source()
-
-                        data_and_metadata = copy.deepcopy(data_and_metadata)  # low level may be reused; copy here
                         display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                         display_name = display_name if display_name else _("Record")
                         channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
                         title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
                         data_item.title = "{} {}".format(title_base, record_index)
-
                         data_item.set_xdata(data_and_metadata)
                         callback_fn(data_item)
                 self.__scan_hardware_source.record_index += 1
@@ -565,15 +563,15 @@ class ScanControlStateController:
         self.__scan_hardware_source.decrease_pmt(channel_index)
 
     def handle_capture_clicked(self) -> None:
-        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+        def receive_new_xdatas(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             if self.__captured_xdatas_available_listener:
                 self.__captured_xdatas_available_listener.close()
                 self.__captured_xdatas_available_listener = None
-            for xdata in xdatas:
+            for data_promise in data_promises:
                 def add_data_item(data_item: DataItem.DataItem) -> None:
                     if self.on_display_new_data_item:
                         self.on_display_new_data_item(data_item)
-
+                xdata = data_promise.xdata
                 if xdata:
                     data_item = DataItem.new_data_item(xdata)
                     display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")

@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import pathlib
+import random
 import shutil
 import threading
 import time
@@ -732,20 +733,55 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
-        with self.__test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = Geometry.IntSize(256, 256)
-            frame_parameters_0.pixel_time_us = 2
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            scan_hardware_source.start_playing()
-            data_list = list()
-            for _ in range(16):
-                data_list.append(scan_hardware_source.get_next_xdatas_to_finish()[0].data)
-            for row in range(0, 256, 32):
-                s = slice(row, row+32), slice(0, 256)
-                for data in data_list[1:]:
-                    self.assertFalse(numpy.array_equal(data_list[0][s], data[s]))
+        numpy_random_state = numpy.random.get_state()
+        random_state = random.getstate()
+        numpy.random.seed(999)
+        random.seed(999)
+        try:
+            with self.__test_context() as test_context:
+                scan_hardware_source = test_context.scan_hardware_source
+                frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
+                frame_parameters_0.size = Geometry.IntSize(256, 256)
+                frame_parameters_0.pixel_time_us = 2
+                scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+                scan_hardware_source.start_playing()
+                data_list = list()
+                for i in range(16):
+                    data = scan_hardware_source.get_next_xdatas_to_finish()[0].data
+                    data_list.append(data)
+                for row in range(0, 256, 32):
+                    s = slice(row, row+32), slice(0, 256)
+                    for i, data in enumerate(data_list[1:]):
+                        self.assertFalse(numpy.array_equal(data_list[0][s], data[s]))
+        finally:
+            random.setstate(random_state)
+            numpy.random.set_state(numpy_random_state)
+
+    def test_frame_do_not_change_after_acquisition(self):
+        # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
+        numpy_random_state = numpy.random.get_state()
+        random_state = random.getstate()
+        numpy.random.seed(999)
+        random.seed(999)
+        try:
+            with self.__test_context() as test_context:
+                scan_hardware_source = test_context.scan_hardware_source
+                frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
+                frame_parameters_0.size = Geometry.IntSize(256, 256)
+                frame_parameters_0.pixel_time_us = 2
+                scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+                scan_hardware_source.start_playing()
+                data_list = list()
+                checksums = list()
+                for i in range(4):
+                    data = scan_hardware_source.get_next_xdatas_to_finish()[0].data
+                    data_list.append(data)
+                    checksums.append(numpy.sum(data))
+                for checksum, data in zip(checksums, data_list):
+                    self.assertEqual(checksum, numpy.sum(data))
+        finally:
+            random.setstate(random_state)
+            numpy.random.set_state(numpy_random_state)
 
     def test_changing_width_when_linked_changes_height_too(self):
         with self.__test_context() as test_context:

@@ -882,7 +882,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
     def grab_synchronized_abort(self) -> None: ...
     def set_selected_profile_index(self, profile_index: int) -> None: ...
-    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]) -> None: ...
+    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None]) -> None: ...
     def open_configuration_interface(self, api_broker: typing.Any) -> None: ...
     def validate_probe_position(self) -> None: ...
     def increase_pmt(self, channel_index: int) -> None: ...
@@ -1467,9 +1467,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, channel_ids, self.display_name)
         finished_event = threading.Event()
         xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
-        def finished(xdatas_: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+        def finished(datas_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             nonlocal xdatas
-            xdatas = [copy.deepcopy(xdata) for xdata in xdatas_]  # low level may be reused; copy here
+            xdatas = [data_promise.xdata for data_promise in datas_promises]
             self.set_enabled_channels(old_enabled_channels)
             finished_event.set()
         record_task.finished_callback_fn = finished
@@ -1575,15 +1575,15 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
-    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]) -> None:
+    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None]) -> None:
         """ Call this when the user clicks the record button. """
         assert callable(callback_fn)
 
         def record_thread() -> None:
             current_frame_time = self.get_current_frame_time()
 
-            def handle_finished(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
-                callback_fn(xdatas)
+            def handle_finished(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                callback_fn(data_promises)
 
             self.start_recording(current_frame_time, finished_callback_fn=handle_finished)
 
