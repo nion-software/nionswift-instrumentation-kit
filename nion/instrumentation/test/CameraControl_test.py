@@ -650,24 +650,28 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the camera is saturated (or otherwise produces identical values naturally)
+        numpy_random_state = numpy.random.get_state()
+        random_state = random.getstate()
         numpy.random.seed(999)
         random.seed(999)
-        self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
-        with self.__test_context() as test_context:
-            hardware_source = test_context.camera_hardware_source
-            hardware_source.start_playing()
-            try:
-                data = hardware_source.get_next_xdatas_to_finish()[0].data
-                last_hash = zlib.crc32(data)
-                for _ in range(16):
+        try:
+            self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
+            with self.__test_context() as test_context:
+                hardware_source = test_context.camera_hardware_source
+                hardware_source.start_playing()
+                try:
                     data = hardware_source.get_next_xdatas_to_finish()[0].data
-                    next_hash = zlib.crc32(data)
-                    self.assertNotEqual(last_hash, next_hash)
-                    last_hash = next_hash
-            finally:
-                hardware_source.abort_playing()
-            numpy.random.seed()
-            random.seed()
+                    last_hash = zlib.crc32(data)
+                    for _ in range(16):
+                        data = hardware_source.get_next_xdatas_to_finish()[0].data
+                        next_hash = zlib.crc32(data)
+                        self.assertNotEqual(last_hash, next_hash)
+                        last_hash = next_hash
+                finally:
+                    hardware_source.abort_playing()
+        finally:
+            random.setstate(random_state)
+            numpy.random.set_state(numpy_random_state)
 
     def test_integrating_frames_updates_frame_count_by_integration_count(self):
         with self.__test_context() as test_context:

@@ -218,24 +218,25 @@ class CameraControlStateController:
     def has_processed_data(self) -> bool:
         return self.__has_processed_channel
 
-    def __receive_new_xdatas(self, xdatas: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
+    def __receive_new_xdatas(self, data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
         current_time = time.time()
-        if current_time - self.__last_camera_current_time > 5.0 and len(xdatas) > 0 and callable(self.on_camera_current_changed):
-            xdata = xdatas[0]
-            counts_per_electron = xdata.metadata.get("hardware_source", dict()).get("counts_per_electron")
-            exposure = xdata.metadata.get("hardware_source", dict()).get("exposure")
-            if xdata.intensity_calibration.units == "counts" and counts_per_electron and exposure:
-                sum_counts = xdata.intensity_calibration.convert_to_calibrated_value(numpy.sum(xdatas[0]._data_ex))
-                detector_current = sum_counts / exposure / counts_per_electron / 6.242e18 if exposure > 0 and counts_per_electron > 0 else 0.0
-                if detector_current != self.__camera_current:
-                    self.__camera_current = detector_current
+        if current_time - self.__last_camera_current_time > 5.0 and len(data_promises) > 0 and callable(self.on_camera_current_changed):
+            xdata = data_promises[0].xdata
+            if xdata:
+                counts_per_electron = xdata.metadata.get("hardware_source", dict()).get("counts_per_electron")
+                exposure = xdata.metadata.get("hardware_source", dict()).get("exposure")
+                if xdata.intensity_calibration.units == "counts" and counts_per_electron and exposure:
+                    sum_counts = xdata.intensity_calibration.convert_to_calibrated_value(numpy.sum(xdata._data_ex))
+                    detector_current = sum_counts / exposure / counts_per_electron / 6.242e18 if exposure > 0 and counts_per_electron > 0 else 0.0
+                    if detector_current != self.__camera_current:
+                        self.__camera_current = detector_current
 
-                    def update_camera_current() -> None:
-                        if callable(self.on_camera_current_changed):
-                            self.on_camera_current_changed(self.__camera_current)
+                        def update_camera_current() -> None:
+                            if callable(self.on_camera_current_changed):
+                                self.on_camera_current_changed(self.__camera_current)
 
-                    self.queue_task(update_camera_current)
-            self.__last_camera_current_time = current_time
+                        self.queue_task(update_camera_current)
+                self.__last_camera_current_time = current_time
 
     def initialize_state(self) -> None:
         """ Call this to initialize the state of the UI after everything has been connected. """
@@ -318,22 +319,24 @@ class CameraControlStateController:
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_capture_clicked(self) -> None:
-        def capture_xdatas(xdatas: typing.Sequence[DataAndMetadata.DataAndMetadata]) -> None:
+        def capture_xdatas(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             if self.__captured_xdatas_available_event:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
-            for index, xdata in enumerate(xdatas):
+            for index, data_promise in enumerate(data_promises):
                 def add_data_item(data_item: DataItem.DataItem) -> None:
                     self.__document_model.append_data_item(data_item)
                     if callable(self.on_display_new_data_item):
                         self.on_display_new_data_item(data_item)
 
                 if index == (1 if self.use_processed_data else 0):
-                    data_item = DataItem.new_data_item(xdata)
-                    display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
-                    display_name = display_name if display_name else _("Capture")
-                    data_item.title = display_name
-                    self.queue_task(functools.partial(add_data_item, data_item))
+                    xdata = data_promise.xdata
+                    if xdata:
+                        data_item = DataItem.new_data_item(xdata)
+                        display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                        display_name = display_name if display_name else _("Capture")
+                        data_item.title = display_name
+                        self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 
         self.__captured_xdatas_available_event = self.__camera_hardware_source.xdatas_available_event.listen(capture_xdatas)

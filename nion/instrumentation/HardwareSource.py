@@ -46,11 +46,25 @@ from nion.utils.ReferenceCounting import weak_partial
 if typing.TYPE_CHECKING:
     from nion.swift.model import DocumentModel
 
-DataElementType = typing.Dict[str, typing.Any]
-_FinishedCallbackType = typing.Callable[[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]], None]
-_NDArray = numpy.typing.NDArray[typing.Any]
-
 _ = gettext.gettext
+
+
+class DataAndMetadataPromise:
+    def __init__(self, xdata: typing.Optional[DataAndMetadata.DataAndMetadata]) -> None:
+        self.__xdata_unsafe = xdata
+        self.__xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
+
+    @property
+    def xdata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
+        if not self.__xdata and self.__xdata_unsafe:
+            self.__xdata = copy.deepcopy(self.__xdata_unsafe)
+            self.__xdata_unsafe = None
+        return self.__xdata
+
+
+DataElementType = typing.Dict[str, typing.Any]
+_FinishedCallbackType = typing.Callable[[typing.Sequence[DataAndMetadataPromise]], None]
+_NDArray = numpy.typing.NDArray[typing.Any]
 
 
 class DocumentModelInterface(typing.Protocol):
@@ -1136,10 +1150,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
         if is_complete:
             # xdatas are may still be pointing to memory in low level code here
-            self.xdatas_available_event.fire(xdatas)
+            # send promises which will give access to the data, but not copy it unless it is used.
+            data_promises = [DataAndMetadataPromise(xdata) for xdata in xdatas]
+            self.xdatas_available_event.fire(data_promises)
             # hack to allow record to know when its data is finished
             if callable(task.finished_callback_fn):
-                task.finished_callback_fn(xdatas)
+                task.finished_callback_fn(data_promises)
 
         if is_error:
             from nion.swift.model import Notification
@@ -1246,11 +1262,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters)
             old_finished_callback_fn = record_task.finished_callback_fn
 
-            def finished(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+            def finished(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
                 if callable(old_finished_callback_fn):
-                    old_finished_callback_fn(xdatas)
+                    old_finished_callback_fn(data_promises)
                 if callable(finished_callback_fn):
-                    finished_callback_fn(xdatas)
+                    finished_callback_fn(data_promises)
 
             record_task.finished_callback_fn = finished
             self._record_task_updated(record_task)
@@ -1289,8 +1305,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         new_data_event = threading.Event()
         new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
-        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
-            new_xdatas[:] = xdatas
+        def receive_new_xdatas(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
+            new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
             new_data_event.set()
 
         def abort() -> None:
@@ -1308,8 +1324,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         new_data_event = threading.Event()
         new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
-        def receive_new_xdatas(xdatas: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
-            new_xdatas[:] = xdatas
+        def receive_new_xdatas(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
+            new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
             new_data_event.set()
 
         def abort() -> None:
