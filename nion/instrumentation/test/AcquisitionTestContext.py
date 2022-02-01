@@ -76,13 +76,9 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         camera_type = "ronchigram" if not is_eels else "eels"
         camera_name = "uSim Camera"
         camera_settings = CameraDevice.CameraSettings(camera_id)
-        if camera_type == "ronchigram":
-            camera_simulator = RonchigramCameraSimulator.RonchigramCameraSimulator(instrument, Geometry.IntSize.make(instrument.camera_sensor_dimensions("ronchigram")), instrument.counts_per_electron, instrument.stage_size_nm)
-        else:
-            camera_simulator = EELSCameraSimulator.EELSCameraSimulator(instrument, Geometry.IntSize.make(instrument.camera_sensor_dimensions("eels")), instrument.counts_per_electron)
-        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, instrument, camera_simulator)
-        if hasattr(instrument, "_set_camera_simulator"):
-            instrument._set_camera_simulator(camera_type, camera_simulator)
+        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, instrument)
+        # Also register the camera device and use a unique name for it so that we can directly access it
+        Registry.register_component(camera_device, {f"usim_{camera_type}_camera_device"})
 
         if getattr(camera_device, "camera_version", 2) == 3:
             camera_hardware_source = camera_base.CameraHardwareSource3("usim_stem_controller", camera_device, camera_settings, None, None)
