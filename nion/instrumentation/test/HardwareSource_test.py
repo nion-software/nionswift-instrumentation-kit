@@ -431,9 +431,8 @@ def _test_exception_during_record_halts_playback(testcase, hardware_source, expo
     hardware_source.start_recording(sync_timeout=3.0)
     try:
         start = time.time()
-        while time.time() - start < exposure * 10.0 and hardware_source.is_recording:
-            time.sleep(0.05)
-        # print(time.time() - start)
+        while time.time() - start < max(exposure * 10.0, 3.0) and hardware_source.is_recording:
+            time.sleep(0.01)  # 10 msec
         testcase.assertFalse(hardware_source.is_recording)
     finally:
         hardware_source.abort_recording(sync_timeout=3.0)
@@ -442,9 +441,8 @@ def _test_exception_during_record_halts_playback(testcase, hardware_source, expo
     hardware_source.start_recording()
     try:
         start = time.time()
-        while time.time() - start < exposure * 10.0 and hardware_source.is_recording:
-            time.sleep(0.05)
-        time.sleep(0.05)  # avoid test race condition
+        while time.time() - start < max(exposure * 10.0, 3.0) and hardware_source.is_recording:
+            time.sleep(0.01)  # 10 msec
         testcase.assertFalse(hardware_source.is_recording)
     finally:
         hardware_source.abort_recording(sync_timeout=3.0)
