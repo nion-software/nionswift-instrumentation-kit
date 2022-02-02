@@ -184,7 +184,7 @@ class ComponentComboBoxHandler:
     component identifier) and components_key (a string used to maintain the list of component instances).
     """
 
-    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, component_id_key: str, components_key: str, extra_top_right: typing.Optional[Declarative.HandlerLike] = None) -> None:
+    def __init__(self, component_base: str, title: str, configuration: Schema.Entity, preferences: Observable.Observable, component_id_key: str, components_key: str, extra_top_right: typing.Optional[Declarative.HandlerLike] = None) -> None:
         # store these values for bookkeeping
         self.__component_name = component_base
         self.__component_factory_name = f"{component_base}-factory"
@@ -216,7 +216,7 @@ class ComponentComboBoxHandler:
                 component_entity = entity_type.create() if entity_type else None
                 if component_entity:
                     configuration._append_item(components_key, component_entity)
-            component = component_factory(component_entity)
+            component = component_factory(component_entity, preferences)
             self.__components.append_item(component)
 
         def sort_key(o: typing.Any) -> typing.Any:
@@ -227,6 +227,8 @@ class ComponentComboBoxHandler:
         self._combo_box_handler = ComboBoxHandler(self.__components, "items", sort_key,
                                                   None, operator.attrgetter("component_id"),
                                                   self.__selected_component_id_model)
+        # must delete the components if they are not added to another widget.
+        self.__combo_box_handler_to_delete: typing.Optional[ComboBoxHandler] = self._combo_box_handler
 
         # create a value stream for the selected item. this is useful in cases where other UI items
         # need to adjust themselves based on the selected value.
@@ -259,6 +261,11 @@ class ComponentComboBoxHandler:
     def close(self) -> None:
         self.__selected_component_id_model.close()
         self.__selected_component_id_model = typing.cast(typing.Any, None)
+        if self.__combo_box_handler_to_delete:
+            self.__combo_box_handler_to_delete.close()
+            self.__combo_box_handler_to_delete = None
+            for component in self.__components.items:
+                component.close()
         self.__components.close()
         self.__components = typing.cast(typing.Any, None)
 
@@ -267,6 +274,7 @@ class ComponentComboBoxHandler:
         if component_id == self.__component_name:
             return typing.cast(Declarative.HandlerLike, item)
         if component_id == "combo_box":
+            self.__combo_box_handler_to_delete = None
             return self._combo_box_handler
         if component_id == "extra":
             return self.__extra_top_right
@@ -306,7 +314,7 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
 
     component_id = "basic-acquire"
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(_("None"))
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -328,7 +336,7 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
 
     component_id = "sequence-acquire"
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(_("Sequence"))
         self.configuration = configuration
         self.count_converter = Converter.IntegerToStringConverter()
@@ -448,9 +456,8 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
 
     component_id = "series-acquire"
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(_("1D Ramp"))
-        assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         # the control UI is constructed as a stack with one item for each control_id.
         # the control_handlers is a map from the control_id to the SeriesControlHandler
@@ -460,7 +467,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 1d controls are presented.
-        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+        self._control_combo_box_handler = ComboBoxHandler(preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
                                                           ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "1d"),
@@ -581,9 +588,8 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
 
     component_id = "tableau-acquire"
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(_("2D Ramp"))
-        assert AcquisitionPreferences.acquisition_preferences
         self.configuration = configuration
         # the control UIs are constructed as a stack with one item for each control_id.
         # the control_handlers is a map from the control_id to the SeriesControlHandler
@@ -594,7 +600,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 2d controls are presented.
-        self._control_combo_box_handler = ComboBoxHandler(AcquisitionPreferences.acquisition_preferences,
+        self._control_combo_box_handler = ComboBoxHandler(preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
                                                           ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "2d"),
@@ -784,7 +790,7 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
 
     component_id = "multiple-acquire"
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(_("Multiple"))
         self.configuration = configuration
         # ensure that there are always a few example sections.
@@ -1332,7 +1338,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
     component_id = "synchronized-scan"
     display_name = _("Synchronized Scan")
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(SynchronizedScanAcquisitionDeviceComponentHandler.display_name)
 
         # the camera hardware source choice model is a property model made by observing the camera_device_id in the configuration.
@@ -1361,7 +1367,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice),
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice),
             self.scan_width,
-            asyncio.get_event_loop()).add_ref()
+            asyncio.get_event_loop_policy().get_event_loop()).add_ref()
 
         # the scan context value model is the text description of the scan context extracted from the value stream.
         self.scan_context_value_model = Model.StreamValueModel(Stream.MapStream(
@@ -1622,7 +1628,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
     component_id = "camera"
     display_name = _("Camera")
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(CameraAcquisitionDeviceComponentHandler.display_name)
 
         # the camera hardware source choice model is a property model made by observing the camera_device_id in the configuration.
@@ -1740,7 +1746,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
     component_id = "scan"
     display_name = _("Scan")
 
-    def __init__(self, configuration: Schema.Entity):
+    def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(ScanAcquisitionDeviceComponentHandler.display_name)
 
         # the scan hardware source choice model is a property model made by observing the scan_device_id in the configuration.
@@ -1918,14 +1924,12 @@ class AcquisitionConfiguration(Schema.Entity):
     The logger/recorder observes changes to the entity. The changes get written to the file.
     """
 
-    def __init__(self, file_path: pathlib.Path):
+    def __init__(self, app_data: AcquisitionPreferences.DictRecorderLoggerDictInterface) -> None:
         super().__init__(AcquisitionConfigurationSchema)
-        self.file_path = file_path
-        self.__app_data = ApplicationData.ApplicationData(file_path)
-        self.read_from_dict(self.__app_data.get_data_dict())
+        self.read_from_dict(app_data.get_data_dict())
         field = Schema.ComponentField(None, self.entity_type.entity_id)
         field.set_field_value(None, self)
-        self.__logger = AcquisitionPreferences.DictRecorderLogger(field, typing.cast(AcquisitionPreferences.DictRecorderLoggerDictInterface, self.__app_data))
+        self.__logger = AcquisitionPreferences.DictRecorderLogger(field, app_data)
         self.__recorder = Recorder.Recorder(self, None, self.__logger)
 
     def close(self) -> None:
@@ -1934,10 +1938,7 @@ class AcquisitionConfiguration(Schema.Entity):
         super().close()
 
     def _create(self, context: typing.Optional[Schema.EntityContext]) -> Schema.Entity:
-        entity = self.__class__(self.file_path)
-        if context:
-            entity._set_entity_context(context)
-        return entity
+        raise NotImplementedError()
 
 
 # define the global acquisition configuration object. this object is created/destroyed when the
@@ -1957,7 +1958,7 @@ def handle_application_changed(is_register: bool, component: Registry._Component
             AcquisitionPreferences.init_acquisition_preferences(file_path)
             file_path = application.ui.get_configuration_location() / pathlib.Path("nion_acquisition_configuration.json")
             logging.info("Acquisition configuration: " + str(file_path))
-            acquisition_configuration = AcquisitionConfiguration(file_path)
+            acquisition_configuration = AcquisitionConfiguration(ApplicationData.ApplicationData(file_path))
         else:
             AcquisitionPreferences.deinit_acquisition_preferences()
             acquisition_configuration = None
@@ -1994,9 +1995,8 @@ class AcquisitionController:
     It also implements the basic acquisition start button, progress bar, drift logger (optional), and data display.
     """
 
-    def __init__(self, document_controller: DocumentController.DocumentController):
+    def __init__(self, document_controller: DocumentController.DocumentController, acquisition_configuration: AcquisitionConfiguration, acquisition_preferences: Observable.Observable) -> None:
         self.document_controller = document_controller
-        assert acquisition_configuration
 
         # create two component combo box declarative components for handling the method and device.
         # pass the configuration and desired accessor strings for each.
@@ -2004,14 +2004,19 @@ class AcquisitionController:
         self.__acquisition_method_component = ComponentComboBoxHandler("acquisition-method-component",
                                                                        _("Iterator Method"),
                                                                        acquisition_configuration,
+                                                                       acquisition_preferences,
                                                                        "acquisition_method_component_id",
                                                                        "acquisition_method_components",
                                                                        PreferencesButtonHandler(document_controller))
         self.__acquisition_device_component = ComponentComboBoxHandler("acquisition-device-component",
                                                                        _("Detector"),
                                                                        acquisition_configuration,
+                                                                       acquisition_preferences,
                                                                        "acquisition_device_component_id",
                                                                        "acquisition_device_components")
+        # must delete the components if they are not added to another widget.
+        self.__acquisition_method_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_method_component
+        self.__acquisition_device_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_device_component
 
         # define the progress value model, a simple bool 'is_acquiring' model, and a button text model that
         # updates according to whether acquire is running or not.
@@ -2102,6 +2107,12 @@ class AcquisitionController:
         self.progress_value_model = typing.cast(typing.Any, None)
         self.button_text_model.close()
         self.button_text_model = typing.cast(typing.Any, None)
+        if self.__acquisition_method_component_to_delete:
+            self.__acquisition_method_component_to_delete.close()
+            self.__acquisition_method_component_to_delete = typing.cast(typing.Any, None)
+        if self.__acquisition_device_component_to_delete:
+            self.__acquisition_device_component_to_delete.close()
+            self.__acquisition_device_component_to_delete = typing.cast(typing.Any, None)
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
@@ -2169,7 +2180,7 @@ class AcquisitionController:
                         self.progress_value_model.value = int(100 * progress)
                     await asyncio.sleep(0.25)
 
-            self.__progress_task = asyncio.get_event_loop().create_task(update_progress())
+            self.__progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress())
 
         # start async acquire.
         self.__acquisition.acquire_async(event_loop=self.document_controller.event_loop, on_completion=finish_grab_async)
@@ -2177,8 +2188,10 @@ class AcquisitionController:
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-method-component":
+            self.__acquisition_method_component_to_delete = None
             return self.__acquisition_method_component
         if component_id == "acquisition-device-component":
+            self.__acquisition_device_component_to_delete = None
             return self.__acquisition_device_component
         return None
 
@@ -2189,7 +2202,10 @@ class AcquisitionPanel(Panel.Panel):
     def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
         super().__init__(document_controller, panel_id, "acquisition-panel")
         if Registry.get_component("stem_controller"):
-            self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller))
+            assert acquisition_configuration
+            acquisition_preferences = AcquisitionPreferences.acquisition_preferences
+            assert acquisition_preferences
+            self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences))
         else:
             self.widget = document_controller.ui.create_column_widget()
 

@@ -1,13 +1,16 @@
+import asyncio
 import contextlib
 import copy
 import json
 import random
 import time
+import typing
 import unittest
 import zlib
 
 import numpy
 
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
@@ -16,9 +19,11 @@ from nion.swift import DocumentController
 from nion.swift import Facade
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
+from nion.swift.model import Schema
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Registry
+from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
 
 """
@@ -31,6 +36,18 @@ suite.run(result)
 """
 
 TIMEOUT = 20
+
+
+class ApplicationDataInMemory:
+    def __init__(self) -> None:
+        self.d = dict()
+
+    def get_data_dict(self) -> typing.Dict[str, typing.Any]:
+        return self.d
+
+    def set_data_dict(self, d: typing.Mapping[str, typing.Any]) -> None:
+        self.d = dict(d)
+
 
 class TestCameraControlClass(unittest.TestCase):
 
@@ -1000,6 +1017,28 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
             self.assertEqual(state_controller.acquisition_state_model.value, "error")
+
+    def test_acquisition_panel_sequence_acquisition(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            hardware_source = test_context.camera_hardware_source
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = hardware_source.hardware_source_id
+            c2 = Schema.Entity(Schema.get_entity_type("acquisition_method_component_sequence_acquire"))
+            c2.count = 4
+            acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationDataInMemory())
+            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationDataInMemory())
+            ac = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
+            with contextlib.closing(ac):
+                h = AcquisitionPanel.CameraAcquisitionDeviceComponentHandler(c, acquisition_preferences)
+                with contextlib.closing(h):
+                    h2 = AcquisitionPanel.SequenceAcquisitionMethodComponentHandler(c2, acquisition_preferences)
+                    with contextlib.closing(h2):
+                        adr = h.build_acquisition_device_data_stream()
+                        amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
+                        ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
+                        while ac.is_acquiring_model.value:
+                            document_controller.periodic()
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass

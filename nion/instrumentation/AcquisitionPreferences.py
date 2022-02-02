@@ -123,9 +123,9 @@ AcquisitionPreferencesSchema = Schema.entity("acquisition_preferences", None, No
 })
 
 
-class DictRecorderLoggerDictInterface:
+class DictRecorderLoggerDictInterface(typing.Protocol):
     def get_data_dict(self) -> typing.Dict[str, typing.Any]: ...
-    def set_data_dict(self, d: typing.Dict[str, typing.Any]) -> None: ...
+    def set_data_dict(self, d: typing.Mapping[str, typing.Any]) -> None: ...
 
 
 class DictRecorderLogger(Recorder.RecorderLogger):
@@ -167,14 +167,12 @@ class DictRecorderLogger(Recorder.RecorderLogger):
 
 
 class AcquisitionPreferences(Schema.Entity):
-    def __init__(self, file_path: pathlib.Path):
+    def __init__(self, app_data: DictRecorderLoggerDictInterface):
         super().__init__(AcquisitionPreferencesSchema)
-        self.file_path = file_path
-        self.__app_data = ApplicationData.ApplicationData(file_path)
-        self.read_from_dict(self.__app_data.get_data_dict())
+        self.read_from_dict(app_data.get_data_dict())
         field = Schema.ComponentField(None, self.entity_type.entity_id)
         field.set_field_value(None, self)
-        self.__logger = DictRecorderLogger(field, typing.cast(DictRecorderLoggerDictInterface, self.__app_data))
+        self.__logger = DictRecorderLogger(field, app_data)
         self.__recorder = Recorder.Recorder(self, None, self.__logger)
 
     def close(self) -> None:
@@ -183,10 +181,7 @@ class AcquisitionPreferences(Schema.Entity):
         super().close()
 
     def _create(self, context: typing.Optional[Schema.EntityContext]) -> Schema.Entity:
-        entity = self.__class__(self.file_path)
-        if context:
-            entity._set_entity_context(context)
-        return entity
+        raise NotImplementedError()
 
 
 acquisition_preferences: typing.Optional[AcquisitionPreferences] = None
@@ -194,7 +189,7 @@ acquisition_preferences: typing.Optional[AcquisitionPreferences] = None
 
 def init_acquisition_preferences(file_path: pathlib.Path) -> None:
     global acquisition_preferences
-    acquisition_preferences = AcquisitionPreferences(file_path)
+    acquisition_preferences = AcquisitionPreferences(ApplicationData.ApplicationData(file_path))
     assert acquisition_preferences
     # determine missing controls. build the master list of controls. remove the ones already there. add remaining.
     control_id_set = {control_description.control_id for control_description in acquisition_controls}
