@@ -20,6 +20,7 @@ from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
 from nion.swift import Application
 from nion.swift import Facade
+from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
@@ -1573,7 +1574,7 @@ class TestScanControlClass(unittest.TestCase):
         os.makedirs(dir)
         file_path = dir / pathlib.Path("test.json")
         try:
-            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(file_path)
+            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationData.ApplicationData(file_path))
             acquisition_preferences._append_item("control_customizations", AcquisitionPreferences.ControlCustomizationSchema.create(None, {"control_id": "blanker", "device_control_id": "BLANK", "delay": 0.05}))
             acquisition_preferences._append_item("control_customizations", AcquisitionPreferences.ControlCustomizationSchema.create(None, {"control_id": "defocus", "device_control_id": "C10", "delay": 0.05}))
             acquisition_preferences.control_customizations[0].delay = 0.03
