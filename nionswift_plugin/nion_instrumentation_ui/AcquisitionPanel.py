@@ -2018,6 +2018,9 @@ class AcquisitionController:
         self.__acquisition_method_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_method_component
         self.__acquisition_device_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_device_component
 
+        # define whether this controller is in an error state
+        self.is_error = False
+
         # define the progress value model, a simple bool 'is_acquiring' model, and a button text model that
         # updates according to whether acquire is running or not.
         self.progress_value_model = Model.PropertyModel[int](0)
@@ -2157,6 +2160,7 @@ class AcquisitionController:
             if self.__acquisition:
                 self.__acquisition.close()
                 self.__acquisition = typing.cast(typing.Any, None)
+            self.is_error = self.__data_stream.is_error
             self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
             if self.__scan_drift_logger:

@@ -1033,6 +1033,8 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(state_controller.acquisition_state_model.value, "error")
 
     def test_acquisition_panel_sequence_acquisition(self):
+        # this test is too complicated to set up. consider simplifying the setup using cleaner objects
+        # in the acquisition panel code.
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
@@ -1041,6 +1043,8 @@ class TestCameraControlClass(unittest.TestCase):
             c2 = Schema.Entity(Schema.get_entity_type("acquisition_method_component_sequence_acquire"))
             c2.count = 4
             acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationDataInMemory())
+            acquisition_configuration.acquisition_device_component_id = "camera"
+            acquisition_configuration.acquisition_method_component_id = "sequence-acquire"
             acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationDataInMemory())
             ac = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
             with contextlib.closing(ac):
@@ -1053,6 +1057,52 @@ class TestCameraControlClass(unittest.TestCase):
                         ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
                         while ac.is_acquiring_model.value:
                             document_controller.periodic()
+                        self.assertFalse(ac.is_error)
+            # only one data item will be create: the sequence. the view data item does not exist since acquiring
+            # a sequence will use the special sequence acquisition of the camera device.
+            self.assertEqual(1, len(document_controller.document_model.data_items))
+
+    def test_acquisition_panel_series_acquisition(self):
+        # this test is much too complicated to set up. consider simplifying the setup using cleaner objects
+        # in the acquisition panel code.
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            hardware_source = test_context.camera_hardware_source
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = hardware_source.hardware_source_id
+            c2 = Schema.Entity(Schema.get_entity_type("acquisition_method_component_series_acquire"))
+            cv = Schema.Entity(Schema.get_entity_type("control_values"))
+            cv.control_id = "C10"
+            cv.count = 4
+            cv.start_value = 500e-9
+            cv.step_value = 5e-9
+            c2.control_id = "C10"
+            c2._append_item("control_values_list", cv)
+            cc = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
+            cc._set_field_value("control_id", "defocus")
+            cc.device_control_id = "C10"
+            cc.delay = 0
+            acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationDataInMemory())
+            acquisition_configuration.acquisition_device_component_id = "camera"
+            acquisition_configuration.acquisition_method_component_id = "series-acquire"
+            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationDataInMemory())
+            ac = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
+            with contextlib.closing(ac):
+                h = AcquisitionPanel.CameraAcquisitionDeviceComponentHandler(c, acquisition_preferences)
+                with contextlib.closing(h):
+                    h2 = AcquisitionPanel.SeriesAcquisitionMethodComponentHandler(c2, acquisition_preferences)
+                    h2._control_combo_box_handler.selected_item_value_stream.value = cc
+                    control_handler = h2.create_handler("series-control", None, cc)
+                    control_handler.control_values = cv
+                    with contextlib.closing(h2):
+                        adr = h.build_acquisition_device_data_stream()
+                        amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
+                        ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
+                        while ac.is_acquiring_model.value:
+                            document_controller.periodic()
+                        self.assertFalse(ac.is_error)
+            # two data items will be created: the series and the camera view.
+            self.assertEqual(2, len(document_controller.document_model.data_items))
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
