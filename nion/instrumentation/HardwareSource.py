@@ -1631,7 +1631,8 @@ class RecordTask:
         self.__recording_started = threading.Event()
 
         def record_thread() -> None:
-            self.__hardware_source.start_recording(frame_parameters=frame_parameters)
+            self.__hardware_source.set_record_frame_parameters(frame_parameters)
+            self.__hardware_source.start_recording()
             self.__recording_started.set()
             self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
             self.__hardware_source.stop_recording(sync_timeout=3.0)

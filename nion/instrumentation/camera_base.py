@@ -1469,9 +1469,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
-    def _create_acquisition_record_task(self, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
-        assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+    def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
+        record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
+        assert record_parameters is not None
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, record_parameters, self.display_name)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
@@ -1994,9 +1995,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
-    def _create_acquisition_record_task(self, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
-        assert self.__record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__record_parameters, self.display_name)
+    def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
+        record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
+        assert record_parameters is not None
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, record_parameters, self.display_name)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
