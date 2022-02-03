@@ -150,6 +150,20 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(len(document_model.data_items), 1)
 
+    def test_record_acquires_properly_binned_data(self):
+        with self.__test_context() as test_context:
+            for binning in (1, 2):
+                hardware_source = test_context.camera_hardware_source
+                frame_parameters = hardware_source.get_frame_parameters(2)
+                frame_parameters.binning = binning
+                hardware_source.set_record_frame_parameters(frame_parameters)
+                hardware_source.start_recording(sync_timeout=3.0)
+                try:
+                    results = hardware_source.get_next_xdatas_to_finish()
+                    self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions(binning))
+                finally:
+                    hardware_source.stop_recording(sync_timeout=3.0)
+
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
