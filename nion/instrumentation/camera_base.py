@@ -300,96 +300,6 @@ class CameraDevice(typing.Protocol):
         """
         return dict()
 
-    def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
-        """Prepare for synchronized acquisition.
-
-        THIS METHOD IS DEPRECATED TO ADD SUPPORT FOR PARTIAL ACQUISITION.
-
-        Default implementation calls acquire_sequence_prepare.
-        """
-        pass
-
-    def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
-        """Acquire a sequence of images with the data_shape. Return a single data element with two dimensions n x data_shape.
-
-        THIS METHOD IS DEPRECATED TO ADD SUPPORT FOR PARTIAL ACQUISITION.
-
-        Default implementation calls acquire_sequence.
-
-        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
-        with a dict.
-
-        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
-        released (Python reference count goes to zero).
-
-        Return None for cancellation.
-
-        Raise exception for error.
-        """
-        return list()
-
-    def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
-        """Begin synchronized acquire.
-
-        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
-
-        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
-        False, is_canceled set to False, and valid_rows and valid_count set to 0.
-
-        Returns PartialData.
-        """
-        ...
-
-    def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
-        """Continue synchronized acquire.
-
-        The camera device should wait up to update_period seconds for data and populate PartialData with data and
-        information about the acquisition.
-
-        Deprecated: The valid_rows field of PartialData indicates how many rows are valid in xdata. The
-        grab_synchronized method will keep track of the last valid row and copy data from the last valid row to
-        valid_rows into the acquisition data and then update last valid row with valid_rows.
-
-        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
-        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
-        data and then update last valid item with valid_count.
-
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
-        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
-
-        Returns PartialData.
-        """
-        ...
-
-    def acquire_synchronized_end(self, **kwargs: typing.Any) -> None:
-        """Clean up synchronized acquire.
-
-        The camera device can clean up anything internal that was required for acquisition.
-
-        The memory returned during acquire_synchronized_begin or acquire_synchronized_continue must remain valid until
-        the last Python reference to that memory is released.
-        """
-        ...
-
-    def acquire_sequence_prepare(self, n: int) -> None:
-        """Prepare for acquire_sequence."""
-        ...
-
-    def acquire_sequence(self, n: int) -> typing.Optional[ImportExportManager.DataElementType]:
-        """Acquire a sequence of n images. Return a single data element with two dimensions n x h, w.
-
-        The data element dict should have a 'data' element with the ndarray of the data and a 'properties' element
-        with a dict.
-
-        The 'data' may point to memory allocated in low level code, but it must remain valid and unmodified until
-        released (Python reference count goes to zero).
-
-        Return None for cancellation.
-
-        Raise exception for error.
-        """
-        return None
-
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         """Begin sequence acquire.
 
@@ -1759,7 +1669,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
 class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
 
-    def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
+    def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice3, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
         # configure the event loop object
