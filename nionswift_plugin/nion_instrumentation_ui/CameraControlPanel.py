@@ -53,31 +53,7 @@ map_channel_state_to_text = {
 
 
 class CameraControlStateController:
-    """
-    Track the state of a camera controller, as it relates to the UI. This object does not hold any state itself.
-
-    Camera controller should support the following API:
-        (acquisition)
-            (event) acquisition_state_changed_event(is_acquiring)
-            (read-only property) hardware_source_id
-            (read-only property) is_playing
-            (read-only property) display_name
-            (read-only property) features
-            (method) start_playing()
-            (method) stop_playing()
-            (method) abort_playing()
-        (event) profile_changed_event(profile_index)
-        (event) frame_parameters_changed_event(profile_index, frame_parameters)
-        (event) log_messages_event(messages, data_elements)
-        (read-only property) selected_profile_index: return current profile index
-        (method) set_selected_profile_index(profile_index): change the profile index
-        (method) get_frame_parameters(profile_index)
-        (method) set_frame_parameters(profile_index, frame_parameters)
-        (method) set_current_frame_parameters(frame_parameters)
-        (method) get_current_frame_parameters()
-        (method) shift_click(mouse_position, camera_shape)
-        (method) open_configuration_interface(api_broker)
-        (method) periodic()
+    """Track the state of a camera controller, as it relates to the UI. This object does not hold any state itself.
 
     Clients can query:
         (property) has_processed_data
@@ -297,6 +273,7 @@ class CameraControlStateController:
     def handle_binning_changed(self, binning_str: str) -> None:
         frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.binning = max(int(binning_str), 1)
+        frame_parameters = self.__camera_hardware_source.validate_frame_parameters(frame_parameters)
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     # must be called on ui thread
@@ -306,16 +283,19 @@ class CameraControlStateController:
             frame_parameters.exposure_ms = float(exposure)
         except ValueError:
             pass
+        frame_parameters = self.__camera_hardware_source.validate_frame_parameters(frame_parameters)
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_decrease_exposure(self) -> None:
         frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.exposure_ms = frame_parameters.exposure_ms * 0.5
+        frame_parameters = self.__camera_hardware_source.validate_frame_parameters(frame_parameters)
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_increase_exposure(self) -> None:
         frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         frame_parameters.exposure_ms = frame_parameters.exposure_ms * 2.0
+        frame_parameters = self.__camera_hardware_source.validate_frame_parameters(frame_parameters)
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_capture_clicked(self) -> None:

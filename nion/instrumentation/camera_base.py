@@ -516,8 +516,20 @@ class CameraDevice3(typing.Protocol):
         """
         ...
 
+    def validate_frame_parameters(self, frame_parameters: CameraFrameParameters) -> CameraFrameParameters:
+        """Validate the frame parameters.
+
+        The returned frame parameters should be a copy of the input values with modifications so that the
+        requested values are within range and precision.
+        """
+        return CameraFrameParameters(frame_parameters.as_dict())
+
     def set_frame_parameters(self, frame_parameters: typing.Any) -> None:
         """Set the pending frame parameters (exposure_ms, binning, processing, integration_count).
+
+        The parameters may be out of range or not precise; the device is free to use the closest value.
+
+        The caller should call validate_frame_parameters if worried about range or precision.
 
         processing and integration_count are optional, in which case they are handled at a higher level.
         """
@@ -763,10 +775,10 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__signal_type = signal_type
         self.__display_name = display_name
         self.__frame_parameters: typing.Optional[CameraFrameParameters] = None
-        self.__pending_frame_parameters: typing.Optional[CameraFrameParameters] = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__pending_frame_parameters: typing.Optional[CameraFrameParameters] = CameraFrameParameters(frame_parameters.as_dict())
 
     def set_frame_parameters(self, frame_parameters: CameraFrameParameters) -> None:
-        self.__pending_frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__pending_frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__activate_frame_parameters()
 
     @property
@@ -985,7 +997,12 @@ class CameraSettings:
         pass
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> CameraFrameParameters:
-        pass
+        """Return camera frame parameters from dict.
+
+        Subclasses should no longer override this method as it is required to return CameraFrameParameters
+        instead of another frame parameters class.
+        """
+        return CameraFrameParameters(d)
 
     def set_current_frame_parameters(self, frame_parameters: CameraFrameParameters) -> None:
         """Set the current frame parameters.
@@ -1127,6 +1144,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_frame_parameters(self, profile_index: int) -> CameraFrameParameters: ...
     def set_frame_parameters(self, profile_index: int, frame_parameters: CameraFrameParameters) -> None: ...
     def set_selected_profile_index(self, profile_index: int) -> None: ...
+    def validate_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> CameraFrameParameters: ...
 
     @property
     def selected_profile_index(self) -> int: raise NotImplementedError()
@@ -1296,7 +1314,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if "frame_parameters" in kwargs:
             self.set_current_frame_parameters(kwargs["frame_parameters"])
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(args[0]))
+            self.set_current_frame_parameters(CameraFrameParameters(args[0]))
         super().start_playing(*args, **kwargs)
 
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
@@ -1551,11 +1569,11 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __current_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, CameraAcquisitionTask):
-            acquisition_task.set_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict()))
-        self.__frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+            acquisition_task.set_frame_parameters(CameraFrameParameters(frame_parameters.as_dict()))
+        self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
 
     def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_current_frame_parameters(frame_parameters)
         # __current_frame_parameters_changed will be called by the controller
 
@@ -1563,10 +1581,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return CameraFrameParameters(self.__frame_parameters.as_dict() if self.__frame_parameters else dict())
 
     def __record_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
-        self.__record_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__record_parameters = CameraFrameParameters(frame_parameters.as_dict())
 
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_record_frame_parameters(frame_parameters)
         # __record_frame_parameters_changed will be called by the controller
 
@@ -1574,7 +1592,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return CameraFrameParameters(self.__record_parameters.as_dict() if self.__record_parameters else dict())
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> CameraFrameParameters:
-        return self.__camera_settings.get_frame_parameters_from_dict(d)
+        return CameraFrameParameters(d)
+
+    def validate_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> CameraFrameParameters:
+        return CameraFrameParameters(frame_parameters.as_dict())
 
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None:
         instrument_controller = self.__get_instrument_controller()
@@ -1646,7 +1667,6 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     # used in api, tests, camera control panel
     def set_frame_parameters(self, profile_index: int, frame_parameters: CameraFrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
         self.__camera_settings.set_frame_parameters(profile_index, frame_parameters)
 
     # used in tuning, api, tests, camera control panel
@@ -1814,7 +1834,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if "frame_parameters" in kwargs:
             self.set_current_frame_parameters(kwargs["frame_parameters"])
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(args[0]))
+            self.set_current_frame_parameters(CameraFrameParameters(args[0]))
         super().start_playing(*args, **kwargs)
 
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
@@ -1995,11 +2015,11 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __current_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, CameraAcquisitionTask):
-            acquisition_task.set_frame_parameters(self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict()))
-        self.__frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+            acquisition_task.set_frame_parameters(CameraFrameParameters(frame_parameters.as_dict()))
+        self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
 
     def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_current_frame_parameters(frame_parameters)
         # __current_frame_parameters_changed will be called by the controller
 
@@ -2007,10 +2027,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return CameraFrameParameters(self.__frame_parameters.as_dict() if self.__frame_parameters else dict())
 
     def __record_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
-        self.__record_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        self.__record_parameters = CameraFrameParameters(frame_parameters.as_dict())
 
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.__camera_settings.set_record_frame_parameters(frame_parameters)
         # __record_frame_parameters_changed will be called by the controller
 
@@ -2018,7 +2038,11 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return CameraFrameParameters(self.__record_parameters.as_dict() if self.__record_parameters else dict())
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> CameraFrameParameters:
-        return self.__camera_settings.get_frame_parameters_from_dict(d)
+        return CameraFrameParameters(d)
+
+    def validate_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> CameraFrameParameters:
+        frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
+        return self.__camera.validate_frame_parameters(frame_parameters)
 
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None:
         instrument_controller = self.__get_instrument_controller()
@@ -2065,7 +2089,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     # used in api, tests, camera control panel
     def set_frame_parameters(self, profile_index: int, frame_parameters: CameraFrameParameters) -> None:
-        frame_parameters = self.__camera_settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
         self.__camera_settings.set_frame_parameters(profile_index, frame_parameters)
 
     # used in tuning, api, tests, camera control panel
@@ -2099,6 +2122,7 @@ class CameraFrameParameters:
         self.binning = d.pop("binning", 1)
         self.processing = d.pop("processing", None)
         self.integration_count = d.pop("integration_count", 1)
+        self.__is_validated = False
         self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in d.pop("active_masks", [])]
         self.__extra = d
 
@@ -2113,6 +2137,7 @@ class CameraFrameParameters:
     def as_dict(self) -> typing.Dict[str, typing.Any]:
         d = {
             "exposure_ms": self.exposure_ms,
+            "exposure": self.exposure_ms / 1000,
             "binning": self.binning,
             "processing": self.processing,
             "integration_count": self.integration_count,
@@ -2132,6 +2157,21 @@ class CameraFrameParameters:
             setattr(self, key, value)
         else:
             self.__extra[key] = value
+
+    @property
+    def exposure(self) -> float:
+        return self.exposure_ms / 1000
+
+    @exposure.setter
+    def exposure(self, value: float) -> None:
+        self.exposure_ms = value * 1000
+
+    @property
+    def is_validated(self) -> bool:
+        return self.__is_validated
+
+    def _set_is_validated(self, is_validated: bool) -> None:
+        self.__is_validated = is_validated
 
     @property
     def active_masks(self) -> typing.Sequence[Mask]:
