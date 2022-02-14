@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import copy
 import json
@@ -10,6 +9,7 @@ import zlib
 
 import numpy
 
+from nion.data import DataAndMetadata
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
 from nion.instrumentation.test import AcquisitionTestContext
@@ -22,6 +22,7 @@ from nion.swift.model import Metadata
 from nion.swift.model import Schema
 from nion.ui import TestUI
 from nion.utils import Geometry
+from nion.utils import Model
 from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
@@ -47,6 +48,56 @@ class ApplicationDataInMemory:
 
     def set_data_dict(self, d: typing.Mapping[str, typing.Any]) -> None:
         self.d = dict(d)
+
+
+def make_camera_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
+    return AcquisitionPanel.build_camera_device_data_stream(test_context.camera_hardware_source)
+
+
+def make_scan_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
+    return AcquisitionPanel.build_scan_device_data_stream(test_context.scan_hardware_source)
+
+
+def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
+    scan_context_description = AcquisitionPanel.SynchronizedScanDescription(str(), True, str(), Geometry.IntSize(6, 4), 0)
+    return AcquisitionPanel.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source)
+
+
+def make_sequence_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
+    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names)
+
+
+def make_series_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
+    control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
+    control_customization._set_field_value("control_id", "defocus")
+    control_customization.device_control_id = "C10"
+    control_customization.delay = 0
+    control_values_range = AcquisitionPanel.ControlValuesRange(4, 500e-9, 5e-9)
+    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_series(
+        adr.data_stream,
+        control_customization,
+        control_values_range,
+        adr.device_map,
+        adr.channel_names
+    )
+
+
+def make_tableau_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
+    control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
+    control_customization._set_field_value("control_id", "stage_position")
+    control_customization.device_control_id = "stage_position_m"
+    control_customization.delay = 0
+    x_control_values_range = AcquisitionPanel.ControlValuesRange(3, -1e-9, 1e-9)
+    y_control_values_range = AcquisitionPanel.ControlValuesRange(3, -1e-9, 1e-9)
+    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_tableau(
+        adr.data_stream,
+        control_customization,
+        "tv",
+        x_control_values_range,
+        y_control_values_range,
+        adr.device_map,
+        adr.channel_names
+    )
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -1033,8 +1084,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(state_controller.acquisition_state_model.value, "error")
 
     def test_acquisition_panel_sequence_acquisition(self):
-        # this test is too complicated to set up. consider simplifying the setup using cleaner objects
-        # in the acquisition panel code.
+        # this test is complicated to set up because it is testing the UI.
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
@@ -1062,47 +1112,69 @@ class TestCameraControlClass(unittest.TestCase):
             # a sequence will use the special sequence acquisition of the camera device.
             self.assertEqual(1, len(document_controller.document_model.data_items))
 
-    def test_acquisition_panel_series_acquisition(self):
-        # this test is much too complicated to set up. consider simplifying the setup using cleaner objects
-        # in the acquisition panel code.
-        with self.__test_context() as test_context:
-            document_controller = test_context.document_controller
-            hardware_source = test_context.camera_hardware_source
-            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
-            c.camera_device_id = hardware_source.hardware_source_id
-            c2 = Schema.Entity(Schema.get_entity_type("acquisition_method_component_series_acquire"))
-            cv = Schema.Entity(Schema.get_entity_type("control_values"))
-            cv.control_id = "C10"
-            cv.count = 4
-            cv.start_value = 500e-9
-            cv.step_value = 5e-9
-            c2.control_id = "C10"
-            c2._append_item("control_values_list", cv)
-            cc = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
-            cc._set_field_value("control_id", "defocus")
-            cc.device_control_id = "C10"
-            cc.delay = 0
-            acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationDataInMemory())
-            acquisition_configuration.acquisition_device_component_id = "camera"
-            acquisition_configuration.acquisition_method_component_id = "series-acquire"
-            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationDataInMemory())
-            ac = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
-            with contextlib.closing(ac):
-                h = AcquisitionPanel.CameraAcquisitionDeviceComponentHandler(c, acquisition_preferences)
-                with contextlib.closing(h):
-                    h2 = AcquisitionPanel.SeriesAcquisitionMethodComponentHandler(c2, acquisition_preferences)
-                    h2._control_combo_box_handler.selected_item_value_stream.value = cc
-                    control_handler = h2.create_handler("series-control", None, cc)
-                    control_handler.control_values = cv
-                    with contextlib.closing(h2):
-                        adr = h.build_acquisition_device_data_stream()
-                        amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
-                        ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
-                        while ac.is_acquiring_model.value:
-                            document_controller.periodic()
-                        self.assertFalse(ac.is_error)
+    def __test_acq(self, document_controller: DocumentController.DocumentController, adr: AcquisitionPanel.AcquisitionDeviceResult, amr: AcquisitionPanel.AcquisitionMethodResult, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
+        acquisition_state = AcquisitionPanel.AcquisitionState()
+        progress_value_model = Model.PropertyModel[int](0)
+        is_acquiring_model = Model.PropertyModel[bool](False)
+        AcquisitionPanel._acquire_data_stream(amr.data_stream,
+                                              document_controller,
+                                              acquisition_state,
+                                              progress_value_model,
+                                              is_acquiring_model,
+                                              amr.title_base,
+                                              amr.channel_names,
+                                              adr.drift_tracker)
+        while is_acquiring_model.value:
+            document_controller.periodic()
+        self.assertFalse(acquisition_state.is_error)
+        self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
+        for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
+            self.assertEqual(expected_dimension[0], data_item.data_shape)
+            self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
+
+    def test_acquisition_panel_acquisition(self):
+        tc = [
+            # only one data item will be created: the sequence. the view data item does not exist since acquiring
+            # a sequence will use the special sequence acquisition of the camera device.
+            (make_camera_device, make_sequence_acquisition_method, [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2))]),
+
             # two data items will be created: the series and the camera view.
-            self.assertEqual(2, len(document_controller.document_model.data_items))
+            (make_camera_device, make_series_acquisition_method, [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2)),
+                                                                  ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # two data items will be created: the series and the camera view.
+            (make_camera_device, make_tableau_acquisition_method, [((3, 3, 1024, 1024), DataAndMetadata.DataDescriptor(False, 2, 2)),
+                                                                   ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # two data items will be created: the series and the scan view.
+            (make_scan_device, make_sequence_acquisition_method, [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2)),
+                                                                  ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # two data items will be created: the series and the scan view.
+            (make_scan_device, make_series_acquisition_method, [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2)),
+                                                                ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # two data items will be created: the tableau and the scan view.
+            (make_scan_device, make_tableau_acquisition_method, [((3, 3, 256, 256), DataAndMetadata.DataDescriptor(False, 2, 2)),
+                                                                 ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # three data items will be created: the camera series, the sync'd series, and the scan view.
+            (make_synchronized_device, make_sequence_acquisition_method, [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
+                                                                          ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
+                                                                          ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+
+            # not supported yet; no way to represent it as a single data item.
+            # (make_synchronized_device, make_series_acquisition_method, [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
+            #                                                             ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
+            #                                                             ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+        ]
+        for adr_fn, amr_fn, expected_count in tc:
+            with self.subTest(adr_fn=adr_fn, amr_fn=amr_fn, expected_count=expected_count):
+                with self.__test_context() as test_context:
+                    document_controller = test_context.document_controller
+                    adr = adr_fn(test_context)
+                    amr = amr_fn(adr)
+                    self.__test_acq(document_controller, adr, amr, expected_count)
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass

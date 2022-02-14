@@ -326,6 +326,21 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
         return AcquisitionMethodResult(data_stream, str(), channel_names)
 
 
+def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.DataStream, count: int, channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    if count > 1:
+        # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
+        # has the option of doing the processing itself and the operator will not be applied to the result. in
+        # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
+        # on the entire sequence. there is probably a better way to abstract this in the future.
+        if isinstance(data_stream, Acquisition.FramedDataStream) and isinstance(data_stream.operator, Acquisition.SumOperator):
+            return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
+        else:
+            return AcquisitionMethodResult(data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
+    else:
+        return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
+
+
 class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
     """Sequence acquisition method - a sequence of acquires from acquisition device with no options.
 
@@ -352,19 +367,8 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         )
 
     def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
-        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
         length = max(1, self.configuration.count) if self.configuration.count else 1
-        if length > 1:
-            # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
-            # has the option of doing the processing itself and the operator will not be applied to the result. in
-            # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
-            # on the entire sequence. there is probably a better way to abstract this in the future.
-            if isinstance(data_stream, Acquisition.FramedDataStream) and isinstance(data_stream.operator, Acquisition.SumOperator):
-                return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
-            else:
-                return AcquisitionMethodResult(data_stream.wrap_in_sequence(length), _("Sequence"), channel_names)
-        else:
-            return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
+        return wrap_acquisition_device_data_stream_for_sequence(data_stream, length, channel_names)
 
 
 @dataclasses.dataclass
@@ -442,6 +446,55 @@ def get_control_values(configuration: Schema.Entity, control_values_list_key: st
                                                            "step_value": 0.0})
         configuration._append_item(control_values_list_key, control_values)
     return control_values
+
+
+def wrap_acquisition_device_data_stream_for_series(data_stream: Acquisition.DataStream, control_customization: AcquisitionPreferences.ControlCustomization, control_values_range: ControlValuesRange, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    # get the associated control handler that was created in created_handler and used within the stack
+    # of control handlers declarative components.
+    assert data_stream
+    if control_values_range.count > 1:
+        class ActionDelegate(Acquisition.ActionDataStreamDelegate):
+            def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                         device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
+                         steps: typing.Sequence[float]) -> None:
+                self.control_customization = control_customization
+                self.device_map = device_map
+                self.starts = starts
+                self.steps = steps
+                self.original_values: typing.Sequence[float] = list()
+
+            def start(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    self.original_values = device_controller.get_values(self.control_customization)
+
+            # define an action function to apply control values during acquisition
+            def perform(self, index: Acquisition.ShapeType) -> None:
+                # look up the device controller in the device_map using the device_id in the control description
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    # calculate the current value (in each dimension) and send the result to the
+                    # device controller. the device controller may be a camera, scan, or stem device
+                    # controller.
+                    values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                    device_controller.update_values(self.control_customization, self.original_values, values)
+
+            def finish(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    device_controller.set_values(self.control_customization, self.original_values)
+
+        # configure the action function and data stream using weak_partial to carefully control ref counts
+        action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step])
+        data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_delegate), control_values_range.count)
+    return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
 
 
 class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -532,48 +585,81 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             if control_handler and data_stream:
                 # get the control values range from the control handler.
                 control_values_range = control_handler.get_control_values_range()
-                if control_values_range.count > 1:
-                    class ActionDelegate(Acquisition.ActionDataStreamDelegate):
-                        def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
-                                     device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
-                                     steps: typing.Sequence[float]) -> None:
-                            self.control_customization = control_customization
-                            self.device_map = device_map
-                            self.starts = starts
-                            self.steps = steps
-                            self.original_values: typing.Sequence[float] = list()
-
-                        def start(self) -> None:
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                self.original_values = device_controller.get_values(self.control_customization)
-
-                        # define an action function to apply control values during acquisition
-                        def perform(self, index: Acquisition.ShapeType) -> None:
-                            # look up the device controller in the device_map using the device_id in the control description
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                # calculate the current value (in each dimension) and send the result to the
-                                # device controller. the device controller may be a camera, scan, or stem device
-                                # controller.
-                                values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
-                                device_controller.update_values(self.control_customization, self.original_values, values)
-
-                        def finish(self) -> None:
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                device_controller.set_values(self.control_customization, self.original_values)
-
-                    # configure the action function and data stream using weak_partial to carefully control ref counts
-                    action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step])
-                    data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_delegate), control_values_range.count)
+                return wrap_acquisition_device_data_stream_for_series(
+                    data_stream,
+                    control_customization,
+                    control_values_range,
+                    device_map,
+                    channel_names
+                )
         return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
+
+
+def wrap_acquisition_device_data_stream_for_tableau(data_stream: Acquisition.DataStream,
+                                                    control_customization: AcquisitionPreferences.ControlCustomization,
+                                                    axis_id: typing.Optional[str],
+                                                    x_control_values_range: ControlValuesRange,
+                                                    y_control_values_range: ControlValuesRange,
+                                                    device_map: typing.Mapping[str, DeviceController],
+                                                    channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    assert data_stream
+    if x_control_values_range.count > 1 or y_control_values_range.count > 1:
+        class ActionDelegate(Acquisition.ActionDataStreamDelegate):
+            def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                         device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
+                         steps: typing.Sequence[float], axis_id: typing.Optional[str]) -> None:
+                self.control_customization = control_customization
+                self.device_map = device_map
+                self.starts = starts
+                self.steps = steps
+                self.axis_id = axis_id
+                self.original_values: typing.Sequence[float] = list()
+
+            def start(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    self.original_values = device_controller.get_values(self.control_customization, self.__resolve_axis())
+
+            # define an action function to apply control values during acquisition
+            def perform(self, index: Acquisition.ShapeType) -> None:
+                # look up the device controller in the device_map using the device_id in the control description
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    # calculate the current value (in each dimension) and send the result to the
+                    # device controller. the device controller may be a camera, scan, or stem device
+                    # controller.
+                    values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                    device_controller.set_values(self.control_customization, values, self.__resolve_axis())
+
+            def finish(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    device_controller.set_values(self.control_customization, self.original_values, self.__resolve_axis())
+
+            def __resolve_axis(self) -> stem_controller.AxisType:
+                # resolve the axis for the 2d control
+                axis: stem_controller.AxisType = ("x", "y")
+                for axis_description in typing.cast(STEMDeviceController,
+                                                    self.device_map[
+                                                        "stem"]).stem_controller.axis_descriptions:
+                    if self.axis_id == axis_description.axis_id:
+                        axis = axis_description.axis_type
+                return axis
+
+        # configure the action function and data stream using weak_partial to carefully control ref counts
+        action_delegate = ActionDelegate(control_customization, device_map, [y_control_values_range.start, x_control_values_range.start], [y_control_values_range.step, x_control_values_range.step], axis_id)
+        data_stream = Acquisition.CollectedDataStream(
+            Acquisition.ActionDataStream(data_stream, action_delegate),
+            (y_control_values_range.count, x_control_values_range.count),
+            (Calibration.Calibration(), Calibration.Calibration()))
+    return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
 
 
 class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -698,61 +784,9 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
                 axis_id = self.__axis_storage_model.value
                 y_control_values_range = y_control_handler.get_control_values_range()
                 x_control_values_range = x_control_handler.get_control_values_range()
-                if x_control_values_range.count > 1 or y_control_values_range.count > 1:
-                    class ActionDelegate(Acquisition.ActionDataStreamDelegate):
-                        def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
-                                     device_map: typing.Mapping[str, DeviceController], starts: typing.Sequence[float],
-                                     steps: typing.Sequence[float], axis_id: typing.Optional[str]) -> None:
-                            self.control_customization = control_customization
-                            self.device_map = device_map
-                            self.starts = starts
-                            self.steps = steps
-                            self.axis_id = axis_id
-                            self.original_values: typing.Sequence[float] = list()
-
-                        def start(self) -> None:
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                self.original_values = device_controller.get_values(self.control_customization, self.__resolve_axis())
-
-                        # define an action function to apply control values during acquisition
-                        def perform(self, index: Acquisition.ShapeType) -> None:
-                            # look up the device controller in the device_map using the device_id in the control description
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                # calculate the current value (in each dimension) and send the result to the
-                                # device controller. the device controller may be a camera, scan, or stem device
-                                # controller.
-                                values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
-                                device_controller.set_values(self.control_customization, values, self.__resolve_axis())
-
-                        def finish(self) -> None:
-                            control_description = self.control_customization.control_description
-                            assert control_description
-                            device_controller = self.device_map.get(control_description.device_id)
-                            if device_controller:
-                                device_controller.set_values(self.control_customization, self.original_values, self.__resolve_axis())
-
-                        def __resolve_axis(self) -> stem_controller.AxisType:
-                            # resolve the axis for the 2d control
-                            axis: stem_controller.AxisType = ("x", "y")
-                            for axis_description in typing.cast(STEMDeviceController,
-                                                                self.device_map[
-                                                                    "stem"]).stem_controller.axis_descriptions:
-                                if self.axis_id == axis_description.axis_id:
-                                    axis = axis_description.axis_type
-                            return axis
-
-                    # configure the action function and data stream using weak_partial to carefully control ref counts
-                    action_delegate = ActionDelegate(control_customization, device_map, [y_control_values_range.start, x_control_values_range.start], [y_control_values_range.step, x_control_values_range.step], axis_id)
-                    data_stream = Acquisition.CollectedDataStream(
-                        Acquisition.ActionDataStream(data_stream, action_delegate),
-                        (y_control_values_range.count, x_control_values_range.count),
-                        (Calibration.Calibration(), Calibration.Calibration()))
+                return wrap_acquisition_device_data_stream_for_tableau(data_stream, control_customization, axis_id,
+                                                                       x_control_values_range, y_control_values_range,
+                                                                       device_map, channel_names)
         return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
 
 
@@ -1324,6 +1358,78 @@ class CameraDetailsHandler(Observable.Observable):
             self.exposure_value_stream.exposure_time_ms = self.exposure_model.value if self.exposure_model.value else 0.0
 
 
+def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: SynchronizedScanDescription, camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+    # first get the camera hardware source and the camera channel description.
+    if channel in hardware_source_channel_descriptions:
+        camera_channel_description = hardware_source_channel_descriptions[channel]
+    else:
+        camera_channel_description = hardware_source_channel_descriptions["image"]
+    assert camera_hardware_source is not None
+    assert camera_channel_description is not None
+
+    assert scan_hardware_source is not None
+    assert scan_context_description is not None
+
+    # configure the camera hardware source processing. always use camera parameters at index 0.
+    camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
+    if camera_channel_description.processing_id:
+        camera_frame_parameters.processing = camera_channel_description.processing_id
+    else:
+        camera_frame_parameters.processing = None
+
+    # configure the scan uuid and scan frame parameters.
+    scan_count = 1
+    scan_size = scan_context_description.scan_size
+    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+    scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
+    scan_frame_parameters.scan_id = uuid.uuid4()
+
+    # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
+    # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
+    # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
+    # tracker is separate at the moment.
+    drift_correction_behavior: typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
+    section_height: typing.Optional[int] = None
+    if scan_context_description.drift_interval_lines > 0:
+        drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+        section_height = scan_context_description.drift_interval_lines
+
+    # build the synchronized data stream. this will also automatically include scan-channel drift correction.
+    synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
+        scan_hardware_source=scan_hardware_source,
+        scan_frame_parameters=scan_frame_parameters,
+        camera_hardware_source=camera_hardware_source,
+        camera_frame_parameters=camera_frame_parameters,
+        scan_behavior=drift_correction_behavior,
+        section_height=section_height,
+        scan_count=scan_count,
+        include_raw=True,
+        include_summed=False
+    )
+
+    # construct the channel names.
+    op = _("Synchronized")
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    for c in scan_hardware_source.get_enabled_channels():
+        channel_state = scan_hardware_source.get_channel_state(c)
+        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
+    channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
+
+    drift_tracker = scan_hardware_source.drift_tracker
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, DeviceController] = dict()
+    device_map["stem"] = STEMDeviceController()
+    device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+    device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+
+    return AcquisitionDeviceResult(synchronized_scan_data_stream, channel_names, drift_tracker, device_map)
+
+
 class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
     """A declarative component handler for a synchronized scan/camera virtual device.
 
@@ -1477,76 +1583,11 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
 
     def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
-
-        # first get the camera and scan hardware sources and the camera channel and scan context descriptions.
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, self.__camera_hardware_source_choice.hardware_source)
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
-        if self.__camera_hardware_source_channel_model.value in hardware_source_channel_descriptions:
-            camera_channel_description = hardware_source_channel_descriptions[self.__camera_hardware_source_channel_model.value]
-        else:
-            camera_channel_description = hardware_source_channel_descriptions["image"]
         scan_context_description = self.__scan_context_description_value_stream.value
-        assert camera_hardware_source is not None
-        assert scan_hardware_source is not None
-        assert camera_channel_description is not None
-        assert scan_context_description is not None
-
-        # configure the camera hardware source processing. always use camera parameters at index 0.
-        camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
-        if camera_channel_description.processing_id:
-            camera_frame_parameters.processing = camera_channel_description.processing_id
-        else:
-            camera_frame_parameters.processing = None
-
-        # configure the scan uuid and scan frame parameters.
-        scan_count = 1
-        scan_size = scan_context_description.scan_size
-        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
-        scan_frame_parameters.scan_id = uuid.uuid4()
-
-        # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
-        # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
-        # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
-        # tracker is separate at the moment.
-        drift_correction_behavior: typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
-        section_height: typing.Optional[int] = None
-        if scan_context_description.drift_interval_lines > 0:
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
-            section_height = scan_context_description.drift_interval_lines
-
-        # build the synchronized data stream. this will also automatically include scan-channel drift correction.
-        synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
-            scan_hardware_source=scan_hardware_source,
-            scan_frame_parameters=scan_frame_parameters,
-            camera_hardware_source=camera_hardware_source,
-            camera_frame_parameters=camera_frame_parameters,
-            scan_behavior=drift_correction_behavior,
-            section_height=section_height,
-            scan_count=scan_count,
-            include_raw=True,
-            include_summed=False
-        )
-
-        # construct the channel names.
-        op = _("Synchronized")
-        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-        for c in scan_hardware_source.get_enabled_channels():
-            channel_state = scan_hardware_source.get_channel_state(c)
-            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
-
-        drift_tracker = scan_hardware_source.drift_tracker
-
-        # construct the device map for this acquisition device.
-        device_map: typing.Dict[str, DeviceController] = dict()
-        device_map["stem"] = STEMDeviceController()
-        device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
-        device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-        device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-
-        return AcquisitionDeviceResult(synchronized_scan_data_stream, channel_names, drift_tracker, device_map)
+        assert scan_context_description
+        return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, self.__camera_hardware_source_channel_model.value)
 
 
 class CameraFrameDataStream(Acquisition.DataStream):
@@ -1614,6 +1655,60 @@ class CameraFrameDataStream(Acquisition.DataStream):
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
         return scan_base.make_sequence_data_stream(self.__hardware_source, self.__frame_parameters, length)
         # return Acquisition.SequenceDataStream(self, length)
+
+
+def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+    # first get the camera hardware source and the camera channel description.
+    if channel in hardware_source_channel_descriptions:
+        camera_channel_description = hardware_source_channel_descriptions[channel]
+    else:
+        camera_channel_description = hardware_source_channel_descriptions["image"]
+    assert camera_hardware_source is not None
+    assert camera_channel_description is not None
+
+    # configure the camera hardware source processing. always use camera parameters at index 0.
+    camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
+    if camera_channel_description.processing_id:
+        camera_frame_parameters.processing = camera_channel_description.processing_id
+    else:
+        camera_frame_parameters.processing = None
+
+    # gather the instrument metadata
+    instrument_metadata: typing.Dict[str, typing.Any] = dict()
+    stem_controller = Registry.get_component('stem_controller')
+    assert stem_controller
+    scan_base.update_instrument_properties(instrument_metadata, stem_controller, None)
+
+    # construct the camera frame data stream. add processing.
+    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
+    processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
+    if camera_frame_parameters.processing == "sum_project":
+        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                    operator=Acquisition.SumOperator(axis=0))
+    elif camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks:
+            operator = Acquisition.StackedDataStreamOperator(
+                [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                        operator=operator)
+        else:
+            operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                        operator=operator)
+
+    # construct the channel names.
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, DeviceController] = dict()
+    device_map["stem"] = STEMDeviceController()
+    device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+
+    return AcquisitionDeviceResult(processed_camera_data_stream, channel_names, None, device_map)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1684,54 +1779,60 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
         # first get the camera hardware source and the camera channel description.
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, self.__camera_hardware_source_choice.hardware_source)
-        if self.__camera_hardware_source_channel_model.value in hardware_source_channel_descriptions:
-            camera_channel_description = hardware_source_channel_descriptions[self.__camera_hardware_source_channel_model.value]
-        else:
-            camera_channel_description = hardware_source_channel_descriptions["image"]
-        assert camera_hardware_source is not None
-        assert camera_channel_description is not None
 
-        # configure the camera hardware source processing. always use camera parameters at index 0.
-        camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
-        if camera_channel_description.processing_id:
-            camera_frame_parameters.processing = camera_channel_description.processing_id
-        else:
-            camera_frame_parameters.processing = None
+        return build_camera_device_data_stream(camera_hardware_source, self.__camera_hardware_source_channel_model.value)
 
-        # gather the instrument metadata
-        instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        stem_controller = Registry.get_component('stem_controller')
-        assert stem_controller
-        scan_base.update_instrument_properties(instrument_metadata, stem_controller, None)
 
-        # construct the camera frame data stream. add processing.
-        camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
-        processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
-        if camera_frame_parameters.processing == "sum_project":
-            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
-                                                                        operator=Acquisition.SumOperator(axis=0))
-        elif camera_frame_parameters.processing == "sum_masked":
-            active_masks = camera_frame_parameters.active_masks
-            if active_masks:
-                operator = Acquisition.StackedDataStreamOperator(
-                    [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
-                processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
-                                                                            operator=operator)
-            else:
-                operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
-                processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
-                                                                            operator=operator)
+def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource) -> AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
-        # construct the channel names.
-        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
+    assert scan_hardware_source is not None
 
-        # construct the device map for this acquisition device.
-        device_map: typing.Dict[str, DeviceController] = dict()
-        device_map["stem"] = STEMDeviceController()
-        device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+    # configure the scan uuid and scan frame parameters.
+    scan_uuid = uuid.uuid4()
+    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+    scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
+    scan_frame_parameters.scan_id = scan_uuid
 
-        return AcquisitionDeviceResult(processed_camera_data_stream, channel_names, None, device_map)
+    # gather the scan metadata.
+    scan_metadata: typing.Dict[str, typing.Any] = dict()
+    scan_base.update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id,
+                                   scan_hardware_source.display_name, scan_frame_parameters, scan_uuid, dict())
+
+    instrument_metadata: typing.Dict[str, typing.Any] = dict()
+    scan_base.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
+                                           scan_hardware_source.scan_device)
+
+    # build the scan frame data stream.
+    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters)
+
+    # potentially break the scan into multiple sections; this is an unused capability currently.
+    scan_size = scan_data_stream.scan_size
+    section_height = scan_size.height
+    section_count = (scan_size.height + section_height - 1) // section_height
+    slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+    for section in range(section_count):
+        start = section * section_height
+        stop = min(start + section_height, scan_size.height)
+        slice_list.append((slice(start, stop), slice(0, scan_size.width)))
+    collector: Acquisition.DataStream = Acquisition.CollectedDataStream(scan_data_stream, tuple(scan_size),
+                                                                        scan_frame_parameters.get_scan_calibrations(),
+                                                                        slice_list)
+
+    # construct the channel names.
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    for c in scan_hardware_source.get_enabled_channels():
+        channel_state = scan_hardware_source.get_channel_state(c)
+        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, DeviceController] = dict()
+    device_map["stem"] = STEMDeviceController()
+    device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+
+    return AcquisitionDeviceResult(collector, channel_names, None, device_map)
 
 
 class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1790,51 +1891,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
         assert scan_hardware_source is not None
 
-        # configure the scan uuid and scan frame parameters.
-        scan_uuid = uuid.uuid4()
-        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
-        scan_frame_parameters.scan_id = scan_uuid
-
-        # gather the scan metadata.
-        scan_metadata: typing.Dict[str, typing.Any] = dict()
-        scan_base.update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id,
-                                       scan_hardware_source.display_name, scan_frame_parameters, scan_uuid, dict())
-
-        instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        scan_base.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
-                                               scan_hardware_source.scan_device)
-
-        # build the scan frame data stream.
-        scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters)
-
-        # potentially break the scan into multiple sections; this is an unused capability currently.
-        scan_size = scan_data_stream.scan_size
-        section_height = scan_size.height
-        section_count = (scan_size.height + section_height - 1) // section_height
-        slice_list: typing.List[typing.Tuple[slice, slice]] = list()
-        for section in range(section_count):
-            start = section * section_height
-            stop = min(start + section_height, scan_size.height)
-            slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-        collector: Acquisition.DataStream = Acquisition.CollectedDataStream(scan_data_stream, tuple(scan_size),
-                                                                            scan_frame_parameters.get_scan_calibrations(),
-                                                                            slice_list)
-
-        # construct the channel names.
-        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-        for c in scan_hardware_source.get_enabled_channels():
-            channel_state = scan_hardware_source.get_channel_state(c)
-            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
-
-        # construct the device map for this acquisition device.
-        device_map: typing.Dict[str, DeviceController] = dict()
-        device_map["stem"] = STEMDeviceController()
-        device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-        device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-
-        return AcquisitionDeviceResult(collector, channel_names, None, device_map)
+        return build_scan_device_data_stream(scan_hardware_source)
 
 
 # register each component as an acquisition device component factory.
@@ -1986,6 +2043,96 @@ class PreferencesButtonHandler:
         self.document_controller.open_preferences()
 
 
+class AcquisitionState:
+    def __init__(self) -> None:
+        self._acquisition: typing.Optional[Acquisition.Acquisition] = None
+        self.is_error = False
+
+    def _start(self, framed_data_stream: Acquisition.FramedDataStream) -> None:
+        self._acquisition = Acquisition.Acquisition(framed_data_stream)
+        self.is_error = False
+
+    def _end(self) -> None:
+        assert self._acquisition
+        self._acquisition.close()
+        self._acquisition = None
+
+    @property
+    def _acquisition_ex(self) -> Acquisition.Acquisition:
+        assert self._acquisition
+        return self._acquisition
+
+    @property
+    def is_active(self) -> bool:
+        return self._acquisition is not None
+
+    def abort_acquire(self) -> None:
+        if self._acquisition:
+            self._acquisition.abort_acquire()
+
+
+def _acquire_data_stream(data_stream: Acquisition.DataStream,
+                         document_controller: DocumentController.DocumentController,
+                         acquisition_state: AcquisitionState,
+                         progress_value_model: Model.PropertyModel[int],
+                         is_acquiring_model: Model.PropertyModel[bool],
+                         title_base: str,
+                         channel_names: typing.Dict[Acquisition.Channel, str],
+                         drift_tracker: typing.Optional[scan_base.DriftTracker]) -> None:
+    """Perform acquisition of of the data stream."""
+
+    # define a callback method to display the data item.
+    def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
+        Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
+
+    # create a data item data channel for converting data streams to data items, using partial updates and
+    # minimizing extra copies where possible.
+    data_item_data_channel = DataChannel.DataItemDataChannel(document_controller.document_model, title_base, channel_names)
+    data_item_data_channel.on_display_data_item = weak_partial(display_data_item, document_controller)
+    framed_data_stream = Acquisition.FramedDataStream(data_stream, data_channel=data_item_data_channel).add_ref()
+
+    # create the acquisition state/controller object based on the data item data channel data stream.
+    acquisition_state._start(framed_data_stream)
+
+    # configure the scan drift logger if required. the drift tracker here is only enabled if using the
+    # scan hardware source drift tracker.
+    scan_drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker,
+                                                 document_controller.event_loop) if drift_tracker else None
+
+    # define a method that gets called when the async acquisition method finished. this closes the various
+    # objects and updates the UI as 'complete'.
+    def finish_grab_async(framed_data_stream: Acquisition.FramedDataStream,
+                          acquisition_state: AcquisitionState,
+                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
+                          progress_task: typing.Optional[asyncio.Task[None]],
+                          progress_value_model: Model.PropertyModel[int],
+                          is_acquiring_model: Model.PropertyModel[bool]) -> None:
+        acquisition_state._end()
+        acquisition_state.is_error = framed_data_stream.is_error
+        framed_data_stream.remove_ref()
+        if scan_drift_logger:
+            scan_drift_logger.close()
+        is_acquiring_model.value = False
+        if progress_task:
+            progress_task.cancel()
+        progress_value_model.value = 100
+
+    # manage the 'is_acquiring' state.
+    is_acquiring_model.value = True
+
+    # define a task to update progress every 250ms.
+    async def update_progress(acquisition: Acquisition.Acquisition, progress_value_model: Model.PropertyModel[int]) -> None:
+        while True:
+            progress = acquisition.progress
+            progress_value_model.value = int(100 * progress)
+            await asyncio.sleep(0.25)
+
+    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
+
+    # start async acquire.
+    acquisition_state._acquisition_ex.acquire_async(event_loop=document_controller.event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
+
+
 class AcquisitionController:
     """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
 
@@ -2081,7 +2228,7 @@ class AcquisitionController:
 
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
-        self.__acquisition: typing.Optional[Acquisition.Acquisition] = None
+        self.__acquisition_state = AcquisitionState()
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -2119,8 +2266,8 @@ class AcquisitionController:
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
-        if self.__acquisition:
-            self.__acquisition.abort_acquire()
+        if self.__acquisition_state.is_active:
+            self.__acquisition_state.abort_acquire()
         else:
             # starting acquisition means building the device data stream using the acquisition device component and
             # then wrapping the device data stream using the acquisition method component.
@@ -2135,59 +2282,14 @@ class AcquisitionController:
                              channel_names: typing.Dict[Acquisition.Channel, str],
                              drift_tracker: typing.Optional[scan_base.DriftTracker]) -> None:
         """Perform acquisition of of the data stream."""
-
-        # define a callback method to display the data item.
-        def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
-            Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
-
-        # create a data item data channel for converting data streams to data items, using partial updates and
-        # minimizing extra copies where possible.
-        data_item_data_channel = DataChannel.DataItemDataChannel(self.document_controller.document_model, title_base, channel_names)
-        data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.document_controller)
-        self.__data_stream = Acquisition.FramedDataStream(data_stream, data_channel=data_item_data_channel).add_ref()
-
-        # create the acquisition state/controller object based on the data item data channel data stream.
-        self.__acquisition = Acquisition.Acquisition(self.__data_stream)
-
-        # configure the scan drift logger if required. the drift tracker here is only enabled if using the
-        # scan hardware source drift tracker.
-        self.__scan_drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker,
-                                                            self.document_controller.event_loop) if drift_tracker else None
-
-        # define a method that gets called when the async acquisition method finished. this closes the various
-        # objects and updates the UI as 'complete'.
-        def finish_grab_async() -> None:
-            if self.__acquisition:
-                self.__acquisition.close()
-                self.__acquisition = typing.cast(typing.Any, None)
-            self.is_error = self.__data_stream.is_error
-            self.__data_stream.remove_ref()
-            self.__data_stream = typing.cast(typing.Any, None)
-            if self.__scan_drift_logger:
-                self.__scan_drift_logger.close()
-                self.__scan_drift_logger = typing.cast(typing.Any, None)
-            self.is_acquiring_model.value = False
-            if self.__progress_task:
-                self.__progress_task.cancel()
-                self.__progress_task = typing.cast(typing.Any, None)
-            self.progress_value_model.value = 100
-
-        # manage the 'is_acquiring' state.
-        self.is_acquiring_model.value = True
-
-        # define a task to update progress every 250ms.
-        if not self.__progress_task:
-            async def update_progress() -> None:
-                while True:
-                    if self.__acquisition:
-                        progress = self.__acquisition.progress
-                        self.progress_value_model.value = int(100 * progress)
-                    await asyncio.sleep(0.25)
-
-            self.__progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress())
-
-        # start async acquire.
-        self.__acquisition.acquire_async(event_loop=self.document_controller.event_loop, on_completion=finish_grab_async)
+        _acquire_data_stream(data_stream,
+                             self.document_controller,
+                             self.__acquisition_state,
+                             self.progress_value_model,
+                             self.is_acquiring_model,
+                             title_base,
+                             channel_names,
+                             drift_tracker)
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
