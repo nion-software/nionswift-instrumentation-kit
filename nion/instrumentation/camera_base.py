@@ -2110,7 +2110,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
 
 class CameraFrameParameters:
-    """Example implementation for camera frame parameters; used in tests too."""
+    """Camera frame parameters."""
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         d: typing.Dict[str, typing.Any] = dict()
@@ -2118,7 +2118,7 @@ class CameraFrameParameters:
         if isinstance(args[0], dict):
             d.update(args[0])
         d.update(kwargs)
-        self.exposure_ms = d.pop("exposure_ms", 125)
+        self.exposure_ms: float = d.pop("exposure_ms", 125)
         self.binning = d.pop("binning", 1)
         self.processing = d.pop("processing", None)
         self.integration_count = d.pop("integration_count", 1)
