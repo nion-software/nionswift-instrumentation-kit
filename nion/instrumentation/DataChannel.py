@@ -67,7 +67,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
     def update_data(self, channel: Acquisition.Channel, source_data: _NDArray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
         data_item = self.__data_item_map.get(channel, None)
         if data_item:
-            source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data)
+            source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data, data_descriptor=data_metadata.data_descriptor)
             dest_slice_lists = Acquisition.unravel_flat_slice(dest_slice, data_metadata.data_shape)
             assert len(dest_slice_lists) == 1  # otherwise we need to break up the source slices too. skipping until needed.
             for dest_slices in dest_slice_lists:
