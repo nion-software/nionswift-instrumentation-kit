@@ -2241,7 +2241,7 @@ class STEMDeviceController(DeviceController):
             return [self.stem_controller.GetVal(control_customization.device_control_id)]
         elif control_description.control_type == "2d":
             assert axis is not None
-            self.stem_controller.GetVal2D(control_customization.device_control_id, axis=axis).as_tuple()
+            return self.stem_controller.GetVal2D(control_customization.device_control_id, axis=axis).as_tuple()
         raise ValueError()
 
     def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
