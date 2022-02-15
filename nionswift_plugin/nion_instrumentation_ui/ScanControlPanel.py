@@ -557,10 +557,24 @@ class ScanControlStateController:
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_increase_pmt_clicked(self, channel_index: int) -> None:
-        self.__scan_hardware_source.increase_pmt(channel_index)
+        try:
+            self.__scan_hardware_source.increase_pmt(channel_index)
+        except Exception as e:
+            from nion.swift.model import Notification
+            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
+                                                     "Unable to change PMT",
+                                                     f"Exception: {e}.")
+            Notification.notify(notification)
 
     def handle_decrease_pmt_clicked(self, channel_index: int) -> None:
-        self.__scan_hardware_source.decrease_pmt(channel_index)
+        try:
+            self.__scan_hardware_source.decrease_pmt(channel_index)
+        except Exception as e:
+            from nion.swift.model import Notification
+            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
+                                                     "Unable to change PMT",
+                                                     f"Exception: {e}.")
+            Notification.notify(notification)
 
     def handle_capture_clicked(self) -> None:
         def receive_new_xdatas(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
