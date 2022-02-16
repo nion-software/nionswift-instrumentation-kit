@@ -1700,14 +1700,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
         return self.hardware_source_id
 
-    def clean_display_items(self, document_model: HardwareSource.HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
-        return
-        for display_item in display_items:
-            for graphic in copy.copy(display_item.graphics):
-                graphic_id = graphic.graphic_id
-                if graphic_id in ("probe", "subscan", "line_scan", "drift"):
-                    display_item.remove_graphic(graphic)
-
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]:
         """Get recently acquired (buffered) data.
 
