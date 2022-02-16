@@ -110,13 +110,10 @@ class HardwareSourceBridge:
         self.__hardware_source_removed_listener = HardwareSourceManager().hardware_source_removed_event.listen(self.__hardware_source_removed)
         for hardware_source in HardwareSourceManager().hardware_sources:
             self.__hardware_source_added(hardware_source)
-        self.__project_loaded_event_listener = document_model.project_loaded_event.listen(weak_partial(HardwareSourceBridge.clean_display_items, self))
 
     def close(self) -> None:
         # close hardware source related stuff
         # close data items left to append that haven't been appended
-        self.__project_loaded_event_listener.close()
-        self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         with self.__data_items_to_append_lock:
             for key, data_item in self.__data_items_to_append:
                 data_item.close()
@@ -142,15 +139,6 @@ class HardwareSourceBridge:
         self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
-    def clean_display_items(self) -> None:
-        # clean the display items for each data channel
-        for hardware_source in HardwareSourceManager().hardware_sources:
-            for data_channel in hardware_source.data_channels:
-                data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
-                data_item = data_item_reference.data_item
-                if data_item:
-                    hardware_source.clean_display_items(self, list(self.__document_model.get_display_items_for_data_item(data_item)))
-
     def __call_soon(self, fn: typing.Callable[[], None]) -> None:
         assert self.__document_model
         self.__document_model._call_soon(fn)
@@ -164,7 +152,6 @@ class HardwareSourceBridge:
             self.__data_channel_start_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_start_listener)
             data_channel_stop_listener = data_channel.data_channel_stop_event.listen(functools.partial(self.__data_channel_stop, hardware_source, data_channel))
             self.__data_channel_stop_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_stop_listener)
-            # NOTE: clean_display_items is called in __finish_project_read
 
     def __hardware_source_removed(self, hardware_source: HardwareSource) -> None:
         self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id].close()
@@ -916,7 +903,6 @@ class HardwareSource(typing.Protocol):
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
-    def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
     def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None: ...
@@ -1364,14 +1350,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         data_channel = DataChannel(self, len(self.__data_channels), processor.processor_id, None, channel_index, processor)
         self.__data_channels.append(data_channel)
         self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
-
-    def clean_display_items(self, document_model: HardwareSourceBridge, display_items: typing.Sequence[DisplayItem.DisplayItem], **kwargs: typing.Any) -> None:
-        """Clean the display items associated with this data channel.
-
-        Invoked when the hardware source is registered with the document model. Useful for
-        removing old graphics and otherwise cleaning up the data item at startup.
-        """
-        pass
 
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
