@@ -1,6 +1,14 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.20.4 (2022-02-18)
+-------------------
+- Fix sequence/series/tableau when used with a synchronized acquistiion.
+- Add optional method to validate camera frame parameters.
+- Improve compatibility with older CameraDevice implementations.
+- Ensure low level data is not directly used in data items. Fixes phantom data issue.
+- Add methods to instrument to get/set configuration parameters.
+
 0.20.3 (2021-12-21)
 -------------------
 - Fix issue handling partial acquisition during synchronized/sequence acquisition.
