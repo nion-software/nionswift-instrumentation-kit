@@ -93,7 +93,7 @@ class ComponentHandler:
         pass
 
 
-class ComboBoxHandler:
+class ComboBoxHandler(Declarative.Handler):
     """Declarative component handler for combo box based on observable list.
 
     Also facilitate reading/writing the selected item identifier from/to a property model.
@@ -109,6 +109,7 @@ class ComboBoxHandler:
     def __init__(self, container: Observable.Observable, items_key: str, sort_key: ListModel.OptionalSortKeyCallable,
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
                  selection_storage_model: Model.PropertyModel[str]) -> None:
+        super().__init__()
         # create a filtered list model with the sort key and filter key.
         self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
         self.sorted_items.sort_key = sort_key
@@ -162,6 +163,7 @@ class ComboBoxHandler:
         self.item_list = typing.cast(typing.Any, None)
         self.sorted_items.close()
         self.sorted_items = typing.cast(typing.Any, None)
+        super().close()
 
     @property
     def current_item(self) -> typing.Any:
@@ -169,7 +171,7 @@ class ComboBoxHandler:
         return self.sorted_items.items[index]
 
 
-class ComponentComboBoxHandler:
+class ComponentComboBoxHandler(Declarative.Handler):
     """Declarative component handler for a set of registry components.
 
     Also facilitate reading/writing the component instances and selected item identifier from/to an entity.
@@ -185,6 +187,8 @@ class ComponentComboBoxHandler:
     """
 
     def __init__(self, component_base: str, title: str, configuration: Schema.Entity, preferences: Observable.Observable, component_id_key: str, components_key: str, extra_top_right: typing.Optional[Declarative.HandlerLike] = None) -> None:
+        super().__init__()
+
         # store these values for bookkeeping
         self.__component_name = component_base
         self.__component_factory_name = f"{component_base}-factory"
@@ -268,6 +272,7 @@ class ComponentComboBoxHandler:
                 component.close()
         self.__components.close()
         self.__components = typing.cast(typing.Any, None)
+        super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
@@ -379,7 +384,7 @@ class ControlValuesRange:
     step: float
 
 
-class SeriesControlHandler(Declarative.HandlerLike):
+class SeriesControlHandler(Declarative.Handler):
     """Declarative component handler for count/start/step control UI.
 
     control_customization is the control being controlled.
@@ -390,6 +395,7 @@ class SeriesControlHandler(Declarative.HandlerLike):
     """
 
     def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: Schema.Entity, label: typing.Optional[str]):
+        super().__init__()
         self.__control_customization = control_customization
         self.control_values = control_values
         self.count_converter = Converter.IntegerToStringConverter()
@@ -410,9 +416,6 @@ class SeriesControlHandler(Declarative.HandlerLike):
         row_items.append(u.create_line_edit(text="@binding(control_values.step_value, converter=value_converter)", width=90))
         row_items.append(u.create_stretch())
         self.ui_view = u.create_row(*row_items, spacing=8)
-
-    def close(self) -> None:
-        pass
 
     def get_control_values_range(self) -> ControlValuesRange:
         """Return control info (count, start, step)."""
@@ -790,10 +793,11 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
 
 
-class MultiAcquireEntryHandler(Declarative.HandlerLike):
+class MultiAcquireEntryHandler(Declarative.Handler):
     """Declarative component handler for a section in a multiple acquire method component."""
 
     def __init__(self, container: typing.Any, item: Schema.Entity):
+        super().__init__()
         self.offset_converter = Converter.PhysicalValueToStringConverter("eV", units_multiplier["eV"], "{:.0f}")
         self.exposure_converter = Converter.PhysicalValueToStringConverter("ms", units_multiplier["ms"], "{:.1f}")
         self.count_converter = Converter.IntegerToStringConverter()
@@ -806,9 +810,6 @@ class MultiAcquireEntryHandler(Declarative.HandlerLike):
             u.create_stretch(),
             spacing=8
         )
-
-    def close(self) -> None:
-        pass
 
 
 class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -941,7 +942,7 @@ Registry.register_component(TableauAcquisitionMethodComponentHandler, {"acquisit
 Registry.register_component(MultipleAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
 
 
-class HardwareSourceHandler(Observable.Observable):
+class HardwareSourceHandler(Declarative.Handler):
     """A declarative component handler for a hardware source choice combo box.
 
     hardware_source_display_names is a read-only list of strings. It is an observable property.
@@ -963,6 +964,7 @@ class HardwareSourceHandler(Observable.Observable):
     def close(self) -> None:
         self.__listener.close()
         self.__listener = typing.cast(typing.Any, None)
+        super().close()
 
     @property
     def hardware_source_display_names(self) -> typing.List[str]:
@@ -996,7 +998,7 @@ hardware_source_channel_descriptions = {
 }
 
 
-class HardwareSourceChannelChooserHandler(Observable.Observable):
+class HardwareSourceChannelChooserHandler(Declarative.Handler):
     """A declarative component handler for a hardware source choice channel combo box.
 
     The hardware_source_choice parameter is the associated hardware source choice from which to build the available
@@ -1031,6 +1033,7 @@ class HardwareSourceChannelChooserHandler(Observable.Observable):
         self.__hardware_source_changed_listener = typing.cast(typing.Any, None)
         self.__channel_model = typing.cast(typing.Any, None)
         self.__hardware_source_choice = typing.cast(typing.Any, None)
+        super().close()
 
     @property
     def channel_descriptions(self) -> typing.List[HardwareSourceChannelDescription]:
@@ -1311,7 +1314,7 @@ class CameraExposureValueStream(Stream.ValueStream[float]):
                 hardware_source.set_frame_parameters(0, frame_parameters)
 
 
-class CameraDetailsHandler(Observable.Observable):
+class CameraDetailsHandler(Declarative.Handler):
     """A declarative component handler for a row describing a camera device.
 
     The hardware_source_choice parameter is the associated hardware source choice.
@@ -1352,6 +1355,7 @@ class CameraDetailsHandler(Observable.Observable):
         self.exposure_model = typing.cast(typing.Any, None)
         self.exposure_value_stream.remove_ref()
         self.exposure_value_stream = typing.cast(typing.Any, None)
+        super().close()
 
     def __exposure_changed(self, k: str) -> None:
         if k == "value":
@@ -2026,18 +2030,16 @@ component_unregistered_event_listener = Registry.listen_component_unregistered_e
 Registry.fire_existing_component_registered_events("application")
 
 
-class PreferencesButtonHandler:
+class PreferencesButtonHandler(Declarative.Handler):
 
     def __init__(self, document_controller: DocumentController.DocumentController):
+        super().__init__()
         self.document_controller = document_controller
         sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
         assert sliders_icon_24_png is not None
         self._sliders_icon_24_png = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_image(image="@binding(_sliders_icon_24_png)", width=24, height=24, on_clicked="handle_preferences")
-
-    def close(self) -> None:
-        pass
 
     def handle_preferences(self, widget: UserInterfaceModule.Widget) -> None:
         self.document_controller.open_preferences()
@@ -2133,7 +2135,7 @@ def _acquire_data_stream(data_stream: Acquisition.DataStream,
     acquisition_state._acquisition_ex.acquire_async(event_loop=document_controller.event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
 
 
-class AcquisitionController:
+class AcquisitionController(Declarative.Handler):
     """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
 
     The acquisition controller allows the user to select an acquisition method (such as basic, sequence, serial, etc.)
@@ -2143,6 +2145,8 @@ class AcquisitionController:
     """
 
     def __init__(self, document_controller: DocumentController.DocumentController, acquisition_configuration: AcquisitionConfiguration, acquisition_preferences: Observable.Observable) -> None:
+        super().__init__()
+
         self.document_controller = document_controller
 
         # create two component combo box declarative components for handling the method and device.
@@ -2263,6 +2267,7 @@ class AcquisitionController:
         if self.__acquisition_device_component_to_delete:
             self.__acquisition_device_component_to_delete.close()
             self.__acquisition_device_component_to_delete = typing.cast(typing.Any, None)
+        super().close()
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
@@ -2431,8 +2436,9 @@ class AcquisitionPreferencePanel:
     def build(self, ui: UserInterfaceModule.UserInterface, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> Declarative.DeclarativeWidget:
         u = Declarative.DeclarativeUI()
 
-        class ControlDescriptionHandler(Declarative.HandlerLike):
+        class ControlDescriptionHandler(Declarative.Handler):
             def __init__(self, item: AcquisitionPreferences.ControlDescription) -> None:
+                super().__init__()
                 self.delay_converter = Converter.PhysicalValueToStringConverter("ms", 1000, "{:.0f}")
                 self.item = item
                 self.ui_view = u.create_column(
@@ -2446,11 +2452,9 @@ class AcquisitionPreferencePanel:
                     spacing=8
                 )
 
-            def close(self) -> None:
-                pass
-
-        class Handler:
+        class Handler(Declarative.Handler):
             def __init__(self) -> None:
+                super().__init__()
                 self.sorted_controls = ListModel.FilteredListModel(container=AcquisitionPreferences.acquisition_preferences, items_key="control_customizations")
                 self.sorted_controls.sort_key = operator.attrgetter("name")
                 self.sorted_controls.filter = ListModel.PredicateFilter(lambda x: bool(x.is_customizable))
@@ -2471,6 +2475,7 @@ class AcquisitionPreferencePanel:
             def close(self) -> None:
                 self.sorted_controls.close()
                 self.sorted_controls = typing.cast(typing.Any, None)
+                super().close()
 
             def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
                 # this is called to construct contained declarative component handlers within this handler.

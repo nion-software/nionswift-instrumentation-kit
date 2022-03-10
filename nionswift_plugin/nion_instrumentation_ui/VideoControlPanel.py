@@ -410,23 +410,22 @@ class VideoPreferencePanel:
 
         video_device_factories: typing.List[video_base.VideoDeviceFactoryLike] = list(Registry.get_components_by_type("video_device_factory"))
 
-        class Handler(Declarative.HandlerLike):
+        class Handler(Declarative.Handler):
             def __init__(self, ui_view: Declarative.UIDescription, video_sources: ListModel.ListModel[video_base.VideoHardwareSource]) -> None:
+                super().__init__()
                 self.ui_view = ui_view
                 self.video_sources = video_sources
                 self.video_source_type_index = Model.PropertyModel(0)
-
-            def close(self) -> None:
-                pass
 
             def create_new_video_device(self, widget: UserInterface.Widget) -> None:
                 video_base.video_configuration.create_hardware_source(video_device_factories[self.video_source_type_index.value or 0])
 
             def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
 
-                class SectionHandler:
+                class SectionHandler(Declarative.Handler):
 
                     def __init__(self, container: typing.Any, hardware_source: video_base.VideoHardwareSource) -> None:
+                        super().__init__()
                         self.container = container
                         self.hardware_source = hardware_source
                         self.settings = video_base.video_configuration.get_settings_model(hardware_source)
@@ -454,6 +453,7 @@ class VideoPreferencePanel:
                         if self.__settings_changed_event_listener:
                             self.__settings_changed_event_listener.close()
                             self.__settings_changed_event_listener = None
+                        super().close()
 
                     def init_handler(self) -> None:
                         if self.apply_button:
