@@ -80,17 +80,15 @@ units_multiplier = {
 }
 
 
-class ComponentHandler:
+class ComponentHandler(Declarative.Handler):
     """Define an interface for component handler to be used with component combo box handler."""
 
     def __init__(self, display_name: str):
+        super().__init__()
         self.display_name = display_name
 
     def __str__(self) -> str:
         return self.display_name
-
-    def close(self) -> None:
-        pass
 
 
 class ComboBoxHandler(Declarative.Handler):
