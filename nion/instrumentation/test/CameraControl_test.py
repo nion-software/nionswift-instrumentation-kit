@@ -444,7 +444,7 @@ class TestCameraControlClass(unittest.TestCase):
             long_exposure = 0.5
             state_controller.handle_change_profile("Snap")
             state_controller.handle_binning_changed("4")
-            state_controller.handle_exposure_changed(str(int(long_exposure * 1000)))
+            state_controller.handle_exposure_changed(long_exposure)
             start = time.time()
             hardware_source.start_playing()
             try:
@@ -463,7 +463,7 @@ class TestCameraControlClass(unittest.TestCase):
             long_exposure = 0.5
             state_controller.handle_change_profile("Snap")
             state_controller.handle_binning_changed("4")
-            state_controller.handle_exposure_changed(str(int(long_exposure * 1000)))
+            state_controller.handle_exposure_changed(long_exposure)
             state_controller.handle_change_profile("Run")
             hardware_source.start_playing()
             try:

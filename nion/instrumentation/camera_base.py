@@ -398,6 +398,11 @@ class CameraDevice3(typing.Protocol):
         raise NotImplementedError()
 
     @property
+    def exposure_precision(self) -> int:
+        """Read-only property for the exposure precision, expressed as a negative integer exponent."""
+        return -3  # ms
+
+    @property
     def readout_area(self) -> typing.Tuple[int, int, int, int]:
         """Return the detector readout area.
 
@@ -1134,6 +1139,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def binning_values(self) -> typing.Sequence[int]: raise NotImplementedError()
 
+    @property
+    def exposure_precision(self) -> int: raise NotImplementedError()
+
     # used in Facade. should be considered private.
 
     def set_current_frame_parameters(self, camera_frame_parameters: HardwareSource.FrameParameters) -> None: ...
@@ -1363,6 +1371,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def sensor_dimensions(self) -> typing.Tuple[int, int]:
         return self.__camera.sensor_dimensions
+
+    @property
+    def exposure_precision(self) -> int:
+        return -3
 
     @property
     def binning_values(self) -> typing.Sequence[int]:
@@ -1891,6 +1903,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def sensor_dimensions(self) -> typing.Tuple[int, int]:
         return self.__camera.sensor_dimensions
+
+    @property
+    def exposure_precision(self) -> int:
+        return self.__camera.exposure_precision
 
     @property
     def binning_values(self) -> typing.Sequence[int]:

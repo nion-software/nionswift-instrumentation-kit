@@ -65,7 +65,7 @@ class CameraControlStateController:
         handle_shift_click(hardware_source_id, mouse_position, image_dimensions)
         handle_tilt_click(hardware_source_id, mouse_position, image_dimensions)
         handle_binning_changed(binning_str)
-        handle_exposure_changed(exposure_str)
+        handle_exposure_changed(exposure)
         handle_increase_exposure()
         handle_decrease_exposure()
         handle_settings_button_clicked(api_broker)
@@ -277,10 +277,10 @@ class CameraControlStateController:
         self.__camera_hardware_source.set_frame_parameters(self.__camera_hardware_source.selected_profile_index, frame_parameters)
 
     # must be called on ui thread
-    def handle_exposure_changed(self, exposure: str) -> None:
+    def handle_exposure_changed(self, exposure: float) -> None:
         frame_parameters = self.__camera_hardware_source.get_frame_parameters(self.__camera_hardware_source.selected_profile_index)
         try:
-            frame_parameters.exposure_ms = float(exposure)
+            frame_parameters.exposure_ms = exposure * 1000
         except ValueError:
             pass
         frame_parameters = self.__camera_hardware_source.validate_frame_parameters(frame_parameters)
@@ -577,6 +577,9 @@ class CameraPanelDelegate:
         return False
 
 
+exposure_units = {0: "s", 1: "s", 2: "s", -3: "ms", -4: "ms", -5: "ms", -6: "us", -7: "us", -8: "us", -9: "ns", -10: "ns", -11: "ns"}
+exposure_format = {0: ".1", 1: ".1", 2: ".2", -3: ".1", -4: ".1", -5: ".2", -6: ".1", -7: ".1", -8: ".2", -9: ".1", -10: ".1", -11: ".2"}
+
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def __init__(self, document_controller: DocumentController.DocumentController, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
@@ -690,10 +693,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         if open_controls_widget:
             button_row1.add(open_controls_widget)
 
-        button_row1a = ui.create_row_widget(properties={"spacing": 2})
-        button_row1a.add_stretch()
-        button_row1a.add(camera_current_label)
-
         def binning_combo_text_changed(text: str) -> None:
             if not self.__changes_blocked:
                 self.__state_controller.handle_binning_changed(text)
@@ -703,7 +702,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         binning_combo.on_current_text_changed = binning_combo_text_changed
 
         def handle_exposure_changed(text: str) -> None:
-            self.__state_controller.handle_exposure_changed(text)
+            self.__state_controller.handle_exposure_changed(float(text) * math.pow(10, camera_hardware_source.exposure_precision))
             exposure_field.request_refocus()
 
         def handle_decrease_exposure() -> None:
@@ -714,28 +713,29 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             self.__state_controller.handle_increase_exposure()
             exposure_field.request_refocus()
 
-        exposure_field = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})  # note: this alignment technique will not work in future
+        exposure_field = ui.create_line_edit_widget(properties={"width": 72})
         exposure_field.on_editing_finished = handle_exposure_changed
 
         parameters_group1 = ui.create_row_widget()
+        parameters_group2 = ui.create_row_widget()
 
-        parameters_row1 = ui.create_row_widget(properties={"margin": 4, "spacing": 2})
-        parameters_row1.add_stretch()
-        parameters_row1.add(ui.create_label_widget(_("Binning"), properties={"width": 68, "stylesheet": "qproperty-alignment: AlignRight"}))  # note: this alignment technique will not work in future
-        parameters_row1.add_spacing(4)
-        parameters_row1.add(binning_combo)
-        parameters_group1.add(parameters_row1)
-        parameters_group1.add_stretch()
+        binning_row = ui.create_row_widget(properties={"margin": 4, "spacing": 2})
+        binning_row.add(ui.create_label_widget(_("Binning")))
+        binning_row.add_spacing(4)
+        binning_row.add(binning_combo)
+        parameters_group2.add(binning_row)
+        parameters_group2.add_stretch()
 
         parameters_row2 = ui.create_row_widget(properties={"margin": 4, "spacing": 2})
-        parameters_row2.add_stretch()
         colx = ui.create_column_widget()
         colx.add_spacing(2)
-        colx.add(ui.create_label_widget(_("Time (ms)"), properties={"width": 68, "stylesheet": "qproperty-alignment: 'AlignBottom | AlignRight'"}))  # note: this alignment technique will not work in future
+        units = exposure_units[camera_hardware_source.exposure_precision]
+        label = _("Time")
+        colx.add(ui.create_label_widget(f"{label} ({units})"))
         colx.add_stretch()
         parameters_row2.add(colx)
         parameters_row2.add_spacing(4)
-        group = ui.create_row_widget(properties={"width": 84})
+        group = ui.create_row_widget()
         canvas_widget = ui.create_canvas_widget(properties={"height": 21, "width": 18})
         decrease_button = CharButtonCanvasItem("F")
         canvas_widget.canvas_item.add_canvas_item(decrease_button)
@@ -750,6 +750,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         colx.add_stretch()
         parameters_row2.add(colx)
         parameters_group1.add(parameters_row2)
+        parameters_group1.add_stretch()
+        parameters_group1.add(camera_current_label)
 
         decrease_button.on_button_clicked = handle_decrease_exposure
         increase_button.on_button_clicked = handle_increase_exposure
@@ -772,8 +774,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         button_row.add(thumbnail_column)
 
         column_widget.add(button_row1)
-        column_widget.add(button_row1a)
         column_widget.add(parameters_group1)
+        column_widget.add(parameters_group2)
         column_widget.add(status_row)
         column_widget.add(button_row)
         column_widget.add_stretch()
@@ -809,7 +811,9 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             blocked = self.__changes_blocked
             self.__changes_blocked = True
             try:
-                exposure_field.text = str("{0:.2f}".format(float(frame_parameters.exposure_ms)))
+                exposure_precision = camera_hardware_source.exposure_precision
+                format_str = f"{{0:{exposure_format[exposure_precision]}f}}"
+                exposure_field.text = str(format_str.format(float(frame_parameters.exposure_ms) / 1000 / math.pow(10, exposure_precision)))
                 if exposure_field.focused:
                     exposure_field.request_refocus()
                 binning_combo.current_text = str(frame_parameters.binning)

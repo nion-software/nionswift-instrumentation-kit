@@ -1326,7 +1326,7 @@ class CameraDetailsHandler(Declarative.Handler):
         # the exposure model converts the exposure value stream to a property model that supports binding.
         self.exposure_model = Model.StreamValueModel(self.exposure_value_stream)
         # the exposure value converter converts the exposure value to a string and back in the line edit.
-        self.exposure_value_converter = Converter.PhysicalValueToStringConverter("ms", 1, "{:.1f}")
+        self.exposure_value_converter = Converter.PhysicalValueToStringConverter("ms", 1, "{:.4f}")
 
         # need to explicitly watch the exposure model for a value change from the UI so that it can update the exposure
         # value stream. this is a hack; check whether there is a better way when encountering this code in the future -
