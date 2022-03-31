@@ -1832,10 +1832,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.change_stage_position(dy=dy, dx=dx)
 
     def increase_pmt(self, channel_index: int) -> None:
-        self.__stem_controller.change_pmt_gain(stem_controller_module.PMTType(channel_index), factor=2.0)
+        self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
 
     def decrease_pmt(self, channel_index: int) -> None:
-        self.__stem_controller.change_pmt_gain(stem_controller_module.PMTType(channel_index), factor=0.5)
+        self.__stem_controller.change_pmt_gain(channel_index, factor=0.5)
 
     def get_api(self, version: str) -> typing.Any:
         actual_version = "1.0.0"

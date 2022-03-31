@@ -37,9 +37,11 @@ _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float
 _ = gettext.gettext
 
 
-class PMTType(enum.IntEnum):
+class PMTTypeEnum(enum.IntEnum):
     DF = 0
     BF = 1
+
+PMTType = typing.Union[PMTTypeEnum, int]
 
 
 class SubscanState(enum.Enum):
