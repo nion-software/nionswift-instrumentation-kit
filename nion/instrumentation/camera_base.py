@@ -765,20 +765,72 @@ class InstrumentController(abc.ABC):
     def handle_tilt_click(self, **kwargs: typing.Any) -> None: pass
 
 
+class AcquisitionData:
+    def __init__(self, data_element: typing.Optional[ImportExportManager.DataElementType] = None) -> None:
+        self.__data_element: ImportExportManager.DataElementType = data_element or dict()
+
+    @property
+    def data_element(self) -> ImportExportManager.DataElementType:
+        return self.__data_element
+
+    @property
+    def is_signal_calibrated(self) -> bool:
+        return "spatial_calibrations" in self.__data_element
+
+    @property
+    def signal_calibrations(self) -> DataAndMetadata.CalibrationListType:
+        return tuple(Calibration.Calibration.from_rpc_dict(d) or Calibration.Calibration() for d in self.__data_element.get("spatial_calibrations", list()))
+
+    @signal_calibrations.setter
+    def signal_calibrations(self, calibrations: DataAndMetadata.CalibrationListType) -> None:
+        self.__data_element["spatial_calibrations"] = [calibration.rpc_dict for calibration in calibrations]
+
+    def apply_signal_calibrations(self, calibrations: DataAndMetadata.CalibrationListType) -> None:
+        if not self.is_signal_calibrated:
+            self.signal_calibrations = calibrations
+
+    @property
+    def is_intensity_calibrated(self) -> bool:
+        return "intensity_calibration" in self.__data_element
+
+    @property
+    def intensity_calibration(self) -> Calibration.Calibration:
+        return Calibration.Calibration.from_rpc_dict(self.__data_element.get("intensity_calibration", dict())) or Calibration.Calibration()
+
+    @intensity_calibration.setter
+    def intensity_calibration(self, calibration: Calibration.Calibration) -> None:
+        self.__data_element["intensity_calibration"] = calibration.rpc_dict
+
+    def apply_intensity_calibration(self, calibration: Calibration.Calibration) -> None:
+        if self.is_intensity_calibrated:
+            self.intensity_calibration = calibration
+
+    @property
+    def counts_per_electron(self) -> typing.Optional[float]:
+        return typing.cast(typing.Optional[float], self.__data_element.get("metadata", dict()).get("hardware_source", dict()).get("counts_per_electron"))
+
+    @counts_per_electron.setter
+    def counts_per_electron(self, counts_per_electron: typing.Optional[float]) -> None:
+        if counts_per_electron:
+            self.__data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
+        else:
+            self.__data_element.get("metadata", dict()).get("hardware_source", dict()).pop("counts_per_electron", None)
+
+
 class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, instrument_controller: InstrumentController, hardware_source_id: str, is_continuous: bool,
-                 camera: CameraDevice, camera_settings: CameraSettings, camera_category: str,
-                 signal_type: typing.Optional[str], frame_parameters: CameraFrameParameters, display_name: str) -> None:
+    def __init__(self, instrument_controller: InstrumentController, camera_hardware_source: CameraHardwareSource, is_continuous: bool,
+                 camera_category: str, signal_type: typing.Optional[str], frame_parameters: CameraFrameParameters) -> None:
         super().__init__(is_continuous)
         self.__instrument_controller = instrument_controller
-        self.hardware_source_id = hardware_source_id
+        self.hardware_source_id = camera_hardware_source.hardware_source_id
         self.is_continuous = is_continuous
-        self.__camera = camera
-        self.__camera_settings = camera_settings
+        self.__camera = camera_hardware_source.camera
+        self.__camera_settings = camera_hardware_source.camera_settings
+        self.__camera_hardware_source = camera_hardware_source
         self.__camera_category = camera_category
         self.__signal_type = signal_type
-        self.__display_name = display_name
+        self.__display_name = camera_hardware_source.display_name
         self.__frame_parameters: typing.Optional[CameraFrameParameters] = None
         self.__pending_frame_parameters: typing.Optional[CameraFrameParameters] = CameraFrameParameters(frame_parameters.as_dict())
 
@@ -844,24 +896,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         if self.__stop_after_acquire:
             self.__camera.stop_live()
         # camera data is always assumed to be full frame, otherwise deal with subarea 1d and 2d
-        data_element: typing.Dict[str, typing.Any] = dict()
-        data_element["metadata"] = dict()
-        data_element["metadata"]["hardware_source"] = copy.deepcopy(_data_element["properties"])
-        data_element["data"] = cumulative_data
-        data_element["version"] = 1
-        data_element["state"] = "complete"
-        data_element["timestamp"] = _data_element.get("timestamp", datetime.datetime.utcnow())
-        update_spatial_calibrations(data_element, self.__instrument_controller, self.__camera, self.__camera_category, cumulative_data.shape, binning, binning)
-        update_intensity_calibration(data_element, self.__instrument_controller, self.__camera)
-        instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        update_instrument_properties(instrument_metadata, self.__instrument_controller, self.__camera)
-        if instrument_metadata:
-            data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-        update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.__display_name, data_element.get("signal_type", self.__signal_type))
-        data_element["metadata"]["hardware_source"]["valid_rows"] = cumulative_data.shape[0]
-        data_element["metadata"]["hardware_source"]["frame_index"] = data_element["metadata"]["hardware_source"]["frame_number"]
-        data_element["metadata"]["hardware_source"]["integration_count"] = cumulative_frame_count
-        return [data_element]
+        return [self.__camera_hardware_source.make_live_data_element(cumulative_data, _data_element["properties"], _data_element.get("timestamp", datetime.datetime.utcnow()), frame_parameters, cumulative_frame_count)]
 
     def __activate_frame_parameters(self) -> None:
         self.__frame_parameters = self.frame_parameters
@@ -1163,6 +1198,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def modes(self) -> typing.Sequence[str]: raise NotImplementedError()
 
     def get_acquire_sequence_metrics(self, frame_parameters: CameraFrameParameters) -> typing.Mapping[str, typing.Any]: ...
+    def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType: ...
     def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None: ...
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]: ...
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration: ...
@@ -1404,7 +1440,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
 
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
@@ -1412,7 +1448,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, record_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self, False, self.__camera_category, self.__signal_type, record_parameters)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
@@ -1468,7 +1504,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __acquire_sequence_fallback(self, n: int, frame_parameters: CameraFrameParameters) -> typing.Optional[ImportExportManager.DataElementType]:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
-        acquisition_task = CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, frame_parameters, self.display_name)
+        acquisition_task = CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, frame_parameters)
         acquisition_task._start_acquisition()
         try:
             properties = None
@@ -1513,19 +1549,90 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             return [data_element]
         return []
 
+    def __build_calibration_dict(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], prefix: str, relative_scale: float = 1, data_len: int = 0) -> typing.Dict[str, typing.Any]:
+        return build_calibration(instrument_controller, calibration_controls, prefix, relative_scale, data_len).rpc_dict
+
+    def __update_spatial_calibrations(self, data_element: ImportExportManager.DataElementType, instrument_controller: InstrumentController, camera: CameraDevice, camera_category: str, data_shape: DataAndMetadata.ShapeType, scaling_x: float, scaling_y: float) -> None:
+        if "spatial_calibrations" not in data_element:
+            if "spatial_calibrations" in data_element.get("hardware_source", dict()):
+                data_element["spatial_calibrations"] = data_element["hardware_source"]["spatial_calibrations"]
+            elif hasattr(camera, "calibration"):  # used in nionccd1010
+                data_element["spatial_calibrations"] = getattr(camera, "calibration")
+            elif instrument_controller:
+                if "calibration_controls" in data_element:
+                    calibration_controls = data_element["calibration_controls"]
+                elif hasattr(camera, "calibration_controls"):
+                    calibration_controls = camera.calibration_controls
+                else:
+                    calibration_controls = None
+                if calibration_controls is not None:
+                    x_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "x", scaling_x, data_shape[0])
+                    y_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
+                    z_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
+                    # leave this here for backwards compatibility until origin override is specified in NionCameraManager.py
+                    if camera_category.lower() == "ronchigram" and len(data_shape) == 2:
+                        y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
+                        x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
+                    if len(data_shape) == 1:
+                        data_element["spatial_calibrations"] = [x_calibration_dict]
+                    if len(data_shape) == 2:
+                        data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
+                    if len(data_shape) == 3:
+                        data_element["spatial_calibrations"] = [z_calibration_dict, y_calibration_dict, x_calibration_dict]
+
+    def __update_intensity_calibration(self, data_element: ImportExportManager.DataElementType, instrument_controller: InstrumentController, camera: CameraDevice) -> None:
+        if instrument_controller and "calibration_controls" in data_element:
+            calibration_controls = data_element["calibration_controls"]
+        elif instrument_controller and hasattr(camera, "calibration_controls"):
+            calibration_controls = camera.calibration_controls
+        else:
+            calibration_controls = None
+        if "intensity_calibration" not in data_element:
+            if "intensity_calibration" in data_element.get("hardware_source", dict()):
+                data_element["intensity_calibration"] = data_element["hardware_source"]["intensity_calibration"]
+            elif calibration_controls is not None:
+                data_element["intensity_calibration"] = self.__build_calibration_dict(instrument_controller, calibration_controls, "intensity")
+        if "counts_per_electron" not in data_element:
+            if calibration_controls is not None:
+                counts_per_electron = get_instrument_calibration_value(instrument_controller, calibration_controls, "counts_per_electron")
+                if counts_per_electron:
+                    data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
+
     def __update_data_element_for_sequence(self, data_element: ImportExportManager.DataElementType, frame_parameters: CameraFrameParameters) -> None:
         binning = frame_parameters.binning
         data_element["version"] = 1
         data_element["state"] = "complete"
         instrument_controller = self.__get_instrument_controller()
         if "spatial_calibrations" not in data_element:
-            update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category,
-                                        data_element["data"].shape[1:], binning, binning)
+            self.__update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category,
+                                               data_element["data"].shape[1:], binning, binning)
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
-        update_intensity_calibration(data_element, instrument_controller, self.__camera)
+        self.__update_intensity_calibration(data_element, instrument_controller, self.__camera)
         update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
         update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+
+    def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
+        data_element: ImportExportManager.DataElementType = dict()
+        data_element["metadata"] = dict()
+        data_element["metadata"]["hardware_source"] = copy.deepcopy(dict(properties))
+        data_element["data"] = data
+        data_element["version"] = 1
+        data_element["state"] = "complete"
+        data_element["timestamp"] = timestamp
+        instrument_controller = self.__instrument_controller
+        assert instrument_controller
+        self.__update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category, data.shape, frame_parameters.binning, frame_parameters.binning)
+        self.__update_intensity_calibration(data_element, instrument_controller, self.__camera)
+        instrument_metadata: typing.Dict[str, typing.Any] = dict()
+        update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
+        if instrument_metadata:
+            data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
+        update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+        data_element["metadata"]["hardware_source"]["valid_rows"] = data.shape[0]
+        data_element["metadata"]["hardware_source"]["frame_index"] = data_element["metadata"]["hardware_source"]["frame_number"]
+        data_element["metadata"]["hardware_source"]["integration_count"] = frame_count
+        return data_element
 
     def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
         update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
@@ -1936,7 +2043,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, True, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, self.__frame_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
 
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
@@ -1944,7 +2051,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self.hardware_source_id, False, self.__camera, self.__camera_settings, self.__camera_category, self.__signal_type, record_parameters, self.display_name)
+        return CameraAcquisitionTask(self.__get_instrument_controller(), self, False, self.__camera_category, self.__signal_type, record_parameters)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
@@ -1970,18 +2077,41 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return [data_element]
 
     def __update_data_element_for_sequence(self, data_element: ImportExportManager.DataElementType, frame_parameters: CameraFrameParameters) -> None:
-        binning = frame_parameters.binning
+        acquisition_data = AcquisitionData(data_element)
         data_element["version"] = 1
         data_element["state"] = "complete"
         instrument_controller = self.__get_instrument_controller()
-        if "spatial_calibrations" not in data_element:
-            update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category,
-                                        data_element["data"].shape[1:], binning, binning)
-            if "spatial_calibrations" in data_element:
-                data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
-        update_intensity_calibration(data_element, instrument_controller, self.__camera)
+        camera_calibrations = self.get_camera_calibrations(frame_parameters)
+        acquisition_data.apply_signal_calibrations([Calibration.Calibration()] + list(camera_calibrations))
+        acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
+        acquisition_data.counts_per_electron = self.get_counts_per_electron()
         update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
         update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+
+    def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
+        acquisition_data = AcquisitionData()
+        data_element = acquisition_data.data_element
+        data_element["metadata"] = dict()
+        data_element["metadata"]["hardware_source"] = copy.deepcopy(dict(properties))
+        data_element["data"] = data
+        data_element["version"] = 1
+        data_element["state"] = "complete"
+        data_element["timestamp"] = timestamp
+        camera_calibrations = self.get_camera_calibrations(frame_parameters)
+        acquisition_data.apply_signal_calibrations(list(camera_calibrations))
+        acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
+        acquisition_data.counts_per_electron = self.get_counts_per_electron()
+        instrument_metadata: typing.Dict[str, typing.Any] = dict()
+        instrument_controller = self.__instrument_controller
+        assert instrument_controller
+        update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
+        if instrument_metadata:
+            data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
+        update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+        data_element["metadata"]["hardware_source"]["valid_rows"] = data.shape[0]
+        data_element["metadata"]["hardware_source"]["frame_index"] = data_element["metadata"]["hardware_source"]["frame_number"]
+        data_element["metadata"]["hardware_source"]["integration_count"] = frame_count
+        return data_element
 
     def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
         update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
@@ -2005,6 +2135,11 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         instrument_controller = self.__instrument_controller
         assert instrument_controller
         return build_calibration(instrument_controller, self.__camera.calibration_controls, "intensity")
+
+    def get_counts_per_electron(self) -> typing.Optional[float]:
+        instrument_controller = self.__instrument_controller
+        assert instrument_controller
+        return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera.calibration_controls, "counts_per_electron"))
 
     def acquire_sequence_prepare(self, n: int) -> None:
         # prepare does nothing in camera device 3
@@ -2561,58 +2696,6 @@ def build_calibration(instrument_controller: InstrumentController, calibration_c
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
     return Calibration.Calibration(offset, scale, units)
-
-
-def build_calibration_dict(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], prefix: str, relative_scale: float = 1, data_len: int = 0) -> typing.Dict[str, typing.Any]:
-    return build_calibration(instrument_controller, calibration_controls, prefix, relative_scale, data_len).rpc_dict
-
-
-def update_spatial_calibrations(data_element: ImportExportManager.DataElementType, instrument_controller: InstrumentController, camera: CameraDevice, camera_category: str, data_shape: DataAndMetadata.ShapeType, scaling_x: float, scaling_y: float) -> None:
-    if "spatial_calibrations" not in data_element:
-        if "spatial_calibrations" in data_element.get("hardware_source", dict()):
-            data_element["spatial_calibrations"] = data_element["hardware_source"]["spatial_calibrations"]
-        elif hasattr(camera, "calibration"):  # used in nionccd1010
-            data_element["spatial_calibrations"] = getattr(camera, "calibration")
-        elif instrument_controller:
-            if "calibration_controls" in data_element:
-                calibration_controls = data_element["calibration_controls"]
-            elif hasattr(camera, "calibration_controls"):
-                calibration_controls = camera.calibration_controls
-            else:
-                calibration_controls = None
-            if calibration_controls is not None:
-                x_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "x", scaling_x, data_shape[0])
-                y_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
-                z_calibration_dict = build_calibration_dict(instrument_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
-                # leave this here for backwards compatibility until origin override is specified in NionCameraManager.py
-                if camera_category.lower() == "ronchigram" and len(data_shape) == 2:
-                    y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
-                    x_calibration_dict["offset"] = -x_calibration_dict.get("scale", 1) * data_shape[1] * 0.5
-                if len(data_shape) == 1:
-                    data_element["spatial_calibrations"] = [x_calibration_dict]
-                if len(data_shape) == 2:
-                    data_element["spatial_calibrations"] = [y_calibration_dict, x_calibration_dict]
-                if len(data_shape) == 3:
-                    data_element["spatial_calibrations"] = [z_calibration_dict, y_calibration_dict, x_calibration_dict]
-
-
-def update_intensity_calibration(data_element: ImportExportManager.DataElementType, instrument_controller: InstrumentController, camera: CameraDevice) -> None:
-    if instrument_controller and "calibration_controls" in data_element:
-        calibration_controls = data_element["calibration_controls"]
-    elif instrument_controller and hasattr(camera, "calibration_controls"):
-        calibration_controls = camera.calibration_controls
-    else:
-        calibration_controls = None
-    if "intensity_calibration" not in data_element:
-        if "intensity_calibration" in data_element.get("hardware_source", dict()):
-            data_element["intensity_calibration"] = data_element["hardware_source"]["intensity_calibration"]
-        elif calibration_controls is not None:
-            data_element["intensity_calibration"] = build_calibration_dict(instrument_controller, calibration_controls, "intensity")
-    if "counts_per_electron" not in data_element:
-        if calibration_controls is not None:
-            counts_per_electron = get_instrument_calibration_value(instrument_controller, calibration_controls, "counts_per_electron")
-            if counts_per_electron:
-                data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict())["counts_per_electron"] = counts_per_electron
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: InstrumentController, camera: CameraDevice) -> None:
