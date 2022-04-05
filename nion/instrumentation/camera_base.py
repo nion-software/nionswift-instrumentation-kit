@@ -544,6 +544,8 @@ class CameraDevice3(typing.Protocol):
     def calibration_controls(self) -> typing.Mapping[str, typing.Union[str, int, float]]:
         """Return lookup dict of calibration controls to be read from instrument controller for this device.
 
+        Only used if a camera calibrator is not supplied.
+
         The dict should have keys of the form <axis>_<field>_<type> where <axis> is "x", "y", "z", or "intensity",
         <field> is "scale", "offset", or "units", and <type> is "control" or "value". If <type> is "control", then
         the value for that axis/field will use the value of that key to read the calibration field value from the
@@ -567,6 +569,13 @@ class CameraDevice3(typing.Protocol):
         { "counts_per_electron_control": "Camera1_CountsPerElectron" }
         """
         return dict()
+
+    def get_camera_calibrator(self, *, instrument_controller: InstrumentController, **kwargs: typing.Any) -> typing.Optional[CameraCalibrator]:
+        """Return a camera calibrator object.
+
+        The default is to return a camera calibrator based on camera controls.
+        """
+        return CalibrationControlsCalibrator(instrument_controller, self)
 
     @property
     def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]:
@@ -1856,6 +1865,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
         self.processor = None
 
+        self.__camera_calibrator: typing.Optional[CameraCalibrator] = None
+
         # configure the features. putting the features into this object is for convenience of access. the features
         # should not be considered as part of this class. instead, the features should be thought of as being stored
         # here as a convenient location where the UI has access to them.
@@ -1942,6 +1953,12 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
             from nion.instrumentation import stem_controller
             self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, stem_controller.STEMController())
         return self.__instrument_controller
+
+    def __get_camera_calibrator(self) -> CameraCalibrator:
+        if not self.__camera_calibrator:
+            self.__camera_calibrator = self.__camera.get_camera_calibrator(instrument_controller=self.__get_instrument_controller())
+        assert self.__camera_calibrator
+        return self.__camera_calibrator
 
     def __handle_log_messages_event(self) -> None:
         if callable(self.__periodic_logger_fn):
@@ -2118,28 +2135,20 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
+        calibrator = self.__get_camera_calibrator()
         processing = camera_frame_parameters.processing
-        instrument_controller = self.__get_instrument_controller()
-        calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.binning
         data_shape = self.get_expected_dimensions(binning)
         if processing in {"sum_project", "sum_masked"}:
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
-            return (x_calibration,)
+            return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape[0:1]))
         else:
-            y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
-            return (y_calibration, x_calibration)
+            return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape))
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
-        instrument_controller = self.__instrument_controller
-        assert instrument_controller
-        return build_calibration(instrument_controller, self.__camera.calibration_controls, "intensity")
+        return self.__get_camera_calibrator().get_intensity_calibration(camera_frame_parameters)
 
     def get_counts_per_electron(self) -> typing.Optional[float]:
-        instrument_controller = self.__instrument_controller
-        assert instrument_controller
-        return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera.calibration_controls, "counts_per_electron"))
+        return self.__get_camera_calibrator().get_counts_per_electron()
 
     def acquire_sequence_prepare(self, n: int) -> None:
         # prepare does nothing in camera device 3
@@ -2696,6 +2705,44 @@ def build_calibration(instrument_controller: InstrumentController, calibration_c
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
     return Calibration.Calibration(offset, scale, units)
+
+
+class CameraCalibrator(typing.Protocol):
+    """A protocol for adding calibrations to data acquired from a camera device.
+
+    The calibration of most cameras on a microscope will depend on other instrument parameters.
+    """
+
+    def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]: ...
+
+    def get_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> Calibration.Calibration: ...
+
+    def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]: ...
+
+
+class CalibrationControlsCalibrator(CameraCalibrator):
+    def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3) -> None:
+        self.__instrument_controller = instrument_controller
+        self.__camera_device = camera_device
+
+    def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
+        binning = frame_parameters.binning
+        calibration_controls = self.__camera_device.calibration_controls
+        if len(data_shape) == 2:
+            y_calibration = build_calibration(self.__instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
+            x_calibration = build_calibration(self.__instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (y_calibration, x_calibration)
+        else:
+            x_calibration = build_calibration(self.__instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            return (x_calibration,)
+
+    def get_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> Calibration.Calibration:
+        instrument_controller = self.__instrument_controller
+        return build_calibration(instrument_controller, self.__camera_device.calibration_controls, "intensity")
+
+    def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
+        instrument_controller = self.__instrument_controller
+        return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: InstrumentController, camera: CameraDevice) -> None:
