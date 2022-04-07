@@ -811,7 +811,7 @@ class AcquisitionData:
         self.__data_element["intensity_calibration"] = calibration.rpc_dict
 
     def apply_intensity_calibration(self, calibration: Calibration.Calibration) -> None:
-        if self.is_intensity_calibrated:
+        if not self.is_intensity_calibrated:
             self.intensity_calibration = calibration
 
     @property
