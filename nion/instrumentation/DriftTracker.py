@@ -88,6 +88,7 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         self.__scan_frame_parameters.subscan_fractional_center = None
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
+        self.__scan_hardware_source.drift_tracker.reset()
 
     def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
         # this method must be thread safe
@@ -100,7 +101,19 @@ class DriftCorrectionBehavior(scan_base.SynchronizedScanBehaviorInterface):
         if drift_channel_id is not None and drift_region is not None:
             drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
             assert drift_channel_index is not None
-            frame_parameters.subscan_pixel_size = Geometry.IntSize(int(context_size.height * drift_region.height * 4), int(context_size.width * drift_region.width * 4))
+            aspect_ratio = (context_size.width * drift_region.width) / (context_size.height * drift_region.height)
+            TARGET_SIZE = 64
+            if aspect_ratio >= 1.0:
+                if aspect_ratio <= 2.0:
+                    shape = Geometry.IntSize(w=TARGET_SIZE, h=int(TARGET_SIZE / aspect_ratio))
+                else:
+                    shape = Geometry.IntSize(w=int(TARGET_SIZE // 2 * aspect_ratio), h=TARGET_SIZE // 2)
+            else:
+                if aspect_ratio > 0.5:
+                    shape = Geometry.IntSize(h=TARGET_SIZE, w=int(TARGET_SIZE * aspect_ratio))
+                else:
+                    shape = Geometry.IntSize(h=int(TARGET_SIZE // 2 / aspect_ratio), w=TARGET_SIZE // 2)
+            frame_parameters.subscan_pixel_size = shape
             if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
                 frame_parameters.subscan_fractional_size = Geometry.FloatSize(drift_region.height, drift_region.width)
                 frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)

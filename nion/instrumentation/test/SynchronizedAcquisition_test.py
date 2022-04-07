@@ -552,13 +552,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual(drift_graphic, display_item.graphics[-1])
 
     def test_drift_corrector(self):
+        # for this test, drift should be in a constant direction
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
+            test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
-            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
@@ -569,14 +571,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
             stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
-            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
-            self.assertTrue(1.9 < dist_nm < 2.1)
-            self.assertTrue(1.9 < abs(last_delta_nm.width) < 2.1)
+            self.assertTrue(0.9 < dist_nm < 1.1)
+            self.assertTrue(0.9 < abs(last_delta_nm.width) < 1.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
-            stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
@@ -585,14 +587,16 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
 
     def test_drift_corrector_with_drift_sub_area_rotation(self):
+        # for this test, drift should be in a constant direction
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
+            test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
-            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-            rotation = math.radians(30)
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
+            rotation = math.radians(30)  # note: this is only rotating the drift region, not the overall sample
             scan_hardware_source.drift_rotation = rotation
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -605,14 +609,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
             stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
-            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
-            self.assertTrue(1.9 < dist_nm < 2.1)
-            self.assertTrue(1.9 < abs(last_delta_nm.width) < 2.1)
+            self.assertTrue(0.9 < dist_nm < 1.1)
+            self.assertTrue(0.9 < abs(last_delta_nm.width) < 1.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
-            stem_controller.SetValDeltaAndConfirm("CSH.x", -2e-9, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
