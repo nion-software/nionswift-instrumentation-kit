@@ -1092,7 +1092,7 @@ class AcquisitionDeviceResult:
     """
     data_stream: Acquisition.DataStream
     channel_names: typing.Dict[Acquisition.Channel, str]
-    drift_tracker: typing.Optional[scan_base.DriftTracker]
+    drift_tracker: typing.Optional[DriftTracker.DriftTracker]
     device_map: typing.Dict[str, DeviceController]
 
 
@@ -1392,10 +1392,10 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
     # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
     # tracker is separate at the moment.
-    drift_correction_behavior: typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
+    drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
     section_height: typing.Optional[int] = None
     if scan_context_description.drift_interval_lines > 0:
-        drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
         section_height = scan_context_description.drift_interval_lines
 
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
@@ -1404,7 +1404,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
         scan_frame_parameters=scan_frame_parameters,
         camera_hardware_source=camera_hardware_source,
         camera_frame_parameters=camera_frame_parameters,
-        scan_behavior=drift_correction_behavior,
+        scan_data_stream_functor=drift_correction_functor,
         section_height=section_height,
         scan_count=scan_count,
         include_raw=True,
@@ -2078,7 +2078,7 @@ def _acquire_data_stream(data_stream: Acquisition.DataStream,
                          is_acquiring_model: Model.PropertyModel[bool],
                          title_base: str,
                          channel_names: typing.Dict[Acquisition.Channel, str],
-                         drift_tracker: typing.Optional[scan_base.DriftTracker]) -> None:
+                         drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
     """Perform acquisition of of the data stream."""
 
     # define a callback method to display the data item.
@@ -2283,7 +2283,7 @@ class AcquisitionController(Declarative.Handler):
                              data_stream: Acquisition.DataStream,
                              title_base: str,
                              channel_names: typing.Dict[Acquisition.Channel, str],
-                             drift_tracker: typing.Optional[scan_base.DriftTracker]) -> None:
+                             drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
         """Perform acquisition of of the data stream."""
         _acquire_data_stream(data_stream,
                              self.document_controller,

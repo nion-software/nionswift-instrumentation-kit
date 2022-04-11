@@ -1072,6 +1072,15 @@ class SequentialDataStream(DataStream):
         self.fire_data_available(data_stream_event)
 
 
+class DataStreamFunctor:
+    """Define a data stream functor: a class which creates a new data stream from another data stream.
+
+    This is useful to pass the code to construct a data stream to a function.
+    """
+    def apply(self, data_stream: DataStream) -> DataStream:
+        return data_stream
+
+
 class ChannelData:
     def __init__(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         self.channel = channel

@@ -30,7 +30,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         instrument = self.setup_stem_controller()
         ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
         scan_base.run()
-        scan_hardware_source = Registry.get_component("scan_hardware_source")
+        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, Registry.get_component("scan_hardware_source"))
         camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
         HardwareSource.HardwareSourceManager().hardware_sources = []
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()

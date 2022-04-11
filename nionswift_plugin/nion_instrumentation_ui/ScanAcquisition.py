@@ -123,10 +123,10 @@ class ScanAcquisitionController:
         data_item_data_channel = DataChannel.DataItemDataChannel(document_model, _("Spectrum Image"), channel_names)
         data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller._document_controller)
 
-        drift_correction_behavior : typing.Optional[DriftTracker.DriftCorrectionBehavior] = None
+        drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
         section_height = section_height_override
         if self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
             section_height = self.__scan_specifier.drift_interval_lines
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
@@ -134,7 +134,7 @@ class ScanAcquisitionController:
             scan_frame_parameters=scan_frame_parameters,
             camera_hardware_source=camera_hardware_source,
             camera_frame_parameters=camera_frame_parameters,
-            scan_behavior=drift_correction_behavior,
+            scan_data_stream_functor=drift_correction_functor,
             section_height=section_height,
             scan_count=self.__scan_specifier.scan_count,
             include_raw=scan_processing.include_raw,

@@ -437,7 +437,7 @@ class SequenceBehavior:
             self.__last_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index]['offset_x']
 
 
-SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_behavior', 'scan_section_height',
+SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_data_stream_functor', 'scan_section_height',
                                                                    'sequence_behavior', 'sequence_section_length'])
 
 class SISequenceAcquisitionHandler:
@@ -474,7 +474,7 @@ class SISequenceAcquisitionHandler:
                                                                      camera_data_channel=self.camera_data_channel,
                                                                      scan_frame_parameters=self.scan_frame_parameters,
                                                                      section_height=self.__si_sequence_behavior.scan_section_height,
-                                                                     scan_behavior=self.__si_sequence_behavior.scan_behavior)
+                                                                     scan_data_stream_functor=self.__si_sequence_behavior.scan_data_stream_functor)
             if combined_data is not None:
                 scan_xdata_list, _ = combined_data
                 data_channel_state = 'complete' if frame >= number_frames - 1 else 'partial'

@@ -8,7 +8,6 @@ import unittest
 import uuid
 
 from nion.data import DataAndMetadata
-from nion.instrumentation import HardwareSource
 from nion.swift import Application
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
@@ -16,10 +15,12 @@ from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.instrumentation import Acquisition
+from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
-from nion.instrumentation import camera_base
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
+from nion.instrumentation import stem_controller as STEMController
 from nion.instrumentation.test import AcquisitionTestContext
 from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
 
@@ -31,6 +32,40 @@ suite = unittest.TestLoader().loadTestsFromTestCase(SimulatorScanControl_test.Te
 result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
 """
+
+
+class ScanMover(Acquisition.ContainerDataStream):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, drift: Geometry.FloatSize, data_stream: Acquisition.DataStream) -> None:
+        super().__init__(data_stream)
+        self.__scan_hardware_source = scan_hardware_source
+        self.__drift = drift
+        self.__skip = True  # skip adjusting the stage the first time through
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+        # adjust the stage for testing.
+        if not self.__skip:
+            stem_controller = typing.cast(STEMController.STEMController, HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller"))
+            # print()
+            # print(f"move delta {self.__drift}")
+            stem_controller.SetValDeltaAndConfirm("CSH.x", self.__drift.width, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.y", self.__drift.height, 1.0, 1000)
+        self.__skip = False
+        # call this last so that we move the stage before measuring drift.
+        super()._prepare_stream(stream_args, **kwargs)
+
+
+class ScanMoverFunctor(Acquisition.DataStreamFunctor):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, drift: Geometry.FloatSize, functor: Acquisition.DataStreamFunctor) -> None:
+        self.__scan_hardware_source = scan_hardware_source
+        self.__drift = drift
+        self.__functor = functor
+
+    def apply(self, data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
+        # the functor passed to this functor will typically be the drift corrector
+        # ensure that the stage is moved first, then the drift corrector measures drift,
+        # then the scan section is prepared (using the measured drift).
+        return ScanMover(self.__scan_hardware_source, self.__drift, self.__functor.apply(data_stream))
+
 
 class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
@@ -108,23 +143,31 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
 
-            class TestAbortBehavior(scan_base.SynchronizedScanBehaviorInterface):
-                def __init__(self) -> None:
+            class TestAbortDataStream(Acquisition.ContainerDataStream):
+                def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, data_stream: Acquisition.DataStream) -> None:
+                    super().__init__(data_stream)
+                    self.__scan_hardware_source = scan_hardware_source
                     self.__i = 0
 
-                def prepare_section(self, **kwargs) -> None:
+                def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
                     self.__i += 1
                     if self.__i == 2:
-                        scan_hardware_source.grab_synchronized_abort()
+                        self.__scan_hardware_source.grab_synchronized_abort()
 
-            abort_behavior = TestAbortBehavior()
+            class TestAbortBehaviorFunctor(Acquisition.DataStreamFunctor):
+                def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource) -> None:
+                    self.__scan_hardware_source = scan_hardware_source
+
+                def apply(self, data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
+                    return TestAbortDataStream(self.__scan_hardware_source, data_stream)
+
             scans_and_spectrum_images = scan_hardware_source.grab_synchronized(
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters,
                 camera_data_channel=camera_data_channel,
                 section_height=2,
-                scan_behavior=abort_behavior)
+                scan_data_stream_functor=TestAbortBehaviorFunctor(scan_hardware_source))
             self.assertIsNone(scans_and_spectrum_images)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
@@ -453,10 +496,11 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
+            test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
-            scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters.scan_id = uuid.uuid4()
@@ -464,13 +508,19 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift = Geometry.FloatSize(0.0, 1.5e-9)
+            # we cannot use drift prediction since we are running a test using the scan mover, which is not continuous.
+            # this is still measuring drift, just not using timing to predict its future location.
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, use_prediction=False)
+            scan_mover_functor = ScanMoverFunctor(scan_hardware_source, drift, drift_correction_functor)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
                                                                             camera_data_channel=camera_data_channel,
                                                                             section_height=2,
-                                                                            scan_behavior=drift_correction_behavior)
+                                                                            scan_data_stream_functor=scan_mover_functor)
+            self.assertEqual(3, scan_hardware_source.drift_tracker.measurement_count)
+            self.assertTrue(1.4 < numpy.mean(scan_hardware_source.drift_tracker.drift_data_frame[2]) < 1.6)
 
     def test_grab_synchronized_basic_eels_with_drift_correction_leaves_graphic_during_scan(self):
         with self.__test_context(is_eels=True) as test_context:
@@ -490,14 +540,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
                                                                                 camera_frame_parameters=camera_frame_parameters,
                                                                                 camera_data_channel=camera_data_channel,
                                                                                 section_height=2,
-                                                                                scan_behavior=drift_correction_behavior)
+                                                                                scan_data_stream_functor=drift_correction_functor)
             # run the grab synchronized in a thread so that periodic can be called so that
             # the graphics get updated in ui thread.
             t = threading.Thread(target=do_grab)
@@ -531,14 +581,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
                                                                                 camera_frame_parameters=camera_frame_parameters,
                                                                                 camera_data_channel=camera_data_channel,
                                                                                 section_height=2,
-                                                                                scan_behavior=drift_correction_behavior)
+                                                                                scan_data_stream_functor=drift_correction_functor)
             # run the grab synchronized in a thread so that periodic can be called so that
             # the graphics get updated in ui thread.
             t = threading.Thread(target=do_grab)
