@@ -249,6 +249,7 @@ class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
             expected_ndim = int(is_sequence) + collection_dimension_count + datum_dimension_count
             if expected_ndim > len(data_shape):
                 collection_dimension_count = 0
+                data_calibrations = tuple()
         data_descriptor = DataAndMetadata.DataDescriptor(is_sequence, collection_dimension_count, datum_dimension_count)
         data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
         dimensional_calibrations = scan_calibrations + data_calibrations
