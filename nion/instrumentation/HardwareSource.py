@@ -180,7 +180,6 @@ class HardwareSourceBridge:
             # if we still don't have a data item, create it.
             if data_item is None:
                 data_item = DataItem.DataItem()
-                data_item.ensure_data_source()
                 data_item.title = "%s (%s)" % (hardware_source.display_name, data_channel.name) if data_channel.name else hardware_source.display_name
                 data_item.category = "temporary"
                 data_item_reference.data_item = data_item
