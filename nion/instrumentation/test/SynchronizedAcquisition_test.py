@@ -12,6 +12,7 @@ from nion.swift import Application
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
 from nion.swift.model import Metadata
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.instrumentation import Acquisition
@@ -70,7 +71,11 @@ class ScanMoverFunctor(Acquisition.DataStreamFunctor):
 class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
     def setUp(self):
+        TestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+
+    def tearDown(self):
+        TestContext.end_leaks(self)
 
     def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context(is_eels=is_eels)

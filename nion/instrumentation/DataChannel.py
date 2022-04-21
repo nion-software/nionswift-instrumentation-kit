@@ -55,6 +55,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
             data_item.decrement_data_ref_count()
         self.__data_item_map.clear()
         self.__data_item_transaction_map.clear()
+        super().about_to_delete()
 
     def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data_item_map[channel].data_and_metadata

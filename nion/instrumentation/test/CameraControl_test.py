@@ -20,6 +20,7 @@ from nion.swift import Facade
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Model
@@ -103,9 +104,13 @@ def make_tableau_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResul
 class TestCameraControlClass(unittest.TestCase):
 
     def setUp(self):
+        TestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
         self.exposure = 1.0
+
+    def tearDown(self):
+        TestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller: DocumentController.DocumentController, hardware_source: camera_base.CameraHardwareSource) -> None:
         hardware_source.start_playing()
@@ -687,7 +692,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, hardware_source)
             display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(display_item.graphics[0].bounds, hardware_source.data_channels[1].processor.bounds)
 
@@ -1020,6 +1025,7 @@ class TestCameraControlClass(unittest.TestCase):
             mask = camera_base.Mask()
             graphic = Graphics.RectangleGraphic()
             mask.add_layer(graphic, 1.0)
+            graphic.close()
             frame_parameters.active_masks = [mask]
             self.assertEqual(frame_parameters.active_masks[0].to_dict(), mask.to_dict())
             self.assertEqual(frame_parameters["active_masks"][0].to_dict(), mask.to_dict())  # mask is already a dict
@@ -1103,11 +1109,17 @@ class TestCameraControlClass(unittest.TestCase):
                     h2 = AcquisitionPanel.SequenceAcquisitionMethodComponentHandler(c2, acquisition_preferences)
                     with contextlib.closing(h2):
                         adr = h.build_acquisition_device_data_stream()
-                        amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
-                        ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
-                        while ac.is_acquiring_model.value:
-                            document_controller.periodic()
-                        self.assertFalse(ac.is_error)
+                        try:
+                            amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
+                            try:
+                                ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
+                                while ac.is_acquiring_model.value:
+                                    document_controller.periodic()
+                                self.assertFalse(ac.is_error)
+                            finally:
+                                amr.data_stream.remove_ref()
+                        finally:
+                            adr.data_stream.remove_ref()
             # only one data item will be create: the sequence. the view data item does not exist since acquiring
             # a sequence will use the special sequence acquisition of the camera device.
             self.assertEqual(1, len(document_controller.document_model.data_items))
@@ -1173,8 +1185,14 @@ class TestCameraControlClass(unittest.TestCase):
                 with self.__test_context() as test_context:
                     document_controller = test_context.document_controller
                     adr = adr_fn(test_context)
-                    amr = amr_fn(adr)
-                    self.__test_acq(document_controller, adr, amr, expected_count)
+                    try:
+                        amr = amr_fn(adr)
+                        try:
+                            self.__test_acq(document_controller, adr, amr, expected_count)
+                        finally:
+                            amr.data_stream.remove_ref()
+                    finally:
+                        adr.data_stream.remove_ref()
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass

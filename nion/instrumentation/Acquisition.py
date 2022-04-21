@@ -1255,10 +1255,6 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
     def __init__(self) -> None:
         super().__init__()
 
-    def about_to_delete(self) -> None:
-        # about_to_delete will be called on the main thread.
-        pass
-
     def add_ref(self) -> DataChannel:
         super().add_ref()
         return self

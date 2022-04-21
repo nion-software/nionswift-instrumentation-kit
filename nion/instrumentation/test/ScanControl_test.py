@@ -24,6 +24,7 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Registry
@@ -41,6 +42,7 @@ suite.run(result)
 class TestScanControlClass(unittest.TestCase):
 
     def setUp(self):
+        TestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
 
     def tearDown(self) -> None:
@@ -55,6 +57,7 @@ class TestScanControlClass(unittest.TestCase):
         self.assertEqual(0, stem_controller.SubscanView.count)
         self.assertEqual(0, stem_controller.LineScanView.count)
         self.assertEqual(0, stem_controller.DriftView.count)
+        TestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)
@@ -278,7 +281,7 @@ class TestScanControlClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
             probe_graphic = display_item.graphics[0]
-            display_item.remove_graphic(probe_graphic)
+            display_item.remove_graphic(probe_graphic).close()
             self.assertEqual(len(display_item.graphics), 0)
             self.assertIsNone(scan_hardware_source.probe_position)
 
@@ -930,7 +933,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
             probe_graphic = display_item.graphics[0]
-            display_item.remove_graphic(probe_graphic)
+            display_item.remove_graphic(probe_graphic).close()
             document_controller.periodic()
             display_item0 = document_model.get_display_item_for_data_item(document_model.data_items[0])
             display_item1 = document_model.get_display_item_for_data_item(document_model.data_items[1])
@@ -1073,7 +1076,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
             scan_hardware_source.stop_playing()
@@ -1092,7 +1095,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.line_scan_enabled = True
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
             scan_hardware_source.stop_playing()
@@ -1109,7 +1112,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertTrue(scan_hardware_source.subscan_enabled)
             display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             document_controller.periodic()
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
@@ -1247,7 +1250,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
             scan_hardware_source.stop_playing()
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
     def test_facade_record_data_with_immediate_close(self):
@@ -1427,7 +1430,7 @@ class TestScanControlClass(unittest.TestCase):
             stem_controller_.drift_channel_id = scan_hardware_source.get_channel_state(0).channel_id
             stem_controller_.drift_region = Geometry.FloatRect.from_tlhw(0.2, 0.2, 0.4, 0.4)
             document_controller.periodic()
-            display_item.remove_graphic(display_item.graphics[0])
+            display_item.remove_graphic(display_item.graphics[0]).close()
             self.assertIsNone(stem_controller_.drift_channel_id)
             self.assertIsNone(stem_controller_.drift_region)
 
