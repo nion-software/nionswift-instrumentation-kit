@@ -2748,7 +2748,25 @@ class CalibrationControlsCalibrator(CameraCalibrator):
 
 
 class CalibrationControlsCalibrator2(CameraCalibrator):
-    """Calibrator v2. Uses calibration config dictionary."""
+    """Calibrator v2. Uses calibration config dictionary.
+
+    The config mapping should have the following keys:
+
+    (optional) calibrationModeIndexControl: name of control to use as index to other controls. substituted into <<n>> below if 1+
+    (required) calibXScaleControl<<n>>: name of control to be used for x-scale; <<nn>> should be empty or 1+
+    (required) calibXOffsetControl<<n>>: name of control to be used for x-offset; <<nn>> should be empty or 1+
+    (required) calibXUnits<<n>>: x-unit string; <<nn>> should be empty or 1+
+    (required) calibYScaleControl<<n>>: name of control to be used for y-scale; <<nn>> should be empty or 1+
+    (required) calibYOffsetControl<<n>>: name of control to be used for y-offset; <<nn>> should be empty or 1+
+    (required) calibYUnits<<n>>: y-unit string; <<nn>> should be empty or 1+
+    (required) calibIntensityScaleControl<<n>>: name of control to be used for intensity-scale; <<nn>> should be empty or 1+
+    (required) calibIntensityOffsetControl<<n>>: name of control to be used for intensity-offset; <<nn>> should be empty or 1+
+    (required) calibIntensityUnits<<n>>: intensity-unit string; <<nn>> should be empty or 1+
+
+    If calibration control for a particular index is empty, the appropriate default value will be used (scale=1.0, offset=0.0, units='').
+
+    NOTE: counts_per_electron control is configured as before, using calibration_controls.
+    """
 
     def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3, config: typing.Mapping[str, typing.Any]) -> None:
         self.__instrument_controller = instrument_controller
