@@ -2721,6 +2721,8 @@ class CameraCalibrator(typing.Protocol):
 
 
 class CalibrationControlsCalibrator(CameraCalibrator):
+    """Calibrator v1. Uses calibration controls dictionary."""
+
     def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3) -> None:
         self.__instrument_controller = instrument_controller
         self.__camera_device = camera_device
@@ -2743,6 +2745,71 @@ class CalibrationControlsCalibrator(CameraCalibrator):
     def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
         instrument_controller = self.__instrument_controller
         return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+
+class CalibrationControlsCalibrator2(CameraCalibrator):
+    """Calibrator v2. Uses calibration config dictionary."""
+
+    def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3, config: typing.Mapping[str, typing.Any]) -> None:
+        self.__instrument_controller = instrument_controller
+        self.__camera_device = camera_device
+        self.__config = config
+
+    def __construct_suffix(self) -> str:
+        control = self.__config.get("calibrationModeIndexControl".lower(), None)
+        if control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
+            if valid and value:
+                return str(int(value))
+        return str()
+
+    def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
+        scale = None
+        scale_control = self.__config.get((prefix + "ScaleControl" + suffix).lower(), None)
+        if scale_control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
+            if valid:
+                scale = value
+        offset = None
+        offset_control = self.__config.get((prefix + "OffsetControl" + suffix).lower(), None)
+        if offset_control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
+            if valid:
+                offset = value
+        units = self.__config.get((prefix + "Units" + suffix).lower(), None)
+        scale = scale * relative_scale if scale is not None else scale
+        if is_center_origin and scale is not None and data_len:
+            offset = -scale * data_len * 0.5
+        return Calibration.Calibration(offset, scale, units)
+
+    def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
+        binning = frame_parameters.binning
+        is_center_origin = getattr(self.__camera_device, "camera_type", str()) != "eels"
+        suffix = self.__construct_suffix()
+        if len(data_shape) == 2:
+            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
+            y_calibration = self.__construct_calibration("calibY", suffix, binning, is_center_origin, data_shape[0])
+            return (y_calibration, x_calibration)
+        else:
+            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[0])
+            return (x_calibration,)
+
+    def get_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> Calibration.Calibration:
+        suffix = self.__construct_suffix()
+        return self.__construct_calibration("calibIntensity", suffix)
+
+    def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
+        instrument_controller = self.__instrument_controller
+        return typing.cast(typing.Optional[float], self.__get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+    def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
+        if key + "_control" in calibration_controls:
+            valid, value = instrument_controller.TryGetVal(typing.cast(str, calibration_controls[key + "_control"]))
+            if valid:
+                return value
+        if key + "_value" in calibration_controls:
+            return calibration_controls.get(key + "_value")
+        return None
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: InstrumentController, camera: CameraDevice) -> None:
