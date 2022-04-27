@@ -385,12 +385,14 @@ class DataStreamInfo:
 
 
 # wraps a data available listener with an exception handler
-def _handle_data_available(data_stream: DataStream, fn: typing.Callable[[DataStream, DataStreamEventArgs], None], data_stream_event: DataStreamEventArgs) -> None:
+def _handle_data_available(data_stream: DataStream, fn: typing.Callable[[DataStream, DataStreamEventArgs], None], data_stream_event: DataStreamEventArgs, exceptions: typing.List[Exception]) -> None:
     try:
         fn(data_stream, data_stream_event)
     except Exception as e:
-        data_stream.handle_error()
-        raise e
+        # exceptions are added here for the caller to handle.
+        # this avoids throwing exceptions within the fire method
+        # which has limited ways of handling them.
+        exceptions.append(e)
 
 
 class DataStream(ReferenceCounting.ReferenceCounted):
@@ -565,7 +567,16 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
         Subclasses can override.
         """
-        self.data_available_event.fire(data_stream_event)
+        exceptions: typing.List[Exception] = list()
+
+        self.data_available_event.fire(data_stream_event, exceptions)
+
+        # ensure that exceptions occurring in data_available get raised.
+        # this mechanism allows handlers to raise exceptions without regard
+        # to how they will be handled through the event.fire call.
+        # exceptions raised here are typically caught at the top level handler.
+        for e in exceptions:
+            raise e
 
     def wrap_in_sequence(self, length: int) -> DataStream:
         """Wrap this data stream in a sequence of length."""
