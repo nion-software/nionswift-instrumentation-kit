@@ -1194,6 +1194,25 @@ class TestCameraControlClass(unittest.TestCase):
                     finally:
                         adr.data_stream.remove_ref()
 
+    def test_exposure_string(self):
+        t = (
+            (1.2E-0,  0,  "1.2", "s"),
+            (1.2E-0, -1,  "1.2", "s"),
+            (1.2E-0, -2, "1.20", "s"),
+            (1.2E-3, -3, "1.2", "ms"),
+            (1.2E-3, -4, "1.2", "ms"),
+            (1.2E-3, -5, "1.20", "ms"),
+            (1.2E-6, -6, "1.2", "us"),
+            (1.2E-6, -7, "1.2", "us"),
+            (1.2E-6, -8, "1.20", "us"),
+            (1.2E-9, -9, "1.2", "ns"),
+            (1.2E-9, -10, "1.2", "ns"),
+            (1.2E-9, -11, "1.20", "ns"),
+        )
+        for exposure, precision, exposure_s, units in t:
+            self.assertEqual(exposure_s, CameraControlPanel.make_exposure_str(exposure, precision))
+            self.assertEqual(units, CameraControlPanel.exposure_units[precision])
+
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
 

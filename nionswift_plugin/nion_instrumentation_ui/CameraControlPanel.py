@@ -577,8 +577,13 @@ class CameraPanelDelegate:
         return False
 
 
-exposure_units = {0: "s", 1: "s", 2: "s", -3: "ms", -4: "ms", -5: "ms", -6: "us", -7: "us", -8: "us", -9: "ns", -10: "ns", -11: "ns"}
-exposure_format = {0: ".1", 1: ".1", 2: ".2", -3: ".1", -4: ".1", -5: ".2", -6: ".1", -7: ".1", -8: ".2", -9: ".1", -10: ".1", -11: ".2"}
+exposure_units = {0: "s", -1: "s", -2: "s", -3: "ms", -4: "ms", -5: "ms", -6: "us", -7: "us", -8: "us", -9: "ns", -10: "ns", -11: "ns"}
+exposure_format = {0: ".1", -1: ".1", -2: ".2", -3: ".1", -4: ".1", -5: ".2", -6: ".1", -7: ".1", -8: ".2", -9: ".1", -10: ".1", -11: ".2"}
+
+def make_exposure_str(exposure: float, exposure_precision: int) -> str:
+    format_str = f"{{0:{exposure_format[exposure_precision]}f}}"
+    return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
+
 
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
@@ -811,9 +816,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             blocked = self.__changes_blocked
             self.__changes_blocked = True
             try:
-                exposure_precision = camera_hardware_source.exposure_precision
-                format_str = f"{{0:{exposure_format[exposure_precision]}f}}"
-                exposure_field.text = str(format_str.format(float(frame_parameters.exposure_ms) / 1000 / math.pow(10, exposure_precision)))
+                exposure_text = make_exposure_str(float(frame_parameters.exposure_ms) / 1000, camera_hardware_source.exposure_precision)
+                exposure_field.text = exposure_text
                 if exposure_field.focused:
                     exposure_field.request_refocus()
                 binning_combo.current_text = str(frame_parameters.binning)
