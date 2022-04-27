@@ -470,6 +470,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         return 0.0
 
     def abort_stream(self) -> None:
+        """Abort the stream. Called to stop the stream. Also called during exceptions."""
         self._abort_stream()
         self.is_aborted = True
 
@@ -517,7 +518,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         pass
 
     def start_stream(self, stream_args: DataStreamArgs) -> None:
-        """Restart a sequence of acquisitions. Sets the sequence count for this stream."""
+        """Restart a sequence of acquisitions. Sets the sequence count for this stream. Always balance by finish_stream."""
         for channel in self.input_channels:
             assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
             self.__sequence_counts[channel] = stream_args.sequence_count
@@ -528,6 +529,8 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Restart a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
+
+        Always balanced by _finish_stream.
         """
         pass
 
@@ -2053,7 +2056,7 @@ class AccumulatedDataStream(ContainerDataStream):
         super()._fire_data_available(new_data_stream_event)
 
 
-def acquire(data_stream: DataStream) -> None:
+def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
     """Perform an acquire.
 
     Performs consistency checks on progress and data.
@@ -2076,11 +2079,15 @@ def acquire(data_stream: DataStream) -> None:
             assert data_stream.progress == 1.0
             data_stream._acquire_finished()
     except Exception as e:
+        data_stream.is_error = True
         data_stream.abort_stream()
         from nion.swift.model import Notification
         Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition", "Acquisition Failed", str(e)))
-        import traceback
-        traceback.print_exc()
+        if error_handler:
+            error_handler(e)
+        else:
+            import traceback
+            traceback.print_exc()
     finally:
         data_stream.finish_stream()
 

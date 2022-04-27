@@ -20,7 +20,7 @@ class ScanDataStream(Acquisition.DataStream):
 
     partial_length is the size of each chunk of data (number of samples) to send at once.
     """
-    def __init__(self, frame_count: int, scan_shape: Acquisition.ShapeType, channels: typing.Sequence[Acquisition.Channel], partial_length: int):
+    def __init__(self, frame_count: int, scan_shape: Acquisition.ShapeType, channels: typing.Sequence[Acquisition.Channel], partial_length: int, *, trigger_error: bool = False):
         super().__init__(frame_count * numpy.product(scan_shape, dtype=numpy.int64))
         # frame counts are used for allocating and returning test data
         self.__frame_count = frame_count
@@ -35,6 +35,7 @@ class ScanDataStream(Acquisition.DataStream):
         self.__partial_index = 0
         self.data = {channel: numpy.random.randn(self.__frame_count, self.__scan_length) for channel in channels}
         self.prepare_count = 0
+        self.__trigger_error = trigger_error
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
@@ -57,6 +58,8 @@ class ScanDataStream(Acquisition.DataStream):
         source_data_slice = (slice(start_index, stop_index),)
         state = Acquisition.DataStreamStateEnum.PARTIAL if stop_index < self.__scan_length else Acquisition.DataStreamStateEnum.COMPLETE
         for channel in self.channels:
+            if self.__trigger_error:
+                new_count = 0
             data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
                                                                 new_count, source_data_slice, state)
@@ -81,7 +84,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
 
     partial_height is the size of each chunk of data (number of samples) to send at once.
     """
-    def __init__(self, frame_count: int, frame_shape: Acquisition.ShapeType, channel: Acquisition.Channel, partial_height: typing.Optional[int] = None):
+    def __init__(self, frame_count: int, frame_shape: Acquisition.ShapeType, channel: Acquisition.Channel, partial_height: typing.Optional[int] = None, trigger_error: bool = False):
         super().__init__(frame_count)
         assert len(frame_shape) == 2
         # frame counts are used for allocating and returning test data
@@ -94,6 +97,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
         self.__partial_height = partial_height or frame_shape[0]
         self.__partial_index = 0
         self.data = numpy.random.randn(self.__frame_count, *self.__frame_shape)
+        self.__trigger_error = trigger_error
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
@@ -126,6 +130,9 @@ class SingleFrameDataStream(Acquisition.DataStream):
             self.__partial_index = 0
             self.__frame_index += 1
             self._sequence_next(self.__channel)
+        if self.__trigger_error:
+            raise Exception()
+
 
 
 class MultiFrameDataStream(Acquisition.DataStream):
@@ -781,3 +788,20 @@ class TestAcquisitionClass(unittest.TestCase):
         self.assertEqual(1, action._s)
         self.assertEqual(4, action._p)
         self.assertEqual(1, action._f)
+
+    def test_error_during_send_next(self):
+        sequence_len = 4
+        channel = Acquisition.Channel("0")
+        data_stream = SingleFrameDataStream(sequence_len, (2, 2), channel, trigger_error=True)
+        sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
+        maker = Acquisition.FramedDataStream(sequencer)
+        with maker.ref():
+            had_error = False
+
+            def handle_error(e: Exception) -> None:
+                nonlocal had_error
+                had_error = True
+
+            Acquisition.acquire(maker, error_handler=handle_error)
+            self.assertTrue(had_error)
+            self.assertTrue(maker.is_error)
