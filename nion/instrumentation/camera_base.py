@@ -2395,6 +2395,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, flyback_pixels: int = 0, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_frame_parameters_original: typing.Optional[CameraFrameParameters] = None
         self.__additional_metadata = additional_metadata or dict()
         self.__flyback_pixels = flyback_pixels
         self.__partial_data_info = typing.cast(PartialData, None)
@@ -2423,6 +2424,8 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             camera_frame_parameters.processing = "sum_masked"
             camera_frame_parameters.active_masks = [typing.cast(Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
             operator.apply()
+        # save original current camera frame parameters. these will be restored in finish stream.
+        self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape)
@@ -2434,6 +2437,9 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_synchronized_end()
+        # restore camera frame parameters.
+        assert self.__camera_frame_parameters_original
+        self.__camera_hardware_source.set_current_frame_parameters(self.__camera_frame_parameters_original)
 
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()
@@ -2487,6 +2493,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_frame_parameters_original: typing.Optional[CameraFrameParameters] = None
         self.__additional_metadata = additional_metadata or dict()
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
@@ -2514,6 +2521,8 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             camera_frame_parameters.processing = "sum_masked"
             camera_frame_parameters.active_masks = [typing.cast(Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
             operator.apply()
+        # save original current camera frame parameters. these will be restored in finish stream.
+        self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         self.__camera_hardware_source.acquire_sequence_prepare(stream_args.sequence_count)
 
@@ -2523,6 +2532,9 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_end()
+        # restore camera frame parameters.
+        assert self.__camera_frame_parameters_original
+        self.__camera_hardware_source.set_current_frame_parameters(self.__camera_frame_parameters_original)
 
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()

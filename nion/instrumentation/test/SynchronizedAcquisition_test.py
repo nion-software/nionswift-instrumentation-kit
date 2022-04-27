@@ -199,6 +199,28 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # self.assertEqual((4, 4, 512), spectrum_images[0].data_shape)  # assumes accumulate for now
             self.assertEqual((3, 4, 4, 512), spectrum_images[0].data_shape)
 
+    def test_grab_synchronized_basic_eels_followed_by_view(self):
+        # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
+        # after a synchronized acquisition.
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, test_context.camera_hardware_source)
+            self.assertEqual("eV", document_controller.document_model.data_items[0].dimensional_calibrations[-1].units)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            camera_data_channel = None
+            old_frame_parameters_d = camera_hardware_source.get_current_frame_parameters().as_dict()
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
+            document_controller.periodic()
+            self._acquire_one(document_controller, test_context.camera_hardware_source)
+            self.assertEqual("eV", document_controller.document_model.data_items[0].dimensional_calibrations[-1].units)
+
     def test_grab_synchronized_basic_eels_followed_by_record(self):
         # perform a synchronized acquisition followed by a record. tests that the record frame parameters are restored
         # after a synchronized acquisition.
@@ -922,6 +944,26 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIsNotNone(current_frame_parameters.subscan_fractional_center)
             self.assertIsNotNone(current_frame_parameters.subscan_fractional_size)
             self.assertIsNotNone(current_frame_parameters.subscan_pixel_size)
+
+    def test_grab_sequence_basic_eels_followed_by_view(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            camera_hardware_source = test_context.camera_hardware_source
+            # establish first acquisition
+            self._acquire_one(document_controller, test_context.camera_hardware_source)
+            self.assertEqual("eV", document_controller.document_model.data_items[0].dimensional_calibrations[-1].units)
+            # perform a sequence acquisition. ensure get camera frame parameters are restored.
+            old_frame_parameters_d = camera_hardware_source.get_current_frame_parameters().as_dict()
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            data_stream = scan_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4)
+            maker = Acquisition.FramedDataStream(data_stream)
+            with maker.ref():
+                Acquisition.acquire(maker)
+            self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
+            # another acquisition. verify it is calibrated.
+            self._acquire_one(document_controller, test_context.camera_hardware_source)
+            self.assertEqual("eV", document_controller.document_model.data_items[0].dimensional_calibrations[-1].units)
 
     # TODO: check for counts per electron
 
