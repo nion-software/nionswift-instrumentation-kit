@@ -1268,7 +1268,11 @@ class TestHardwareSourceClass(unittest.TestCase):
             finally:
                 hardware_source.abort_playing(sync_timeout=3.0)
             enabled = False
-            self.assertEqual(error_text, Notification._notification_source.notifications[0].text)
+            print("---")
+            for x in Notification._notification_source.notifications:
+                print(f"{x.title}: {x.text}")
+            print("+++")
+            self.assertEqual(error_text, Notification._notification_source.notifications[-1].text)
 
 
 if __name__ == '__main__':
