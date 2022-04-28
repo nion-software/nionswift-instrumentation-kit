@@ -12,6 +12,7 @@ from nion.instrumentation import HardwareSource
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
+from nion.swift.model import Notification
 from nion.swift.model import Utility
 from nion.swift import Application
 from nion.swift import Facade
@@ -1246,6 +1247,33 @@ class TestHardwareSourceClass(unittest.TestCase):
                 hardware_source.stop_playing(sync_timeout=3.0)
                 document_controller.periodic()
             self.assertFalse(document_model.data_items[0].is_write_delayed)
+
+    def test_exception_reported(self):
+        with self.__scan_test_context() as scan_test_context:
+            error_text = "Test error during acquisition"
+            hardware_source = scan_test_context.hardware_source
+            enabled = False
+            def raise_exception():
+                nonlocal enabled
+                if enabled:
+                    raise Exception(error_text)
+            hardware_source._test_acquire_hook = raise_exception
+            hardware_source._test_acquire_exception = lambda *args: None
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+                self.assertTrue(hardware_source.is_playing)
+                enabled = True
+                hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+                # avoid a race condition and wait for is_playing to go false.
+                start_time = time.time()
+                while hardware_source.is_playing:
+                    time.sleep(0.01)
+                    self.assertTrue(time.time() - start_time < 3.0)
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+            enabled = False
+            self.assertEqual(error_text, Notification._notification_source.notifications[0].text)
 
 
 if __name__ == '__main__':
