@@ -628,13 +628,18 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertTrue(0.9 < dist_nm < 1.1)
             self.assertTrue(0.9 < abs(last_delta_nm.width) < 1.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
-            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 2.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(last_delta_nm.width) < 2.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
+            total_delta_nm = drift_tracker.total_delta_nm
+            self.assertTrue(2.8 < abs(total_delta_nm.width) < 3.2)
+            self.assertTrue(abs(last_delta_nm.height) < 0.1)
+            expected_drift_data_frame = [[0.0, 0.0], [1.0, 3.0], [1.0, 3.0]]
+            self.assertTrue(numpy.allclose(drift_tracker.drift_data_frame[:-1], expected_drift_data_frame, atol=0.2))
 
     def test_drift_corrector_with_drift_sub_area_rotation(self):
         # for this test, drift should be in a constant direction
