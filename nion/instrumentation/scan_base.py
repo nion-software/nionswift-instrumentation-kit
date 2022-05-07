@@ -573,6 +573,14 @@ class ScanDevice(typing.Protocol):
     def open_configuration_interface(self) -> None: ...
     def show_configuration_dialog(self, api_broker: typing.Any) -> None: ...
 
+    # default implementation
+    def wait_for_frame(self, frame_number: int) -> None:
+        pixels_to_skip = 0
+        while True:
+            _data_elements, complete, bad_frame, sub_area, _frame_number, pixels_to_skip = self.read_partial(frame_number, pixels_to_skip)
+            if complete:
+                break
+
     @property
     def channel_count(self) -> int: raise NotImplementedError()
 
@@ -730,6 +738,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
+    def scan_immediate(self, frame_paramters: ScanFrameParameters) -> None: ...
 
     record_index: int
     priority: int = 100
@@ -1588,6 +1597,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             return data_element_groups
 
         return list()
+
+    def scan_immediate(self, frame_paramters: ScanFrameParameters) -> None:
+        old_frame_parameters = self.__device.current_frame_parameters
+        self.__device.set_frame_parameters(frame_paramters)
+        frame_number = self.__device.start_frame(False)
+        self.__device.wait_for_frame(frame_number)
+        self.__device.stop()
+        self.__device.set_frame_parameters(old_frame_parameters)
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
