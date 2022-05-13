@@ -113,14 +113,14 @@ class DriftCalculator:
     drift_calculator_id: str
     drift_calculator_name: typing.Optional[str] = None
 
-    def calculate(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: collections.deque) -> typing.Optional[DriftResult]:
+    def calculate_drift_result(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: collections.deque) -> typing.Optional[DriftResult]:
         ...
 
 
 class SimpleDriftCalculator(DriftCalculator):
     drift_calculator_id = 'simple_drift_calculator'
 
-    def calculate(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: collections.deque) -> typing.Optional[DriftResult]:
+    def calculate_drift_result(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: collections.deque) -> typing.Optional[DriftResult]:
         current_xdata = xdata_history[-1] if len(xdata_history) else None
 
         if first_xdata and current_xdata:
@@ -131,6 +131,7 @@ class SimpleDriftCalculator(DriftCalculator):
             delta_nm = Geometry.FloatSize(
                     h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                     w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+            # print(f"Raw shift nm: {delta_nm}, raw offset px: {raw_offset}, quality: {quality}, delta time: {delta_time}")
 
             return DriftResult(drift_rate=delta_nm / delta_time, time_window_start=first_xdata.timestamp, time_window_end=current_xdata.timestamp)
 
@@ -141,7 +142,7 @@ Registry.register_component(SimpleDriftCalculator(), {"drift_calculator"})
 
 
 class DriftDataSource:
-    """Collects images from a camera or scan device and provides them to DiftTracker for calculating drift.
+    """Collects images from a camera or scan device and provides them to DriftTracker for calculating drift.
 
     Each drift data source needs to define in which axis its images are oriented. In addition it can also define an
     extra rotation, which is useful for example for subscan images.
@@ -202,8 +203,8 @@ class DriftTracker:
     An extension to this class would be to separate the drift algorithm into its own class and allow it to be
     configured.
     """
-    def __init__(self, *, max_history_size: typing.Optional[int] = 10, native_axis: str="StageAxis") -> None:
-        self.__native_axis = native_axis
+    def __init__(self, *, max_history_size: typing.Optional[int] = 10, native_axis: typing.Optional[str]=None) -> None:
+        self.__native_axis = native_axis or "StageAxis"
         # dispatcher is used to calculate drift offsets on a thread
         self.__dispatcher = ThreadPool.SingleItemDispatcher()
 
@@ -233,14 +234,8 @@ class DriftTracker:
 
     def reset(self) -> None:
         with self.__lock:
-            # self.__first_xdata = None
-            # self.__xdata_history.clear()
-            # self.__current_xdata = None
             self.__drift_history.clear()
             self.drift_data_sources.clear()
-            # self.__drift_data_frame = numpy.zeros((4, 0), float)
-            # self.__rotation = 0.0
-            # self.__total_delta_nm = Geometry.FloatSize()
 
     @property
     def measurement_count(self) -> int:
@@ -298,7 +293,7 @@ class DriftTracker:
 
     def get_drift_rate(self, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
         """Return the drift rate over the last n measurements."""
-        n = 3 if n is None else n
+        n = 1 if n is None else n
         assert n > 0
         with self.__lock:
             drift_rate = Geometry.FloatSize()
@@ -339,7 +334,7 @@ class DriftTracker:
 
         with self.__lock:
             if drift_data_source and drift_calculator:
-                drift_result = drift_calculator.calculate(drift_data_source.first_xdata, drift_data_source.xdata_history)
+                drift_result = drift_calculator.calculate_drift_result(drift_data_source.first_xdata, drift_data_source.xdata_history)
             if drift_result:
                 # rotate back into context reference frame
                 if not math.isclose(drift_data_source.rotation, 0.0):
@@ -377,6 +372,11 @@ class DriftTracker:
                         self.drift_data_sources.remove(drift_data_source)
                         drift_data_source = None
                     break
+            # If we did not find "drift_data_source_id" in the existing sources, set "drift_data_osurce" to None so that
+            # a new one will be created below.
+            else:
+                drift_data_source = None
+
             if drift_data_source is None:
                 drift_data_source = DriftDataSource(drift_data_source_id=drift_data_source_id, axis=axis, rotation=rotation, applies_drift_correction=drift_correction_applied)
                 self.drift_data_sources.add(drift_data_source)
@@ -461,7 +461,7 @@ class DriftCorrectionBehavior:
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 xdata0 = xdatas[0]
                 if xdata0:
-                    drift_tracker.submit_image(xdata0, drift_rotation, drift_data_source_id="subscan", axis="Scan", drift_correction_applied=True, wait=True)
+                    drift_tracker.submit_image(xdata0, drift_rotation, drift_data_source_id="drift_correction_behavior_subscan", axis="Scan", drift_correction_applied=True, wait=True)
 
 
 class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
@@ -524,7 +524,36 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super()._fire_data_available(data_stream_event)
 
     def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation)
+        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, drift_data_source_id="drift_updater_data_stream_haadf", axis="Scan", drift_correction_applied=False)
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
+
+
+"""
+Architectural Decision Records.
+
+# ADR-002 2022-05-05 AM "Use drift_rate as the native quantiy for tracking drift"
+
+This is a consequence of allowing different drift sources and different cross-correlation algorithms. Compared to an
+absolute drift, drift_rate can be interpreted without further knowledge about the algorithm that produces it. For example
+cross-correlating the first recorded image with the latest one produces a different absolute drift than cross-correlating
+the second to last one with the latest one. However, assuming a constant drift rate both methods would result in the same
+drift_rate. Of course drift and drift_rate can be converted into each other if the respective time windows used for their
+calculation are known. But overall it is drift_rate that we are actually interested in: The sample will usually drift with
+a certain drift_rate that typically decreases over time. The drift rate decrease is usually small compared to the sampling
+interval, so assuming a constant drift rate between the sampling points is a good approximation. 
+
+# ADR-001 2022-05-05 AM "Introduce DriftDataSource"
+
+DriftTracker is intended as a global place to track sample drift. But for calculating the global drift we can have different
+sources like ronchigram images or scanned images. Only images from one source can be cross-correlated and different sources
+also produce data oriented in different coordinate systems. In order to be able to globally track sample drift we need to
+track the different sources individually.
+Each DriftDataSource contains the information needed to correctly interpret the data it produces: In addition to the axis
+the data is oriented it can have an extra rotation which is for example required for subscan images. We also need to track
+if a DriftDataSource produces data that has drift correction applied, i.e. if the images are shifted according to the last
+known drift rate. DriftTracker tracks the total global drift, so for a DriftDataSource that produces drift corrected images
+it adds the drift rate calculated from it to the last known drift rate.
+
+"""

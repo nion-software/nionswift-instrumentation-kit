@@ -628,7 +628,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertTrue(0.9 < dist_nm < 1.1)
             self.assertTrue(0.9 < abs(last_delta_nm.width) < 1.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
-            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 2.0, 1000)
+            stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
