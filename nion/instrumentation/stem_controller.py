@@ -73,10 +73,11 @@ AxisType = typing.Tuple[str, str]
 
 
 class AxisDescription:
-    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str):
+    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str, searchable_name: str):
         self.axis_id = axis_id
         self.axis_type = (axis1, axis2)
         self.display_name = display_name
+        self.searchable_name = searchable_name
 
     def __str__(self) -> str:
         return self.display_name
@@ -501,6 +502,17 @@ class STEMController(Observable.Observable):
         procedures can work properly. There is always exactly one reference setting per settings control, because it
         is important to always align the microscope in the same setting to avoid creating diverging alignments and
         settings.
+        """
+        raise NotImplementedError()
+
+    def convert_axis(self, value: Geometry.FloatPoint, from_axis: str, to_axis: str) -> Geometry.FloatPoint:
+        """
+        Convert the vector "value" from "from_axis" to "to_axis".
+
+        Valid axis names can be retrieved via:
+        `[axis_description.axis_id for axis_description in STEMController.axis_descriptions]`
+
+        Raises `ValueError` if an unknown axis name is passed as "from_axis" or "to_axis".
         """
         raise NotImplementedError()
 
