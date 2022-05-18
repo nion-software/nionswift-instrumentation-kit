@@ -88,7 +88,7 @@ class DriftResult:
     It can interpreted as: Between 'time_window_start' and 'time_window_end' the average drift rate was estimated to
     be 'drift_rate'.
 
-    'drift_rate' should be in units of nm / s.
+    'drift_rate' should be in units of m / s.
     """
 
     drift_rate: Geometry.FloatSize
@@ -128,12 +128,13 @@ class SimpleDriftCalculator(DriftCalculator):
             delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds()
             assert delta_time > 0.0
             offset = Geometry.FloatPoint.make(typing.cast(typing.Tuple[float, float], raw_offset))
+            # TODO How do we ensure that the data is actually calibrated in nm? It could also be m or even something completely different like rad.
             delta_nm = Geometry.FloatSize(
                     h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
                     w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
             # print(f"Raw shift nm: {delta_nm}, raw offset px: {raw_offset}, quality: {quality}, delta time: {delta_time}")
 
-            return DriftResult(drift_rate=delta_nm / delta_time, time_window_start=first_xdata.timestamp, time_window_end=current_xdata.timestamp)
+            return DriftResult(drift_rate=delta_nm / delta_time * 1e-9, time_window_start=first_xdata.timestamp, time_window_end=current_xdata.timestamp)
 
         return None
 
@@ -247,12 +248,12 @@ class DriftTracker:
         with self.__lock:
             if not len(self.__drift_history):
                 return Geometry.FloatSize()
-            total_delta_nm = Geometry.FloatSize()
+            total_delta = Geometry.FloatSize()
             time_window_start = self.__drift_history[0].time_window_start
             for drift_result in self.__drift_history:
-                total_delta_nm += drift_result.drift_rate * (drift_result.time_window_end - time_window_start).total_seconds()
+                total_delta += drift_result.drift_rate * (drift_result.time_window_end - time_window_start).total_seconds()
                 time_window_start = drift_result.time_window_end
-            return total_delta_nm
+            return total_delta * 1e9
 
     @property
     def drift_data_frame(self) -> _NDArray:
@@ -264,7 +265,7 @@ class DriftTracker:
             time_window_start = self.__drift_history[0].time_window_start
             for i, drift_result in enumerate(self.__drift_history):
                 delta_time = (drift_result.time_window_end - time_window_start).total_seconds()
-                delta_nm = drift_result.drift_rate * delta_time
+                delta_nm = drift_result.drift_rate * delta_time * 1e9
                 offset_nm_xy = math.sqrt(pow(delta_nm.height, 2) + pow(delta_nm.width, 2))
                 drift_data_frame[:, i] = (delta_nm.height, delta_nm.width, offset_nm_xy, delta_time)
                 time_window_start = drift_result.time_window_end
@@ -279,7 +280,7 @@ class DriftTracker:
                 if self.measurement_count > 1:
                     time_window_start = self.__drift_history[-2].time_window_end
                 delta_time = (drift_result.time_window_end - time_window_start).total_seconds()
-                delta_nm = drift_result.drift_rate * delta_time
+                delta_nm = drift_result.drift_rate * delta_time * 1e9
             else:
                 delta_nm = Geometry.FloatSize()
             return delta_nm
@@ -310,7 +311,7 @@ class DriftTracker:
             future_delta_nm = Geometry.FloatSize()
             if self.measurement_count > 0:
                 delta_time = utc_time - self.__drift_history[-1].time_window_end
-                future_delta_nm = delta_time.total_seconds() * self.get_drift_rate(n=n)
+                future_delta_nm = delta_time.total_seconds() * self.get_drift_rate(n=n) * 1e9
             return self.total_delta_nm + future_delta_nm
 
     def __append_drift(self, drift_result: DriftResult) -> None:
@@ -356,7 +357,7 @@ class DriftTracker:
         # this call is not under lock - so recheck the condition upon which we fire the event.
         if drift_result:
             delta_time = (drift_result.time_window_end - drift_result.time_window_start).total_seconds()
-            delta_nm = drift_result.drift_rate * delta_time
+            delta_nm = drift_result.drift_rate * delta_time * 1e9
             self.drift_changed_event.fire(delta_nm, delta_time)
 
     def submit_image(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, drift_data_source_id: str, axis: str, drift_correction_applied: bool, wait: bool = False) -> None:

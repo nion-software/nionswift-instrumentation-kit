@@ -188,7 +188,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate()
+                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
 
@@ -259,7 +259,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate()
+                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
 
@@ -295,6 +295,6 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate()
+                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
