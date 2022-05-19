@@ -72,15 +72,29 @@ class DriftCorrectionSettings:
 AxisType = typing.Tuple[str, str]
 
 
-class AxisDescription:
-    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str, searchable_name: str):
-        self.axis_id = axis_id
-        self.axis_type = (axis1, axis2)
-        self.display_name = display_name
-        self.searchable_name = searchable_name
+class AxisDescription(typing.Protocol):
 
-    def __str__(self) -> str:
-        return self.display_name
+    @property
+    def axis_id(self) -> str:
+        """Read-only property for the (ideally unique) identifier of this axis.
+
+        """
+        raise NotImplementedError()
+
+    @property
+    def axis_type(self) -> typing.Tuple[str, str]:
+        """Read-only property for the co-ordinate names of this axis.
+
+        Note: This might be removed in a future release
+        """
+        raise NotImplementedError()
+
+    @property
+    def display_name(self) -> str:
+        """Read-only property for the name of this axis as it appears in the UI
+
+        """
+        raise NotImplementedError()
 
 
 class ScanContext:
@@ -505,14 +519,14 @@ class STEMController(Observable.Observable):
         """
         raise NotImplementedError()
 
-    def convert_axis(self, value: Geometry.FloatPoint, from_axis: str, to_axis: str) -> Geometry.FloatPoint:
+    def axis_transform_point(self, point: Geometry.FloatPoint, from_axis: AxisDescription, to_axis: AxisDescription) -> Geometry.FloatPoint:
         """
         Convert the vector "value" from "from_axis" to "to_axis".
 
-        Valid axis names can be retrieved via:
-        `[axis_description.axis_id for axis_description in STEMController.axis_descriptions]`
+        Existing axis descriptions can be retrieved via:
+        `STEMController.axis_descriptions`
 
-        Raises `ValueError` if an unknown axis name is passed as "from_axis" or "to_axis".
+        Raises `ValueError` if an invalid axis is passed as "from_axis" or "to_axis".
         """
         raise NotImplementedError()
 
