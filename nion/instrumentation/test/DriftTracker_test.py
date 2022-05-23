@@ -52,14 +52,19 @@ class TestDriftTrackerClass(unittest.TestCase):
             scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters)
+            stem_controller = scan_hardware_source.stem_controller
+            axis = None
+            for axis in stem_controller.axis_descriptions:
+                if axis.axis_id == "scan":
+                    break
+            assert axis is not None
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(scan_hardware_source, scan_frame_parameters, axis=axis)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
             stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
@@ -77,7 +82,7 @@ class TestDriftTrackerClass(unittest.TestCase):
             total_delta_nm = drift_tracker.total_delta_nm
             self.assertAlmostEqual(abs(total_delta_nm.width), 3.0, delta=0.3)
             self.assertLess(abs(last_delta_nm.height), 0.1)
-            expected_drift_data_frame = [[0.0, 0.0], [1.0, 3.0], [1.0, 3.0]]
+            expected_drift_data_frame = [[0.0, 0.0, 0.0], [0.0, 1.0, 3.0], [0.0, 1.0, 3.0]]
             self.assertTrue(numpy.allclose(drift_tracker.drift_data_frame[:-1], expected_drift_data_frame, atol=0.2))
 
     def test_drift_corrector_basic_without_correction(self):
@@ -136,7 +141,7 @@ class TestDriftTrackerClass(unittest.TestCase):
             total_delta_nm = drift_tracker.total_delta_nm
             self.assertAlmostEqual(abs(total_delta_nm.width), 3.0, delta=0.2)
             self.assertLess(abs(last_delta_nm.height), 0.1)
-            expected_drift_data_frame = [[0.0, 0.0], [1.0, 3.0], [1.0, 3.0]]
+            expected_drift_data_frame = [[0.0, 0.0, 0.0], [0.0, 1.0, 3.0], [0.0, 1.0, 3.0]]
             self.assertTrue(numpy.allclose(drift_tracker.drift_data_frame[:-1], expected_drift_data_frame, atol=0.2))
 
     def test_drift_corrector_constant_drift_rate(self):

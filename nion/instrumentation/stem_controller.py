@@ -73,11 +73,10 @@ AxisType = typing.Tuple[str, str]
 
 
 class AxisDescription:
-    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str, searchable_name: str):
+    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str):
         self.axis_id = axis_id
         self.axis_type = (axis1, axis2)
         self.display_name = display_name
-        self.searchable_name = searchable_name
 
     def __str__(self) -> str:
         return self.display_name

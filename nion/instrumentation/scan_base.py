@@ -832,8 +832,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         # synchronized acquisition
         self.acquisition_state_changed_event = Event.Event()
-
-        self.drift_tracker = DriftTracker.DriftTracker()
+        # TODO Hardcoding a specific native axis for drift tracker is not optimal. There should be a better way of doing this.
+        axis: typing.Optional[stem_controller_module.AxisDescription] = None
+        for axis in stem_controller_.axis_descriptions:
+            if axis.axis_id == "stageaxis":
+                break
+        assert axis is not None
+        self.drift_tracker = DriftTracker.DriftTracker(stem_controller=stem_controller_, native_axis=axis)
 
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
@@ -2050,7 +2055,13 @@ def make_synchronized_scan_data_stream(
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         if enable_drift_tracker:
-            collector = DriftTracker.DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
+            # TODO Harcoding the axis of DriftUpdaterDataStream is not optimal. There should be a better solution.
+            axis: typing.Optional[stem_controller_module.AxisDescription] = None
+            for axis in scan_hardware_source.stem_controller.axis_descriptions:
+                if axis.axis_id == "scan":
+                    break
+            assert axis is not None
+            collector = DriftTracker.DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, axis, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed

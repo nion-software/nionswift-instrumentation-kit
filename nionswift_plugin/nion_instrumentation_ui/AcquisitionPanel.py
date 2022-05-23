@@ -329,19 +329,75 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
         return AcquisitionMethodResult(data_stream, str(), channel_names)
 
 
-def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.DataStream, count: int, channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
+def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.DataStream, count: int, channel_names: typing.Dict[Acquisition.Channel, str], drift_correction: bool, include_raw: bool, include_summed: bool, device_map: typing.Mapping[str, DeviceController]) -> AcquisitionMethodResult:
+    # Look for a scan_hardware_source in the devices involved in the input data stream. Only enable drift correction
+    # when a scan is involved for now, although we might also want it for cameras in the future. But since drift tracker
+    # "lives" in the scan_hardware_source for now we are limited to scans for drift correction.
+    scan_hardware_source: typing.Optional[scan_base.ScanHardwareSource] = None
+    if "scan" in device_map and isinstance(device_map["scan"], ScanDeviceController):
+        scan_hardware_source = typing.cast(ScanDeviceController, device_map["scan"]).scan_hardware_source
     # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
     if count > 1:
+        if drift_correction and scan_hardware_source:
+            # TODO Harcoding the axis of DriftUpdaterDataStream is not optimal. There should be a better solution.
+            axis: typing.Optional[stem_controller.AxisDescription] = None
+            for axis in scan_hardware_source.stem_controller.axis_descriptions:
+                if axis.axis_id == "scan":
+                    break
+            assert axis is not None
+            data_stream = DriftTracker.DriftUpdaterDataStream(data_stream, scan_hardware_source.drift_tracker, axis, scan_hardware_source.drift_rotation)
         # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
         # has the option of doing the processing itself and the operator will not be applied to the result. in
         # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
         # on the entire sequence. there is probably a better way to abstract this in the future.
         if isinstance(data_stream, Acquisition.FramedDataStream) and isinstance(data_stream.operator, Acquisition.SumOperator):
-            return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
+            data_stream = data_stream.data_stream.wrap_in_sequence(count)
+            # return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
         else:
-            return AcquisitionMethodResult(data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
+            data_stream = data_stream.wrap_in_sequence(count)
+            # return AcquisitionMethodResult(data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
+
+        assert include_raw or include_summed
+        if include_raw and include_summed:
+            # AccumulateDataStream sums the successive frames in each channel
+            monitor = Acquisition.MonitorDataStream(data_stream, "raw")
+            data_stream = Acquisition.AccumulatedDataStream(data_stream)
+            data_stream = Acquisition.CombinedDataStream([data_stream, monitor])
+        elif include_summed:
+            data_stream = Acquisition.AccumulatedDataStream(data_stream)
+
+        return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
     else:
         return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
+
+
+class StringToListIndexConverter(Converter.ConverterLike[str, int]):
+    def __init__(self, string_list: typing.List[str]):
+        self.__string_list = string_list
+
+    def convert(self, value: typing.Optional[str]) -> typing.Optional[int]:
+        assert value is not None
+        return self.__string_list.index(value)
+
+    def convert_back(self, formatted_value: typing.Optional[int]) -> typing.Optional[str]:
+        assert formatted_value is not None
+        return self.__string_list[formatted_value]
+
+
+class ApplyComparisonOperatorConverter(Converter.ConverterLike[typing.Any, bool]):
+    def __init__(self, operator_fn: typing.Callable[[typing.Any], bool]):
+        self.__operator_function = operator_fn
+        self.__last_value: typing.Any = None
+
+    def convert(self, value: typing.Optional[typing.Any]) -> typing.Optional[bool]:
+        self.__last_value = value
+        return self.__operator_function(value)
+
+    # This converter only works for one-way bindings like enabled or visible flags because convert_back cannot
+    # guess the original value from the boolean "formatted_value" but since bindings seem to bounce at least once
+    # we need this hack to ensure that the binding gets the original value back when it bounces.
+    def convert_back(self, formatted_value: typing.Optional[bool]) -> typing.Any:
+        return self.__last_value
 
 
 class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -358,6 +414,9 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         super().__init__(_("Sequence"))
         self.configuration = configuration
         self.count_converter = Converter.IntegerToStringConverter()
+        self.sequence_processing_converter = StringToListIndexConverter(["raw", "sum", "raw_and_sum"])
+        self.visible_converter = ApplyComparisonOperatorConverter(functools.partial(operator.lt, 2))
+
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_row(
@@ -366,12 +425,25 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
                 u.create_stretch(),
                 spacing=8
             ),
+            # How do we make sure we only show the drift correction checkbox if it can be applied? We can check for
+            # count > 2, but we also would need to check for a scan being involved in the acquisition, because right
+            # now we only support drift correction for scanned images or synchronized acquisitions.
+            u.create_row(
+                u.create_check_box(text=_("Drift correction"), checked="@binding(configuration.drift_correction)"),
+                u.create_combo_box(items=["Raw", "Sum", "Raw + Sum"], current_index="@binding(configuration.sequence_processing, converter=sequence_processing_converter)"),
+                u.create_stretch(),
+                visible="@binding(configuration.count, converter=visible_converter)",
+                spacing=8
+            ),
             spacing=8
         )
 
     def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
         length = max(1, self.configuration.count) if self.configuration.count else 1
-        return wrap_acquisition_device_data_stream_for_sequence(data_stream, length, channel_names)
+        drift_correction = self.configuration.drift_correction if length > 1 else False
+        include_raw = "raw" in self.configuration.sequence_processing or length <= 1
+        include_summed = "sum" in self.configuration.sequence_processing and length > 1
+        return wrap_acquisition_device_data_stream_for_sequence(data_stream, length, channel_names, drift_correction, include_raw, include_summed, device_map)
 
 
 @dataclasses.dataclass
@@ -1395,7 +1467,13 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
     section_height: typing.Optional[int] = None
     if scan_context_description.drift_interval_lines > 0:
-        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
+        # TODO Harcoding the axis of DriftUpdaterDataStream is not optimal. There should be a better solution.
+        axis: typing.Optional[stem_controller.AxisDescription] = None
+        for axis in scan_hardware_source.stem_controller.axis_descriptions:
+            if axis.axis_id == "scan":
+                break
+        assert axis is not None
+        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, axis=axis)
         section_height = scan_context_description.drift_interval_lines
 
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
@@ -1408,7 +1486,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
         section_height=section_height,
         scan_count=scan_count,
         include_raw=True,
-        include_summed=False
+        include_summed=False,
     )
 
     # construct the channel names.
@@ -1543,6 +1621,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
                 spacing=8
             )
         )
+
         self.ui_view = u.create_column(
             *column_items,
             spacing=8,
@@ -1935,6 +2014,8 @@ Schema.entity("acquisition_method_component_basic_acquire", AcquisitionMethodSch
 # SequenceAcquisitionMethodComponentHandler
 Schema.entity("acquisition_method_component_sequence_acquire", AcquisitionMethodSchema, None, {
     "count": Schema.prop(Schema.INT, default=1),
+    "drift_correction": Schema.prop(Schema.BOOLEAN, default=False),
+    "sequence_processing": Schema.prop(Schema.STRING, default="raw"),
 })
 
 ControlValuesSchema = Schema.entity("control_values", None, None, {
