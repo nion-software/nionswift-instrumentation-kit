@@ -326,7 +326,7 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
 
     def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
-        return AcquisitionMethodResult(data_stream, str(), channel_names)
+        return AcquisitionMethodResult(data_stream.add_ref(), str(), channel_names)
 
 
 def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.DataStream, count: int, channel_names: typing.Dict[Acquisition.Channel, str], drift_correction: bool, include_raw: bool, include_summed: bool, device_map: typing.Mapping[str, DeviceController]) -> AcquisitionMethodResult:
@@ -351,10 +351,10 @@ def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.Da
         # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
         # on the entire sequence. there is probably a better way to abstract this in the future.
         if isinstance(data_stream, Acquisition.FramedDataStream) and isinstance(data_stream.operator, Acquisition.SumOperator):
-            data_stream = data_stream.data_stream.wrap_in_sequence(count)
+            data_stream = data_stream.data_stream.wrap_in_sequence(count).add_ref()
             # return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
         else:
-            data_stream = data_stream.wrap_in_sequence(count)
+            data_stream = data_stream.wrap_in_sequence(count).add_ref()
             # return AcquisitionMethodResult(data_stream.wrap_in_sequence(count), _("Sequence"), channel_names)
 
         assert include_raw or include_summed
@@ -368,7 +368,7 @@ def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.Da
 
         return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
     else:
-        return AcquisitionMethodResult(data_stream, _("Sequence"), channel_names)
+        return AcquisitionMethodResult(data_stream.add_ref(), _("Sequence"), channel_names)
 
 
 class StringToListIndexConverter(Converter.ConverterLike[str, int]):
@@ -567,7 +567,7 @@ def wrap_acquisition_device_data_stream_for_series(data_stream: Acquisition.Data
         # configure the action function and data stream using weak_partial to carefully control ref counts
         action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step])
         data_stream = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action_delegate), control_values_range.count)
-    return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
+    return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
 
 
 class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -665,7 +665,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
                     device_map,
                     channel_names
                 )
-        return AcquisitionMethodResult(data_stream, _("Series"), channel_names)
+        return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
 
 
 def wrap_acquisition_device_data_stream_for_tableau(data_stream: Acquisition.DataStream,
@@ -732,7 +732,7 @@ def wrap_acquisition_device_data_stream_for_tableau(data_stream: Acquisition.Dat
             Acquisition.ActionDataStream(data_stream, action_delegate),
             (y_control_values_range.count, x_control_values_range.count),
             (Calibration.Calibration(), Calibration.Calibration()))
-    return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
+    return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
 
 
 class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -860,7 +860,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
                 return wrap_acquisition_device_data_stream_for_tableau(data_stream, control_customization, axis_id,
                                                                        x_control_values_range, y_control_values_range,
                                                                        device_map, channel_names)
-        return AcquisitionMethodResult(data_stream, _("Tableau"), channel_names)
+        return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
 
 
 class MultiAcquireEntryHandler(Declarative.Handler):
@@ -1001,7 +1001,7 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         for channel in sequential_data_stream.channels:
             channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}",
                                                channel_names[Acquisition.Channel(*channel.segments[1:])]))
-        return AcquisitionMethodResult(sequential_data_stream, _("Multiple"), channel_names)
+        return AcquisitionMethodResult(sequential_data_stream.add_ref(), _("Multiple"), channel_names)
 
 
 # register each component as an acquisition method component factory.
@@ -1507,7 +1507,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-    return AcquisitionDeviceResult(synchronized_scan_data_stream, channel_names, drift_tracker, device_map)
+    return AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), channel_names, drift_tracker, device_map)
 
 
 class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1789,7 +1789,7 @@ def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHa
     device_map["stem"] = STEMDeviceController()
     device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
 
-    return AcquisitionDeviceResult(processed_camera_data_stream, channel_names, None, device_map)
+    return AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), channel_names, None, device_map)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1913,7 +1913,7 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-    return AcquisitionDeviceResult(collector, channel_names, None, device_map)
+    return AcquisitionDeviceResult(collector.add_ref(), channel_names, None, device_map)
 
 
 class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -2356,9 +2356,15 @@ class AcquisitionController(Declarative.Handler):
             # starting acquisition means building the device data stream using the acquisition device component and
             # then wrapping the device data stream using the acquisition method component.
             build_result = self.__acquisition_device_component.current_item.build_acquisition_device_data_stream()
-            apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
-            # call the acquire data stream method to carry out the acquisition.
-            self._acquire_data_stream(apply_result.data_stream, apply_result.title_base, apply_result.channel_names, build_result.drift_tracker)
+            try:
+                apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
+                try:
+                    # call the acquire data stream method to carry out the acquisition.
+                    self._acquire_data_stream(apply_result.data_stream, apply_result.title_base, apply_result.channel_names, build_result.drift_tracker)
+                finally:
+                    apply_result.data_stream.remove_ref()
+            finally:
+                build_result.data_stream.remove_ref()
 
     def _acquire_data_stream(self,
                              data_stream: Acquisition.DataStream,

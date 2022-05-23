@@ -180,7 +180,6 @@ class HardwareSourceBridge:
             # if we still don't have a data item, create it.
             if data_item is None:
                 data_item = DataItem.DataItem()
-                data_item.ensure_data_source()
                 data_item.title = "%s (%s)" % (hardware_source.display_name, data_channel.name) if data_channel.name else hardware_source.display_name
                 data_item.category = "temporary"
                 data_item_reference.data_item = data_item
@@ -444,11 +443,11 @@ class AcquisitionTask:
 
     def __mark_as_finished(self) -> None:
         self.__finished = True
-        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, False)
+        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, None)
 
-    def __mark_as_error(self) -> None:
+    def __mark_as_error(self, e: Exception) -> None:
         self.__finished = True
-        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, True)
+        self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, e)
 
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
@@ -460,7 +459,7 @@ class AcquisitionTask:
                 self.__start()
             except Exception as e:
                 # the task is finished if it doesn't start
-                self.__mark_as_error()
+                self.__mark_as_error(e)
                 raise
             self.__started = True
             # logging.debug("%s started", self)
@@ -491,7 +490,7 @@ class AcquisitionTask:
                 # the task is finished if it doesn't execute
                 # logging.debug("exception")
                 self._safe_stop_acquisition()
-                self.__mark_as_error()
+                self.__mark_as_error(e)
                 raise
 
     # called from the hardware source
@@ -558,7 +557,7 @@ class AcquisitionTask:
                 break
 
         # notify that data elements have changed. at this point data_elements may contain data stored in low level code.
-        self.data_elements_changed_event.fire(data_elements, self.__view_id, complete, self.__is_stopping, False)
+        self.data_elements_changed_event.fire(data_elements, self.__view_id, complete, self.__is_stopping, None)
 
         if complete:
             self.__frame_index += 1
@@ -1063,7 +1062,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def _record_task_updated(self, record_task: typing.Optional[AcquisitionTask]) -> None:
         pass
 
-    def __data_elements_changed(self, task: AcquisitionTask, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_complete: bool, is_stopping: bool, is_error: bool) -> None:
+    def __data_elements_changed(self, task: AcquisitionTask, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_complete: bool, is_stopping: bool, e: typing.Optional[Exception]) -> None:
         """Called in response to a data_elements_changed event from the task.
 
         data_elements is a list of data_elements; may be an empty list
@@ -1090,6 +1089,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         beyond these three items, the data element will be converted to xdata using convert_data_element_to_data_and_metadata.
         thread safe
         """
+        is_error = e is not None
         xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
         data_channels: typing.List[DataChannel] = list()
         for data_element in data_elements:
@@ -1146,7 +1146,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         if is_error:
             from nion.swift.model import Notification
             Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition",
-                                                          "Acquisition Failed", "Acquisition has failed due to an error."))
+                                                          "Acquisition Failed", str(e)))
 
     def __start(self) -> None:
         for data_channel in self.__data_channels:

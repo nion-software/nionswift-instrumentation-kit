@@ -385,12 +385,14 @@ class DataStreamInfo:
 
 
 # wraps a data available listener with an exception handler
-def _handle_data_available(data_stream: DataStream, fn: typing.Callable[[DataStream, DataStreamEventArgs], None], data_stream_event: DataStreamEventArgs) -> None:
+def _handle_data_available(data_stream: DataStream, fn: typing.Callable[[DataStream, DataStreamEventArgs], None], data_stream_event: DataStreamEventArgs, exceptions: typing.List[Exception]) -> None:
     try:
         fn(data_stream, data_stream_event)
     except Exception as e:
-        data_stream.handle_error()
-        raise e
+        # exceptions are added here for the caller to handle.
+        # this avoids throwing exceptions within the fire method
+        # which has limited ways of handling them.
+        exceptions.append(e)
 
 
 class DataStream(ReferenceCounting.ReferenceCounted):
@@ -470,6 +472,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         return 0.0
 
     def abort_stream(self) -> None:
+        """Abort the stream. Called to stop the stream. Also called during exceptions."""
         self._abort_stream()
         self.is_aborted = True
 
@@ -517,7 +520,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         pass
 
     def start_stream(self, stream_args: DataStreamArgs) -> None:
-        """Restart a sequence of acquisitions. Sets the sequence count for this stream."""
+        """Restart a sequence of acquisitions. Sets the sequence count for this stream. Always balance by finish_stream."""
         for channel in self.input_channels:
             assert self.__sequence_indexes.get(channel, 0) % self.__sequence_counts.get(channel, self.__sequence_count) == 0
             self.__sequence_counts[channel] = stream_args.sequence_count
@@ -528,6 +531,8 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Restart a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
+
+        Always balanced by _finish_stream.
         """
         pass
 
@@ -562,7 +567,16 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
         Subclasses can override.
         """
-        self.data_available_event.fire(data_stream_event)
+        exceptions: typing.List[Exception] = list()
+
+        self.data_available_event.fire(data_stream_event, exceptions)
+
+        # ensure that exceptions occurring in data_available get raised.
+        # this mechanism allows handlers to raise exceptions without regard
+        # to how they will be handled through the event.fire call.
+        # exceptions raised here are typically caught at the top level handler.
+        for e in exceptions:
+            raise e
 
     def wrap_in_sequence(self, length: int) -> DataStream:
         """Wrap this data stream in a sequence of length."""
@@ -1254,10 +1268,6 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
     """
     def __init__(self) -> None:
         super().__init__()
-
-    def about_to_delete(self) -> None:
-        # about_to_delete will be called on the main thread.
-        pass
 
     def add_ref(self) -> DataChannel:
         super().add_ref()
@@ -2057,7 +2067,7 @@ class AccumulatedDataStream(ContainerDataStream):
         super()._fire_data_available(new_data_stream_event)
 
 
-def acquire(data_stream: DataStream) -> None:
+def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
     """Perform an acquire.
 
     Performs consistency checks on progress and data.
@@ -2080,11 +2090,15 @@ def acquire(data_stream: DataStream) -> None:
             assert data_stream.progress == 1.0
             data_stream._acquire_finished()
     except Exception as e:
+        data_stream.is_error = True
         data_stream.abort_stream()
         from nion.swift.model import Notification
         Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition", "Acquisition Failed", str(e)))
-        import traceback
-        traceback.print_exc()
+        if error_handler:
+            error_handler(e)
+        else:
+            import traceback
+            traceback.print_exc()
     finally:
         data_stream.finish_stream()
 

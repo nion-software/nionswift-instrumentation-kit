@@ -189,7 +189,6 @@ class Controller:
             for xdata in xdata_group:
                 if xdata:
                     data_item = DataItem.DataItem(large_format=True)
-                    data_item.ensure_data_source()
                     data_item.set_xdata(xdata)
                     channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
                     channel_ext = (" (" + channel_name + ")") if channel_name else ""

@@ -2395,6 +2395,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, flyback_pixels: int = 0, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_frame_parameters_original: typing.Optional[CameraFrameParameters] = None
         self.__additional_metadata = additional_metadata or dict()
         self.__flyback_pixels = flyback_pixels
         self.__partial_data_info = typing.cast(PartialData, None)
@@ -2423,6 +2424,8 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             camera_frame_parameters.processing = "sum_masked"
             camera_frame_parameters.active_masks = [typing.cast(Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
             operator.apply()
+        # save original current camera frame parameters. these will be restored in finish stream.
+        self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape)
@@ -2434,6 +2437,9 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_synchronized_end()
+        # restore camera frame parameters.
+        assert self.__camera_frame_parameters_original
+        self.__camera_hardware_source.set_current_frame_parameters(self.__camera_frame_parameters_original)
 
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()
@@ -2487,6 +2493,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_frame_parameters_original: typing.Optional[CameraFrameParameters] = None
         self.__additional_metadata = additional_metadata or dict()
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
@@ -2514,6 +2521,8 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             camera_frame_parameters.processing = "sum_masked"
             camera_frame_parameters.active_masks = [typing.cast(Mask, typing.cast(Acquisition.MaskedSumOperator, o).mask) for o in operator.operators]
             operator.apply()
+        # save original current camera frame parameters. these will be restored in finish stream.
+        self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         self.__camera_hardware_source.acquire_sequence_prepare(stream_args.sequence_count)
 
@@ -2523,6 +2532,9 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_end()
+        # restore camera frame parameters.
+        assert self.__camera_frame_parameters_original
+        self.__camera_hardware_source.set_current_frame_parameters(self.__camera_frame_parameters_original)
 
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()
@@ -2721,6 +2733,8 @@ class CameraCalibrator(typing.Protocol):
 
 
 class CalibrationControlsCalibrator(CameraCalibrator):
+    """Calibrator v1. Uses calibration controls dictionary."""
+
     def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3) -> None:
         self.__instrument_controller = instrument_controller
         self.__camera_device = camera_device
@@ -2743,6 +2757,89 @@ class CalibrationControlsCalibrator(CameraCalibrator):
     def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
         instrument_controller = self.__instrument_controller
         return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+
+class CalibrationControlsCalibrator2(CameraCalibrator):
+    """Calibrator v2. Uses calibration config dictionary.
+
+    The config mapping should have the following keys:
+
+    (optional) calibrationModeIndexControl: name of control to use as index to other controls. substituted into <<n>> below if 1+
+    (required) calibXScaleControl<<n>>: name of control to be used for x-scale; <<nn>> should be empty or 1+
+    (required) calibXOffsetControl<<n>>: name of control to be used for x-offset; <<nn>> should be empty or 1+
+    (required) calibXUnits<<n>>: x-unit string; <<nn>> should be empty or 1+
+    (required) calibYScaleControl<<n>>: name of control to be used for y-scale; <<nn>> should be empty or 1+
+    (required) calibYOffsetControl<<n>>: name of control to be used for y-offset; <<nn>> should be empty or 1+
+    (required) calibYUnits<<n>>: y-unit string; <<nn>> should be empty or 1+
+    (required) calibIntensityScaleControl<<n>>: name of control to be used for intensity-scale; <<nn>> should be empty or 1+
+    (required) calibIntensityOffsetControl<<n>>: name of control to be used for intensity-offset; <<nn>> should be empty or 1+
+    (required) calibIntensityUnits<<n>>: intensity-unit string; <<nn>> should be empty or 1+
+
+    If calibration control for a particular index is empty, the appropriate default value will be used (scale=1.0, offset=0.0, units='').
+
+    NOTE: counts_per_electron control is configured as before, using calibration_controls.
+    """
+
+    def __init__(self, instrument_controller: InstrumentController, camera_device: CameraDevice3, config: typing.Mapping[str, typing.Any]) -> None:
+        self.__instrument_controller = instrument_controller
+        self.__camera_device = camera_device
+        self.__config = config
+
+    def __construct_suffix(self) -> str:
+        control = self.__config.get("calibrationModeIndexControl".lower(), None)
+        if control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
+            if valid and value:
+                return str(int(value))
+        return str()
+
+    def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
+        scale = None
+        scale_control = self.__config.get((prefix + "ScaleControl" + suffix).lower(), None)
+        if scale_control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
+            if valid:
+                scale = value
+        offset = None
+        offset_control = self.__config.get((prefix + "OffsetControl" + suffix).lower(), None)
+        if offset_control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
+            if valid:
+                offset = value
+        units = self.__config.get((prefix + "Units" + suffix).lower(), None)
+        scale = scale * relative_scale if scale is not None else scale
+        if is_center_origin and scale is not None and data_len:
+            offset = -scale * data_len * 0.5
+        return Calibration.Calibration(offset, scale, units)
+
+    def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
+        binning = frame_parameters.binning
+        is_center_origin = getattr(self.__camera_device, "camera_type", str()) != "eels"
+        suffix = self.__construct_suffix()
+        if len(data_shape) == 2:
+            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
+            y_calibration = self.__construct_calibration("calibY", suffix, binning, is_center_origin, data_shape[0])
+            return (y_calibration, x_calibration)
+        else:
+            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[0])
+            return (x_calibration,)
+
+    def get_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> Calibration.Calibration:
+        suffix = self.__construct_suffix()
+        return self.__construct_calibration("calibIntensity", suffix)
+
+    def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
+        instrument_controller = self.__instrument_controller
+        return typing.cast(typing.Optional[float], self.__get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+    def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
+        if key + "_control" in calibration_controls:
+            valid, value = instrument_controller.TryGetVal(typing.cast(str, calibration_controls[key + "_control"]))
+            if valid:
+                return value
+        if key + "_value" in calibration_controls:
+            return calibration_controls.get(key + "_value")
+        return None
 
 
 def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: InstrumentController, camera: CameraDevice) -> None:

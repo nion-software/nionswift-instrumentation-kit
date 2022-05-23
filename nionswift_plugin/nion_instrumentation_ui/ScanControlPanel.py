@@ -415,7 +415,6 @@ class ScanControlStateController:
                     data_and_metadata = data_promise.xdata
                     if data_and_metadata:
                         data_item = DataItem.DataItem()
-                        data_item.ensure_data_source()
                         display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                         display_name = display_name if display_name else _("Record")
                         channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")

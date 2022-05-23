@@ -72,14 +72,29 @@ class DriftCorrectionSettings:
 AxisType = typing.Tuple[str, str]
 
 
-class AxisDescription:
-    def __init__(self, axis_id: str, axis1: str, axis2: str, display_name: str):
-        self.axis_id = axis_id
-        self.axis_type = (axis1, axis2)
-        self.display_name = display_name
+class AxisDescription(typing.Protocol):
 
-    def __str__(self) -> str:
-        return self.display_name
+    @property
+    def axis_id(self) -> str:
+        """Read-only property for the (ideally unique) identifier of this axis.
+
+        """
+        raise NotImplementedError()
+
+    @property
+    def axis_type(self) -> typing.Tuple[str, str]:
+        """Read-only property for the co-ordinate names of this axis.
+
+        Note: This might be removed in a future release
+        """
+        raise NotImplementedError()
+
+    @property
+    def display_name(self) -> str:
+        """Read-only property for the name of this axis as it appears in the UI
+
+        """
+        raise NotImplementedError()
 
 
 class ScanContext:
@@ -504,6 +519,17 @@ class STEMController(Observable.Observable):
         """
         raise NotImplementedError()
 
+    def axis_transform_point(self, point: Geometry.FloatPoint, from_axis: AxisDescription, to_axis: AxisDescription) -> Geometry.FloatPoint:
+        """
+        Convert the vector "value" from "from_axis" to "to_axis".
+
+        Existing axis descriptions can be retrieved via:
+        `STEMController.axis_descriptions`
+
+        Raises `ValueError` if an invalid axis is passed as "from_axis" or "to_axis".
+        """
+        raise NotImplementedError()
+
     # end instrument API
 
     # required functions (templates). subclasses should override.
@@ -650,7 +676,7 @@ class GraphicSetController:
             del display_about_to_be_removed_listener
         self.__graphic_trackers = list()
         for graphic in graphics:
-            graphic.display_item.remove_graphic(graphic)
+            graphic.display_item.remove_graphic(graphic).close()
 
     def __remove_one_graphic(self, graphic_to_remove: Graphics.Graphic) -> None:
         graphic_trackers = list()
@@ -746,7 +772,7 @@ class DisplayItemListModel(Observable.Observable):
         for display_item in display_items:
             for graphic in display_item.graphics:
                 if graphic.graphic_id == graphic_id:
-                    display_item.remove_graphic(graphic)
+                    display_item.remove_graphic(graphic).close()
 
 def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
@@ -1195,7 +1221,7 @@ class DriftView(EventLoopMonitor):
             self.__graphic_about_to_be_removed_listener.close()
             self.__graphic_about_to_be_removed_listener = None
         if self.__graphic_display_item and self.__graphic:
-            self.__graphic_display_item.remove_graphic(self.__graphic)
+            self.__graphic_display_item.remove_graphic(self.__graphic).close()
             self.__graphic_display_item = None
         self.__graphic = None
 
