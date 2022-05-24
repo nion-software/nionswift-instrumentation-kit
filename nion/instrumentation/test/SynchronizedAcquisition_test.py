@@ -158,6 +158,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     self.__i += 1
                     if self.__i == 2:
                         self.__scan_hardware_source.grab_synchronized_abort()
+                    super()._prepare_stream(stream_args, **kwargs)
 
             class TestAbortBehaviorFunctor(Acquisition.DataStreamFunctor):
                 def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource) -> None:
