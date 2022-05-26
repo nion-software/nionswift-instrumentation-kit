@@ -124,7 +124,7 @@ from nion.utils import ReferenceCounting
 from nion.utils.ReferenceCounting import weak_partial
 
 ShapeType = typing.Sequence[int]
-SliceType = typing.Sequence[slice]
+SliceType = typing.Tuple[slice, ...]
 SliceListType = typing.Sequence[SliceType]
 ChannelSegment = str
 
@@ -990,7 +990,7 @@ class SequentialDataStream(DataStream):
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
-        self.__stream_args = DataStreamArgs(list(), list())
+        self.__stream_args = DataStreamArgs(tuple(), list())
         self.__current_index = 0
 
     def about_to_delete(self) -> None:
