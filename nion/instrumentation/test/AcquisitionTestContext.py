@@ -68,7 +68,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         Registry.register_component(instrument, {"stem_controller"})
         return instrument
 
-    def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> HardwareSource.HardwareSource:
+    def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
         camera_id = "usim_ronchigram_camera" if not is_eels else "usim_eels_camera"
         camera_type = "ronchigram" if not is_eels else "eels"

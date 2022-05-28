@@ -45,7 +45,7 @@ class ScanMover(Acquisition.ContainerDataStream):
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
         # adjust the stage for testing.
         if not self.__skip:
-            stem_controller = typing.cast(STEMController.STEMController, HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller"))
+            stem_controller = self.__scan_hardware_source.stem_controller
             # print()
             # print(f"move delta {self.__drift}")
             stem_controller.SetValDeltaAndConfirm("CSH.x", self.__drift.width, 1.0, 1000)
@@ -648,7 +648,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+            stem_controller = test_context.instrument
             stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
@@ -686,7 +686,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+            stem_controller = test_context.instrument
             stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
