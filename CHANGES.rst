@@ -1,6 +1,15 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.20.5 (2022-05-28)
+-------------------
+- Improve error handling and reporting.
+- Use a target size of 64x64 for drift tracking area.
+- Allow camera device to supply its own calibrator object.
+- Fix PMT issue when index >= 2.
+- Allow camera device to specify desired exposure precision.
+- Improve support for axis handling in STEM controller.
+
 0.20.4 (2022-02-18)
 -------------------
 - Fix sequence/series/tableau when used with a synchronized acquistiion.
