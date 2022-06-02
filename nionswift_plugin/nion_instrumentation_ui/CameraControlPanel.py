@@ -707,7 +707,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         binning_combo.on_current_text_changed = binning_combo_text_changed
 
         def handle_exposure_changed(text: str) -> None:
-            self.__state_controller.handle_exposure_changed(float(text) * math.pow(10, camera_hardware_source.exposure_precision))
+            self.__state_controller.handle_exposure_changed(float(text) * math.pow(10, math.trunc(camera_hardware_source.exposure_precision / 3) * 3))
             exposure_field.request_refocus()
 
         def handle_decrease_exposure() -> None:
