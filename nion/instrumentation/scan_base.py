@@ -1809,11 +1809,12 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
         # updated and the accumulated would have to be reset.
         drift_tracker = self.__scan_hardware_source.drift_tracker
-        camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
-        delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
-        # print(f"predicted {delta_nm}")
-        self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
-        # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
+        if drift_tracker.active:
+            camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
+            delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+            # print(f"predicted {delta_nm}")
+            self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
+            # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
         if self.__camera_data_stream:
             assert self.__camera_exposure_ms is not None
             self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)

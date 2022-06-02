@@ -334,8 +334,11 @@ def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.Da
     # when a scan is involved for now, although we might also want it for cameras in the future. But since drift tracker
     # "lives" in the scan_hardware_source for now we are limited to scans for drift correction.
     scan_hardware_source: typing.Optional[scan_base.ScanHardwareSource] = None
+    drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None
     if "scan" in device_map and isinstance(device_map["scan"], ScanDeviceController):
         scan_hardware_source = typing.cast(ScanDeviceController, device_map["scan"]).scan_hardware_source
+        drift_tracker = scan_hardware_source.drift_tracker
+        drift_tracker.active = drift_correction
     # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
     if count > 1:
         if drift_correction and scan_hardware_source:
@@ -345,7 +348,7 @@ def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.Da
                 if axis.axis_id == "scan":
                     break
             assert axis is not None
-            data_stream = DriftTracker.DriftUpdaterDataStream(data_stream, scan_hardware_source.drift_tracker, axis, scan_hardware_source.drift_rotation)
+            data_stream = DriftTracker.DriftUpdaterDataStream(data_stream, drift_tracker, axis, scan_hardware_source.drift_rotation)
         # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
         # has the option of doing the processing itself and the operator will not be applied to the result. in
         # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
@@ -425,7 +428,7 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
                 u.create_stretch(),
                 spacing=8
             ),
-            # How do we make sure we only show the drift correction checkbox if it can be applied? We can check for
+            # TODO How do we make sure we only show the drift correction checkbox if it can be applied? We can check for
             # count > 2, but we also would need to check for a scan being involved in the acquisition, because right
             # now we only support drift correction for scanned images or synchronized acquisitions.
             u.create_row(
@@ -440,7 +443,7 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
 
     def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
         length = max(1, self.configuration.count) if self.configuration.count else 1
-        drift_correction = self.configuration.drift_correction if length > 1 else False
+        drift_correction = self.configuration.drift_correction if length > 2 else False
         include_raw = "raw" in self.configuration.sequence_processing or length <= 1
         include_summed = "sum" in self.configuration.sequence_processing and length > 1
         return wrap_acquisition_device_data_stream_for_sequence(data_stream, length, channel_names, drift_correction, include_raw, include_summed, device_map)

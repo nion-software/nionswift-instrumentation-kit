@@ -217,6 +217,11 @@ class DriftTracker:
 
         # the lock controls access to the fields below
         self.__lock = threading.RLock()
+        # The "active" flag does not have any effect within DriftTracker. It is just there to have a global place for
+        # tracking if drift correction is enabled or not. Since DriftTracker is a globally used class, it makes sense to
+        # also track whether drift correction is active globally. What each component does with this information is then
+        # up to its individual implementation.
+        self.__active = False
 
         self.__drift_history: typing.List[DriftResult] = list()
 
@@ -243,6 +248,15 @@ class DriftTracker:
         with self.__lock:
             self.__drift_history.clear()
             self.drift_data_sources.clear()
+
+    @property
+    def active(self) -> bool:
+        return self.__active
+
+    @active.setter
+    def active(self, active: bool) -> None:
+        with self.__lock:
+            self.__active = active
 
     @property
     def measurement_count(self) -> int:
@@ -526,9 +540,11 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         self.__channel = data_stream.channels[0]
         self.__framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
 
-    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        super()._start_stream(stream_args)
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+        # We need to call drift_tracker.reset() at the earliest possible moment, because otherwise another layer
+        # in the acquisition pipeline could have already used the outdated drift information for some initial setup.
         self.__drift_tracker.reset()
+        super()._start_stream(stream_args)
 
     def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel == data_stream_event.channel:
@@ -549,6 +565,13 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
 
 """
 Architectural Decision Records.
+
+# ADR-003 2022-06-02 AM "Add a global 'active' flag to DriftTracker"
+
+The "active" flag does not have any effect within DriftTracker. It is just there to have a global place for
+tracking if drift correction is enabled or not. Since DriftTracker is a globally used class, it makes sense to
+also track whether drift correction is active globally. What each component does with this information is then
+up to its individual implementation.
 
 # ADR-002 2022-05-05 AM "Use drift_rate as the native quantiy for tracking drift"
 
