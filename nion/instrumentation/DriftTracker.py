@@ -349,7 +349,7 @@ class DriftTracker:
                 # We don't have that available yet, but it would be great if we could do something like this
                 # to have an easier time supporting different axis
                 # TODO convert drift rate to self.__native_axis before adding the new drift result
-                drift_result.drift_rate = self.__stem_controller.axis_transform_point(drift_result.drift_rate, from_axis=drift_data_source.axis, to_axis=self.__native_axis)
+                drift_result.drift_rate = self.__stem_controller.axis_transform_point(drift_result.drift_rate.as_point(), from_axis=drift_data_source.axis, to_axis=self.__native_axis).as_size()
 
                 # There are two types of drift tracking/correction: 1) We only track drift, 2) We also use the calculated
                 # drift to correct the scan or beam position on the sample. In DriftTracker we want to track the total
@@ -405,8 +405,8 @@ class DriftTracker:
         native axis.
         """
         # TODO convert drift rate to self.__native_axis before adding the new drift result
-        drift_rate = self.__stem_controller.axis_transform_point(drift_rate, from_axis=axis, to_axis=self.__native_axis)
-        self.__append_drift(DriftResult(drift_rate=drift_rate, time_window_start=time_window_start, time_window_end=time_window_end))
+        drift_rate = self.__stem_controller.axis_transform_point(drift_rate.as_point(), from_axis=axis, to_axis=self.__native_axis)
+        self.__append_drift(DriftResult(drift_rate=drift_rate.as_size(), time_window_start=time_window_start, time_window_end=time_window_end))
 
 
 # used for debugging
