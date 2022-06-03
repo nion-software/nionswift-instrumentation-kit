@@ -323,7 +323,7 @@ class DriftTracker:
                 for i in range(1, n + 1):
                     drift_rate += self.__drift_history[-i].drift_rate
                 drift_rate /= n
-            return drift_rate
+        return self.__stem_controller.axis_transform_point(drift_rate.as_point(), from_axis=self.__native_axis, to_axis=axis).as_size()
 
     def predict_drift(self, utc_time: datetime.datetime, *, axis: stem_controller_module.AxisDescription, n: typing.Optional[int] = None) -> Geometry.FloatSize:
         """Predict total drift (nm) at utc_time."""
@@ -332,7 +332,9 @@ class DriftTracker:
             if self.measurement_count > 0:
                 delta_time = utc_time - self.__drift_history[-1].time_window_end
                 future_delta_nm = delta_time.total_seconds() * self.get_drift_rate(axis=axis, n=n) * 1e9
-            return self.total_delta_nm + future_delta_nm
+            total_delta_nm = self.total_delta_nm
+        total_delta_nm = self.__stem_controller.axis_transform_point(total_delta_nm.as_point(), from_axis=self.__native_axis, to_axis=axis).as_size()
+        return total_delta_nm + future_delta_nm
 
     def __append_drift(self, drift_result: DriftResult) -> None:
         with self.__lock:
@@ -371,7 +373,7 @@ class DriftTracker:
                 # from a source that applies drift correction. In this case, the calculated drift rate will be on top
                 # of the corrected drift rate, which is - to the best of our knowledge - the drift rate from the previous
                 # measurement.
-                if drift_data_source.applies_drift_correction and len(self.__drift_history) > 1:
+                if drift_data_source.applies_drift_correction and len(self.__drift_history) > 0:
                     drift_result.drift_rate += self.get_drift_rate(axis=self.__native_axis, n=1)
                 self.__append_drift(drift_result)
 
