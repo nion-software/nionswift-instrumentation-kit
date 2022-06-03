@@ -348,6 +348,7 @@ def wrap_acquisition_device_data_stream_for_sequence(data_stream: Acquisition.Da
                 if axis.axis_id == "scan":
                     break
             assert axis is not None
+            assert drift_tracker is not None
             data_stream = DriftTracker.DriftUpdaterDataStream(data_stream, drift_tracker, axis, scan_hardware_source.drift_rotation)
         # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
         # has the option of doing the processing itself and the operator will not be applied to the result. in

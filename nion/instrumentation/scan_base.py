@@ -1759,6 +1759,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
         self.__started = False
 
+        axis: typing.Optional[stem_controller_module.AxisDescription] = None
+        for axis in scan_hardware_source.stem_controller.axis_descriptions:
+            if axis.axis_id == "scan":
+                break
+        assert axis is not None
+        self.__axis = axis
+
         def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
             # when data arrives here, it will be part of the overall data item, even if it is only a partial
             # acquire of the data item. so the buffer data shape will reflect the overall data item.
@@ -1811,7 +1818,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         drift_tracker = self.__scan_hardware_source.drift_tracker
         if drift_tracker.active:
             camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
-            delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+            delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead), axis=self.__axis)
             # print(f"predicted {delta_nm}")
             self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
             # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
