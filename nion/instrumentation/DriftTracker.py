@@ -559,7 +559,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         # for drift here.
         # TODO How do we find out if drift correction is applied or not?
         # TODO If we want to correct drift by another method, how do we switch off the hardcoded correction in ScanFrameDataStream?
-        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, drift_data_source_id="drift_updater_data_stream_haadf", axis=self.__axis, drift_correction_applied=True)
+        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, drift_data_source_id="drift_updater_data_stream_haadf", axis=self.__axis, drift_correction_applied=True, wait=True)
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
