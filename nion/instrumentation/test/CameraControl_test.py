@@ -107,7 +107,7 @@ class TestCameraControlClass(unittest.TestCase):
         TestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
-        self.exposure = 1.0
+        self.exposure = 0.04
 
     def tearDown(self):
         TestContext.end_leaks(self)
@@ -128,7 +128,7 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller.periodic()
 
     def __test_context(self, is_eels: bool=False):
-        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=0.04)
+        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=self.exposure)
 
     def __create_state_controller(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext, *,
                                   initialize: bool = True) -> CameraControlPanel.CameraControlStateController:
