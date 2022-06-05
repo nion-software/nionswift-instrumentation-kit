@@ -808,6 +808,26 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(2, len(data_element["data"].shape))
             self.assertEqual(2, len(data_element["spatial_calibrations"]))
 
+    def test_ronchigram_calibrations(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual("rad", document_model.data_items[0].dimensional_calibrations[0].units)
+            self.assertEqual("rad", document_model.data_items[0].dimensional_calibrations[1].units)
+
+    def test_eels_calibrations(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual("eV", document_model.data_items[0].dimensional_calibrations[1].units)
+            self.assertEqual("eV", document_model.data_items[1].dimensional_calibrations[0].units)
+            # note: it is an error to run view mode with "sum_project" enabled.
+            # "sum_project" is for sequence/SI only.
+
     def test_acquire_with_probe_position(self):
         # used to test out the code path, but no specific asserts
         with self.__test_context() as test_context:
