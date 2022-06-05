@@ -1992,9 +1992,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
             self.set_current_frame_parameters(camera_frame_parameters)
         else:
             # hack in case camera_frame_parameters is already sum_project. ugh.
-            camera_frame_parameters = CameraFrameParameters(self.__frame_parameters.as_dict())
-            camera_frame_parameters.processing = None
-            self.set_current_frame_parameters(camera_frame_parameters)
+            if self.__frame_parameters:
+                camera_frame_parameters = CameraFrameParameters(self.__frame_parameters.as_dict())
+                camera_frame_parameters.processing = None
+                self.set_current_frame_parameters(camera_frame_parameters)
         super().start_playing(*args, **kwargs)
 
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:

@@ -794,6 +794,10 @@ class MultiAcquireController:
                         dark_data = numpy.sum(dark_data, axis=0)
                     else:
                         dark_data = numpy.mean(dark_data, axis=0)
+                    # since view mode will reset the processing flag and acquire_sequence uses the current frame
+                    # parameters, handle sum_project here instead.
+                    if self.__active_settings['processing'] == 'sum_project':
+                        dark_data = numpy.sum(dark_data, axis=0)
 
                     data_element['data'] -= dark_data
 
