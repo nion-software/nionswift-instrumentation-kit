@@ -20,6 +20,7 @@ from nion.instrumentation import Acquisition
 from nion.swift.model import DataItem
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Registry
 from nion.utils import ThreadPool
 
 if typing.TYPE_CHECKING:
@@ -241,9 +242,12 @@ class DriftCorrectionBehavior:
     Take a drift scan from the drift region and send it to the drift compensator.
     """
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource,
+    def __init__(self,
+                 drift_tracker: DriftTracker,
+                 scan_hardware_source: scan_base.ScanHardwareSource,
                  scan_frame_parameters: scan_base.ScanFrameParameters, *, use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
+        self.__drift_tracker = drift_tracker
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
         self.__use_predition = use_prediction
@@ -253,7 +257,7 @@ class DriftCorrectionBehavior:
         self.__scan_frame_parameters.subscan_fractional_center = None
         self.__scan_frame_parameters.subscan_rotation = 0.0
         self.__scan_frame_parameters.channel_override = "drift"
-        self.__scan_hardware_source.drift_tracker.reset()
+        self.__drift_tracker.reset()
 
     def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
         # this method must be thread safe
@@ -284,15 +288,14 @@ class DriftCorrectionBehavior:
                 frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)
                 frame_parameters.subscan_rotation = drift_rotation
                 # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
-                drift_tracker = self.__scan_hardware_source.drift_tracker
                 utc_time = utc_time or datetime.datetime.utcnow()
-                delta_nm = drift_tracker.predict_drift(utc_time) if self.__use_predition else drift_tracker.total_delta_nm
+                delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_predition else self.__drift_tracker.total_delta_nm
                 frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
                 # print(f"measure with center_nm {frame_parameters.center_nm}")
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 xdata0 = xdatas[0]
                 if xdata0:
-                    drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
+                    self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
 
 
 class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
@@ -322,16 +325,17 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
     """Define a functor to create a drift correction data stream."""
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, *, use_prediction: bool = True) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, *, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
+        self.__drift_tracker = drift_tracker
         self.__use_prediction = use_prediction
         # for testing
         self._drift_correction_data_stream: typing.Optional[DriftCorrectionDataStream] = None
 
     def apply(self, data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
         assert not self._drift_correction_data_stream
-        self._drift_correction_data_stream = DriftCorrectionDataStream(DriftCorrectionBehavior(self.scan_hardware_source, self.scan_frame_parameters, use_prediction=self.__use_prediction), data_stream)
+        self._drift_correction_data_stream = DriftCorrectionDataStream(DriftCorrectionBehavior(self.__drift_tracker, self.scan_hardware_source, self.scan_frame_parameters, use_prediction=self.__use_prediction), data_stream)
         return self._drift_correction_data_stream
 
 
@@ -359,3 +363,10 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
+
+
+def run() -> None:
+    Registry.register_component(DriftTracker(), {"drift_tracker"})
+
+def stop() -> None:
+    pass

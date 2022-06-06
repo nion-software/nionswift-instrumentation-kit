@@ -80,7 +80,7 @@ class ScanAcquisitionController:
         self.__scan_specifier = copy.deepcopy(scan_specifier)
         self.__scan_result_data_stream = typing.cast(Acquisition.FramedDataStream, None)
         self.__scan_acquisition = typing.cast(Acquisition.Acquisition, None)
-        self.__scan_drift_logger = typing.cast(DriftTracker.DriftLogger, None)
+        self.__scan_drift_logger: typing.Optional[DriftTracker.DriftLogger] = None
         self.acquisition_state_changed_event = Event.Event()
 
     def start(self, processing: ScanAcquisitionProcessing, scan_processing: ScanProcessing, *, section_height_override: typing.Optional[int] = None) -> None:
@@ -125,8 +125,9 @@ class ScanAcquisitionController:
 
         drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
         section_height = section_height_override
-        if self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters)
+        drift_tracker = scan_hardware_source.drift_tracker
+        if drift_tracker and self.__scan_specifier.drift_interval_lines > 0:
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker)
             section_height = self.__scan_specifier.drift_interval_lines
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
@@ -142,7 +143,9 @@ class ScanAcquisitionController:
         )
         self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
-        self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, scan_hardware_source.drift_tracker, event_loop)
+        drift_tracker = scan_hardware_source.drift_tracker
+        if drift_tracker:
+            self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, drift_tracker, event_loop)
 
         def finish_grab_async() -> None:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
@@ -150,8 +153,9 @@ class ScanAcquisitionController:
             self.__scan_acquisition = typing.cast(typing.Any, None)
             self.__scan_result_data_stream.remove_ref()
             self.__scan_result_data_stream = typing.cast(typing.Any, None)
-            self.__scan_drift_logger.close()
-            self.__scan_drift_logger = typing.cast(typing.Any, None)
+            if self.__scan_drift_logger:
+                self.__scan_drift_logger.close()
+                self.__scan_drift_logger = None
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 

@@ -711,7 +711,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @drift_enabled.setter
     def drift_enabled(self, enabled: bool) -> None: ...
 
-    # private. do not use outside of instrumentation-kit.
+    # private. do not use outside instrumentation-kit.
 
     def get_current_frame_parameters(self) -> ScanFrameParameters: ...
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None: ...
@@ -742,7 +742,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     record_index: int
     priority: int = 100
-    drift_tracker: DriftTracker.DriftTracker
+
+    @property
+    def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
+        raise NotImplementedError()
 
     profile_changed_event: Event.Event
     frame_parameters_changed_event: Event.Event
@@ -842,14 +845,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # synchronized acquisition
         self.acquisition_state_changed_event = Event.Event()
 
-        self.drift_tracker = DriftTracker.DriftTracker()
-
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
-        self.drift_tracker.close()
-        self.drift_tracker = typing.cast(typing.Any, None)
         # when overriding hardware source close, the acquisition loop may still be running
         # so nothing can be changed here that will make the acquisition loop fail.
         self.__stem_controller.disconnect_probe_connections()
@@ -875,6 +874,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def periodic(self) -> None:
         self.__handle_executing_task_queue()
+
+    @property
+    def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
+        return self.__stem_controller.drift_tracker
 
     def __handle_executing_task_queue(self) -> None:
         # gather the pending tasks, then execute them.
@@ -1707,6 +1710,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
 class ScanFrameDataStream(Acquisition.DataStream):
     def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters,
+                 drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None,
                  camera_exposure_ms: typing.Optional[float] = None,
                  camera_data_stream: typing.Optional[camera_base.CameraFramesDataStream] = None):
         super().__init__()
@@ -1714,6 +1718,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__scan_frame_parameters_center_nm = Geometry.FloatPoint.make(scan_frame_parameters.center_nm)
+        self.__drift_tracker = drift_tracker
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
         self.__enabled_channels = scan_hardware_source.get_enabled_channels()
@@ -1803,11 +1808,11 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # update the center_nm of scan parameters by adding the accumulated value from drift to the original value.
         # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
         # updated and the accumulated would have to be reset.
-        drift_tracker = self.__scan_hardware_source.drift_tracker
-        camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
-        delta_nm = drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
-        # print(f"predicted {delta_nm}")
-        self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
+        if self.__drift_tracker:
+            camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
+            delta_nm = self.__drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+            # print(f"predicted {delta_nm}")
+            self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
         # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
         if self.__camera_data_stream:
             assert self.__camera_exposure_ms is not None
@@ -2041,7 +2046,7 @@ def make_synchronized_scan_data_stream(
         else:
             operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
-    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, camera_exposure_ms, camera_data_stream)
+    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream)
     scan_size = scan_data_stream.scan_size
     scan_like_data_stream: Acquisition.DataStream = scan_data_stream
     if scan_data_stream_functor:
@@ -2066,8 +2071,9 @@ def make_synchronized_scan_data_stream(
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
-        if enable_drift_tracker:
-            collector = DriftTracker.DriftUpdaterDataStream(collector, scan_hardware_source.drift_tracker, scan_hardware_source.drift_rotation)
+        drift_tracker = scan_hardware_source.drift_tracker
+        if drift_tracker and enable_drift_tracker:
+            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed
