@@ -43,7 +43,7 @@ class TestMultiAcquire(unittest.TestCase):
             total_acquisition_time = 0.0
             for parms in parameters:
                 # the simulator cant go super fast, so make sure we give it enough time
-                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)*1e-3
+                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
                 # add some extra overhead time
                 total_acquisition_time += 0.15
                 total_acquisition_time += settings['x_shift_delay']*2
@@ -82,7 +82,7 @@ class TestMultiAcquire(unittest.TestCase):
             total_acquisition_time = 0.0
             for parms in parameters:
                 # the simulator cant go super fast, so make sure we give it enough time
-                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)*1e-3
+                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
                 # add some extra overhead time
                 total_acquisition_time += 0.15
                 total_acquisition_time += settings['x_shift_delay']*2
@@ -177,7 +177,7 @@ class TestMultiAcquire(unittest.TestCase):
                             total_acquisition_time = 0.0
                             for params in parameters:
                                 # the simulator cant go super fast, so make sure we give it enough time
-                                total_acquisition_time += params['frames']*max(params['exposure_ms'], 100)*1e-3*scan_size[0]*scan_size[1]
+                                total_acquisition_time += params['frames']*max(params['exposure_ms'], 100)/1000*scan_size[0]*scan_size[1]
                                 # add some extra overhead time
                                 total_acquisition_time += 0.15
                                 total_acquisition_time += settings['x_shift_delay']*2
@@ -263,28 +263,27 @@ class TestMultiAcquire(unittest.TestCase):
                             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
 
                             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
-                                with self.subTest():
-                                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
-                                    total_shape = tuple(scan_frame_parameters.size)
-                                    haadf_shape = tuple(scan_frame_parameters.size)
-                                    index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
-                                    if parameters[index]['frames'] > 1 and not settings['sum_frames']:
-                                        total_shape = (parameters[index]['frames'],) + total_shape
-                                        haadf_shape = (parameters[index]['frames'],) + haadf_shape
-                                    if settings['processing'] == 'sum_project':
-                                        total_shape += camera_dims[1:]
-                                    elif settings['processing'] == 'sum_masked':
-                                        if len(masks) > 1:
-                                            if parameters[index]['frames'] > 1 and not settings['sum_frames']:
-                                                total_shape = (total_shape[0], len(masks)) + total_shape[1:]
-                                            else:
-                                                total_shape = (len(masks),) + total_shape
-                                    else:
-                                        total_shape += camera_dims
+                                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+                                total_shape = tuple(scan_frame_parameters.size)
+                                haadf_shape = tuple(scan_frame_parameters.size)
+                                index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
+                                if parameters[index]['frames'] > 1 and not settings['sum_frames']:
+                                    total_shape = (parameters[index]['frames'],) + total_shape
+                                    haadf_shape = (parameters[index]['frames'],) + haadf_shape
+                                if settings['processing'] == 'sum_project':
+                                    total_shape += camera_dims[1:]
+                                elif settings['processing'] == 'sum_masked':
+                                    if len(masks) > 1:
+                                        if parameters[index]['frames'] > 1 and not settings['sum_frames']:
+                                            total_shape = (total_shape[0], len(masks)) + total_shape[1:]
+                                        else:
+                                            total_shape = (len(masks),) + total_shape
+                                else:
+                                    total_shape += camera_dims
 
-                                    self.assertSequenceEqual(data_item.data.shape, total_shape)
-                                    self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
-                                    self.assertEqual(len(data_item.metadata['hardware_source']['binning']), parameters[index]['frames'])
+                                self.assertSequenceEqual(data_item.data.shape, total_shape)
+                                self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
+                                self.assertEqual(len(data_item.metadata['hardware_source']['binning']), parameters[index]['frames'])
 
                             self.assertLess(starttime - endtime, total_acquisition_time)
 
@@ -386,21 +385,20 @@ class TestMultiAcquire(unittest.TestCase):
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
 
             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
-                with self.subTest():
-                    camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
-                    total_shape = tuple(scan_frame_parameters.size)
-                    haadf_shape = tuple(scan_frame_parameters.size)
-                    index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
-                    if parameters[index]['frames'] > 1 and not settings['sum_frames']:
-                        total_shape = (parameters[index]['frames'],) + total_shape
-                        haadf_shape = (parameters[index]['frames'],) + haadf_shape
+                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+                total_shape = tuple(scan_frame_parameters.size)
+                haadf_shape = tuple(scan_frame_parameters.size)
+                index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
+                if parameters[index]['frames'] > 1 and not settings['sum_frames']:
+                    total_shape = (parameters[index]['frames'],) + total_shape
+                    haadf_shape = (parameters[index]['frames'],) + haadf_shape
 
-                    total_shape += camera_dims[1:]
+                total_shape += camera_dims[1:]
 
-                    self.assertSequenceEqual(data_item.data.shape, total_shape)
-                    self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
-                    self.assertEqual(len(data_item.metadata['hardware_source']['defocus']), parameters[index]['frames'])
-                    self.assertSequenceEqual(data_item.metadata['hardware_source']['defocus'], result_expected_defocus[index])
+                self.assertSequenceEqual(data_item.data.shape, total_shape)
+                self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
+                self.assertEqual(len(data_item.metadata['hardware_source']['defocus']), parameters[index]['frames'])
+                self.assertSequenceEqual(data_item.metadata['hardware_source']['defocus'], result_expected_defocus[index])
 
 
 if __name__ == '__main__':
