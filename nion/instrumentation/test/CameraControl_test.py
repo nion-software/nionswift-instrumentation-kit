@@ -1133,8 +1133,11 @@ class TestCameraControlClass(unittest.TestCase):
                             amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
                             try:
                                 ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
+                                start_time = time.time()
                                 while ac.is_acquiring_model.value:
                                     document_controller.periodic()
+                                    time.sleep(0.1)
+                                    self.assertTrue(time.time() - start_time < TIMEOUT)
                                 self.assertFalse(ac.is_error)
                             finally:
                                 amr.data_stream.remove_ref()
@@ -1156,8 +1159,23 @@ class TestCameraControlClass(unittest.TestCase):
                                               amr.title_base,
                                               amr.channel_names,
                                               adr.drift_tracker)
-        while is_acquiring_model.value:
+
+        start = time.time()
+        last_progress_time = time.time()
+        last_progress = progress_value_model.value
+        while is_acquiring_model.value and time.time() - last_progress_time < TIMEOUT:
             document_controller.periodic()
+            time.sleep(0.01)
+            progress = progress_value_model.value
+            if progress > last_progress:
+                last_progress = progress
+                last_progress_time = time.time()
+        if not (time.time() - last_progress_time < TIMEOUT):
+            start = time.time()
+            while is_acquiring_model.value and time.time() - start < 5.0:
+                document_controller.periodic()
+                time.sleep(0.01)
+            raise Exception("Timeout")
         self.assertFalse(acquisition_state.is_error)
         self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
         for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):

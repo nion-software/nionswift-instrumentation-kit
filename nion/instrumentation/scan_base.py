@@ -1037,6 +1037,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             try:
                 scan_acquisition.prepare_acquire()
                 scan_acquisition.acquire()
+                if scan_acquisition.is_error:
+                    raise RuntimeError("grab_synchronized failed.")
                 if not scan_acquisition.is_aborted:
                     scan_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == self.hardware_source_id]
                     camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera.hardware_source_id]
