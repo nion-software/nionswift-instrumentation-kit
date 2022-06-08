@@ -2,29 +2,17 @@ import copy
 import datetime
 import math
 import numpy
-import threading
-import time
 import typing
 import unittest
-import uuid
 
-from nion.data import DataAndMetadata
 from nion.data import Calibration
 from nion.swift import Application
-from nion.swift import Facade
-from nion.swift.model import ApplicationData
-from nion.swift.model import Metadata
 from nion.ui import TestUI
 from nion.utils import Geometry
-from nion.instrumentation import Acquisition
-from nion.instrumentation import camera_base
-from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
-from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller as STEMController
 from nion.instrumentation.test import AcquisitionTestContext
-from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
 
 
 class TestDriftTrackerClass(unittest.TestCase):
@@ -39,6 +27,22 @@ class TestDriftTrackerClass(unittest.TestCase):
         hardware_source.start_playing(sync_timeout=3.0)
         hardware_source.stop_playing(sync_timeout=3.0)
         document_controller.periodic()
+
+    def _get_scan_axis(self, stem_controller: STEMController.STEMController) -> STEMController.AxisDescription:
+        axis: typing.Optional[STEMController.AxisDescription] = None
+        for axis in stem_controller.axis_descriptions:
+            if axis.axis_id == "scan":
+                break
+        assert axis is not None
+        return axis
+
+    def _get_tv_axis(self, stem_controller: STEMController.STEMController) -> STEMController.AxisDescription:
+        axis: typing.Optional[STEMController.AxisDescription] = None
+        for axis in stem_controller.axis_descriptions:
+            if axis.axis_id == "tv":
+                break
+        assert axis is not None
+        return axis
 
     def test_drift_corrector_basic_with_correction(self):
         # for this test, drift should be in a constant direction
@@ -105,18 +109,19 @@ class TestDriftTrackerClass(unittest.TestCase):
             self.assertIsNotNone(xdata_list[0])
             starttime = datetime.datetime.utcnow()
             xdata_list[0].timestamp = starttime
-            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis="ScanAxis", drift_correction_applied=False, wait=True)
+            stem_controller = typing.cast(STEMController.STEMController, HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller"))
+            scan_axis_description = self._get_scan_axis(stem_controller)
+            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis=scan_axis_description, drift_correction_applied=False, wait=True)
             # drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
             stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
             xdata_list = scan_hardware_source.record_immediate(scan_frame_parameters)
             self.assertTrue(xdata_list)
             self.assertIsNotNone(xdata_list[0])
             xdata_list[0].timestamp = starttime + datetime.timedelta(seconds=1.0)
-            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis="ScanAxis", drift_correction_applied=False, wait=True)
+            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis=scan_axis_description, drift_correction_applied=False, wait=True)
             # drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             # print(last_delta_nm)
@@ -129,7 +134,7 @@ class TestDriftTrackerClass(unittest.TestCase):
             self.assertTrue(xdata_list)
             self.assertIsNotNone(xdata_list[0])
             xdata_list[0].timestamp = starttime + datetime.timedelta(seconds=3.0)
-            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis="ScanAxis", drift_correction_applied=False, wait=True)
+            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis=scan_axis_description, drift_correction_applied=False, wait=True)
             # drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
             last_delta_nm = drift_tracker.last_delta_nm
             # print(last_delta_nm)
@@ -165,12 +170,13 @@ class TestDriftTrackerClass(unittest.TestCase):
             acquisition_time = (xdata_list[0].timestamp - starttime).total_seconds()
             # print(f"Acquisition time: {acquisition_time}")
             xdata_list[0].timestamp = starttime
-            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis="ScanAxis", drift_correction_applied=False, wait=True)
+            stem_controller = typing.cast(STEMController.STEMController, HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller"))
+            scan_axis_description = self._get_scan_axis(stem_controller)
+            drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis=scan_axis_description, drift_correction_applied=False, wait=True)
             # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
             self.assertLess(dist_nm, 0.1)
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
             for i in range(n_points):
                 now = datetime.datetime.utcnow()
                 acquisition_time = (xdata_list[0].timestamp - starttime).total_seconds()
@@ -183,7 +189,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertTrue(xdata_list)
                     self.assertIsNotNone(xdata_list[0])
                     xdata_list[0].timestamp = now
-                    drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis="ScanAxis", drift_correction_applied=False, wait=True)
+                    drift_tracker.submit_image(xdata_list[0], 0.0, drift_data_source_id="test_drift_corrector", axis=scan_axis_description, drift_correction_applied=False, wait=True)
                     # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
                     last_delta_nm = drift_tracker.total_delta_nm
                     # print(f"{last_delta_nm=}\n{expected_delta_nm=}")
@@ -193,7 +199,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
+                    measured_drift_rate = drift_tracker.get_drift_rate(axis=scan_axis_description) * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
 
@@ -204,7 +210,7 @@ class TestDriftTrackerClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
-            stem_controller = HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller")
+            stem_controller = typing.cast(STEMController.STEMController, HardwareSource.HardwareSourceManager().get_instrument_by_id("usim_stem_controller"))
             test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
@@ -231,7 +237,8 @@ class TestDriftTrackerClass(unittest.TestCase):
             old_calibration = camera_xdata.dimensional_calibrations[0]
             new_calibration = Calibration.Calibration(old_calibration.offset * defocus, old_calibration.scale * defocus, "nm")
             camera_xdata._set_dimensional_calibrations([new_calibration, new_calibration])
-            drift_tracker.submit_image(camera_xdata, 0.0, drift_data_source_id="test_drift_corrector_camera", axis="TV", drift_correction_applied=False, wait=True)
+            tv_axis_description = self._get_tv_axis(stem_controller)
+            drift_tracker.submit_image(camera_xdata, 0.0, drift_data_source_id="test_drift_corrector_camera", axis=tv_axis_description, drift_correction_applied=False, wait=True)
             # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
             last_delta_nm = drift_tracker.last_delta_nm
             dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
@@ -254,7 +261,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     old_calibration = camera_xdata.dimensional_calibrations[0]
                     new_calibration = Calibration.Calibration(old_calibration.offset * defocus, old_calibration.scale * defocus, "nm")
                     camera_xdata._set_dimensional_calibrations([new_calibration, new_calibration])
-                    drift_tracker.submit_image(camera_xdata, 0.0, drift_data_source_id="test_drift_corrector_camera", axis="TV", drift_correction_applied=False, wait=True)
+                    drift_tracker.submit_image(camera_xdata, 0.0, drift_data_source_id="test_drift_corrector_camera", axis=tv_axis_description, drift_correction_applied=False, wait=True)
                     # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
                     last_delta_nm = drift_tracker.total_delta_nm
                     # print(f"Camera: {last_delta_nm=}\n{expected_delta_nm=}")
@@ -264,7 +271,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
+                    measured_drift_rate = drift_tracker.get_drift_rate(axis=tv_axis_description) * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
 
@@ -275,7 +282,8 @@ class TestDriftTrackerClass(unittest.TestCase):
             acquisition_time = (xdata_list[0].timestamp - starttime).total_seconds()
             # print(f"Acquisition time: {acquisition_time}")
             xdata_list[0].timestamp = now
-            drift_tracker.submit_image(xdata_list[0], 0.5, drift_data_source_id="test_drift_corrector_scan", axis="ScanAxis", drift_correction_applied=False, wait=True)
+            scan_axis_description = self._get_scan_axis(stem_controller)
+            drift_tracker.submit_image(xdata_list[0], 0.5, drift_data_source_id="test_drift_corrector_scan", axis=scan_axis_description, drift_correction_applied=False, wait=True)
             # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
 
             for i in range(n_points):
@@ -290,7 +298,7 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertTrue(xdata_list)
                     self.assertIsNotNone(xdata_list[0])
                     xdata_list[0].timestamp = now
-                    drift_tracker.submit_image(xdata_list[0], 0.5, drift_data_source_id="test_drift_corrector_scan", axis="ScanAxis", drift_correction_applied=False, wait=True)
+                    drift_tracker.submit_image(xdata_list[0], 0.5, drift_data_source_id="test_drift_corrector_scan", axis=scan_axis_description, drift_correction_applied=False, wait=True)
                     # numpy.save(f"C:/Users/Andi/Downloads/image_{xdata_list[0].timestamp.timestamp()}.npy", xdata_list[0].data)
                     last_delta_nm = drift_tracker.total_delta_nm
                     # print(f"Scan: {last_delta_nm=}\n{expected_delta_nm=}")
@@ -300,6 +308,6 @@ class TestDriftTrackerClass(unittest.TestCase):
                     self.assertAlmostEqual(dist_nm, expected_dist_nm, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.width, expected_delta_nm.width, delta=0.8)
                     self.assertAlmostEqual(last_delta_nm.height, expected_delta_nm.height, delta=0.8)
-                    measured_drift_rate = drift_tracker.get_drift_rate() * 1e9
+                    measured_drift_rate = drift_tracker.get_drift_rate(axis=scan_axis_description) * 1e9
                     self.assertAlmostEqual(measured_drift_rate.width, drift_rate.width, delta=0.8)
                     self.assertAlmostEqual(measured_drift_rate.height, drift_rate.height, delta=0.8)
