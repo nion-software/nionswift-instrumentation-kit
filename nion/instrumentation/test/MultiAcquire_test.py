@@ -187,16 +187,6 @@ class TestMultiAcquire(unittest.TestCase):
                             camera_hardware_source = test_context.camera_hardware_source
                             scan_hardware_source = test_context.scan_hardware_source
                             scan_hardware_source.set_enabled_channels([0, 1])
-
-                            scan_device = scan_hardware_source.scan_device
-                            old_ap = getattr(scan_device, "advance_pixel")
-                            sbs = getattr(scan_device, "_Device__scan_box")
-                            def ap() -> None:
-                                import logging
-                                logging.info(f"{sbs._ScanBoxSimulator__current_pixel_flat} {time.time()}")
-                                old_ap()
-                            setattr(scan_device, "advance_pixel", ap)
-
                             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                             scan_frame_parameters.size = scan_size
                             scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
