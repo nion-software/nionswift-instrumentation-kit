@@ -162,11 +162,10 @@ class TestMultiAcquire(unittest.TestCase):
         scan_size = Geometry.IntSize(6, 6)
         masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
 
-        for sum_frames in [True]:#, False]:
-            for processing in ['sum_project']:#, None, 'sum_masked']:
+        for sum_frames in [True, False]:
+            for processing in ['sum_project', None, 'sum_masked']:
                 for masks in (masks_list if processing == 'sum_masked' else [[]]):
-                    if True:
-                    # with self.subTest(sum_frames=sum_frames, processing=processing, n_masks=len(masks)):
+                    with self.subTest(sum_frames=sum_frames, processing=processing, n_masks=len(masks)):
                         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': processing,
                                     'blanker_delay': 0.05, 'sum_frames': sum_frames, 'camera_hardware_source_id': ''}
