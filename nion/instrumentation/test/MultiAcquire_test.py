@@ -193,7 +193,8 @@ class TestMultiAcquire(unittest.TestCase):
                             old_ap = getattr(scan_device, "advance_pixel")
                             sbs = getattr(scan_device, "_Device__scan_box")
                             def ap() -> None:
-                                print(f"{sbs._ScanBoxSimulator__current_pixel_flat} {time.time()}")
+                                import logging
+                                logging.info(f"{sbs._ScanBoxSimulator__current_pixel_flat} {time.time()}")
                                 old_ap()
                             setattr(scan_device, "advance_pixel", ap)
 
