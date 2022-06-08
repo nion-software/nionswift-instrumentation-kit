@@ -162,10 +162,11 @@ class TestMultiAcquire(unittest.TestCase):
         scan_size = Geometry.IntSize(6, 6)
         masks_list = [[], [camera_base.Mask()], [camera_base.Mask(), camera_base.Mask()]]
 
-        for sum_frames in [True, False]:
-            for processing in ['sum_project', None, 'sum_masked']:
+        for sum_frames in [True]:#, False]:
+            for processing in ['sum_project']:#, None, 'sum_masked']:
                 for masks in (masks_list if processing == 'sum_masked' else [[]]):
-                    with self.subTest(sum_frames=sum_frames, processing=processing, n_masks=len(masks)):
+                    if True:
+                    # with self.subTest(sum_frames=sum_frames, processing=processing, n_masks=len(masks)):
                         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
                                     'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': processing,
                                     'blanker_delay': 0.05, 'sum_frames': sum_frames, 'camera_hardware_source_id': ''}
@@ -187,6 +188,15 @@ class TestMultiAcquire(unittest.TestCase):
                             camera_hardware_source = test_context.camera_hardware_source
                             scan_hardware_source = test_context.scan_hardware_source
                             scan_hardware_source.set_enabled_channels([0, 1])
+
+                            scan_device = scan_hardware_source.scan_device
+                            old_ap = getattr(scan_device, "advance_pixel")
+                            sbs = getattr(scan_device, "_Device__scan_box")
+                            def ap() -> None:
+                                print(f"{sbs._ScanBoxSimulator__current_pixel_flat} {time.time()}")
+                                old_ap()
+                            setattr(scan_device, "advance_pixel", ap)
+
                             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                             scan_frame_parameters.size = scan_size
                             scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)

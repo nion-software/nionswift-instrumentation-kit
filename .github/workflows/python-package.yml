@@ -16,8 +16,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10"]
+        os: [windows-latest]
+        python-version: ["3.8"]
 
     steps:
     - uses: actions/checkout@v2
@@ -37,6 +37,7 @@ jobs:
         pip install -r test-requirements.txt
         python -m pip install mypy==0.960
         python -m pip install flake8
+        python -m pip install pytest
         mypy --version
     - name: Type checking
       run: |
@@ -44,7 +45,8 @@ jobs:
         mypy --namespace-packages --ignore-missing-imports --follow-imports=silent --strict --no-warn-redundant-casts --no-warn-unused-ignores --exclude '/test' -p nionswift_plugin.nion_instrumentation_ui -p nion.instrumentation
     - name: Test
       run: |
-        python -m unittest discover -s nion/instrumentation/test -p "*_test.py" -v
+        pytest nion/instrumentation/test/MultiAcquire_test.py
+        # python -m unittest discover -s nion/instrumentation/test -p "*_test.py" -v
     - name: Upload Artifacts
       uses: actions/upload-artifact@v2
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.8'

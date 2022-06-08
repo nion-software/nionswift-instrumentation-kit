@@ -2094,7 +2094,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 last_progress = next_progress
                 last_progress_time = time.time()
             assert time.time() - last_progress_time < TIMEOUT
-            time.sleep(0.05)  # play nice with other threads
+            time.sleep(0.25)  # play nice with other threads
         if data_stream.is_finished:
             assert data_stream.progress == 1.0
             data_stream._acquire_finished()
