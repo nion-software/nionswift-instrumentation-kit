@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.20.6 (2022-06-06)
+-------------------
+- Fix calibration issue on view modes.
+
 0.20.5 (2022-05-28)
 -------------------
 - Improve error handling and reporting.

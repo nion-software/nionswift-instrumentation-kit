@@ -17,6 +17,7 @@ import uuid
 
 # local libraries
 from nion.data import Calibration
+from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
@@ -29,8 +30,8 @@ from nion.utils import Registry
 if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
-    from . import camera_base
-    from . import scan_base
+    from nion.instrumentation import camera_base
+    from nion.instrumentation import scan_base
 
 _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
 
@@ -208,6 +209,7 @@ class STEMController(Observable.Observable):
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
+        self.__drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None
 
     def close(self) -> None:
         self.__scan_context_channel_map = typing.cast(typing.Any, None)
@@ -234,23 +236,23 @@ class STEMController(Observable.Observable):
     def ronchigram_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
-        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
+        return typing.cast(typing.Optional[camera_base.CameraHardwareSource],
                            Registry.get_component("ronchigram_camera_hardware_source"))
 
     def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
-        self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
+        self.__ronchigram_camera = typing.cast(typing.Optional[camera_base.CameraHardwareSource], camera)
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__eels_camera:
             return self.__eels_camera
-        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
+        return typing.cast(typing.Optional[camera_base.CameraHardwareSource],
                            Registry.get_component("eels_camera_hardware_source"))
 
     def set_eels_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_eels_camera", False)
-        self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
+        self.__eels_camera = typing.cast(typing.Optional[camera_base.CameraHardwareSource], camera)
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
@@ -261,6 +263,13 @@ class STEMController(Observable.Observable):
 
     def set_scan_controller(self, scan_controller: typing.Optional[HardwareSource.HardwareSource]) -> None:
         self.__scan_controller = typing.cast(typing.Optional["scan_base.ScanHardwareSource"], scan_controller)
+
+    @property
+    def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
+        if self.__drift_tracker:
+            return self.__drift_tracker
+        return typing.cast(typing.Optional[DriftTracker.DriftTracker],
+                           Registry.get_component("drift_tracker"))
 
     # end configuration methods
 

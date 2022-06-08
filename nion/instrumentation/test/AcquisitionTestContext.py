@@ -1,6 +1,7 @@
 import typing
 
 from nion.instrumentation import camera_base
+from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -28,6 +29,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
 
         HardwareSource.run()
         instrument = self.setup_stem_controller()
+        DriftTracker.run()
         ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
         scan_base.run()
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, Registry.get_component("scan_hardware_source"))
@@ -53,6 +55,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         stem_controller.unregister_event_loop()
         self.camera_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
+        DriftTracker.stop()
         ScanDevice.stop()
         scan_base.stop()
         Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
@@ -68,7 +71,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         Registry.register_component(instrument, {"stem_controller"})
         return instrument
 
-    def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> HardwareSource.HardwareSource:
+    def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
         camera_id = "usim_ronchigram_camera" if not is_eels else "usim_eels_camera"
         camera_type = "ronchigram" if not is_eels else "eels"

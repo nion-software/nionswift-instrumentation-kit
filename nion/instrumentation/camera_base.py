@@ -1364,10 +1364,15 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 self.log_messages_event.fire(messages, data_elements)
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
         if "frame_parameters" in kwargs:
-            self.set_current_frame_parameters(kwargs["frame_parameters"])
+            camera_frame_parameters = typing.cast(CameraFrameParameters, kwargs["frame_parameters"])
+            camera_frame_parameters.processing = None
+            self.set_current_frame_parameters(camera_frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(CameraFrameParameters(args[0]))
+            camera_frame_parameters = CameraFrameParameters(args[0])
+            camera_frame_parameters.processing = None
+            self.set_current_frame_parameters(camera_frame_parameters)
         super().start_playing(*args, **kwargs)
 
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
@@ -1653,7 +1658,9 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.binning
         data_shape = self.get_expected_dimensions(binning)
-        if processing in {"sum_project", "sum_masked"}:
+        if processing in {"sum_masked"}:
+            return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
+        elif processing in {"sum_project"}:
             x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
             return (x_calibration,)
         else:
@@ -1905,6 +1912,13 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__frame_parameters = self.__camera_settings.get_current_frame_parameters()
         self.__record_parameters = self.__camera_settings.get_record_frame_parameters()
 
+        # view mode "processing" has been misused in the past; clear it here. it should never be enabled, at least in its current form.
+        # the y-summed channel is handled below in the has_processed_channel/SumProcessor code.
+        if self.__frame_parameters:
+            self.__frame_parameters.processing = None
+        if self.__record_parameters:
+            self.__record_parameters.processing = None
+
         self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
 
         self.__grab_sequence_partial_data: typing.Optional[PartialData] = None
@@ -1967,10 +1981,21 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 self.log_messages_event.fire(messages, data_elements)
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
         if "frame_parameters" in kwargs:
-            self.set_current_frame_parameters(kwargs["frame_parameters"])
+            camera_frame_parameters = typing.cast(CameraFrameParameters, kwargs["frame_parameters"])
+            camera_frame_parameters.processing = None
+            self.set_current_frame_parameters(camera_frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(CameraFrameParameters(args[0]))
+            camera_frame_parameters = CameraFrameParameters(args[0])
+            camera_frame_parameters.processing = None
+            self.set_current_frame_parameters(camera_frame_parameters)
+        else:
+            # hack in case camera_frame_parameters is already sum_project. ugh.
+            if self.__frame_parameters:
+                camera_frame_parameters = CameraFrameParameters(self.__frame_parameters.as_dict())
+                camera_frame_parameters.processing = None
+                self.set_current_frame_parameters(camera_frame_parameters)
         super().start_playing(*args, **kwargs)
 
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
@@ -2139,7 +2164,9 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         processing = camera_frame_parameters.processing
         binning = camera_frame_parameters.binning
         data_shape = self.get_expected_dimensions(binning)
-        if processing in {"sum_project", "sum_masked"}:
+        if processing in {"sum_masked"}:
+            return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
+        elif processing in {"sum_project"}:
             return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape[0:1]))
         else:
             return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape))

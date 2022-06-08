@@ -107,7 +107,7 @@ class TestCameraControlClass(unittest.TestCase):
         TestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
-        self.exposure = 1.0
+        self.exposure = 0.04
 
     def tearDown(self):
         TestContext.end_leaks(self)
@@ -128,7 +128,7 @@ class TestCameraControlClass(unittest.TestCase):
         document_controller.periodic()
 
     def __test_context(self, is_eels: bool=False):
-        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=0.04)
+        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=self.exposure)
 
     def __create_state_controller(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext, *,
                                   initialize: bool = True) -> CameraControlPanel.CameraControlStateController:
@@ -808,6 +808,26 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(2, len(data_element["data"].shape))
             self.assertEqual(2, len(data_element["spatial_calibrations"]))
 
+    def test_ronchigram_calibrations(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual("rad", document_model.data_items[0].dimensional_calibrations[0].units)
+            self.assertEqual("rad", document_model.data_items[0].dimensional_calibrations[1].units)
+
+    def test_eels_calibrations(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual("eV", document_model.data_items[0].dimensional_calibrations[1].units)
+            self.assertEqual("eV", document_model.data_items[1].dimensional_calibrations[0].units)
+            # note: it is an error to run view mode with "sum_project" enabled.
+            # "sum_project" is for sequence/SI only.
+
     def test_acquire_with_probe_position(self):
         # used to test out the code path, but no specific asserts
         with self.__test_context() as test_context:
@@ -1113,8 +1133,11 @@ class TestCameraControlClass(unittest.TestCase):
                             amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
                             try:
                                 ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
+                                start_time = time.time()
                                 while ac.is_acquiring_model.value:
                                     document_controller.periodic()
+                                    time.sleep(0.1)
+                                    self.assertTrue(time.time() - start_time < TIMEOUT)
                                 self.assertFalse(ac.is_error)
                             finally:
                                 amr.data_stream.remove_ref()
@@ -1136,8 +1159,23 @@ class TestCameraControlClass(unittest.TestCase):
                                               amr.title_base,
                                               amr.channel_names,
                                               adr.drift_tracker)
-        while is_acquiring_model.value:
+
+        start = time.time()
+        last_progress_time = time.time()
+        last_progress = progress_value_model.value
+        while is_acquiring_model.value and time.time() - last_progress_time < TIMEOUT:
             document_controller.periodic()
+            time.sleep(0.01)
+            progress = progress_value_model.value
+            if progress > last_progress:
+                last_progress = progress
+                last_progress_time = time.time()
+        if not (time.time() - last_progress_time < TIMEOUT):
+            start = time.time()
+            while is_acquiring_model.value and time.time() - start < 5.0:
+                document_controller.periodic()
+                time.sleep(0.01)
+            raise Exception("Timeout")
         self.assertFalse(acquisition_state.is_error)
         self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
         for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):

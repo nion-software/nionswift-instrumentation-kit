@@ -1470,14 +1470,15 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     # tracker is separate at the moment.
     drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
     section_height: typing.Optional[int] = None
-    if scan_context_description.drift_interval_lines > 0:
+    drift_tracker = scan_hardware_source.drift_tracker
+    if drift_tracker and scan_context_description.drift_interval_lines > 0:
         # TODO Harcoding the axis of DriftUpdaterDataStream is not optimal. There should be a better solution.
         axis: typing.Optional[stem_controller.AxisDescription] = None
         for axis in scan_hardware_source.stem_controller.axis_descriptions:
             if axis.axis_id == "scan":
                 break
         assert axis is not None
-        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, axis=axis)
+        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, axis=axis)
         section_height = scan_context_description.drift_interval_lines
 
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
@@ -1889,7 +1890,7 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
                                            scan_hardware_source.scan_device)
 
     # build the scan frame data stream.
-    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters)
+    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker)
 
     # potentially break the scan into multiple sections; this is an unused capability currently.
     scan_size = scan_data_stream.scan_size

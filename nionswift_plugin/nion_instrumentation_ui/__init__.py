@@ -14,6 +14,7 @@ from . import MultipleShiftEELSAcquire
 from . import VideoControlPanel
 
 from nion.instrumentation import camera_base
+from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -46,6 +47,7 @@ def run() -> None:
     global configuration_location
     if configuration_location:
         HardwareSource.run()
+        DriftTracker.run()
         camera_base.run(configuration_location)
         scan_base.run()
         video_base.run()

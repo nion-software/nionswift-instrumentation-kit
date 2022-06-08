@@ -2071,11 +2071,16 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     """Perform an acquire.
 
     Performs consistency checks on progress and data.
+
+    Progress must be made once per 60s or else an exception is thrown.
     """
+    TIMEOUT = 60.0
     data_stream.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
     data_stream.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
     try:
+        start = time.time()
         last_progress = 0.0
+        last_progress_time = time.time()
         while not data_stream.is_finished and not data_stream.is_aborted:
             # progress checking is for tests and self consistency
             pre_progress = data_stream.progress
@@ -2085,7 +2090,11 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             next_progress = data_stream.progress
             assert pre_progress <= post_progress <= next_progress
             assert next_progress >= last_progress
-            last_progress = next_progress
+            if next_progress > last_progress:
+                last_progress = next_progress
+                last_progress_time = time.time()
+            assert time.time() - last_progress_time < TIMEOUT
+            time.sleep(0.05)  # play nice with other threads
         if data_stream.is_finished:
             assert data_stream.progress == 1.0
             data_stream._acquire_finished()
@@ -2108,6 +2117,7 @@ class Acquisition:
         self.__data_stream = data_stream.add_ref()
         self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
+        self.__is_error = False
 
     def close(self) -> None:
         if self.__data_stream:
@@ -2123,6 +2133,7 @@ class Acquisition:
             with self.__data_stream.ref():
                 acquire(self.__data_stream)
                 self.__is_aborted = self.__data_stream.is_aborted
+                self.__is_error = self.__data_stream.is_error
         finally:
             self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
@@ -2158,6 +2169,10 @@ class Acquisition:
     @property
     def is_aborted(self) -> bool:
         return self.__is_aborted
+
+    @property
+    def is_error(self) -> bool:
+        return self.__is_error
 
 
 """
