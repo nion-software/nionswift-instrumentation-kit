@@ -236,23 +236,23 @@ class STEMController(Observable.Observable):
     def ronchigram_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
-        return typing.cast(typing.Optional[camera_base.CameraHardwareSource],
+        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
                            Registry.get_component("ronchigram_camera_hardware_source"))
 
     def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
-        self.__ronchigram_camera = typing.cast(typing.Optional[camera_base.CameraHardwareSource], camera)
+        self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
         if self.__eels_camera:
             return self.__eels_camera
-        return typing.cast(typing.Optional[camera_base.CameraHardwareSource],
+        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
                            Registry.get_component("eels_camera_hardware_source"))
 
     def set_eels_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_eels_camera", False)
-        self.__eels_camera = typing.cast(typing.Optional[camera_base.CameraHardwareSource], camera)
+        self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
