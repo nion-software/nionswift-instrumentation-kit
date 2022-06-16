@@ -351,16 +351,17 @@ class DataStreamEventArgs:
 
 
 class DataStreamArgs:
-    def __init__(self, slice: SliceType, shape: ShapeType) -> None:
+    def __init__(self, slice: SliceType, shape: ShapeType, max_count: typing.Optional[int] = None) -> None:
         for s, l in zip(slice, shape):
             assert s.start < s.stop
             assert 0 <= s.start <= l
             assert 0 <= s.stop <= l
         self.slice = slice
         self.shape = shape
+        self.max_count = max_count
 
     def __str__(self) -> str:
-        return f"{self!r} {self.slice} {self.shape}"
+        return f"{self!r} {self.slice} {self.shape} max:{self.max_count}"
 
     @property
     def slice_shape(self) -> ShapeType:
@@ -1771,6 +1772,7 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
 
 
 class ContainerDataStream(DataStream):
+    """An abstract class to contain another data stream and facilitate decoration in subclasses."""
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
@@ -1878,12 +1880,17 @@ class ActionDataStream(ContainerDataStream):
         self.__channel_count = len(self.channels)
         self.__complete_channel_count = 0
 
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+        stream_args.max_count = 1
+        super()._prepare_stream(stream_args, **kwargs)
+
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__shape = stream_args.shape
         self.__index = 0
         self.__complete_channel_count = self.__channel_count
         self.__delegate.start()
         self.__check_action()
+        stream_args.max_count = 1
         super()._start_stream(stream_args)
 
     def __check_action(self) -> None:
@@ -1903,6 +1910,7 @@ class ActionDataStream(ContainerDataStream):
         super()._finish_stream()
 
     def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        assert data_stream_event.count is None or data_stream_event.count == 1
         super()._fire_data_available(data_stream_event)
         if data_stream_event.state == DataStreamStateEnum.COMPLETE:
             assert (data_stream_event.count or 1) == 1

@@ -183,7 +183,7 @@ class ScanDataChannel:
             data_item.decrement_data_ref_count()
 
 
-class CameraDataChannel(scan_base.SynchronizedDataChannelInterface):
+class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
     title_base = _("MultiAcquire")
 
     def __init__(self, document_model: DocumentModel.DocumentModel, channel_name: str,

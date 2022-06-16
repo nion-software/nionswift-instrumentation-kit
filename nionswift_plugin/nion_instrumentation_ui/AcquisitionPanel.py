@@ -1593,73 +1593,6 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, self.__camera_hardware_source_channel_model.value)
 
 
-class CameraFrameDataStream(Acquisition.DataStream):
-    """A data stream of individual camera frames."""
-
-    # TODO: use sequence acquisition if there are no "in between" actions
-
-    def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters):
-        super().__init__()
-        self.__hardware_source = camera_hardware_source
-        self.__frame_parameters = frame_parameters
-        self.__record_task = typing.cast(HardwareSource.RecordTask, None)
-        self.__record_count = 0
-        self.__frame_shape = camera_hardware_source.get_expected_dimensions(frame_parameters.binning)
-        self.__channel = Acquisition.Channel(self.__hardware_source.hardware_source_id)
-
-    def about_to_delete(self) -> None:
-        if self.__record_task:
-            self.__record_task = typing.cast(typing.Any, None)
-        super().about_to_delete()
-
-    @property
-    def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
-        return (self.__channel,)
-
-    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        data_shape = tuple(self.__hardware_source.get_expected_dimensions(self.__frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
-        return Acquisition.DataStreamInfo(data_metadata, self.__frame_parameters.exposure_ms / 1000)
-
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
-        self.__hardware_source.abort_playing(sync_timeout=5.0)
-
-    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        self.__record_task = HardwareSource.RecordTask(self.__hardware_source, self.__frame_parameters)
-        self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
-
-    def _finish_stream(self) -> None:
-        if self.__record_task:
-            self.__record_task.grab()  # ensure grab is finished
-            self.__record_task = typing.cast(typing.Any, None)
-
-    def _abort_stream(self) -> None:
-        self.__hardware_source.abort_recording()
-
-    def _send_next(self) -> None:
-        if self.__record_task.is_finished:
-            # data metadata describes the data being sent from this stream: shape, data type, and descriptor
-            data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, numpy.float32), data_descriptor=data_descriptor)
-            source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
-            state = Acquisition.DataStreamStateEnum.COMPLETE
-            xdatas = self.__record_task.grab()
-            xdata = xdatas[0] if xdatas else None
-            data = xdata.data if xdata else None
-            assert data is not None
-            data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
-                                                                source_data_slice, state)
-            self.fire_data_available(data_stream_event)
-            self._sequence_next(self.__channel)
-            self.__record_count -= 1
-            if self.__record_count > 0:
-                self.__record_task = HardwareSource.RecordTask(self.__hardware_source, self.__frame_parameters)
-
-    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
-        return scan_base.make_sequence_data_stream(self.__hardware_source, self.__frame_parameters, length)
-        # return Acquisition.SequenceDataStream(self, length)
-
-
 def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
@@ -1685,7 +1618,7 @@ def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHa
     scan_base.update_instrument_properties(instrument_metadata, stem_controller, None)
 
     # construct the camera frame data stream. add processing.
-    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
+    camera_data_stream = camera_base.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,

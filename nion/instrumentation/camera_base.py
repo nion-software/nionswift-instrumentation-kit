@@ -2601,17 +2601,23 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             self.__partial_data_info = typing.cast(typing.Any, None)
 
 
-class CameraFramesDataStream(Acquisition.DataStream):
-    """A data stream of individual camera frames, for use in synchronized/sequence acquisition."""
+class CameraFrameDataStream(Acquisition.DataStream):
+    """A data stream of individual camera frames, for use in synchronized/sequence acquisition.
+
+    The data stream may utilize the sequence acquisition mode if the number of expected frames (passed in
+    data stream args) is greater than one and the max count is unspecified. Otherwise, frames will be acquired
+    one by one.
+    """
 
     def __init__(self, camera_hardware_source: CameraHardwareSource,
                  camera_frame_parameters: CameraFrameParameters,
-                 camera_device_stream_delegate: CameraDeviceStreamInterface) -> None:
+                 camera_device_stream_delegate: typing.Optional[CameraDeviceStreamInterface] = None) -> None:
         super().__init__()
         self.__camera_device_stream_interface = camera_device_stream_delegate
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
         self.__record_task = typing.cast(HardwareSource.RecordTask, None)  # used for single frames
+        self.__record_count = 0
         self.__frame_shape = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
         self.__channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
         self.__last_index = 0
@@ -2630,13 +2636,14 @@ class CameraFramesDataStream(Acquisition.DataStream):
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, float))
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
-        if stream_args.shape == (1,):
+        if stream_args.max_count == 1 or stream_args.shape == (1,):
             self.__camera_hardware_source.abort_playing(sync_timeout=5.0)
         else:
+            assert self.__camera_device_stream_interface
             self.__start = time.perf_counter()
             self.__camera_device_stream_interface.prepare_stream(stream_args, **kwargs)
             self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
@@ -2644,9 +2651,11 @@ class CameraFramesDataStream(Acquisition.DataStream):
                 self.__camera_sequence_overheads.pop(0)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        if stream_args.shape == (1,):
+        if stream_args.max_count == 1 or stream_args.shape == (1,):
             self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, self.__camera_frame_parameters)
+            self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
         else:
+            assert self.__camera_device_stream_interface
             self.__last_index = 0
             self.__start = time.perf_counter()
             self.__camera_device_stream_interface.start_stream(stream_args)
@@ -2657,14 +2666,17 @@ class CameraFramesDataStream(Acquisition.DataStream):
 
     def _finish_stream(self) -> None:
         if self.__record_task:
+            self.__record_task.grab()  # ensure grab is finished
             self.__record_task = typing.cast(typing.Any, None)
         else:
+            assert self.__camera_device_stream_interface
             self.__camera_device_stream_interface.finish_stream()
 
     def _abort_stream(self) -> None:
         if self.__record_task:
             self.__camera_hardware_source.abort_recording()
         else:
+            assert self.__camera_device_stream_interface
             self.__camera_device_stream_interface.abort_stream()
 
     def _send_next(self) -> None:
@@ -2676,15 +2688,18 @@ class CameraFramesDataStream(Acquisition.DataStream):
                 source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
                 state = Acquisition.DataStreamStateEnum.COMPLETE
                 xdatas = self.__record_task.grab()
-                xdata0 = xdatas[0] if xdatas else None
-                assert xdata0
-                data = xdata0.data
+                xdata = xdatas[0] if xdatas else None
+                data = xdata.data if xdata else None
                 assert data is not None
                 data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
                                                                     source_data_slice, state)
                 self.fire_data_available(data_stream_event)
                 self._sequence_next(self.__channel)
+                self.__record_count -= 1
+                if self.__record_count > 0:
+                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, self.__camera_frame_parameters)
         else:
+            assert self.__camera_device_stream_interface
             partial_data = self.__camera_device_stream_interface.get_next_data()
             if partial_data:
                 valid_index = partial_data.valid_index
@@ -2724,6 +2739,10 @@ class CameraFramesDataStream(Acquisition.DataStream):
                     self._sequence_next(channel, count)
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
+
+    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
+        return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
+        # return Acquisition.SequenceDataStream(self, length)
 
 
 def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
@@ -2893,6 +2912,168 @@ def update_camera_properties(properties: typing.MutableMapping[str, typing.Any],
     properties["binning"] = frame_parameters.binning
     if signal_type:
         properties["signal_type"] = signal_type
+
+
+class ChannelDataStream(Acquisition.ContainerDataStream):
+    def __init__(self, data_stream: Acquisition.DataStream, camera_data_channel: typing.Optional[SynchronizedDataChannelInterface], channel: typing.Optional[Acquisition.Channel] = None):
+        super().__init__(data_stream)
+        self.__camera_data_channel = camera_data_channel
+        self.__channel = channel
+        self.__dst_index = 0
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        super()._start_stream(stream_args)
+        self.__dst_index = 0
+
+    def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+        if self.__channel is None or self.__channel == data_stream_event.channel:
+            data_channel_state = "complete" if data_stream_event.state == Acquisition.DataStreamStateEnum.COMPLETE else "partial"
+            assert data_stream_event.count is None
+            assert not data_stream_event.data_metadata.is_sequence
+            assert data_stream_event.source_slice[1].start is None or data_stream_event.source_slice[1].start == 0
+            if data_stream_event.data_metadata.is_navigable:
+                collection_shape = data_stream_event.data_metadata.navigation_dimension_shape
+                data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
+                data = data_stream_event.source_data
+                dimensional_calibrations = tuple(data_stream_event.data_metadata.dimensional_calibrations)
+                data_descriptor = data_stream_event.data_metadata.data_descriptor
+            else:
+                collection_shape = data_stream_event.data_metadata.datum_dimension_shape
+                data_shape = Geometry.IntSize(h=collection_shape[0], w=collection_shape[1])
+                data = data_stream_event.source_data[..., numpy.newaxis]
+                dimensional_calibrations = tuple(data_stream_event.data_metadata.dimensional_calibrations) + (Calibration.Calibration(),)
+                data_descriptor = DataAndMetadata.DataDescriptor(False, data_stream_event.data_metadata.data_descriptor.datum_dimension_count, 1)
+            start_index = Acquisition.ravel_slice_start(data_stream_event.source_slice[0:2], data_shape.as_tuple())
+            stop_index = Acquisition.ravel_slice_stop(data_stream_event.source_slice[0:2], data_shape.as_tuple())
+            src_row = data_stream_event.source_slice[0].start
+            width = data_shape[1]
+            # handle the case where a partial row has been acquired; try to finish the row
+            if self.__dst_index % width:
+                length = min(width - self.__dst_index % width, stop_index - start_index)
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, self.__dst_index % width, 1, length)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, 0, 1, length)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += 1
+                start_index += length
+                self.__dst_index += length
+            # handle the case where one or more full rows remain; send full rows.
+            if stop_index - start_index >= width:
+                assert data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 2 or (data_stream_event.data_metadata.data_descriptor.collection_dimension_count == 0 and data_stream_event.data_metadata.data_descriptor.datum_dimension_count == 2)
+                assert data_stream_event.source_slice[1].stop is None  # or data_stream_event.source_slice[1].stop == data_shape.width
+                height = (stop_index - start_index) // width
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, 0, height, width)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, 0, height, width)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += height
+                start_index += height * width
+                self.__dst_index += height * width
+            # handle remaining data as a partial row.
+            if start_index < stop_index:
+                length = stop_index - start_index
+                if self.__camera_data_channel:
+                    source_data_and_metadata = DataAndMetadata.new_data_and_metadata(data,
+                                                                                     data_stream_event.data_metadata.intensity_calibration,
+                                                                                     dimensional_calibrations,
+                                                                                     data_stream_event.data_metadata.metadata,
+                                                                                     data_stream_event.data_metadata.timestamp,
+                                                                                     data_descriptor,
+                                                                                     data_stream_event.data_metadata.timezone,
+                                                                                     data_stream_event.data_metadata.timezone_offset)
+                    dst_rect = Geometry.IntRect.from_tlhw(self.__dst_index // width, 0, 1, length)
+                    src_rect = Geometry.IntRect.from_tlhw(src_row, start_index % width, 1, length)
+                    data_channel_view_id = None
+                    self.__camera_data_channel.update(source_data_and_metadata, data_channel_state, data_shape, dst_rect, src_rect, data_channel_view_id)
+                src_row += 1
+                start_index += length
+                self.__dst_index += length
+
+        super()._fire_data_available(data_stream_event)
+
+
+class SynchronizedDataChannelInterface:
+    """Update the data.
+
+    This method is always called with a collection of 1d or 2d data.
+    """
+    def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id: typing.Optional[str]) -> None: ...
+
+
+def make_sequence_data_stream(
+        camera_hardware_source: CameraHardwareSource,
+        camera_frame_parameters: CameraFrameParameters,
+        count: int,
+        camera_data_channel: typing.Optional[SynchronizedDataChannelInterface] = None,
+        include_raw: bool = True,
+        include_summed: bool = False) -> Acquisition.DataStream:
+
+    instrument_controller = typing.cast(InstrumentController, Registry.get_component("stem_controller"))
+
+    instrument_metadata: typing.Dict[str, typing.Any] = dict()
+    update_instrument_properties(instrument_metadata, instrument_controller, camera_hardware_source.camera)
+
+    additional_camera_metadata = {"instrument": copy.deepcopy(instrument_metadata)}
+    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
+                                                CameraDeviceSequenceStream(
+                                                    camera_hardware_source,
+                                                    camera_frame_parameters,
+                                                    additional_camera_metadata))
+    processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
+    if camera_frame_parameters.processing == "sum_project":
+        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+    elif camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks:
+            operator = Acquisition.StackedDataStreamOperator(
+                [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
+        else:
+            operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
+    sequence: Acquisition.DataStream = Acquisition.SequenceDataStream(processed_camera_data_stream, count)
+    if camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks and len(active_masks) > 1:
+            sequence = Acquisition.FramedDataStream(sequence, operator=Acquisition.MoveAxisDataStreamOperator(
+                processed_camera_data_stream.channels[0]))
+    # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
+    if count > 1:
+        assert include_raw or include_summed
+        if include_raw and include_summed:
+            # AccumulateDataStream sums the successive frames in each channel
+            monitor = Acquisition.MonitorDataStream(sequence, "raw")
+            sequence = Acquisition.AccumulatedDataStream(sequence)
+            sequence = Acquisition.CombinedDataStream([sequence, monitor])
+        elif include_summed:
+            sequence = Acquisition.AccumulatedDataStream(sequence)
+        # include_raw is the default behavior
+    # the optional ChannelDataStream updates the camera data channel for the stream matching 999
+    data_stream: Acquisition.DataStream
+    if camera_data_channel:
+        data_stream = ChannelDataStream(sequence, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id))
+    else:
+        data_stream = sequence
+    # return the top level stream
+    return data_stream
 
 
 _component_registered_listener = None

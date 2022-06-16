@@ -955,7 +955,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             old_frame_parameters_d = camera_hardware_source.get_current_frame_parameters().as_dict()
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            data_stream = scan_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4)
+            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4)
             maker = Acquisition.FramedDataStream(data_stream)
             with maker.ref():
                 Acquisition.acquire(maker)
