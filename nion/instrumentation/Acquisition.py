@@ -415,8 +415,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
     The stream includes the concept of a sequence of acquisition. The length of the sequence gets updated in calls
     to start_stream.
 
-    Subclasses may override channels, is_finished, _send_next (for testing), _sequence_next, _start_stream, and
-    _advance_stream.
+    Subclasses may override channels, is_finished, _send_next, _start_stream, and _advance_stream.
 
     The is_error property is set if this stream or one of its contained streams enters an error state.
     """
@@ -486,7 +485,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.handle_error_event.fire()
 
     def send_next(self) -> None:
-        """Used for testing. Send next data."""
+        """Send next data."""
         if not self.is_finished and not self.is_aborted:
             for channel in self.input_channels:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
@@ -495,15 +494,6 @@ class DataStream(ReferenceCounting.ReferenceCounted):
     def _send_next(self) -> None:
         """Used for testing. Send next data. Subclasses can override as required."""
         pass
-
-    def _sequence_next(self, channel: Channel, n: int = 1) -> None:
-        """Move the sequence for channel forward by n.
-
-        Subclasses should call this after they fire a data available event. It is used to
-        keep track of how many items in the sequence have been produced.
-        """
-        assert self.__sequence_indexes.get(channel, 0) + n <= self.__sequence_counts.get(channel, self.__sequence_count)
-        self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + n
 
     def prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         """Prepare stream. Top level prepare_stream is called before start_stream.
@@ -559,9 +549,20 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         pass
 
-    def fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        """Fire the data available event."""
+    def fire_data_available(self, data_stream_event: DataStreamEventArgs, update_in_place: bool = False) -> None:
+        """Fire the data available event.
+
+        update_in_place is a hack to allow for operations such as summing in place to not trigger sequence index updates
+        since they are repeating the same update over and over. future plans would be to include an update operation
+        with the data stream event, perhaps 'clear', 'replace', 'update', 'final_update' with only 'replace' and
+        'final_update' advancing the sequence indexes.
+        """
         self._fire_data_available(data_stream_event)
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE and not update_in_place:
+            count = data_stream_event.count or 1
+            channel = data_stream_event.channel
+            assert self.__sequence_indexes.get(channel, 0) + count <= self.__sequence_counts.get(channel, self.__sequence_count)
+            self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + count
 
     def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         """Fire the data available event.
@@ -791,9 +792,6 @@ class CollectedDataStream(DataStream):
                 new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
                 self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-                self.__indexes[channel] = next_index
-                self.__sub_slice_indexes[channel] = next_sub_slice_index
-                self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
             else:
                 # multiple data chunks have been provided.
                 # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
@@ -851,11 +849,6 @@ class CollectedDataStream(DataStream):
                     count -= count
                     assert count is not None  # for type checker bug
                 assert count == 0  # everything has been accounted for
-                self.__indexes[channel] = next_index
-                self.__sub_slice_indexes[channel] = next_sub_slice_index
-                self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
-            if new_state == DataStreamStateEnum.COMPLETE:
-                self._sequence_next(channel)
         else:
             # incoming data is partial
             # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
@@ -872,11 +865,9 @@ class CollectedDataStream(DataStream):
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
             self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-            self.__indexes[channel] = next_index
-            self.__sub_slice_indexes[channel] = next_sub_slice_index
-            self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
-            if new_state == DataStreamStateEnum.COMPLETE:
-                self._sequence_next(channel)
+        self.__indexes[channel] = next_index
+        self.__sub_slice_indexes[channel] = next_sub_slice_index
+        self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -1539,17 +1530,16 @@ class FramedDataStream(DataStream):
         # callback for Framer
         if not self.__operator.is_applied:
             for new_channel_data in self.__operator.process(ChannelData(channel, data_and_metadata)):
-                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
+                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata, update_in_place=True)
         else:
             self.__send_data(channel, data_and_metadata)
-        self._sequence_next(channel)
 
     def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         # callback for Framer
         if not self.__operator.is_applied:
             for new_channel_data in self.__operator.process_multiple(
                     ChannelData(channel, data_and_metadata)):
-                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
+                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count, update_in_place=True)
         else:
             # special case for camera compatibility. cameras should not return empty dimensions.
             if data_and_metadata.data_shape[-1] == 1:
@@ -1568,9 +1558,8 @@ class FramedDataStream(DataStream):
                                                                           data_metadata.timezone,
                                                                           data_metadata.timezone_offset)
             self.__send_data_multiple(channel, data_and_metadata, count)
-        self._sequence_next(channel, count)
 
-    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, update_in_place: bool = False) -> None:
         new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
         new_count: typing.Optional[int] = None
         new_source_slice: typing.Tuple[slice, ...]
@@ -1585,9 +1574,9 @@ class FramedDataStream(DataStream):
         # send the new data chunk
         new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, new_data, new_count,
                                                     new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.fire_data_available(new_data_stream_event)
+        self.fire_data_available(new_data_stream_event, update_in_place)
 
-    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, update_in_place: bool = False) -> None:
         assert data_and_metadata.is_sequence
         new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count,
                                                              data_and_metadata.datum_dimension_count)
@@ -1606,7 +1595,7 @@ class FramedDataStream(DataStream):
         data = data_and_metadata.data
         assert data is not None
         new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.fire_data_available(new_data_stream_event)
+        self.fire_data_available(new_data_stream_event, update_in_place)
 
 
 class MaskLike(typing.Protocol):

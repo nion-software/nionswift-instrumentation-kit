@@ -64,9 +64,8 @@ class ScanDataStream(Acquisition.DataStream):
                 self.__error_after -= 1
             data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
-                                                                new_count, source_data_slice, state)
+                                                                new_count, source_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
             self.fire_data_available(data_stream_event)
-            self._sequence_next(channel, new_count)
         # update indexes
         if state == Acquisition.DataStreamStateEnum.COMPLETE:
             self.__partial_index = 0
@@ -131,7 +130,6 @@ class SingleFrameDataStream(Acquisition.DataStream):
         else:
             self.__partial_index = 0
             self.__frame_index += 1
-            self._sequence_next(self.__channel)
         if self.__error_after is not None:
             if self.__error_after == 0:
                 raise Exception()
@@ -205,7 +203,6 @@ class MultiFrameDataStream(Acquisition.DataStream):
                                                             source_data_slice, state)
         self.fire_data_available(data_stream_event)
         self.__frame_index += count
-        self._sequence_next(self.__channel, count)
 
 
 class RectangleMask(Acquisition.MaskLike):

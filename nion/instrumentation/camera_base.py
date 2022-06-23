@@ -2694,7 +2694,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
                                                                     source_data_slice, state)
                 self.fire_data_available(data_stream_event)
-                self._sequence_next(self.__channel)
                 self.__record_count -= 1
                 if self.__record_count > 0:
                     self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, self.__camera_frame_parameters)
@@ -2734,9 +2733,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                         data,
                                                                         count,
                                                                         source_slice,
-                                                                        data_stream_state)
+                                                                        Acquisition.DataStreamStateEnum.COMPLETE)
                     self.fire_data_available(data_stream_event)
-                    self._sequence_next(channel, count)
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
 

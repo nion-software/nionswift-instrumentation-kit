@@ -1869,10 +1869,9 @@ class ScanFrameDataStream(Acquisition.DataStream):
                                                                             scan_data_data.reshape(-1),
                                                                             stop - start,
                                                                             source_slice,
-                                                                            data_stream_state)
+                                                                            Acquisition.DataStreamStateEnum.COMPLETE)
                         if stop - start > 0:
                             self.fire_data_available(data_stream_event)
-                            self._sequence_next(channel, stop - start)
                             self.__sent_rows[channel] = available_rows
 
 
