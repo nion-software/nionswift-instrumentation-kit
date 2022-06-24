@@ -626,7 +626,6 @@ class CollectedDataStream(DataStream):
         # sub-slice indexes track the destination of the next data within the current slice.
         self.__sub_slice_indexes: typing.Dict[Channel, int] = dict()
         # needs starts tracks whether the downstream data stream needs a start call.
-        self.__needs_starts: typing.Dict[Channel, bool] = dict()
         self.__data_stream_started = False
 
     def about_to_delete(self) -> None:
@@ -677,12 +676,20 @@ class CollectedDataStream(DataStream):
         # all channels progress simultaneously in a collection; so use the last one for calculation
         count = expand_shape(self.__collection_shape)
         # only add current progress if we're not about to advance to the next sub slice
-        p = 0.0 if all(self.__needs_starts.get(channel, False) for channel in self.input_channels) else self.__data_stream.progress
+        p = 0.0 if self.__all_channels_need_start else self.__data_stream.progress
         incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
         if not incomplete_indexes:
             return 0.0
         index = min(incomplete_indexes)
         return (index + p) / count
+
+    @property
+    def __all_channels_need_start(self) -> bool:
+        # whether all channels are in the 'needs_start' state.
+        collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
+        collection_sub_slice_length = expand_shape(collection_sub_slice_shape)
+        needs_starts = {channel: self.__sub_slice_indexes.get(channel, 0) == collection_sub_slice_length for channel in self.channels}
+        return all(needs_starts.get(channel, False) for channel in self.input_channels)
 
     def _send_next(self) -> None:
         assert self.__data_stream_started
@@ -706,18 +713,14 @@ class CollectedDataStream(DataStream):
             self.__data_stream_started = False
         self.__collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
         self.__sub_slice_indexes.clear()
-        self.__needs_starts.clear()
         self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
         self.__data_stream.start_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
         self.__data_stream_started = True
         self.__collection_sub_slice_index += 1
 
     def _advance_stream(self) -> None:
-        # handle finish and start stream here.
-        # ideally it could be done in data available, but (a) it is difficult to tell when all channels are
-        # complete; and (b) the enclosing structures may not properly update their is_finished flag. instead,
-        # do it here, which is called when the current round of data available is not running.
-        if all(self.__needs_starts.get(channel, False) for channel in self.input_channels):
+        # handle calling finish and start for the contained data stream.
+        if self.__all_channels_need_start:
             if self.__data_stream.is_finished and self.__collection_sub_slice_index < len(self.__collection_sub_slices):
                 self._start_next_sub_stream()
             elif not self.is_finished:
@@ -792,7 +795,6 @@ class CollectedDataStream(DataStream):
         sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
         collection_rank = len(self.__collection_shape)
         collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
-        collection_sub_slice_length = expand_shape(collection_sub_slice_shape)
         collection_sub_slice_row_length = expand_shape(collection_sub_slice_shape[1:])
         if count is not None:
             # incoming data is frames
@@ -887,7 +889,6 @@ class CollectedDataStream(DataStream):
             self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
         self.__indexes[channel] = next_index
         self.__sub_slice_indexes[channel] = next_sub_slice_index
-        self.__needs_starts[channel] = next_sub_slice_index == collection_sub_slice_length
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -996,6 +997,129 @@ class CombinedDataStream(DataStream):
         self.fire_data_available(data_stream_event)
 
 
+class StackedDataStream(DataStream):
+    """Acquire multiple streams and stack the results.
+
+    Each stream can produce multiple channels but the channels must match between streams.
+    """
+    def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
+        super().__init__()
+        self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
+        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
+        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
+        self.__stream_args = DataStreamArgs(tuple(), list())
+        self.__current_index = 0
+        assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
+        self.__channels = self.__data_streams[0].channels
+        self.__last_state = DataStreamStateEnum.PARTIAL
+        self.__sequence_count = 0
+        self.__sequence_index = 0
+
+    def about_to_delete(self) -> None:
+        if self.__data_available_event_listener:
+            self.__data_available_event_listener.close()
+            self.__data_available_event_listener = typing.cast(typing.Any, None)
+        if self.__handle_error_event_listener:
+            self.__handle_error_event_listener.close()
+            self.__handle_error_event_listener = typing.cast(typing.Any, None)
+        for data_stream in self.__data_streams:
+            data_stream.remove_ref()
+        self.__data_streams = typing.cast(typing.Any, None)
+        super().about_to_delete()
+
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return tuple(self.__data_streams)
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        return self.__channels
+
+    def get_info(self, channel: Channel) -> DataStreamInfo:
+        data_metadata = copy.deepcopy(self.__data_streams[0].get_info(channel).data_metadata)
+        duration = 0.0
+        height = 0
+        for data_stream in self.__data_streams:
+            duration += data_stream.get_info(channel).duration
+            data_stream_data_metadata = data_stream.get_info(channel).data_metadata
+            height += data_stream_data_metadata.data_shape[0]
+            assert data_metadata.data_shape[1:] == data_stream_data_metadata.data_shape[1:]
+            assert data_metadata.data_dtype == data_stream_data_metadata.data_dtype
+            assert data_metadata.data_descriptor == data_stream_data_metadata.data_descriptor
+        data_metadata.data_shape_and_dtype = ((height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
+        return DataStreamInfo(data_metadata, duration)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__current_index == len(self.__data_streams)
+
+    @property
+    def _progress(self) -> float:
+        # return the average of combined streams progress
+        return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
+
+    def _send_next(self) -> None:
+        self.__data_streams[self.__current_index].send_next()
+
+    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+        self.__current_index = 0
+        self.__stream_args = DataStreamArgs((slice(0, 1),), (1,))
+        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+        self.__sequence_count = stream_args.sequence_count
+        self.__sequence_index = 0
+
+    def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        assert self.__current_index == 0
+        assert not self.__data_available_event_listener
+        assert not self.__handle_error_event_listener
+        self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
+        self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
+        self.__data_streams[self.__current_index].start_stream(self.__stream_args)
+
+    def _abort_stream(self) -> None:
+        self.__data_streams[self.__current_index].abort_stream()
+
+    def _advance_stream(self) -> None:
+        # handle calling finish and start for the contained data stream.
+        if self.__current_index < len(self.__data_streams):
+            if self.__data_streams[self.__current_index].is_finished:
+                self.__data_streams[self.__current_index].finish_stream()
+                self.__data_available_event_listener.close()
+                self.__data_available_event_listener = typing.cast(typing.Any, None)
+                self.__handle_error_event_listener.close()
+                self.__handle_error_event_listener = typing.cast(typing.Any, None)
+                self.__current_index += 1
+                if self.__current_index == len(self.__data_streams) and self.__sequence_index + 1 < self.__sequence_count:
+                    self.__current_index = 0
+                    self.__sequence_index += 1
+                if self.__current_index < len(self.__data_streams):
+                    self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+                    self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
+                    self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
+                    self.__data_streams[self.__current_index].start_stream(self.__stream_args)
+
+        if self.__current_index < len(self.__data_streams):
+            self.__data_streams[self.__current_index].advance_stream()
+
+    def _finish_stream(self) -> None:
+        if self.__current_index < len(self.__data_streams):
+            self.__data_streams[self.__current_index].finish_stream()
+
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        state = DataStreamStateEnum.COMPLETE if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams) else DataStreamStateEnum.PARTIAL
+        data_stream_event = DataStreamEventArgs(
+            data_stream_event.data_stream,
+            data_stream_event.channel,
+            self.get_info(data_stream_event.channel).data_metadata,
+            data_stream_event.source_data,
+            data_stream_event.count,
+            data_stream_event.source_slice,
+            state
+        )
+        self.fire_data_available(data_stream_event)
+        self.__last_state = state
+
+
 class SequentialDataStream(DataStream):
     """Acquire multiple streams sequentially.
 
@@ -1008,6 +1132,9 @@ class SequentialDataStream(DataStream):
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(tuple(), list())
         self.__current_index = 0
+        self.__last_state = DataStreamStateEnum.PARTIAL
+        self.__sequence_count = 0
+        self.__sequence_index = 0
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -1047,15 +1174,18 @@ class SequentialDataStream(DataStream):
     @property
     def _progress(self) -> float:
         # return the average of combined streams progress
-        return (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)
+        return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
 
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__current_index = 0
-        self.__stream_args = copy.deepcopy(stream_args)
+        self.__stream_args = DataStreamArgs((slice(0, 1),), (1,))
+        # self.__stream_args = copy.deepcopy(stream_args)
         self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+        self.__sequence_count = stream_args.sequence_count
+        self.__sequence_index = 0
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert self.__current_index == 0
@@ -1069,10 +1199,7 @@ class SequentialDataStream(DataStream):
         self.__data_streams[self.__current_index].abort_stream()
 
     def _advance_stream(self) -> None:
-        # handle finish and start stream here.
-        # ideally it could be done in data available, but (a) it is difficult to tell when all channels are
-        # complete; and (b) the enclosing structures may not properly update their is_finished flag. instead,
-        # do it here, which is called when the current round of data available is not running.
+        # handle calling finish and start for the contained data stream.
         if self.__data_streams[self.__current_index].is_finished:
             self.__data_streams[self.__current_index].finish_stream()
             self.__data_available_event_listener.close()
@@ -1080,6 +1207,9 @@ class SequentialDataStream(DataStream):
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
             self.__current_index += 1
+            if self.__current_index == len(self.__data_streams) and self.__sequence_index + 1 < self.__sequence_count:
+                self.__current_index = 0
+                self.__sequence_index += 1
             if self.__current_index < len(self.__data_streams):
                 self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
                 self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, SequentialDataStream.__data_available))
@@ -1094,6 +1224,7 @@ class SequentialDataStream(DataStream):
             self.__data_streams[self.__current_index].finish_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        state = DataStreamStateEnum.COMPLETE if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams) else DataStreamStateEnum.PARTIAL
         data_stream_event = DataStreamEventArgs(
             data_stream_event.data_stream,
             Channel(str(self.__current_index), *data_stream_event.channel.segments),
@@ -1101,9 +1232,10 @@ class SequentialDataStream(DataStream):
             data_stream_event.source_data,
             data_stream_event.count,
             data_stream_event.source_slice,
-            data_stream_event.state
+            state
         )
         self.fire_data_available(data_stream_event)
+        self.__last_state = state
 
 
 class DataStreamFunctor:

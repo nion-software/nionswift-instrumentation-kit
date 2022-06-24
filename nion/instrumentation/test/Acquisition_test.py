@@ -732,6 +732,19 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 2), maker.get_data(channel2).data_descriptor)
             self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
 
+    def test_sequence_of_stacked_collections(self):
+        channel = Acquisition.Channel("Cam")
+        camera_data_stream = SingleFrameDataStream(32, (2, 2), channel)
+        section1 = Acquisition.CollectedDataStream(camera_data_stream, (2, 4), [Calibration.Calibration(), Calibration.Calibration()])
+        section2 = Acquisition.CollectedDataStream(camera_data_stream, (2, 4), [Calibration.Calibration(), Calibration.Calibration()])
+        sections = Acquisition.StackedDataStream((section1, section2))
+        maker = Acquisition.FramedDataStream(Acquisition.SequenceDataStream(sections, 2))
+        with maker.ref():
+            Acquisition.acquire(maker)
+            self.assertFalse(maker.is_error)
+            maker_data = maker.get_data(channel)
+            self.assertTrue(numpy.array_equal(numpy.reshape(camera_data_stream.data, maker_data.data_shape), maker_data.data))
+
     def test_scan_as_collection_sequential(self):
         channel = Acquisition.Channel("Cam")
         sequence_len1 = 4
