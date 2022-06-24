@@ -584,6 +584,22 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Wrap this data stream in a sequence of length."""
         return SequenceDataStream(self, length)
 
+    @property
+    def data_shapes(self) -> typing.Sequence[DataAndMetadata.ShapeType]:
+        return tuple(self.get_info(channel).data_metadata.data_shape for channel in self.channels)
+
+    @property
+    def data_types(self) -> typing.Sequence[typing.Optional[numpy.typing.DTypeLike]]:
+        return tuple(self.get_info(channel).data_metadata.data_dtype for channel in self.channels)
+
+    @property
+    def data_descriptors(self) -> typing.Sequence[DataAndMetadata.DataDescriptor]:
+        return tuple(self.get_info(channel).data_metadata.data_descriptor for channel in self.channels)
+
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return tuple()
+
 
 class CollectedDataStream(DataStream):
     """Collect a data stream of chunks into a collection of those chunks.
@@ -625,6 +641,10 @@ class CollectedDataStream(DataStream):
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
+
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return (self.__data_stream,)
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -913,6 +933,10 @@ class CombinedDataStream(DataStream):
         super().about_to_delete()
 
     @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return tuple(self.__data_streams)
+
+    @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         channels: typing.List[Channel] = list()
         for data_stream in self.__data_streams:
@@ -996,6 +1020,10 @@ class SequentialDataStream(DataStream):
             data_stream.remove_ref()
         self.__data_streams = typing.cast(typing.Any, None)
         super().about_to_delete()
+
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return tuple(self.__data_streams)
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1456,6 +1484,10 @@ class FramedDataStream(DataStream):
         self.__framer = typing.cast(typing.Any, None)
         super().about_to_delete()
 
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return (self.__data_stream,)
+
     def add_ref(self) -> FramedDataStream:
         super().add_ref()
         return self
@@ -1780,6 +1812,10 @@ class ContainerDataStream(DataStream):
         super().about_to_delete()
 
     @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return (self.__data_stream,)
+
+    @property
     def data_stream(self) -> DataStream:
         return self.__data_stream
 
@@ -1926,6 +1962,10 @@ class MonitorDataStream(DataStream):
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
+
+    @property
+    def data_streams(self) -> typing.Sequence[DataStream]:
+        return (self.__data_stream,)
 
     @property
     def data_stream(self) -> DataStream:
