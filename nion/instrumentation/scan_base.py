@@ -1712,6 +1712,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__scan_frame_parameters_center_nm = Geometry.FloatPoint.make(scan_frame_parameters.center_nm)
+        self.__section_offset = 0
         self.__drift_tracker = drift_tracker
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
@@ -1793,6 +1794,9 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def scan_size(self) -> Geometry.IntSize:
         return self.__scan_size
 
+    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+        return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata(((), numpy.float32)), 0.0)
+
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return tuple(Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(c)) for c in self.__enabled_channels)
@@ -1815,10 +1819,15 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         scan_frame_parameters = self.__scan_frame_parameters
         scan_size = self.__scan_size
+        # configure the section rect. to make this class work as automatically as possible, the next section
+        # will start at the bottom of this section modulo the height of the acquisition. this allows this
+        # class to be continually started but still produce the proper output in the view channels.
         section_rect = stream_args.slice_rect
+        section_rect = section_rect + Geometry.IntPoint(y=self.__section_offset)
         section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size,
                                                       self.__fractional_area, self.__channel_modifier)
         self.__section_rect = section_rect
+        self.__section_offset = section_rect.bottom % scan_size.height
         self.__started = True
         with self.__lock:
             self.__buffers.clear()
@@ -1951,14 +1960,12 @@ def make_synchronized_scan_data_stream(
     combined_data_stream = Acquisition.CombinedDataStream([scan_like_data_stream, processed_camera_data_stream])
     section_height = section_height or scan_size.height
     section_count = (scan_size.height + section_height - 1) // section_height
-    slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+    collectors: typing.List[Acquisition.CollectedDataStream] = list()
     for section in range(section_count):
         start = section * section_height
         stop = min(start + section_height, scan_size.height)
-        slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-    collector: Acquisition.DataStream = Acquisition.CollectedDataStream(combined_data_stream, tuple(scan_size),
-                                                                        scan_frame_parameters.get_scan_calibrations(),
-                                                                        slice_list)
+        collectors.append(Acquisition.CollectedDataStream(combined_data_stream, (stop - start, scan_size.width), scan_frame_parameters.get_scan_calibrations()))
+    collector: Acquisition.DataStream = Acquisition.StackedDataStream(collectors)
     if not old_move_axis and camera_frame_parameters.processing == "sum_masked":
         active_masks = camera_frame_parameters.active_masks
         if active_masks and len(active_masks) > 1:

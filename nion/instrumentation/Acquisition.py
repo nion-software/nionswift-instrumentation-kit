@@ -1017,9 +1017,16 @@ class StackedDataStream(DataStream):
         self.__current_index = 0
         assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
         self.__channels = self.__data_streams[0].channels
-        self.__last_state = DataStreamStateEnum.PARTIAL
         self.__sequence_count = 0
         self.__sequence_index = 0
+        # confirm that the contained data streams are sensible (same shape except for height, same dtype, same descriptor)
+        for channel in self.__channels:
+            data_metadata = self.__data_streams[0].get_info(channel).data_metadata
+            for data_stream in self.__data_streams:
+                data_stream_data_metadata = data_stream.get_info(channel).data_metadata
+                assert data_metadata.data_shape[1:] == data_stream_data_metadata.data_shape[1:]
+                assert data_metadata.data_dtype == data_stream_data_metadata.data_dtype
+                assert data_metadata.data_descriptor == data_stream_data_metadata.data_descriptor
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -1042,6 +1049,7 @@ class StackedDataStream(DataStream):
         return self.__channels
 
     def get_info(self, channel: Channel) -> DataStreamInfo:
+        # compute duration and height as a sum from contained data streams.
         data_metadata = copy.deepcopy(self.__data_streams[0].get_info(channel).data_metadata)
         duration = 0.0
         height = 0
@@ -1113,17 +1121,24 @@ class StackedDataStream(DataStream):
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         state = DataStreamStateEnum.COMPLETE if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams) else DataStreamStateEnum.PARTIAL
+        # compute height as a sum from contained data streams and configure a new data_metadata
+        data_metadata = copy.deepcopy(data_stream_event.data_metadata)
+        height = 0
+        for data_stream in self.__data_streams:
+            data_stream_data_metadata = data_stream.get_info(data_stream_event.channel).data_metadata
+            height += data_stream_data_metadata.data_shape[0]
+        data_metadata.data_shape_and_dtype = ((height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
+        # create the data stream event with the overridden data_metadata and state.
         data_stream_event = DataStreamEventArgs(
             data_stream_event.data_stream,
             data_stream_event.channel,
-            self.get_info(data_stream_event.channel).data_metadata,
+            data_metadata,
             data_stream_event.source_data,
             data_stream_event.count,
             data_stream_event.source_slice,
             state
         )
         self.fire_data_available(data_stream_event)
-        self.__last_state = state
 
 
 class SequentialDataStream(DataStream):
@@ -1138,7 +1153,6 @@ class SequentialDataStream(DataStream):
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(tuple(), list())
         self.__current_index = 0
-        self.__last_state = DataStreamStateEnum.PARTIAL
         self.__sequence_count = 0
         self.__sequence_index = 0
 
@@ -1241,7 +1255,6 @@ class SequentialDataStream(DataStream):
             state
         )
         self.fire_data_available(data_stream_event)
-        self.__last_state = state
 
 
 class DataStreamFunctor:
@@ -1873,7 +1886,7 @@ class MaskedSumOperator(DataStreamOperator):
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         data_metadata = data_stream_info.data_metadata
         data_metadata = DataAndMetadata.DataMetadata(
-            ((), float),
+            ((), numpy.float32),
             data_metadata.intensity_calibration,
             [],
             data_metadata.metadata,

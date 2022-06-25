@@ -1746,15 +1746,12 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     scan_size = scan_data_stream.scan_size
     section_height = scan_size.height
     section_count = (scan_size.height + section_height - 1) // section_height
-    slice_list: typing.List[typing.Tuple[slice, slice]] = list()
+    collectors: typing.List[Acquisition.CollectedDataStream] = list()
     for section in range(section_count):
         start = section * section_height
         stop = min(start + section_height, scan_size.height)
-        slice_list.append((slice(start, stop), slice(0, scan_size.width)))
-    collector: Acquisition.DataStream = Acquisition.CollectedDataStream(scan_data_stream, tuple(scan_size),
-                                                                        scan_frame_parameters.get_scan_calibrations(),
-                                                                        slice_list)
-
+        collectors.append(Acquisition.CollectedDataStream(scan_data_stream, (stop - start, scan_size.width), scan_frame_parameters.get_scan_calibrations()))
+    collector = Acquisition.StackedDataStream(collectors)
     # construct the channel names.
     channel_names: typing.Dict[Acquisition.Channel, str] = dict()
     for c in scan_hardware_source.get_enabled_channels():

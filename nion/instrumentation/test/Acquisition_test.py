@@ -304,10 +304,8 @@ class TestAcquisitionClass(unittest.TestCase):
         collection_shape = (4, )
         channel = Acquisition.Channel("0")
         data_stream = SingleFrameDataStream(numpy.product(collection_shape), (2, 2), channel, partial_height=1)
-        collector_slices = [tuple(Acquisition.index_slice(n) for n in i) for i in numpy.ndindex(*collection_shape)]
-        collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
-                                                    [Calibration.Calibration()],#, Calibration.Calibration()],
-                                                    collector_slices)
+        collectors = [Acquisition.CollectedDataStream(data_stream, (1,), [Calibration.Calibration()]) for i in numpy.ndindex(*collection_shape)]
+        collector = Acquisition.StackedDataStream(collectors)
         maker = Acquisition.FramedDataStream(collector)
         with maker.ref():
             Acquisition.acquire(maker)
@@ -658,8 +656,10 @@ class TestAcquisitionClass(unittest.TestCase):
         scan_data_stream = ScanDataStream(sequence_len, scan_shape, [channel0, channel1], scan_shape[1])
         camera_data_stream = SingleFrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), channel2)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
-        scan_slices = [[slice(0, 4), slice(0, 8)], [slice(4, 8), slice(0, 8)]]
-        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()], scan_slices)
+        collector = Acquisition.StackedDataStream([
+            Acquisition.CollectedDataStream(combined_data_stream, (4, 8), [Calibration.Calibration(), Calibration.Calibration()]),
+            Acquisition.CollectedDataStream(combined_data_stream, (4, 8), [Calibration.Calibration(), Calibration.Calibration()]),
+            ])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
@@ -687,8 +687,7 @@ class TestAcquisitionClass(unittest.TestCase):
         camera_data_stream = SingleFrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), channel2)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
-        slices = tuple((slice(i, i + 1),) for i in range(sequence_len))
-        sequencer = Acquisition.SequenceDataStream(collector, sequence_len, sub_slices=slices)
+        sequencer = Acquisition.StackedDataStream([Acquisition.SequenceDataStream(collector, 1) for i in range(sequence_len)])
         maker = Acquisition.FramedDataStream(sequencer)
         with maker.ref():
             Acquisition.acquire(maker)
@@ -714,8 +713,10 @@ class TestAcquisitionClass(unittest.TestCase):
         scan_data_stream = ScanDataStream(sequence_len, scan_shape, [channel0, channel1], scan_shape[1])
         camera_data_stream = SingleFrameDataStream(sequence_len * numpy.product(scan_shape), (2, 2), channel2)
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, camera_data_stream])
-        scan_slices = [[slice(0, 4), slice(0, 8)], [slice(4, 8), slice(0, 8)]]
-        collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()], scan_slices)
+        collector = Acquisition.StackedDataStream([
+            Acquisition.CollectedDataStream(combined_data_stream, (4, 8), [Calibration.Calibration(), Calibration.Calibration()]),
+            Acquisition.CollectedDataStream(combined_data_stream, (4, 8), [Calibration.Calibration(), Calibration.Calibration()]),
+            ])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         accumulator = Acquisition.AccumulatedDataStream(sequencer)
         maker = Acquisition.FramedDataStream(accumulator)
