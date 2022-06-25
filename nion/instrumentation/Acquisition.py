@@ -436,6 +436,12 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         super().add_ref()
         return self
 
+    def _print(self, indent: typing.Optional[str] = None) -> None:
+        indent = indent or str()
+        print(f"{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
+        for data_stream in self.data_streams:
+            data_stream._print(indent + "  ")
+
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         """Return the channels for this data stream."""
@@ -1304,6 +1310,9 @@ class NullDataStreamOperator(DataStreamOperator):
     def __init__(self) -> None:
         super().__init__()
 
+    def __str__(self) -> str:
+        return "null"
+
     def _process(self, channel_data: ChannelData) -> typing.Sequence[ChannelData]:
         return [channel_data]
 
@@ -1312,6 +1321,9 @@ class CompositeDataStreamOperator(DataStreamOperator):
     def __init__(self, operator_map: typing.Dict[Channel, DataStreamOperator]) -> None:
         super().__init__()
         self.__operator_map = operator_map
+
+    def __str__(self) -> str:
+        return f"composite ({self.__operator_map})"
 
     def get_channels(self, input_channels: typing.Sequence[Channel]) -> typing.Sequence[Channel]:
         return list(self.__operator_map.keys())
@@ -1336,6 +1348,9 @@ class StackedDataStreamOperator(DataStreamOperator):
     def __init__(self, operators: typing.Sequence[DataStreamOperator]) -> None:
         super().__init__()
         self.__operators = list(operators)
+
+    def __str__(self) -> str:
+        return f"stacked ({self.__operators})"
 
     @property
     def operators(self) -> typing.Sequence[DataStreamOperator]:
@@ -1616,6 +1631,12 @@ class FramedDataStream(DataStream):
         self.__framer = typing.cast(typing.Any, None)
         super().about_to_delete()
 
+    def __str__(self) -> str:
+        s = super().__str__()
+        if self.__operator and not isinstance(self.__operator, NullDataStreamOperator):
+            s = s + f" ({self.__operator})"
+        return s
+
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
         return (self.__data_stream,)
@@ -1774,6 +1795,9 @@ class SumOperator(DataStreamOperator):
         super().__init__()
         self.__axis = axis
 
+    def __str__(self) -> str:
+        return "sum"
+
     @property
     def axis(self) -> typing.Optional[AxisType]:
         return self.__axis
@@ -1839,6 +1863,9 @@ class MaskedSumOperator(DataStreamOperator):
         super().__init__()
         self.__mask = mask
 
+    def __str__(self) -> str:
+        return "masked"
+
     @property
     def mask(self) -> MaskLike:
         return self.__mask
@@ -1876,6 +1903,9 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
     def __init__(self, channel: typing.Optional[Channel] = None) -> None:
         super().__init__()
         self.__channel = channel
+
+    def __str__(self) -> str:
+        return f"move-axis"
 
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         if self.__channel is None or channel == self.__channel:
