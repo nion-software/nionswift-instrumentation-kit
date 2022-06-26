@@ -351,17 +351,20 @@ class DataStreamEventArgs:
 
 
 class DataStreamArgs:
-    def __init__(self, slice: SliceType, shape: ShapeType, max_count: typing.Optional[int] = None) -> None:
-        for s, l in zip(slice, shape):
-            assert s.start < s.stop
-            assert 0 <= s.start <= l
-            assert 0 <= s.stop <= l
-        self.slice = slice
-        self.shape = shape
+    def __init__(self, shape: ShapeType, max_count: typing.Optional[int] = None) -> None:
+        self.__shape = shape
         self.max_count = max_count
 
     def __str__(self) -> str:
         return f"{self!r} {self.slice} {self.shape} max:{self.max_count}"
+
+    @property
+    def shape(self) -> ShapeType:
+        return self.__shape
+
+    @property
+    def slice(self) -> SliceType:
+        return tuple(slice(0, length) for length in self.shape)
 
     @property
     def slice_shape(self) -> ShapeType:
@@ -617,7 +620,7 @@ class CollectedDataStream(DataStream):
     Optionally pass in a list of sub-slices to break collection into sections.
     """
 
-    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], sub_slices: typing.Optional[SliceListType] = None) -> None:
+    def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
@@ -625,14 +628,11 @@ class CollectedDataStream(DataStream):
         assert len(shape) in (1, 2)
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
-        self.__collection_sub_slices = [tuple(sub_slice) for sub_slice in sub_slices] if sub_slices else [tuple(slice(0, length) for length in self.__collection_shape)]
-        self.__collection_sub_slice_index = 0
-        # indexes track the destination of the next data within the collection.
-        self.__indexes: typing.Dict[Channel, int] = dict()
         # sub-slice indexes track the destination of the next data within the current slice.
-        self.__sub_slice_indexes: typing.Dict[Channel, int] = dict()
+        self.__indexes: typing.Dict[Channel, int] = dict()
         # needs starts tracks whether the downstream data stream needs a start call.
         self.__data_stream_started = False
+        self.__all_channels_need_start = False
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -689,14 +689,6 @@ class CollectedDataStream(DataStream):
         index = min(incomplete_indexes)
         return (index + p) / count
 
-    @property
-    def __all_channels_need_start(self) -> bool:
-        # whether all channels are in the 'needs_start' state.
-        collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
-        collection_sub_slice_length = expand_shape(collection_sub_slice_shape)
-        needs_starts = {channel: self.__sub_slice_indexes.get(channel, 0) == collection_sub_slice_length for channel in self.channels}
-        return all(needs_starts.get(channel, False) for channel in self.input_channels)
-
     def _send_next(self) -> None:
         assert self.__data_stream_started
         self.__data_stream.send_next()
@@ -706,8 +698,6 @@ class CollectedDataStream(DataStream):
         assert not self.__handle_error_event_listener
         self.__data_available_event_listener = self.__data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, CollectedDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
-        self.__collection_sub_slice_index = 0
-        self.__indexes = dict()
         self._start_next_sub_stream()
 
     def _abort_stream(self) -> None:
@@ -717,20 +707,16 @@ class CollectedDataStream(DataStream):
         if self.__data_stream_started:
             self.__data_stream.finish_stream()
             self.__data_stream_started = False
-        self.__collection_sub_slice = self.__collection_sub_slices[self.__collection_sub_slice_index]
-        self.__sub_slice_indexes.clear()
-        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
-        self.__data_stream.start_stream(DataStreamArgs(self.__collection_sub_slice, self.__collection_shape))
+        self.__indexes.clear()
+        self.__all_channels_need_start = False
+        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_shape))
+        self.__data_stream.start_stream(DataStreamArgs(self.__collection_shape))
         self.__data_stream_started = True
-        self.__collection_sub_slice_index += 1
 
     def _advance_stream(self) -> None:
         # handle calling finish and start for the contained data stream.
         if self.__all_channels_need_start:
-            if self.__data_stream.is_finished and self.__collection_sub_slice_index < len(self.__collection_sub_slices):
-                self._start_next_sub_stream()
-            elif not self.is_finished:
-                self.__collection_sub_slice_index = 0
+            if not self.is_finished:
                 self._start_next_sub_stream()
         self.__data_stream.advance_stream()
 
@@ -769,7 +755,6 @@ class CollectedDataStream(DataStream):
 
         # useful variables
         data_metadata = data_stream_event.data_metadata
-        count = data_stream_event.count
         channel = data_stream_event.channel
         collection_count = expand_shape(self.__collection_shape)
 
@@ -797,20 +782,19 @@ class CollectedDataStream(DataStream):
         # index for channel should be mod collection_count. the index is allowed to be equal
         # to collection_count to signal that the channel is complete. this fact is used to
         # calculate progress. self.__indexes[channel] will get set directly to next_channel below.
-        index = self.__indexes.get(channel, 0) % collection_count
-        sub_slice_index = self.__sub_slice_indexes.get(channel, 0)
+        index = self.__indexes.get(channel, 0)
         collection_rank = len(self.__collection_shape)
-        collection_sub_slice_shape = tuple(get_slice_shape(self.__collection_sub_slice, self.__collection_shape))
-        collection_sub_slice_row_length = expand_shape(collection_sub_slice_shape[1:])
-        if count is not None:
+        collection_row_length = expand_shape(self.__collection_shape[1:])
+        if data_stream_event.count is not None:
+            remaining_count = data_stream_event.count
+            current_index = index
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
-            assert count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
-            assert index + count <= collection_count
-            assert count > 0
-            next_index = index + count
-            next_sub_slice_index = sub_slice_index + count
-            if count == 1:
+            assert remaining_count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
+            assert current_index + remaining_count <= collection_count
+            assert remaining_count > 0
+            next_index = index + remaining_count
+            if remaining_count == 1:
                 # a single data chunk has been provided.
                 # if the count is one, add new dimensions of length one for the collection shape and form
                 # the new slice with indexes of 0 for each collection dimension and full slices for the remaining
@@ -818,65 +802,64 @@ class CollectedDataStream(DataStream):
                 old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
                 new_source_data = old_source_data.reshape((1,) * collection_rank + old_source_data.shape[1:])
                 new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
-                new_state = DataStreamStateEnum.COMPLETE if index + count == collection_count else DataStreamStateEnum.PARTIAL
+                new_state = DataStreamStateEnum.COMPLETE if current_index + remaining_count == collection_count else DataStreamStateEnum.PARTIAL
                 self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
             else:
                 # multiple data chunks have been provided.
                 # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
                 # start by calculating the start/stop rows. reshape the data into collection shape and add a slice
                 # for the rows and full slices for the remaining dimensions.
-                collection_slice_offset = better_unravel_index(ravel_slice_start(self.__collection_sub_slice, self.__collection_shape), self.__collection_shape)[0]
                 old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
                 source_index = 0
-                if index % collection_sub_slice_row_length != 0:
+                if current_index % collection_row_length != 0:
                     # finish the current row
                     assert len(self.__collection_shape) == 2
-                    slice_column = index % collection_sub_slice_row_length
-                    slice_width = min(collection_sub_slice_row_length - slice_column, count)
+                    slice_column = current_index % collection_row_length
+                    slice_width = min(collection_row_length - slice_column, remaining_count)
                     new_source_slice = (slice(0, 1), slice(0, slice_width)) + (slice(None),) * (len(new_shape) - 2)
                     next_source_index = source_index + slice_width
                     new_source_data = old_source_data[source_index:next_source_index].reshape((1, slice_width) + old_source_data.shape[1:])
-                    new_state = DataStreamStateEnum.COMPLETE if index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
+                    new_state = DataStreamStateEnum.COMPLETE if current_index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
                     self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     source_index = next_source_index
-                    index += slice_width
-                    count -= slice_width
-                    assert count is not None  # for type checker bug
+                    current_index += slice_width
+                    remaining_count -= slice_width
+                    assert remaining_count is not None  # for type checker bug
                 else:
                     new_state = DataStreamStateEnum.COMPLETE  # satisfy type checker
-                if count // collection_sub_slice_row_length > 0:
+                if remaining_count // collection_row_length > 0:
                     # send as many complete rows as possible
-                    slice_offset = index // collection_sub_slice_row_length - collection_slice_offset
-                    slice_start = better_unravel_index(index, self.__collection_shape)[0] - slice_offset - collection_slice_offset
-                    slice_stop = better_unravel_index(index + count, self.__collection_shape)[0] - slice_offset - collection_slice_offset
+                    slice_offset = current_index // collection_row_length
+                    slice_start = better_unravel_index(current_index, self.__collection_shape)[0] - slice_offset
+                    slice_stop = better_unravel_index(current_index + remaining_count, self.__collection_shape)[0] - slice_offset
                     assert 0 <= slice_start <= self.__collection_shape[0]
                     assert 0 <= slice_stop <= self.__collection_shape[0]
                     source_slice_shape = get_slice_shape(data_stream_event.source_slice, old_source_data.shape)
                     source_slice_length = source_slice_shape[0]
-                    row_count = (source_slice_length - source_index) // collection_sub_slice_row_length
-                    next_source_index = source_index + row_count * collection_sub_slice_row_length
-                    new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + collection_sub_slice_shape[1:] + old_source_data.shape[1:])
+                    row_count = (source_slice_length - source_index) // collection_row_length
+                    next_source_index = source_index + row_count * collection_row_length
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + self.__collection_shape[1:] + old_source_data.shape[1:])
                     new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
-                    new_state = DataStreamStateEnum.COMPLETE if index + row_count * collection_sub_slice_row_length == collection_count else DataStreamStateEnum.PARTIAL
+                    new_state = DataStreamStateEnum.COMPLETE if current_index + row_count * collection_row_length == collection_count else DataStreamStateEnum.PARTIAL
                     self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     source_index = next_source_index
-                    index += row_count * collection_sub_slice_row_length
-                    count -= row_count * collection_sub_slice_row_length
-                    assert count is not None  # for type checker bug
-                if count > 0:
+                    current_index += row_count * collection_row_length
+                    remaining_count -= row_count * collection_row_length
+                    assert remaining_count is not None  # for type checker bug
+                if remaining_count > 0:
                     # any remaining count means a partial row
                     assert len(self.__collection_shape) == 2
-                    assert count < collection_sub_slice_row_length
-                    new_source_slice = (slice(0, 1), slice(0, count)) + (slice(None),) * (len(new_shape) - 2)
-                    next_source_index = source_index + count
-                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, count) + old_source_data.shape[1:])
+                    assert remaining_count < collection_row_length
+                    new_source_slice = (slice(0, 1), slice(0, remaining_count)) + (slice(None),) * (len(new_shape) - 2)
+                    next_source_index = source_index + remaining_count
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, remaining_count) + old_source_data.shape[1:])
                     new_state = DataStreamStateEnum.PARTIAL  # always partial, otherwise would have been sent in previous section
                     self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
                     # source_index = next_source_index  # no need for this
-                    index += count
-                    count -= count
-                    assert count is not None  # for type checker bug
-                assert count == 0  # everything has been accounted for
+                    current_index += remaining_count
+                    remaining_count -= remaining_count
+                    assert remaining_count is not None  # for type checker bug
+                assert remaining_count == 0  # everything has been accounted for
         else:
             # incoming data is partial
             # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
@@ -886,15 +869,15 @@ class CollectedDataStream(DataStream):
             # new state is complete if data chunk is complete and it will put us at the end of our collection.
             new_state = DataStreamStateEnum.PARTIAL
             next_index = index
-            next_sub_slice_index = sub_slice_index
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
                 next_index += 1
-                next_sub_slice_index += 1
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
             self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
         self.__indexes[channel] = next_index
-        self.__sub_slice_indexes[channel] = next_sub_slice_index
+        # whether all channels are in the 'needs_start' state.
+        needs_starts = {channel: self.__indexes.get(channel, 0) == collection_count for channel in self.channels}
+        self.__all_channels_need_start = all(needs_starts.get(channel, False) for channel in self.input_channels)
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -902,8 +885,8 @@ class SequenceDataStream(CollectedDataStream):
 
     This is a subclass of CollectedDataStream.
     """
-    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None, sub_slices: typing.Optional[SliceListType] = None) -> None:
-        super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),), sub_slices)
+    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None) -> None:
+        super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),))
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
@@ -1013,7 +996,7 @@ class StackedDataStream(DataStream):
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
-        self.__stream_args = DataStreamArgs(tuple(), list())
+        self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0
         assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
         self.__channels = self.__data_streams[0].channels
@@ -1077,7 +1060,7 @@ class StackedDataStream(DataStream):
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__current_index = 0
-        self.__stream_args = DataStreamArgs((slice(0, 1),), (1,))
+        self.__stream_args = DataStreamArgs((1,))
         self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
         self.__sequence_count = stream_args.sequence_count
         self.__sequence_index = 0
@@ -1151,7 +1134,7 @@ class SequentialDataStream(DataStream):
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
-        self.__stream_args = DataStreamArgs(tuple(), list())
+        self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0
         self.__sequence_count = 0
         self.__sequence_index = 0
@@ -1201,7 +1184,7 @@ class SequentialDataStream(DataStream):
 
     def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
         self.__current_index = 0
-        self.__stream_args = DataStreamArgs((slice(0, 1),), (1,))
+        self.__stream_args = DataStreamArgs((1,))
         # self.__stream_args = copy.deepcopy(stream_args)
         self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
         self.__sequence_count = stream_args.sequence_count
@@ -2287,8 +2270,8 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     Progress must be made once per 60s or else an exception is thrown.
     """
     TIMEOUT = 60.0
-    data_stream.prepare_stream(DataStreamArgs((slice(0, 1),), (1,)))
-    data_stream.start_stream(DataStreamArgs((slice(0, 1),), (1,)))
+    data_stream.prepare_stream(DataStreamArgs((1,)))
+    data_stream.start_stream(DataStreamArgs((1,)))
     try:
         start = time.time()
         last_progress = 0.0
