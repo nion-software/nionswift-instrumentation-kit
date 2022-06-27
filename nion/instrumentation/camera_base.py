@@ -2624,6 +2624,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__camera_sequence_overheads: typing.List[float] = list()
         self.camera_sequence_overhead = 0.0
         self.__start = 0.0
+        self.__progress = 0.0
 
     def about_to_delete(self) -> None:
         if self.__record_task:
@@ -2638,6 +2639,12 @@ class CameraFrameDataStream(Acquisition.DataStream):
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
         data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
+
+    @property
+    def progress(self) -> float:
+        if not self.is_finished:
+            return self.__progress
+        return super().progress
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):
@@ -2657,6 +2664,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         else:
             assert self.__camera_device_stream_interface
             self.__last_index = 0
+            self.__progress = 0.0
             self.__start = time.perf_counter()
             self.__camera_device_stream_interface.start_stream(stream_args)
             self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
@@ -2702,7 +2710,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
             partial_data = self.__camera_device_stream_interface.get_next_data()
             if partial_data:
                 valid_index = partial_data.valid_index
-                is_complete = partial_data.is_complete
                 xdata = partial_data.xdata
                 start_index = self.__last_index
                 stop_index = valid_index
@@ -2726,7 +2733,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
                     total_count = numpy.product(xdata.navigation_dimension_shape, dtype=numpy.int64)  # type: ignore
                     data = data_channel_data.reshape((total_count,) + tuple(xdata.datum_dimension_shape))
                     source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
-                    data_stream_state = Acquisition.DataStreamStateEnum.COMPLETE if is_complete else Acquisition.DataStreamStateEnum.PARTIAL
                     data_stream_event = Acquisition.DataStreamEventArgs(self,
                                                                         channel,
                                                                         data_metadata,
@@ -2735,6 +2741,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                         source_slice,
                                                                         Acquisition.DataStreamStateEnum.COMPLETE)
                     self.fire_data_available(data_stream_event)
+                    self.__progress = valid_index / total_count.item()
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
 

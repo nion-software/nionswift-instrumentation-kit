@@ -37,7 +37,7 @@ result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
 """
 
-TIMEOUT = 20
+TIMEOUT = 30.0
 
 
 class ApplicationDataInMemory:
@@ -1163,19 +1163,15 @@ class TestCameraControlClass(unittest.TestCase):
         start = time.time()
         last_progress_time = time.time()
         last_progress = progress_value_model.value
-        while is_acquiring_model.value and time.time() - last_progress_time < TIMEOUT:
+        while is_acquiring_model.value:
+            if time.time() - last_progress_time > TIMEOUT:
+                raise Exception(f"Timeout {TIMEOUT}s")
             document_controller.periodic()
-            time.sleep(0.01)
             progress = progress_value_model.value
             if progress > last_progress:
                 last_progress = progress
                 last_progress_time = time.time()
-        if not (time.time() - last_progress_time < TIMEOUT):
-            start = time.time()
-            while is_acquiring_model.value and time.time() - start < 5.0:
-                document_controller.periodic()
-                time.sleep(0.01)
-            raise Exception("Timeout")
+            time.sleep(0.05)
         self.assertFalse(acquisition_state.is_error)
         self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
         for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
