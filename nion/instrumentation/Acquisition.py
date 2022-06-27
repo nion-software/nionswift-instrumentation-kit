@@ -834,9 +834,7 @@ class CollectedDataStream(DataStream):
                     slice_stop = better_unravel_index(current_index + remaining_count, self.__collection_shape)[0] - slice_offset
                     assert 0 <= slice_start <= self.__collection_shape[0]
                     assert 0 <= slice_stop <= self.__collection_shape[0]
-                    source_slice_shape = get_slice_shape(data_stream_event.source_slice, old_source_data.shape)
-                    source_slice_length = source_slice_shape[0]
-                    row_count = (source_slice_length - source_index) // collection_row_length
+                    row_count = remaining_count // collection_row_length
                     next_source_index = source_index + row_count * collection_row_length
                     new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + self.__collection_shape[1:] + old_source_data.shape[1:])
                     new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
@@ -1053,7 +1051,9 @@ class StackedDataStream(DataStream):
     @property
     def _progress(self) -> float:
         # return the average of combined streams progress
-        return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
+        if self.__sequence_count:
+            return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
+        return 0.0
 
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()

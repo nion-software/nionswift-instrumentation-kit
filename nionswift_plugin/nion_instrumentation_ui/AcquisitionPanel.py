@@ -2054,9 +2054,14 @@ def _acquire_data_stream(data_stream: Acquisition.DataStream,
     # define a task to update progress every 250ms.
     async def update_progress(acquisition: Acquisition.Acquisition, progress_value_model: Model.PropertyModel[int]) -> None:
         while True:
-            progress = acquisition.progress
-            progress_value_model.value = int(100 * progress)
-            await asyncio.sleep(0.25)
+            try:
+                progress = acquisition.progress
+                progress_value_model.value = int(100 * progress)
+                await asyncio.sleep(0.25)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                raise
 
     progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
 
