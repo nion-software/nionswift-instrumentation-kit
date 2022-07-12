@@ -2730,8 +2730,11 @@ class CameraFrameDataStream(Acquisition.DataStream):
                         DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
                         xdata.timezone,
                         xdata.timezone_offset)
-                    total_count = numpy.product(xdata.navigation_dimension_shape, dtype=numpy.int64)  # type: ignore
-                    data = data_channel_data.reshape((total_count,) + tuple(xdata.datum_dimension_shape))
+                    # data_count is the total for the data provided by the child data stream. some data streams will
+                    # provide a slice into a chunk of data representing the entire stream; whereas others will provide
+                    # smaller chunks.
+                    data_count = numpy.product(xdata.navigation_dimension_shape, dtype=numpy.int64)
+                    data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
                     source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
                     data_stream_event = Acquisition.DataStreamEventArgs(self,
                                                                         channel,
@@ -2741,7 +2744,9 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                         source_slice,
                                                                         Acquisition.DataStreamStateEnum.COMPLETE)
                     self.fire_data_available(data_stream_event)
-                    self.__progress = valid_index / total_count.item()
+                    # total_count is the total for this entire stream.
+                    total_count = numpy.product(self.get_info(channel).data_metadata.data_shape, dtype=numpy.int64).item()
+                    self.__progress = valid_index / total_count
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
 

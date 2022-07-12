@@ -441,7 +441,7 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
-        print(f"{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
+        print(f".{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
 
@@ -2283,7 +2283,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             post_progress = data_stream.progress
             data_stream.advance_stream()
             next_progress = data_stream.progress
-            assert pre_progress <= post_progress <= next_progress
+            assert pre_progress <= post_progress <= next_progress, f"{pre_progress=} <= {post_progress=} <= {next_progress=}"
             assert next_progress >= last_progress
             if next_progress > last_progress:
                 last_progress = next_progress
