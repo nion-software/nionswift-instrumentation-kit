@@ -3,6 +3,7 @@ from __future__ import annotations
 # system imports
 import asyncio
 import copy
+import dataclasses
 import datetime
 import functools
 import gettext
@@ -11,17 +12,19 @@ import numpy
 import numpy.typing
 import threading
 import typing
+import collections
 
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
+from nion.instrumentation import stem_controller as stem_controller_module
 from nion.swift.model import DataItem
 from nion.utils import Event
 from nion.utils import Geometry
-from nion.utils import Registry
 from nion.utils import ThreadPool
+from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DocumentModel
@@ -50,7 +53,7 @@ class DriftLogger:
         # must be called on main thread
         if not self.__data_item:
             drift_data_frame = self.__drift_tracker.drift_data_frame
-            delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+            delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[1], drift_data_frame[0], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
             data_item = DataItem.DataItem(delta_nm_data)
             data_item.title = f"Drift Log"
             self.__document_model.append_data_item(data_item)
@@ -75,8 +78,122 @@ class DriftLogger:
 
     def __drift_changed(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
         drift_data_frame = self.__drift_tracker.drift_data_frame
-        delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
+        delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[1], drift_data_frame[0], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
         self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, delta_nm_data))
+
+
+@dataclasses.dataclass
+class DriftResult:
+    """Result of drift calculation returned by DriftCalculator.calculate
+
+    It can interpreted as: Between 'time_window_start' and 'time_window_end' the average drift rate was estimated to
+    be 'drift_rate'.
+
+    'drift_rate' should be in units of m / s.
+    """
+
+    drift_rate: Geometry.FloatSize
+    time_window_start: datetime.datetime
+    time_window_end: datetime.datetime
+
+
+class DriftCalculator:
+    """Calculate drift rate from images with timestamps
+
+    Used by DriftTracker to perform the actual drift calculation from submitted images.
+
+    There can be different algorithms for drift calculation. Each of them should be implemented in its own class
+    which should be a subclass of this one.
+
+    DriftTracker discovers available drift calculation algorithms from the registry by looking for the component id
+    'drift_calculator'.
+
+    You need to set 'drift_calculator_id' to a unique name that will be used to identify a specifc algorithm.
+    'drift_calculator_name' is optional and will be used as the display name in a UI based drift calculator selection.
+    """
+    drift_calculator_id: str
+    drift_calculator_name: typing.Optional[str] = None
+
+    def calculate_drift_result(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: typing.Deque[DataAndMetadata.DataAndMetadata]) -> typing.Optional[DriftResult]:
+        ...
+
+
+class SimpleDriftCalculator(DriftCalculator):
+    drift_calculator_id = 'simple_drift_calculator'
+
+    def calculate_drift_result(self, first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata], xdata_history: typing.Deque[DataAndMetadata.DataAndMetadata]) -> typing.Optional[DriftResult]:
+        current_xdata = xdata_history[-1] if len(xdata_history) else None
+
+        if first_xdata and current_xdata:
+            # Check that units of submitted images are "nm". Once we have a good system for tracking and recognizing units,
+            # we can also allow other units and convert them to nm here.
+            assert first_xdata.dimensional_calibrations[-1].units == "nm"
+            assert current_xdata.dimensional_calibrations[-1].units == "nm"
+            quality, raw_offset = xd.register_template(first_xdata, current_xdata)
+            delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds()
+            assert delta_time > 0.0
+            offset = Geometry.FloatPoint.make(typing.cast(typing.Tuple[float, float], raw_offset))
+
+            delta_nm = Geometry.FloatSize(
+                    h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
+                    w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
+            # print(f"Raw shift nm: {delta_nm}, raw offset px: {raw_offset}, quality: {quality}, delta time: {delta_time}")
+
+            return DriftResult(drift_rate=delta_nm / delta_time * 1e-9, time_window_start=first_xdata.timestamp, time_window_end=current_xdata.timestamp)
+
+        return None
+
+
+Registry.register_component(SimpleDriftCalculator(), {"drift_calculator"})
+
+
+class DriftDataSource:
+    """Collects images from a camera or scan device and provides them to DriftTracker for calculating drift.
+
+    Each drift data source needs to define in which axis its images are oriented. In addition it can also define an
+    extra rotation, which is useful for example for subscan images.
+
+    Each drift data source needs to have a unique id so that "DriftTracker.submit_image" can append images to the
+    correct drift data source.
+    """
+
+    def __init__(self, *, drift_data_source_id: str, axis: stem_controller_module.AxisDescription, applies_drift_correction: bool, rotation: float=0.0, max_history_size: typing.Optional[int]=10) -> None:
+        self.__drift_data_source_id = drift_data_source_id
+        self.__axis = axis
+        self.__applies_drift_correction = applies_drift_correction
+        self.__rotation = rotation
+        self.__first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
+        self.__xdata_history: typing.Deque[DataAndMetadata.DataAndMetadata] = collections.deque(maxlen=max_history_size)
+
+    @property
+    def drift_data_source_id(self) -> str:
+        return self.__drift_data_source_id
+
+    @property
+    def xdata_history(self) -> typing.Deque[DataAndMetadata.DataAndMetadata]:
+        return self.__xdata_history
+
+    @property
+    def first_xdata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
+        return self.__first_xdata
+
+    @property
+    def axis(self) -> stem_controller_module.AxisDescription:
+        return self.__axis
+
+    @property
+    def rotation(self) -> float:
+        return self.__rotation
+
+    @property
+    def applies_drift_correction(self) -> bool:
+        return self.__applies_drift_correction
+
+    def submit_image(self, xdata: DataAndMetadata.DataAndMetadata) -> None:
+        if self.__first_xdata is None:
+            self.__first_xdata = copy.deepcopy(xdata)
+        else:
+            self.__xdata_history.append(copy.deepcopy(xdata))
 
 
 class DriftTracker:
@@ -92,23 +209,36 @@ class DriftTracker:
     An extension to this class would be to separate the drift algorithm into its own class and allow it to be
     configured.
     """
-    def __init__(self) -> None:
+    def __init__(self, *, stem_controller: stem_controller_module.STEMController, native_axis: stem_controller_module.AxisDescription, max_history_size: typing.Optional[int] = 10) -> None:
+        self.__stem_controller = stem_controller
+        self.__native_axis = native_axis
         # dispatcher is used to calculate drift offsets on a thread
         self.__dispatcher = ThreadPool.SingleItemDispatcher()
 
         # the lock controls access to the fields below
         self.__lock = threading.RLock()
+        # The "active" flag does not have any effect within DriftTracker. It is just there to have a global place for
+        # tracking if drift correction is enabled or not. Since DriftTracker is a globally used class, it makes sense to
+        # also track whether drift correction is active globally. What each component does with this information is then
+        # up to its individual implementation.
+        self.__active = False
 
-        #  The current data item is used for the delta calculation only.
-        self.__first_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
-        self.__current_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
-        self.__rotation = 0.0
-
-        self.__drift_data_frame: numpy.typing.NDArray[numpy.float_] = numpy.zeros((4, 0), float)
-
-        self.__total_delta_nm = Geometry.FloatSize()
+        self.__drift_history: typing.List[DriftResult] = list()
 
         self.drift_changed_event = Event.Event()
+        # Set this to an existing drift calculator id to select a specific algorithm for drift calculation
+        # If this is set to None or a non-exisiting name we simply use the first algorithm available in the Registry
+        self.drift_calculator_id: typing.Optional[str] = None
+        # DriftTracker.submit_image() now requires callers to supply a "drift_data_source_id". This needs to be a string
+        # that is unique to a source for images used to calculate drift. For each new "drift_data_source_id" we create
+        # a separate DriftDataSource that tracks images from this source separately. The calculated drift rates will
+        # be shared across all DriftDataSources though. This allows to have different sources for drift images. As an
+        # example, a user might do a coarse drift estimation with the Ronchigram camera before going to scan mode. Then
+        # in scan mode there is very likely some residual drift because there you are typically working with much higher
+        # resolutions. Of course we cannot cross-correlate ronchigram images with scanned images, so we need to track
+        # them separately. DriftTracker also converts all measured drift rates to its native axis, which defaults to
+        # "StageAxis".
+        self.drift_data_sources: typing.Set[DriftDataSource] = set()
 
     def close(self) -> None:
         self.__dispatcher.close()
@@ -116,120 +246,183 @@ class DriftTracker:
 
     def reset(self) -> None:
         with self.__lock:
-            self.__first_xdata = None
-            self.__current_xdata = None
-            self.__drift_data_frame = numpy.zeros((4, 0), float)
-            self.__rotation = 0.0
-            self.__total_delta_nm = Geometry.FloatSize()
+            self.__drift_history.clear()
+            self.drift_data_sources.clear()
+
+    @property
+    def active(self) -> bool:
+        return self.__active
+
+    @active.setter
+    def active(self, active: bool) -> None:
+        with self.__lock:
+            self.__active = active
 
     @property
     def measurement_count(self) -> int:
         with self.__lock:
-            return typing.cast(int, self.__drift_data_frame.shape[-1])
+            return len(self.__drift_history)
 
     @property
     def total_delta_nm(self) -> Geometry.FloatSize:
-        return self.__total_delta_nm
+        with self.__lock:
+            if not len(self.__drift_history):
+                return Geometry.FloatSize()
+            total_delta = Geometry.FloatSize()
+            time_window_start = self.__drift_history[0].time_window_start
+            for drift_result in self.__drift_history:
+                total_delta += drift_result.drift_rate * (drift_result.time_window_end - time_window_start).total_seconds()
+                time_window_start = drift_result.time_window_end
+            return total_delta * 1e9
 
     @property
     def drift_data_frame(self) -> _NDArray:
         with self.__lock:
-            return numpy.copy(self.__drift_data_frame)  # type: ignore
+            drift_data_frame = numpy.zeros((4, len(self.__drift_history) + 1))
+            if not len(self.__drift_history):
+                return drift_data_frame
+
+            time_window_start = self.__drift_history[0].time_window_start
+            for i, drift_result in enumerate(self.__drift_history):
+                delta_time = (drift_result.time_window_end - time_window_start).total_seconds()
+                delta_nm = drift_result.drift_rate * delta_time * 1e9
+                offset_nm_xy = math.sqrt(pow(delta_nm.height, 2) + pow(delta_nm.width, 2))
+                drift_data_frame[:, i + 1] = (delta_nm.height, delta_nm.width, offset_nm_xy, delta_time)
+                time_window_start = drift_result.time_window_end
+            return numpy.cumsum(drift_data_frame, axis=1)
 
     @property
     def last_delta_nm(self) -> Geometry.FloatSize:
         with self.__lock:
             if self.measurement_count > 0:
-                width = self.__drift_data_frame[1][-1]
-                height = self.__drift_data_frame[0][-1]
+                drift_result = self.__drift_history[-1]
+                time_window_start = drift_result.time_window_start
+                if self.measurement_count > 1:
+                    time_window_start = self.__drift_history[-2].time_window_end
+                delta_time = (drift_result.time_window_end - time_window_start).total_seconds()
+                delta_nm = drift_result.drift_rate * delta_time * 1e9
             else:
-                width = 0.0
-                height = 0.0
-            return Geometry.FloatSize(height=height, width=width)
+                delta_nm = Geometry.FloatSize()
+            return delta_nm
 
     @property
     def _last_entry_utc_time(self) -> datetime.datetime:
-        if self.__first_xdata:
-            # self.__first_xdata.timestamp is utc datetime, so just use 'fromtimestamp' to get utc POSIX timestamp
-            return datetime.datetime.fromtimestamp(self.__first_xdata.timestamp.timestamp() + numpy.sum(self.__drift_data_frame[3]))
+        if self.measurement_count > 0:
+            return self.__drift_history[-1].time_window_end
         else:
             return datetime.datetime.utcnow()
 
-    def get_drift_rate(self, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
+    def get_drift_rate(self, *, axis: stem_controller_module.AxisDescription, n: typing.Optional[int] = None) -> Geometry.FloatSize:
         """Return the drift rate over the last n measurements."""
-        n = 3 if n is None else n
+        n = 1 if n is None else n
         assert n > 0
         with self.__lock:
+            drift_rate = Geometry.FloatSize()
             if self.measurement_count > 0:
-                assert self.__first_xdata
                 n = min(n, self.measurement_count)
-                offset_v = typing.cast(float, numpy.sum(self.__drift_data_frame[0][-n:]))
-                offset_h = typing.cast(float, numpy.sum(self.__drift_data_frame[1][-n:]))
-                recent_offset = Geometry.FloatSize(h=offset_v, w=offset_h)
-                recent_time = typing.cast(float, numpy.sum(self.__drift_data_frame[3][-n:]))
-                return recent_offset / recent_time
-            return Geometry.FloatSize()
+                for i in range(1, n + 1):
+                    drift_rate += self.__drift_history[-i].drift_rate
+                drift_rate /= n
+        return self.__stem_controller.axis_transform_point(drift_rate.as_point(), from_axis=self.__native_axis, to_axis=axis).as_size()
 
-    def predict_drift(self, utc_time: datetime.datetime, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
+    def predict_drift(self, utc_time: datetime.datetime, *, axis: stem_controller_module.AxisDescription, n: typing.Optional[int] = None) -> Geometry.FloatSize:
         """Predict total drift (nm) at utc_time."""
         with self.__lock:
             future_delta_nm = Geometry.FloatSize()
-            if self.__drift_data_frame.shape[-1] > 0:
-                assert self.__first_xdata
-                last_entry_timestamp = self.__first_xdata.timestamp.timestamp() + numpy.sum(self.__drift_data_frame[3])
-                delta_timestamp = utc_time.timestamp() - last_entry_timestamp
-                future_delta_nm = delta_timestamp * self.get_drift_rate(n=n)
-            return self.__total_delta_nm + future_delta_nm
+            if self.measurement_count > 0:
+                delta_time = utc_time - self.__drift_history[-1].time_window_end
+                future_delta_nm = delta_time.total_seconds() * self.get_drift_rate(axis=axis, n=n) * 1e9
+            total_delta_nm = self.total_delta_nm
+        total_delta_nm = self.__stem_controller.axis_transform_point(total_delta_nm.as_point(), from_axis=self.__native_axis, to_axis=axis).as_size()
+        return total_delta_nm + future_delta_nm
 
-    def __append_drift(self, delta_nm: Geometry.FloatSize, delta_time: float) -> None:
-        offset_nm_xy = math.sqrt(pow(delta_nm.height, 2) + pow(delta_nm.width, 2))
+    def __append_drift(self, drift_result: DriftResult) -> None:
         with self.__lock:
-            self.__drift_data_frame = numpy.hstack(
-                [self.__drift_data_frame, numpy.array([delta_nm.height, delta_nm.width, offset_nm_xy, delta_time]).reshape(4, 1)])
+            self.__drift_history.append(drift_result)
 
-    def __calculate(self) -> None:
+    def __calculate(self, drift_data_source_id: str) -> None:
+        available_calculators: typing.Set[DriftCalculator] = Registry.get_components_by_type("drift_calculator")
+
+        drift_calculator: typing.Optional[DriftCalculator] = None
+        drift_result: typing.Optional[DriftResult] = None
+        drift_data_source: typing.Optional[DriftDataSource] = None
+
+        for drift_calculator in available_calculators:
+            if drift_calculator.drift_calculator_id == self.drift_calculator_id or self.drift_calculator_id is None:
+                break
+
+        for drift_data_source in self.drift_data_sources:
+                if drift_data_source.drift_data_source_id == drift_data_source_id:
+                    break
+
         with self.__lock:
-            first_xdata = self.__first_xdata
-            current_xdata = self.__current_xdata
-            rotation = self.__rotation
-
-            if first_xdata and current_xdata:
-                quality, raw_offset = xd.register_template(first_xdata, current_xdata)
-                delta_time = (current_xdata.timestamp - first_xdata.timestamp).total_seconds() - numpy.sum(self.__drift_data_frame[3])
-                assert delta_time > 0.0
-                offset = Geometry.FloatPoint.make(typing.cast(typing.Tuple[float, float], raw_offset))
-                delta_nm = Geometry.FloatSize(
-                    h=current_xdata.dimensional_calibrations[0].convert_to_calibrated_size(offset.y),
-                    w=current_xdata.dimensional_calibrations[1].convert_to_calibrated_size(offset.x))
-                # calculate adjustment (center_nm). if center_nm positive, data shifts up/left.
+            if drift_data_source and drift_calculator:
+                drift_result = drift_calculator.calculate_drift_result(drift_data_source.first_xdata, drift_data_source.xdata_history)
+            if drift_result:
                 # rotate back into context reference frame
-                delta_nm = delta_nm.rotate(-rotation)
-                # print(f"measured {delta_nm}")
-                self.__append_drift(delta_nm, delta_time)
-                # add the difference from the last time, but negative since center_nm positive shifts up/left
-                self.__total_delta_nm = self.__total_delta_nm + delta_nm
+                if not math.isclose(drift_data_source.rotation, 0.0):
+                    drift_result.drift_rate = drift_result.drift_rate.rotate(-drift_data_source.rotation)
+                # We don't have that available yet, but it would be great if we could do something like this
+                # to have an easier time supporting different axis
+                # TODO convert drift rate to self.__native_axis before adding the new drift result
+                drift_result.drift_rate = self.__stem_controller.axis_transform_point(drift_result.drift_rate.as_point(), from_axis=drift_data_source.axis, to_axis=self.__native_axis).as_size()
+
+                # There are two types of drift tracking/correction: 1) We only track drift, 2) We also use the calculated
+                # drift to correct the scan or beam position on the sample. In DriftTracker we want to track the total
+                # drift, independent from potential corrections. Each DriftDataSource indicates if its data comes
+                # from a source that applies drift correction. In this case, the calculated drift rate will be on top
+                # of the corrected drift rate, which is - to the best of our knowledge - the drift rate from the previous
+                # measurement.
+                if drift_data_source.applies_drift_correction and len(self.__drift_history) > 0:
+                    drift_result.drift_rate += self.get_drift_rate(axis=self.__native_axis, n=1)
+                self.__append_drift(drift_result)
 
         # this call is not under lock - so recheck the condition upon which we fire the event.
-        if first_xdata and current_xdata:
+        if drift_result:
+            delta_time = (drift_result.time_window_end - drift_result.time_window_start).total_seconds()
+            delta_nm = drift_result.drift_rate * delta_time * 1e9
             self.drift_changed_event.fire(delta_nm, delta_time)
 
-    def submit_image(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, wait: bool = False) -> None:
+    def submit_image(self, xdata: DataAndMetadata.DataAndMetadata, rotation: float, *, drift_data_source_id: str, axis: stem_controller_module.AxisDescription, drift_correction_applied: bool, wait: bool = False) -> None:
         # set first data if it hasn't been set or if rotation has changed.
         # otherwise, set current data and be ready to measure.
         with self.__lock:
             global _next_image_index
             _next_image_index += 1
+            drift_data_source = None
+            for drift_data_source in self.drift_data_sources:
+                if drift_data_source.drift_data_source_id == drift_data_source_id:
+                    if not math.isclose(drift_data_source.rotation, rotation) or drift_data_source.axis != axis or drift_correction_applied != drift_data_source.applies_drift_correction:
+                        self.drift_data_sources.remove(drift_data_source)
+                        drift_data_source = None
+                    break
+            # If we did not find "drift_data_source_id" in the existing sources, set "drift_data_osurce" to None so that
+            # a new one will be created below.
+            else:
+                drift_data_source = None
+
+            if drift_data_source is None:
+                drift_data_source = DriftDataSource(drift_data_source_id=drift_data_source_id, axis=axis, rotation=rotation, applies_drift_correction=drift_correction_applied)
+                self.drift_data_sources.add(drift_data_source)
+
+            drift_data_source.submit_image(xdata)
             # useful for debugging.
             # numpy.save(f"/Users/cmeyer/Desktop/n{_next_image_index}.npy", xdata.data)
-            if self.__first_xdata and math.isclose(self.__rotation, rotation):
-                self.__current_xdata = copy.deepcopy(xdata)
-            else:
-                self.reset()
-                self.__first_xdata = copy.deepcopy(xdata)
-                self.__rotation = rotation
-            future = self.__dispatcher.dispatch(self.__calculate)
+            future = self.__dispatcher.dispatch(functools.partial(self.__calculate, drift_data_source_id))
         if wait:
             future.result()
+
+    def submit_drift_result(self, *, drift_rate: Geometry.FloatSize, time_window_start: datetime.datetime, time_window_end: datetime.datetime, axis: stem_controller_module.AxisDescription) -> None:
+        """Submit a drift rate that has been calculated externally.
+
+        For example tuning also calculates the drift rate, so it can add it to the "globally known drift" through this method.
+
+        "axis" should be the name of the axis that drift_rate was measured in. DriftTracker will then convert it to its
+        native axis.
+        """
+        # TODO convert drift rate to self.__native_axis before adding the new drift result
+        drift_rate = self.__stem_controller.axis_transform_point(drift_rate.as_point(), from_axis=axis, to_axis=self.__native_axis).as_size()
+        self.__append_drift(DriftResult(drift_rate=drift_rate, time_window_start=time_window_start, time_window_end=time_window_end))
 
 
 # used for debugging
@@ -245,11 +438,14 @@ class DriftCorrectionBehavior:
     def __init__(self,
                  drift_tracker: DriftTracker,
                  scan_hardware_source: scan_base.ScanHardwareSource,
-                 scan_frame_parameters: scan_base.ScanFrameParameters, *, use_prediction: bool = True) -> None:
+                 scan_frame_parameters: scan_base.ScanFrameParameters, *,
+                 axis: stem_controller_module.AxisDescription,
+                 use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
         self.__drift_tracker = drift_tracker
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        self.__axis = axis
         self.__use_predition = use_prediction
         # here we convert those frame parameters to the context
         self.__scan_frame_parameters.subscan_pixel_size = None
@@ -289,13 +485,13 @@ class DriftCorrectionBehavior:
                 frame_parameters.subscan_rotation = drift_rotation
                 # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
                 utc_time = utc_time or datetime.datetime.utcnow()
-                delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_predition else self.__drift_tracker.total_delta_nm
+                delta_nm = self.__drift_tracker.predict_drift(utc_time, axis=self.__axis) if self.__use_predition else self.__drift_tracker.total_delta_nm
                 frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
                 # print(f"measure with center_nm {frame_parameters.center_nm}")
                 xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
                 xdata0 = xdatas[0]
                 if xdata0:
-                    self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
+                    self.__drift_tracker.submit_image(xdata0, drift_rotation, drift_data_source_id="drift_correction_behavior_subscan", axis=self.__axis, drift_correction_applied=True, wait=True)
 
 
 class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
@@ -325,33 +521,37 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
     """Define a functor to create a drift correction data stream."""
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, *, use_prediction: bool = True) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, *, axis: stem_controller_module.AxisDescription, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
         self.__drift_tracker = drift_tracker
+        self.__axis = axis
         self.__use_prediction = use_prediction
         # for testing
         self._drift_correction_data_stream: typing.Optional[DriftCorrectionDataStream] = None
 
     def apply(self, data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
         assert not self._drift_correction_data_stream
-        self._drift_correction_data_stream = DriftCorrectionDataStream(DriftCorrectionBehavior(self.__drift_tracker, self.scan_hardware_source, self.scan_frame_parameters, use_prediction=self.__use_prediction), data_stream)
+        self._drift_correction_data_stream = DriftCorrectionDataStream(DriftCorrectionBehavior(self.__drift_tracker, self.scan_hardware_source, self.scan_frame_parameters, axis=self.__axis, use_prediction=self.__use_prediction), data_stream)
         return self._drift_correction_data_stream
 
 
 class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
     """A data stream which watches the first channel (HAADF) and sends its frames to the drift compensator"""
 
-    def __init__(self, data_stream: Acquisition.DataStream, drift_tracker: DriftTracker, drift_rotation: float):
+    def __init__(self, data_stream: Acquisition.DataStream, drift_tracker: DriftTracker, axis: stem_controller_module.AxisDescription, drift_rotation: float):
         super().__init__(data_stream)
         self.__drift_tracker = drift_tracker
+        self.__axis = axis
         self.__drift_rotation = drift_rotation
         self.__channel = data_stream.channels[0]
         self.__framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
 
-    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        super()._start_stream(stream_args)
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+        # We need to call drift_tracker.reset() at the earliest possible moment, because otherwise another layer
+        # in the acquisition pipeline could have already used the outdated drift information for some initial setup.
         self.__drift_tracker.reset()
+        super()._prepare_stream(stream_args, **kwargs)
 
     def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel == data_stream_event.channel:
@@ -359,14 +559,61 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super()._fire_data_available(data_stream_event)
 
     def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation)
+        # ScanFrameDataStream (in scan_base.py) always uses the currently estimated drift to correct the scan position.
+        # Because of this we still need to set "drift_correction_applied" to True even though we don't explicitly correct
+        # for drift here.
+        # TODO How do we find out if drift correction is applied or not?
+        # TODO If we want to correct drift by another method, how do we switch off the hardcoded correction in ScanFrameDataStream?
+        self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation, drift_data_source_id="drift_updater_data_stream_haadf", axis=self.__axis, drift_correction_applied=True, wait=True)
 
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
         pass
 
 
+"""
+Architectural Decision Records.
+
+# ADR-003 2022-06-02 AM "Add a global 'active' flag to DriftTracker"
+
+The "active" flag does not have any effect within DriftTracker. It is just there to have a global place for
+tracking if drift correction is enabled or not. Since DriftTracker is a globally used class, it makes sense to
+also track whether drift correction is active globally. What each component does with this information is then
+up to its individual implementation.
+
+# ADR-002 2022-05-05 AM "Use drift_rate as the native quantiy for tracking drift"
+
+This is a consequence of allowing different drift sources and different cross-correlation algorithms. Compared to an
+absolute drift, drift_rate can be interpreted without further knowledge about the algorithm that produces it. For example
+cross-correlating the first recorded image with the latest one produces a different absolute drift than cross-correlating
+the second to last one with the latest one. However, assuming a constant drift rate both methods would result in the same
+drift_rate. Of course drift and drift_rate can be converted into each other if the respective time windows used for their
+calculation are known. But overall it is drift_rate that we are actually interested in: The sample will usually drift with
+a certain drift_rate that typically decreases over time. The drift rate decrease is usually small compared to the sampling
+interval, so assuming a constant drift rate between the sampling points is a good approximation. 
+
+# ADR-001 2022-05-05 AM "Introduce DriftDataSource"
+
+DriftTracker is intended as a global place to track sample drift. But for calculating the global drift we can have different
+sources like ronchigram images or scanned images. Only images from one source can be cross-correlated and different sources
+also produce data oriented in different coordinate systems. In order to be able to globally track sample drift we need to
+track the different sources individually.
+Each DriftDataSource contains the information needed to correctly interpret the data it produces: In addition to the axis
+the data is oriented it can have an extra rotation which is for example required for subscan images. We also need to track
+if a DriftDataSource produces data that has drift correction applied, i.e. if the images are shifted according to the last
+known drift rate. DriftTracker tracks the total global drift, so for a DriftDataSource that produces drift corrected images
+it adds the drift rate calculated from it to the last known drift rate.
+
+"""
+
 def run() -> None:
-    Registry.register_component(DriftTracker(), {"drift_tracker"})
+    stem_controller = Registry.get_component("stem_controller")
+    # TODO Hardcoding a specific native axis for drift tracker is not optimal. There should be a better way of doing this.
+    axis: typing.Optional[stem_controller_module.AxisDescription] = None
+    for axis in stem_controller.axis_descriptions:
+        if axis.axis_id == "stageaxis":
+            break
+    assert axis is not None
+    Registry.register_component(DriftTracker(stem_controller=stem_controller, native_axis=axis), {"drift_tracker"})
 
 def stop() -> None:
     pass

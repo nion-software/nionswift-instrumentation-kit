@@ -65,7 +65,7 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context) 
 
 
 def make_sequence_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
-    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names)
+    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names, False, True, False, adr.device_map)
 
 
 def make_series_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:

@@ -127,7 +127,13 @@ class ScanAcquisitionController:
         section_height = section_height_override
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker and self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker)
+            # TODO Hardcoding a specific native axis for drift tracker is not optimal. There should be a better way of doing this.
+            axis: typing.Optional[stem_controller.AxisDescription] = None
+            for axis in scan_hardware_source.stem_controller.axis_descriptions:
+                if axis.axis_id == "scan":
+                    break
+            assert axis is not None
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, axis=axis)
             section_height = self.__scan_specifier.drift_interval_lines
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(

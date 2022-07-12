@@ -1754,6 +1754,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
         self.__started = False
 
+        axis: typing.Optional[stem_controller_module.AxisDescription] = None
+        for axis in scan_hardware_source.stem_controller.axis_descriptions:
+            if axis.axis_id == "scan":
+                break
+        assert axis is not None
+        self.__axis = axis
+
         def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
             # when data arrives here, it will be part of the overall data item, even if it is only a partial
             # acquire of the data item. so the buffer data shape will reflect the overall data item.
@@ -1806,12 +1813,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # update the center_nm of scan parameters by adding the accumulated value from drift to the original value.
         # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
         # updated and the accumulated would have to be reset.
-        if self.__drift_tracker:
+        if self.__drift_tracker and self.__drift_tracker.active:
             camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
-            delta_nm = self.__drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+            delta_nm = self.__drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead), axis=self.__axis)
             # print(f"predicted {delta_nm}")
             self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
-        # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
+            # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
+
         if self.__camera_data_stream:
             assert self.__camera_exposure_ms is not None
             self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
@@ -1977,7 +1985,13 @@ def make_synchronized_scan_data_stream(
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker and enable_drift_tracker:
-            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, scan_hardware_source.drift_rotation)
+            # TODO Harcoding the axis of DriftUpdaterDataStream is not optimal. There should be a better solution.
+            axis: typing.Optional[stem_controller_module.AxisDescription] = None
+            for axis in scan_hardware_source.stem_controller.axis_descriptions:
+                if axis.axis_id == "scan":
+                    break
+            assert axis is not None
+            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, axis, scan_hardware_source.drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed
