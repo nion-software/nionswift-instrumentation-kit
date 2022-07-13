@@ -60,7 +60,7 @@ def make_scan_device(test_context: AcquisitionTestContext.test_context) -> Acqui
 
 
 def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
-    scan_context_description = AcquisitionPanel.SynchronizedScanDescription(str(), True, str(), Geometry.IntSize(6, 4), 0)
+    scan_context_description = AcquisitionPanel.SynchronizedScanDescription(str(), True, str(), Geometry.IntSize(6, 4), 0, 0, False)
     return AcquisitionPanel.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source)
 
 

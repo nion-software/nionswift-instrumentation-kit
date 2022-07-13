@@ -245,12 +245,16 @@ class DriftCorrectionBehavior:
     def __init__(self,
                  drift_tracker: DriftTracker,
                  scan_hardware_source: scan_base.ScanHardwareSource,
-                 scan_frame_parameters: scan_base.ScanFrameParameters, *, use_prediction: bool = True) -> None:
+                 scan_frame_parameters: scan_base.ScanFrameParameters,
+                 drift_scan_interval: int,
+                 *, use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
         self.__drift_tracker = drift_tracker
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
-        self.__use_predition = use_prediction
+        self.__drift_scan_interval = drift_scan_interval
+        self.__drift_scan_interval_index = 0
+        self.__use_prediction = use_prediction
         # here we convert those frame parameters to the context
         self.__scan_frame_parameters.subscan_pixel_size = None
         self.__scan_frame_parameters.subscan_fractional_size = None
@@ -260,42 +264,48 @@ class DriftCorrectionBehavior:
         self.__drift_tracker.reset()
 
     def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
-        # this method must be thread safe
-        # start with the context frame parameters and adjust for the drift region
-        frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
-        context_size = frame_parameters.size.to_float_size()
-        drift_channel_id = self.__scan_hardware_source.drift_channel_id
-        drift_region = self.__scan_hardware_source.drift_region
-        drift_rotation = self.__scan_hardware_source.drift_rotation
-        if drift_channel_id is not None and drift_region is not None:
-            drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
-            assert drift_channel_index is not None
-            aspect_ratio = (context_size.width * drift_region.width) / (context_size.height * drift_region.height)
-            TARGET_SIZE = 64
-            if aspect_ratio >= 1.0:
-                if aspect_ratio <= 2.0:
-                    shape = Geometry.IntSize(w=TARGET_SIZE, h=int(TARGET_SIZE / aspect_ratio))
+        # if this is called, it means some form of drift-sub-area drift correction has been enabled.
+        # if the scan interval is 0, it means every n lines; so do the drift correction here since the
+        # each section wil have its own acquisition and this will be called for each section. if the scan
+        # interval is non-zero, then only perform drift correction every n scans.
+        if self.__drift_scan_interval == 0 or (self.__drift_scan_interval_index % self.__drift_scan_interval) == 0:
+            # this method must be thread safe
+            # start with the context frame parameters and adjust for the drift region
+            frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
+            context_size = frame_parameters.size.to_float_size()
+            drift_channel_id = self.__scan_hardware_source.drift_channel_id
+            drift_region = self.__scan_hardware_source.drift_region
+            drift_rotation = self.__scan_hardware_source.drift_rotation
+            if drift_channel_id is not None and drift_region is not None:
+                drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
+                assert drift_channel_index is not None
+                aspect_ratio = (context_size.width * drift_region.width) / (context_size.height * drift_region.height)
+                TARGET_SIZE = 64
+                if aspect_ratio >= 1.0:
+                    if aspect_ratio <= 2.0:
+                        shape = Geometry.IntSize(w=TARGET_SIZE, h=int(TARGET_SIZE / aspect_ratio))
+                    else:
+                        shape = Geometry.IntSize(w=int(TARGET_SIZE // 2 * aspect_ratio), h=TARGET_SIZE // 2)
                 else:
-                    shape = Geometry.IntSize(w=int(TARGET_SIZE // 2 * aspect_ratio), h=TARGET_SIZE // 2)
-            else:
-                if aspect_ratio > 0.5:
-                    shape = Geometry.IntSize(h=TARGET_SIZE, w=int(TARGET_SIZE * aspect_ratio))
-                else:
-                    shape = Geometry.IntSize(h=int(TARGET_SIZE // 2 / aspect_ratio), w=TARGET_SIZE // 2)
-            frame_parameters.subscan_pixel_size = shape
-            if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
-                frame_parameters.subscan_fractional_size = Geometry.FloatSize(drift_region.height, drift_region.width)
-                frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)
-                frame_parameters.subscan_rotation = drift_rotation
-                # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
-                utc_time = utc_time or datetime.datetime.utcnow()
-                delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_predition else self.__drift_tracker.total_delta_nm
-                frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
-                # print(f"measure with center_nm {frame_parameters.center_nm}")
-                xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
-                xdata0 = xdatas[0]
-                if xdata0:
-                    self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
+                    if aspect_ratio > 0.5:
+                        shape = Geometry.IntSize(h=TARGET_SIZE, w=int(TARGET_SIZE * aspect_ratio))
+                    else:
+                        shape = Geometry.IntSize(h=int(TARGET_SIZE // 2 / aspect_ratio), w=TARGET_SIZE // 2)
+                frame_parameters.subscan_pixel_size = shape
+                if frame_parameters.subscan_pixel_size[0] >= 8 or frame_parameters.subscan_pixel_size[1] >= 8:
+                    frame_parameters.subscan_fractional_size = Geometry.FloatSize(drift_region.height, drift_region.width)
+                    frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)
+                    frame_parameters.subscan_rotation = drift_rotation
+                    # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
+                    utc_time = utc_time or datetime.datetime.utcnow()
+                    delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_prediction else self.__drift_tracker.total_delta_nm
+                    frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
+                    # print(f"measure with center_nm {frame_parameters.center_nm}")
+                    xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
+                    xdata0 = xdatas[0]
+                    if xdata0:
+                        self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
+        self.__drift_scan_interval_index += 1
 
 
 class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
@@ -323,19 +333,29 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
 
 
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
-    """Define a functor to create a drift correction data stream."""
+    """Define a functor to create a drift correction data stream.
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, *, use_prediction: bool = True) -> None:
+    A functor object can be passed to another function and allows the other function to modify a data stream
+    it has created with the functor object.
+    """
+
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
         self.__drift_tracker = drift_tracker
+        self.__drift_scan_interval = drift_scan_interval
         self.__use_prediction = use_prediction
         # for testing
         self._drift_correction_data_stream: typing.Optional[DriftCorrectionDataStream] = None
 
     def apply(self, data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
         assert not self._drift_correction_data_stream
-        self._drift_correction_data_stream = DriftCorrectionDataStream(DriftCorrectionBehavior(self.__drift_tracker, self.scan_hardware_source, self.scan_frame_parameters, use_prediction=self.__use_prediction), data_stream)
+        drift_correction_behavior = DriftCorrectionBehavior(self.__drift_tracker,
+                                                            self.scan_hardware_source,
+                                                            self.scan_frame_parameters,
+                                                            self.__drift_scan_interval,
+                                                            use_prediction=self.__use_prediction)
+        self._drift_correction_data_stream = DriftCorrectionDataStream(drift_correction_behavior, data_stream)
         return self._drift_correction_data_stream
 
 

@@ -1113,12 +1113,16 @@ class SynchronizedScanDescription:
     scan_text is a string explaining the planned scan.
     scan_size is an IntSize of the scan size.
     drift_interval_lines is an int of how often to do drift correction.
+    drift_interval_scans is an int of how often to do drift correction.
+    enable_drift_correction is a bool of whether to do drift correction between scans.
     """
     context_text: str
     context_valid: bool
     scan_text: str
     scan_size: Geometry.IntSize
     drift_interval_lines: int
+    drift_interval_scans: int
+    enable_drift_correction: bool
 
 
 class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScanDescription]):
@@ -1208,7 +1212,9 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
                 scan_text = f"{scan_length} px"
                 scan_size = Geometry.IntSize(height=1, width=scan_length)
                 drift_interval_lines = 0
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines))
+                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
+                enable_drift_correction = False
+                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
             elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
                 assert scan_context_size
                 calibration = scan_context.calibration
@@ -1225,9 +1231,10 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
                 scan_height = int(scan_width * height / width)
                 scan_text = f"{scan_width} x {scan_height}"
                 scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
-                drift_interval_lines = drift_lines
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines))
+                drift_interval_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
+                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
+                enable_drift_correction = False
+                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
             elif scan_context.is_valid:
                 assert scan_context_size
                 calibration = scan_context.calibration
@@ -1244,13 +1251,14 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
                 scan_height = int(scan_width * height / width)
                 scan_text = f"{scan_width} x {scan_height}"
                 scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
-                drift_interval_lines = drift_lines
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines))
+                drift_interval_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
+                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
+                enable_drift_correction = False
+                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
             else:
                 context_text = _("No scan context")
                 scan_text = str()
-                self.send_value(SynchronizedScanDescription(context_text, False, scan_text, Geometry.IntSize(), 0))
+                self.send_value(SynchronizedScanDescription(context_text, False, scan_text, Geometry.IntSize(), 0, 0, False))
 
 
 class CameraExposureValueStream(Stream.ValueStream[float]):
@@ -1396,8 +1404,9 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     section_height: typing.Optional[int] = None
     drift_tracker = scan_hardware_source.drift_tracker
     if drift_tracker and scan_context_description.drift_interval_lines > 0:
-        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker)
+        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
         section_height = scan_context_description.drift_interval_lines
+    enable_drift_tracker = drift_tracker is not None and scan_context_description.enable_drift_correction
 
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
     synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
@@ -1409,7 +1418,8 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
         section_height=section_height,
         scan_count=scan_count,
         include_raw=True,
-        include_summed=False
+        include_summed=False,
+        enable_drift_tracker=enable_drift_tracker
     )
 
     # construct the channel names.

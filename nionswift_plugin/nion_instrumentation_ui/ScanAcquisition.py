@@ -126,9 +126,11 @@ class ScanAcquisitionController:
         drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
         section_height = section_height_override
         drift_tracker = scan_hardware_source.drift_tracker
-        if drift_tracker and self.__scan_specifier.drift_interval_lines > 0:
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker)
-            section_height = self.__scan_specifier.drift_interval_lines
+        if drift_tracker and (self.__scan_specifier.drift_interval_lines > 0 or self.__scan_specifier.drift_interval_scans > 0):
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, self.__scan_specifier.drift_interval_scans)
+            if self.__scan_specifier.drift_interval_lines > 0:
+                section_height = self.__scan_specifier.drift_interval_lines
+        enable_drift_tracker = False
 
         synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
             scan_hardware_source=scan_hardware_source,
@@ -139,7 +141,8 @@ class ScanAcquisitionController:
             section_height=section_height,
             scan_count=self.__scan_specifier.scan_count,
             include_raw=scan_processing.include_raw,
-            include_summed=scan_processing.include_summed
+            include_summed=scan_processing.include_summed,
+            enable_drift_tracker=enable_drift_tracker
         )
         self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
@@ -287,13 +290,15 @@ class PanelDelegate:
                 self.__roi_description.text = f"{line_str} {length_str} ({length} px)"
                 scan_str = _("Scan (1D)")
                 scan_length = max(self.__scan_width, 1)
-                self.__scan_label_widget.text = f"{scan_str} {scan_length} px"
+                drift_scans = scan_hardware_source.calculate_drift_scans()
+                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else str()
+                self.__scan_label_widget.text = f"{scan_str} {scan_length} px" + drift_str
                 self.__scan_pixels = scan_length
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
                 self.__scan_specifier.scan_count = max(self.__scan_count, 1)
                 self.__scan_specifier.size = 1, scan_length
                 self.__scan_specifier.drift_interval_lines = 0
-                self.__scan_specifier.drift_interval_scans = 0
+                self.__scan_specifier.drift_interval_scans = drift_scans
                 self.__acquire_button._widget.enabled = True
             elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
                 assert scan_context_size
@@ -308,9 +313,9 @@ class PanelDelegate:
                 scan_width = self.__scan_width
                 scan_height = int(self.__scan_width * height / width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
-                drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                drift_str = f" / Drift every {drift_lines} lines" if drift_lines > 0 else str()
                 drift_scans = scan_hardware_source.calculate_drift_scans()
-                drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
+                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else drift_str
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
@@ -332,9 +337,9 @@ class PanelDelegate:
                 scan_width = self.__scan_width
                 scan_height = int(self.__scan_width * height / width)
                 drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
-                drift_str = f" / Drift {drift_lines} lines" if drift_lines > 0 else str()
+                drift_str = f" / Drift every {drift_lines} lines" if drift_lines > 0 else str()
                 drift_scans = scan_hardware_source.calculate_drift_scans()
-                drift_str = f" / Drift {drift_scans} scans" if drift_scans > 0 else drift_str
+                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else drift_str
                 self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
                 self.__scan_pixels = scan_width * scan_height
                 self.__scan_specifier.scan_context = copy.deepcopy(scan_context)

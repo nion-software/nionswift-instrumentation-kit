@@ -1921,6 +1921,10 @@ def make_synchronized_scan_data_stream(
         enable_drift_tracker: bool = False,
         old_move_axis: bool = False) -> Acquisition.DataStream:
 
+    # there are two separate drift corrector possibilities:
+    #   1 - a drift corrector that takes a separate scan, implemented using the scan_data_stream_functor
+    #   2 - a drift corrector that uses the entire result of the scan, implemented by passing enable_drift_corrector = True
+
     scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
     scan_uuid = scan_frame_parameters.scan_id
 

@@ -1259,11 +1259,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         line_scan_checkbox = ui.create_check_box_widget(_("Line Scan"))
         line_scan_checkbox.on_checked_changed = self.__state_controller.handle_line_scan_enabled
 
-        drift_checkbox = ui.create_check_box_widget(_("Drift Correction"))
+        drift_checkbox = ui.create_check_box_widget(_("Drift Correct Every"))
         drift_checkbox.on_checked_changed = self.__state_controller.handle_drift_enabled
 
         drift_settings_value = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})
-        drift_settings_unit = ui.create_combo_box_widget([_("Frames"), _("Seconds"), _("Lines"), _("Scans")])
+        drift_settings_unit = ui.create_combo_box_widget([_("Scan Lines"), _("Scan Frames")])
 
         def drift_value_edited(text: str) -> None:
             drift_settings = copy.copy(scan_controller.drift_settings)
@@ -1274,7 +1274,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         def drift_unit_changed(index: typing.Optional[int]) -> None:
             if index is not None:
                 drift_settings = copy.copy(scan_controller.drift_settings)
-                drift_settings.interval_units = stem_controller.DriftIntervalUnit(index)
+                drift_settings.interval_units = stem_controller.DriftIntervalUnit(index + 2)
                 scan_controller.drift_settings = drift_settings
 
         drift_settings_value.on_editing_finished = drift_value_edited
