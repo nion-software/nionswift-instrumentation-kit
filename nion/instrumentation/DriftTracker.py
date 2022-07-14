@@ -227,9 +227,10 @@ class DriftTracker:
                 self.reset()
                 self.__first_xdata = copy.deepcopy(xdata)
                 self.__rotation = rotation
-            future = self.__dispatcher.dispatch(self.__calculate)
-        if wait:
-            future.result()
+            if wait:
+                self.__calculate()
+            else:
+                self.__dispatcher.dispatch(self.__calculate)
 
 
 # used for debugging
