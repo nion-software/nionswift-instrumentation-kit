@@ -1123,6 +1123,7 @@ class CameraSettings:
         pass
 
 
+@dataclasses.dataclass
 class PartialData:
     """Represents data returned from acquisition.
 
@@ -1134,13 +1135,11 @@ class PartialData:
 
     is_complete and is_canceled should be set as required.
     """
-    def __init__(self, xdata: DataAndMetadata.DataAndMetadata, is_complete: bool, is_canceled: bool,
-                 valid_rows: typing.Optional[int] = None, valid_count: typing.Optional[int] = None) -> None:
-        self.xdata = xdata
-        self.is_complete = is_complete
-        self.is_canceled = is_canceled
-        self.valid_rows = valid_rows
-        self.valid_count = valid_count
+    xdata: DataAndMetadata.DataAndMetadata
+    is_complete: bool
+    is_canceled: bool
+    valid_rows: typing.Optional[int] = None
+    valid_count: typing.Optional[int] = None
 
 
 @typing.runtime_checkable
@@ -2427,6 +2426,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__flyback_pixels = flyback_pixels
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
+        self.__total_count = 0
 
     def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
         camera_frame_parameters = self.__camera_frame_parameters
@@ -2461,6 +2461,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__slice = list(stream_args.slice)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, collection_shape)
+        self.__total_count = numpy.product(collection_shape, dtype=numpy.uint64)  # type: ignore
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_synchronized_end()
@@ -2478,7 +2479,16 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         assert valid_count is not None
         if valid_count > 0:
             uncropped_xdata = self.__partial_data_info.xdata  # this returns the entire result data array
-            is_complete = self.__partial_data_info.is_complete
+            is_complete = valid_count == self.__total_count
+            # the old way of doing it (0.20.6 or older) required the device to signal when
+            # it was complete; however, that is redundant information since we know how much
+            # data should be and has been supplied. now this is handled by comparing the
+            # valid_count to total_count, which is calculated in start_stream.
+            # the only downside of the new way is the case where a device would provide the
+            # last piece of data but not signal it being complete and expect another call to
+            # signal completion.
+            # assert is_complete == self.__partial_data_info.is_complete
+            # is_complete = self.__partial_data_info.is_complete
             camera_metadata: typing.Dict[str, typing.Any] = dict()
             self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
             metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
@@ -2524,6 +2534,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__additional_metadata = additional_metadata or dict()
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
+        self.__total_count = 0
 
     def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
         camera_frame_parameters = self.__camera_frame_parameters
@@ -2556,6 +2567,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
         self.__partial_data_info = self.__camera_hardware_source.acquire_sequence_begin(self.__camera_frame_parameters, stream_args.sequence_count)
+        self.__total_count = stream_args.sequence_count
 
     def finish_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_end()
@@ -2571,7 +2583,16 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         assert valid_count is not None
         if valid_count > 0:
             uncropped_xdata = self.__partial_data_info.xdata  # this returns the entire result data array
-            is_complete = self.__partial_data_info.is_complete
+            is_complete = valid_count == self.__total_count
+            # the old way of doing it (0.20.6 or older) required the device to signal when
+            # it was complete; however, that is redundant information since we know how much
+            # data should be and has been supplied. now this is handled by comparing the
+            # valid_count to total_count, which is calculated in start_stream.
+            # the only downside of the new way is the case where a device would provide the
+            # last piece of data but not signal it being complete and expect another call to
+            # signal completion.
+            # assert is_complete == self.__partial_data_info.is_complete
+            # is_complete = self.__partial_data_info.is_complete
             camera_metadata: typing.Dict[str, typing.Any] = dict()
             self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
             metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
@@ -2624,7 +2645,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__camera_sequence_overheads: typing.List[float] = list()
         self.camera_sequence_overhead = 0.0
         self.__start = 0.0
-        self.__progress = 0.0
+        self.__progress: typing.Dict[Acquisition.Channel, float] = dict()
 
     def about_to_delete(self) -> None:
         if self.__record_task:
@@ -2643,7 +2664,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
     @property
     def progress(self) -> float:
         if not self.is_finished:
-            return self.__progress
+            return sum(self.__progress.values()) / len(self.__progress.values()) if self.__progress else 0.0
         return super().progress
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
@@ -2664,7 +2685,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         else:
             assert self.__camera_device_stream_interface
             self.__last_index = 0
-            self.__progress = 0.0
+            self.__progress = dict()
             self.__start = time.perf_counter()
             self.__camera_device_stream_interface.start_stream(stream_args)
             self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
@@ -2746,7 +2767,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                     self.fire_data_available(data_stream_event)
                     # total_count is the total for this entire stream.
                     total_count = numpy.product(self.get_info(channel).data_metadata.data_shape, dtype=numpy.int64).item()
-                    self.__progress = valid_index / total_count
+                    self.__progress[channel] = valid_index / total_count
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
 
