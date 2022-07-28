@@ -366,7 +366,7 @@ class VideoSourcePanel(Panel.Panel):
         self.__hardware_source_widgets: typing.Dict[str, VideoSourceWidget] = dict()
 
         hardware_sources = HardwareSource.HardwareSourceManager().hardware_sources
-        hardware_sources.sort(key=lambda hardware_source: hardware_source.display_name)
+        hardware_sources.sort(key=lambda hardware_source: hardware_source.display_name or _("Unknown"))
 
         def hardware_source_added(hardware_source: HardwareSource.HardwareSource) -> None:
             if hasattr(hardware_source, "video_device") and isinstance(hardware_source, video_base.VideoHardwareSource):
@@ -587,7 +587,7 @@ def run() -> None:
                         if selected_display_panel:
                             selected_display_panel.change_display_panel_content(d)
 
-                    action = display_type_menu.add_menu_item(hardware_source.display_name, functools.partial(switch_to_live_controller, hardware_source))
+                    action = display_type_menu.add_menu_item(hardware_source.display_name or _("Unknown"), functools.partial(switch_to_live_controller, hardware_source))
                     display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
                     action.checked = isinstance(display_panel_controller, VideoDisplayPanelController) and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
                     return [action]
