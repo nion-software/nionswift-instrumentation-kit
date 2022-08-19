@@ -564,6 +564,7 @@ class ScanDevice(typing.Protocol):
     def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
     def open_configuration_interface(self) -> None: ...
     def show_configuration_dialog(self, api_broker: typing.Any) -> None: ...
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
@@ -588,7 +589,6 @@ class ScanDevice(typing.Protocol):
     @property
     def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]: raise NotImplementedError()
 
-    flyback_pixels: int
     on_device_state_changed: typing.Optional[typing.Callable[[typing.Sequence[ScanFrameParameters], typing.Sequence[typing.Tuple[str, bool]]], None]]
 
 
@@ -633,9 +633,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     @property
     def scan_context(self) -> stem_controller_module.ScanContext: raise NotImplementedError()
-
-    @property
-    def flyback_pixels(self) -> int: raise NotImplementedError()
 
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]: raise NotImplementedError()
@@ -730,7 +727,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
-    def scan_immediate(self, frame_paramters: ScanFrameParameters) -> None: ...
+    def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
     record_index: int
     priority: int = 100
@@ -1064,10 +1062,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 xdata_group.append(xdata)
             xdata_group_list.append(xdata_group)
         return xdata_group_list
-
-    @property
-    def flyback_pixels(self) -> int:
-        return self.__device.flyback_pixels
 
     @property
     def subscan_state(self) -> stem_controller_module.SubscanState:
@@ -1595,13 +1589,18 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         return list()
 
-    def scan_immediate(self, frame_paramters: ScanFrameParameters) -> None:
+    def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None:
         old_frame_parameters = self.__device.current_frame_parameters
-        self.__device.set_frame_parameters(frame_paramters)
+        self.__device.set_frame_parameters(frame_parameters)
         frame_number = self.__device.start_frame(False)
         self.__device.wait_for_frame(frame_number)
         self.__device.stop()
         self.__device.set_frame_parameters(old_frame_parameters)
+
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int:
+        if callable(getattr(self.__device, "calculate_flyback_pixels", None)):
+            return self.__device.calculate_flyback_pixels(frame_parameters)
+        return getattr(self.__device, "flyback_pixels", 0)
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
@@ -1939,10 +1938,16 @@ def make_synchronized_scan_data_stream(
     camera_exposure_ms = camera_frame_parameters.exposure_ms
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
                                   "instrument": copy.deepcopy(instrument_metadata)}
+    # calculate the flyback pixels by using the scan device. this is fragile because the exposure
+    # for a particular section gets calculated here and in ScanFrameDataStream.prepare. if they
+    # don't match, the total pixel count for the camera will not match the scan pixels.
+    scan_paramaters_copy = copy.deepcopy(scan_frame_parameters)
+    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_paramaters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
+    flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_paramaters_copy)
     camera_data_stream = camera_base.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
                                                             camera_base.CameraDeviceSynchronizedStream(camera_hardware_source,
                                                                                            camera_frame_parameters,
-                                                                                           scan_hardware_source.flyback_pixels,
+                                                                                           flyback_pixels,
                                                                                            additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":

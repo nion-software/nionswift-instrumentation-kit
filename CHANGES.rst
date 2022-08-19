@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Replace flyback_pixels property with calculate_flyback_pixels method.
+
 0.20.7 (2022-07-26)
 -------------------
 - Drift correction improvements, simplified UI. Work in progress.

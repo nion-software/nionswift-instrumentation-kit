@@ -130,6 +130,7 @@ ChannelSegment = str
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
+
 class Channel:
     def __init__(self, *segments: ChannelSegment) -> None:
         self.__segments: typing.List[ChannelSegment] = list(segments)
@@ -1604,6 +1605,8 @@ class FramedDataStream(DataStream):
 
     Pass an operator map to process the resulting frame using multiple operators and send them out on different
     channels.
+
+    Pass a data channel to accept the frame as it arrives.
     """
 
     def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None) -> None:
