@@ -4,6 +4,7 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 - Replace flyback_pixels property with calculate_flyback_pixels method.
+- Change 2D ramp (tableau) to use relative control values, like 1D ramp.
 
 0.20.7 (2022-07-26)
 -------------------

@@ -635,7 +635,7 @@ def wrap_acquisition_device_data_stream_for_tableau(data_stream: Acquisition.Dat
                     # device controller. the device controller may be a camera, scan, or stem device
                     # controller.
                     values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
-                    device_controller.set_values(self.control_customization, values, self.__resolve_axis())
+                    device_controller.update_values(self.control_customization, self.original_values, values, self.__resolve_axis())
 
             def finish(self) -> None:
                 control_description = self.control_customization.control_description
