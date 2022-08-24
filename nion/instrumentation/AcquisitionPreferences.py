@@ -118,6 +118,10 @@ ControlCustomizationSchema = Schema.entity("control_customization", None, None, 
     "delay": Schema.prop(Schema.FLOAT),
 }, ControlCustomization)
 
+default_drift_frame_parameters = {
+                "scan_width_pixels": 64,
+                "dwell_time_us": 16.0}
+
 # Create an entity for customizing the drift scan that is created when "Drift correct" is checked in the ScanControlPanel
 DriftFrameParameters = Schema.entity("drift_frame_parameters", None, None, {
     "scan_width_pixels": Schema.prop(Schema.INT),
@@ -207,10 +211,11 @@ def init_acquisition_preferences(file_path: pathlib.Path) -> None:
             acquisition_preferences._append_item("control_customizations", ControlCustomizationSchema.create(None, {
                 "control_id": control_description.control_id,
                 "device_control_id": control_description.device_control_id, "delay": control_description.delay}))
-    if not acquisition_preferences.drift_scan_customization:
-        acquisition_preferences._set_field_value("drift_scan_customization", DriftFrameParameters.create(None, {
-                "scan_width_pixels": 64,
-                "dwell_time_us": 16.0}))
+    # We want to reset to defaults after each reastart of Swift, so simply always set "drift_scan_customization"
+    # Uncomment the line below to return to persistent saving.
+    # if not acquisition_preferences.drift_scan_customization:
+    acquisition_preferences._set_field_value("drift_scan_customization", DriftFrameParameters.create(None, default_drift_frame_parameters))
+
 
 
 def deinit_acquisition_preferences() -> None:
