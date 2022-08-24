@@ -289,7 +289,7 @@ class DriftCorrectionBehavior:
                 aspect_ratio = (context_size.width * drift_region.width) / (context_size.height * drift_region.height)
                 # Get the drift scan preferences and change the scan width and dwell time accordingly. The drift
                 # preferences can be changed in the preferences panel
-                scan_customization = AcquisitionPreferences.acquisition_preferences.drift_scan_customization
+                scan_customization = getattr(AcquisitionPreferences.acquisition_preferences, "drift_scan_customization")
                 frame_parameters.pixel_time_us = scan_customization.dwell_time_us
                 TARGET_SIZE = scan_customization.scan_width_pixels
                 if aspect_ratio >= 1.0:

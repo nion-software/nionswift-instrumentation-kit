@@ -44,6 +44,7 @@ if typing.TYPE_CHECKING:
     from nion.swift.model import Persistence
     from nion.ui import DrawingContext
     from nion.utils import Event
+    from nion.swift.model import Schema
 
 
 _ = gettext.gettext
@@ -1854,11 +1855,11 @@ class DriftScanPreferencesPanel:
         self.identifier = "nion.drift-scan-customization"
         self.label = _("Drift scan settings")
 
-    def build(self, ui: UserInterface, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> Declarative.DeclarativeWidget:
+    def build(self, ui: UserInterface.UserInterface, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> Declarative.DeclarativeWidget:
         u = Declarative.DeclarativeUI()
 
         class Handler(Declarative.Handler):
-            def __init__(self, drift_frame_parameters: AcquisitionPreferences.DriftFrameParameters) -> None:
+            def __init__(self, drift_frame_parameters: Schema.EntityType) -> None:
                 super().__init__()
                 self.drift_frame_parameters = drift_frame_parameters
                 self.scan_width_converter = Converter.IntegerToStringConverter()
