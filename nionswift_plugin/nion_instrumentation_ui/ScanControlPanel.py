@@ -20,6 +20,7 @@ from nion.data import DataAndMetadata
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
+from nion.instrumentation import AcquisitionPreferences
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
@@ -29,7 +30,9 @@ from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import MouseTrackingCanvasItem
 from nion.ui import UserInterface
+from nion.ui import Declarative
 from nion.ui import Widgets
+from nion.ui import PreferencesDialog
 from nion.utils import Converter
 from nion.utils import Geometry
 from nion.utils import Model
@@ -1839,6 +1842,38 @@ class ScanDisplayPanelController:
     def hardware_source_id(self) -> str:
         return self.__hardware_source_id
 
+
+class DriftScanPreferencesPanel:
+    """Define a drift scan preferences panel.
+
+    This panel allows the user to change the size and dwell time of the drift scan used in
+    DriftTracker.DriftCorrectionBehavior
+    """
+
+    def __init__(self) -> None:
+        self.identifier = "nion.drift-scan-customization"
+        self.label = _("Drift scan settings")
+
+    def build(self, ui: UserInterface, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> Declarative.DeclarativeWidget:
+        u = Declarative.DeclarativeUI()
+
+        class Handler(Declarative.Handler):
+            def __init__(self, drift_frame_parameters: AcquisitionPreferences.DriftFrameParameters) -> None:
+                super().__init__()
+                self.drift_frame_parameters = drift_frame_parameters
+                self.scan_width_converter = Converter.IntegerToStringConverter()
+                self.dwell_time_converter = Converter.PhysicalValueToStringConverter("us", format="{:.1f}")
+                self.ui_view = u.create_column(
+                    u.create_row(u.create_label(text="Drift scan width (pixels)"), u.create_line_edit(text="@binding(drift_frame_parameters.scan_width_pixels, converter=scan_width_converter)", width=40), u.create_stretch(), spacing=8),
+                    u.create_row(u.create_label(text="Drift scan dwell time"), u.create_line_edit(text="@binding(drift_frame_parameters.dwell_time_us, converter=dwell_time_converter)", width=60), u.create_stretch(), spacing=8),
+                    u.create_stretch(),
+                    spacing=8)
+
+        return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler(AcquisitionPreferences.acquisition_preferences.drift_scan_customization))
+
+
+# Register the preferences panel.
+PreferencesDialog.PreferencesManager().register_preference_pane(DriftScanPreferencesPanel())
 
 hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
 hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None

@@ -17,6 +17,7 @@ from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
+from nion.instrumentation import AcquisitionPreferences
 from nion.swift.model import DataItem
 from nion.utils import Event
 from nion.utils import Geometry
@@ -281,7 +282,11 @@ class DriftCorrectionBehavior:
                 drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
                 assert drift_channel_index is not None
                 aspect_ratio = (context_size.width * drift_region.width) / (context_size.height * drift_region.height)
-                TARGET_SIZE = 64
+                # Get the drift scan preferences and change the scan width and dwell time accordingly. The drift
+                # preferences can be changed in the preferences panel
+                scan_customization = AcquisitionPreferences.acquisition_preferences.drift_scan_customization
+                frame_parameters.pixel_time_us = scan_customization.dwell_time_us
+                TARGET_SIZE = scan_customization.scan_width_pixels
                 if aspect_ratio >= 1.0:
                     if aspect_ratio <= 2.0:
                         shape = Geometry.IntSize(w=TARGET_SIZE, h=int(TARGET_SIZE / aspect_ratio))

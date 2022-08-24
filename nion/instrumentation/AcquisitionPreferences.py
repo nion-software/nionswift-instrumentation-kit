@@ -118,8 +118,15 @@ ControlCustomizationSchema = Schema.entity("control_customization", None, None, 
     "delay": Schema.prop(Schema.FLOAT),
 }, ControlCustomization)
 
+# Create an entity for customizing the drift scan that is created when "Drift correct" is checked in the ScanControlPanel
+DriftFrameParameters = Schema.entity("drift_frame_parameters", None, None, {
+    "scan_width_pixels": Schema.prop(Schema.INT),
+    "dwell_time_us": Schema.prop(Schema.FLOAT),
+})
+
 AcquisitionPreferencesSchema = Schema.entity("acquisition_preferences", None, None, {
     "control_customizations": Schema.array(Schema.component(ControlCustomizationSchema)),
+    "drift_scan_customization": Schema.component(DriftFrameParameters),
 })
 
 
@@ -200,6 +207,10 @@ def init_acquisition_preferences(file_path: pathlib.Path) -> None:
             acquisition_preferences._append_item("control_customizations", ControlCustomizationSchema.create(None, {
                 "control_id": control_description.control_id,
                 "device_control_id": control_description.device_control_id, "delay": control_description.delay}))
+    if not acquisition_preferences.drift_scan_customization:
+        acquisition_preferences._set_field_value("drift_scan_customization", DriftFrameParameters.create(None, {
+                "scan_width_pixels": 64,
+                "dwell_time_us": 16.0}))
 
 
 def deinit_acquisition_preferences() -> None:
