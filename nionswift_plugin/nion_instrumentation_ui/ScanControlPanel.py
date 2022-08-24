@@ -1869,7 +1869,7 @@ class DriftScanPreferencesPanel:
                     u.create_stretch(),
                     spacing=8)
 
-        return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler(AcquisitionPreferences.acquisition_preferences.drift_scan_customization))
+        return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler(getattr(AcquisitionPreferences.acquisition_preferences, "drift_scan_customization")))
 
 
 # Register the preferences panel.

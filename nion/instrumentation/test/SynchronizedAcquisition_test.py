@@ -6,6 +6,8 @@ import time
 import typing
 import unittest
 import uuid
+import tempfile
+import pathlib
 
 from nion.data import DataAndMetadata
 from nion.swift import Application
@@ -20,6 +22,7 @@ from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import scan_base
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation.test import AcquisitionTestContext
 from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
 
@@ -699,6 +702,51 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertTrue(1.9 < dist_nm < 2.1)
             self.assertTrue(1.9 < abs(last_delta_nm.width) < 2.1)
             self.assertTrue(abs(last_delta_nm.height) < 0.1)
+
+    def test_drift_corrector_uses_customized_drift_scan_frame_parameters(self):
+        # for this test, drift should be in a constant direction
+        with self.__test_context() as test_context:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                file_path = pathlib.Path(temp_dir) / pathlib.Path("nion_acquisition_preferences.json")
+                AcquisitionPreferences.init_acquisition_preferences(file_path)
+                document_controller = test_context.document_controller
+                scan_hardware_source = test_context.scan_hardware_source
+                test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
+                drift_tracker = scan_hardware_source.drift_tracker
+                self._acquire_one(document_controller, scan_hardware_source)
+                scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+                scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
+                document_controller.periodic()
+                # Change the default parameters (64 px and 16 us) to something different
+                scan_customization = AcquisitionPreferences.acquisition_preferences.drift_scan_customization
+                # Use something that is unlikely to be used as a default value in the future
+                scan_customization.dwell_time_us = 17.3
+                scan_customization.scan_width_pixels = 111
+                scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(drift_tracker, scan_hardware_source, scan_frame_parameters, 0)
+                self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
+                self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
+                drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
+                last_delta_nm = drift_tracker.last_delta_nm
+                dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
+                self.assertLess(dist_nm, 0.1)
+                stem_controller = test_context.instrument
+                stem_controller.SetValDeltaAndConfirm("CSH.x", 1e-9, 1.0, 1000)
+                drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
+                last_delta_nm = drift_tracker.last_delta_nm
+                dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
+                self.assertTrue(0.9 < dist_nm < 1.1)
+                self.assertTrue(0.9 < abs(last_delta_nm.width) < 1.1)
+                self.assertTrue(abs(last_delta_nm.height) < 0.1)
+                stem_controller.SetValDeltaAndConfirm("CSH.x", 2e-9, 1.0, 1000)
+                drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
+                last_delta_nm = drift_tracker.last_delta_nm
+                dist_nm = math.sqrt(pow(last_delta_nm.width, 2) + pow(last_delta_nm.height, 2))
+                self.assertTrue(1.9 < dist_nm < 2.1)
+                self.assertTrue(1.9 < abs(last_delta_nm.width) < 2.1)
+                self.assertTrue(abs(last_delta_nm.height) < 0.1)
+                self.assertSequenceEqual(drift_tracker._first_xdata.data_shape, (111, 111))
+                self.assertEqual(drift_tracker._first_xdata.metadata["hardware_source"]["pixel_time_us"], 17.3)
 
     def test_scan_acquisition_controller(self):
         with self.__test_context(is_eels=True) as test_context:

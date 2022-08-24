@@ -123,6 +123,11 @@ class DriftTracker:
             self.__rotation = 0.0
             self.__total_delta_nm = Geometry.FloatSize()
 
+    # For testing
+    @property
+    def _first_xdata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
+        return self.__first_xdata
+
     @property
     def measurement_count(self) -> int:
         with self.__lock:
