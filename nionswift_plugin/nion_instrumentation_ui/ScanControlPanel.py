@@ -1867,8 +1867,13 @@ class DriftScanPreferencesPanel:
                 self.ui_view = u.create_column(
                     u.create_row(u.create_label(text="Drift scan width (pixels)"), u.create_line_edit(text="@binding(drift_frame_parameters.scan_width_pixels, converter=scan_width_converter)", width=40), u.create_stretch(), spacing=8),
                     u.create_row(u.create_label(text="Drift scan dwell time"), u.create_line_edit(text="@binding(drift_frame_parameters.dwell_time_us, converter=dwell_time_converter)", width=60), u.create_stretch(), spacing=8),
+                    u.create_row(u.create_push_button(text="Restore defaults", on_clicked="restore_defaults_clicked"), u.create_stretch(), spacing=8),
                     u.create_stretch(),
                     spacing=8)
+
+            def restore_defaults_clicked(self, widget: Declarative.UIWidget) -> None:
+                for key, value in AcquisitionPreferences.default_drift_frame_parameters.items():
+                    setattr(self.drift_frame_parameters, key, value)
 
         return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler(getattr(AcquisitionPreferences.acquisition_preferences, "drift_scan_customization")))
 
