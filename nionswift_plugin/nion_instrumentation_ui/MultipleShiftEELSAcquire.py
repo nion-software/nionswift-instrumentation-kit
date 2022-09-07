@@ -66,7 +66,7 @@ class AcquireController(metaclass=Utility.Singleton):
                                        camera: camera_base.CameraHardwareSource,
                                        number_frames: int,
                                        energy_offset: float,
-                                       sleep_time: int,
+                                       sleep_time: float,
                                        dark_ref_enabled: bool,
                                        dark_ref_data: typing.Optional[_NDArray],
                                        cross_cor: bool,
@@ -76,7 +76,7 @@ class AcquireController(metaclass=Utility.Singleton):
             logging.debug("Already acquiring")
             return
 
-        def set_offset_energy(energy_offset: float, sleep_time: float = 1) -> None:
+        def set_offset_energy(energy_offset: float, sleep_time: float = 1.0) -> None:
             current_energy = stem_controller.GetVal(energy_adjust_control)
             # this function waits until the value is confirmed to be the
             # desired value (or until timeout)
@@ -89,7 +89,7 @@ class AcquireController(metaclass=Utility.Singleton):
             time.sleep(sleep_time)
 
         def acquire_dark(number_frames: int,
-                         sleep_time: int,
+                         sleep_time: float,
                          task_object: typing.Optional[Task.TaskContextManager] = None) -> typing.Optional[_NDArray]:
             # Sleep to allow the afterglow to die away
             if task_object is not None:
@@ -124,9 +124,10 @@ class AcquireController(metaclass=Utility.Singleton):
                            dark_ref_enabled: bool,
                            dark_ref_data: typing.Optional[_NDArray],
                            task_object: typing.Optional[Task.TaskContextManager] = None) -> DataItem.DataItem:
-            logging.info("Starting image acquisition.")
+            logging.getLogger("camera_control_ui").info("Starting image acquisition.")
 
             # grab one frame to get image size
+            camera.start_playing()
             first_xdatas = camera.get_next_xdatas_to_start()
             first_xdata = first_xdatas[0] if first_xdatas else None
             first_data = first_xdata.data if first_xdata else None
@@ -141,6 +142,7 @@ class AcquireController(metaclass=Utility.Singleton):
             # loop through the frames and fill in the empty stack from the
             # camera
             for frame_index in range(number_frames):
+                logging.getLogger("camera_control_ui").info(f"Grabbing image {frame_index + 1}/{number_frames}.")
                 if energy_offset == 0.:
                     set_offset_energy(energy_offset, 1)
                 # use next frame to start to make sure we're getting a
@@ -162,6 +164,8 @@ class AcquireController(metaclass=Utility.Singleton):
                     # Update the task panel with the progress
                     task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
+
+            logging.getLogger("camera_control_ui").info(f"Finishing image acquisition.")
 
             # Blank the beam
             stem_controller.SetValWait(blank_control, 1.0, 200)
@@ -399,7 +403,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.dark_file.text = ""
         self.acquire_button = ui.create_push_button_widget(_("Start"))
         self.sleep_time = self.ui.create_line_edit_widget(properties={"width": 50})
-        self.sleep_time.text = "15"
+        self.sleep_time.text = "15.0"
 
         # Dialog row to hold the dropdown to select a camera
         camera_row = ui.create_row_widget()
@@ -449,7 +453,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
             self.acquire(
                 int(self.number_frames.text or "0"),
                 float(self.energy_offset.text or "0"),
-                int(self.sleep_time.text or "0"),
+                float(self.sleep_time.text or "0.0"),
                 bool(self.dark_ref_choice.checked),
                 pathlib.Path(),  # stand-in dark reference
                 #            pathlib.Path(self.dark_file.text),
@@ -485,7 +489,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
     def acquire(self,
                 number_frames: int,
                 energy_offset: float,
-                sleep_time: int,
+                sleep_time: float,
                 dark_ref_choice: bool,
                 dark_file: pathlib.Path,
                 cross_cor_choice: bool) -> None:
