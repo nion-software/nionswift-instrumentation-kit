@@ -110,7 +110,7 @@ class AcquireController(metaclass=Utility.Singleton):
                     # know it's already blanked
                     xdatas = camera.get_next_xdatas_to_finish()
                     xdata0 = xdatas[0] if xdatas else None
-                    if xdata0 and xdata0.data:
+                    if xdata0 and xdata0.data is not None:
                         dark_sum += xdata0.data
                 if task_object is not None:
                     # Update task panel with progress acquiring dark
