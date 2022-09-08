@@ -5,6 +5,7 @@ import random
 import time
 import typing
 import unittest
+import uuid
 import zlib
 
 import numpy
@@ -705,6 +706,16 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual("eels", Metadata.get_metadata_value(document_model.data_items[0], "stem.signal_type"))
             self.assertEqual("eels", Metadata.get_metadata_value(document_model.data_items[1], "stem.signal_type"))
+
+    def test_acquiring_eels_with_existing_invalid_summed_reference_succeeds(self):
+        # this tests a problem that occurred when the data reference of an old non-existent data item exists
+        # and the EELS starts and tries to regenerate the data item.
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            project = test_context.document_model._project
+            project._set_persistent_property_value("data_item_references", {"usim_eels_camera_summed": str(uuid.uuid4())})
+            hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, hardware_source)
 
     def test_acquiring_ronchigram_sets_signal_type(self):
         # assumes EELS camera produces two data items

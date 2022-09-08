@@ -188,6 +188,8 @@ class HardwareSourceBridge:
                     with self.__data_items_to_append_lock:
                         for key, data_item in self.__data_items_to_append:
                             self.__document_model.append_data_item(data_item)
+                            # this next line may be redundant since the data_item_reference.data_item is set above.
+                            # however, this line may ensure it is written to disk; needs a test before removing.
                             self.__document_model._update_data_item_reference(key, data_item)
                         self.__data_items_to_append.clear()
 
