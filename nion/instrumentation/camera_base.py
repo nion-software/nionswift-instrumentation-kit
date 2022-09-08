@@ -2144,7 +2144,12 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         data_element["version"] = 1
         data_element["state"] = "complete"
         data_element["timestamp"] = timestamp
-        camera_calibrations = self.get_camera_calibrations(frame_parameters)
+        # use a frame parameters copy without processing to hack around calibration issue where view mode is
+        # has wrong calibration during SI because processing is enabled is frame parameters when SI starts but
+        # the view acquisition is 2D with the sum processor. strong code smell.
+        frame_parameters_copy = copy.deepcopy(frame_parameters)
+        frame_parameters_copy.processing = None
+        camera_calibrations = self.get_camera_calibrations(frame_parameters_copy)
         acquisition_data.apply_signal_calibrations(list(camera_calibrations))
         acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
         acquisition_data.counts_per_electron = self.get_counts_per_electron()

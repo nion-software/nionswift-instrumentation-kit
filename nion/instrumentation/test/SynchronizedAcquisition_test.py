@@ -542,6 +542,61 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 # self.assertIn("rotation", scan_metadata)
                 # self.assertIn("scan_id", scan_metadata)
 
+    def test_partial_acquisition_has_proper_metadata_in_associated_view(self):
+        # start an SI. use data channel to record the spectrum image item used for the view during the
+        # acquisition and also call periodic. probably better if grab_synchronized is modified to support this.
+
+        class TestDataChannel(DataChannel.DataItemDataChannel):
+            def __init__(self, document_controller, data_item, channel_names: typing.Mapping[Acquisition.Channel, str]):
+                super().__init__(document_controller.document_model, "test", channel_names)
+                self.__document_controller = document_controller
+                self.__data_item = data_item
+                self.updates = list()
+
+            def update_data(self, channel: Acquisition.Channel, source_data: numpy.ndarray,
+                            source_slice: Acquisition.SliceType, dest_slice: slice,
+                            data_metadata: DataAndMetadata.DataMetadata) -> None:
+                super().update_data(channel, source_data, source_slice, dest_slice, data_metadata)
+                self.updates.append(self.__data_item.dimensional_calibrations)
+                self.__document_controller.periodic()
+
+        with self.__test_context(is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(2, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+
+            # start the camera playing; ensure we have a data item
+            camera_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+                test_context.document_controller.periodic()
+                data_item = test_context.document_model.data_items[0]
+                self.assertEqual("eV", data_item.dimensional_calibrations[-1].units)
+
+                data_channel = TestDataChannel(test_context.document_controller, data_item,
+                                               {Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                                                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
+
+                section_height = 2
+                scan_hardware_source.grab_synchronized(data_channel=data_channel,
+                                                       scan_frame_parameters=scan_frame_parameters,
+                                                       camera=camera_hardware_source,
+                                                       camera_frame_parameters=camera_frame_parameters,
+                                                       section_height=section_height)
+
+                camera_hardware_source.get_next_xdatas_to_start(camera_frame_parameters.exposure * 10)
+                self.assertEqual("eV", data_item.dimensional_calibrations[-1].units)
+            finally:
+                camera_hardware_source.stop_playing(sync_timeout=3.0)
+                test_context.document_controller.periodic()
+
+            for update in data_channel.updates:
+                self.assertEqual("eV", update[-1].units)
+
     def test_grab_synchronized_basic_eels_with_drift_correction(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
