@@ -436,6 +436,27 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
             # self.assertEqual("Ned Flanders", data_item.session_metadata["microscopist"])
 
+    def test_partial_acquisition_while_view_mode_running(self):
+        with self.__test_context(is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(6, 6)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            camera_hardware_source.start_playing(camera_frame_parameters, sync_timeout=3.0)
+            try:
+                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+                section_height = 5
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
+                                                       camera=camera_hardware_source,
+                                                       camera_frame_parameters=camera_frame_parameters,
+                                                       section_height=section_height)
+                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+            finally:
+                camera_hardware_source.stop_playing(sync_timeout=3.0)
+
     def test_partial_acquisition_has_proper_metadata(self):
 
         class TestDataChannel(DataChannel.DataItemDataChannel):
