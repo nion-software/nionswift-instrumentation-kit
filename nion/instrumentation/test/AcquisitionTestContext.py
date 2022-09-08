@@ -84,7 +84,6 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
             camera_hardware_source = camera_base.CameraHardwareSource2("usim_stem_controller", camera_device, camera_settings, None, None)
         if is_eels:
             camera_hardware_source.features["is_eels_camera"] = True
-            camera_hardware_source.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0))))
         camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
             {"exposure_ms": camera_exposure * 1000, "binning": 2}))
         camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters(

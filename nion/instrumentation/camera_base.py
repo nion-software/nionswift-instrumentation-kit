@@ -1823,6 +1823,11 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
 
 class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
+    """Construct hardware source from the device.
+
+    Adds a primary channel and any processor channels automatically included with the device, e.g. a sum-processed
+    channel for a 2D spectral device such as an EELS detector.
+    """
 
     def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice3, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
