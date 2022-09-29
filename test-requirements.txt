@@ -9,4 +9,4 @@ git+https://github.com/nion-software/niondata.git#egg=niondata
 git+https://github.com/nion-software/nionswift.git#egg=nionswift
 
 # specify no-deps to avoid installing this project (nionswift-instrumentation-kit) itself
---no-deps git+https://github.com/nion-software/nionswift-usim.git#egg=nionswift-usim
+git+https://github.com/nion-software/nionswift-usim.git#egg=nionswift-usim --install-option="--no-deps"
