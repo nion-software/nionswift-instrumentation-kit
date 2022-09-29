@@ -1440,6 +1440,12 @@ class DelegateHardwareSource(ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> DelegateAcquisitionTask:
         return DelegateAcquisitionTask(self.__delegate, self.hardware_source_id, self.display_name)
 
+    def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None:
+        raise NotImplementedError()
+
+    def get_record_frame_parameters(self) -> FrameParameters:
+        raise NotImplementedError()
+
 
 class SumProcessor(Observable.Observable):
     def __init__(self, bounds: Geometry.FloatRect, processor_id: typing.Optional[str] = None, label: typing.Optional[str] = None) -> None:

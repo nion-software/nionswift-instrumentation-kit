@@ -147,7 +147,7 @@ class CameraDevice(typing.Protocol):
 
     def remove_all_dark_images(self) -> None:
         """Remove all dark reference images."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     @property
     def is_gain_normalization_enabled(self) -> bool:
@@ -177,7 +177,7 @@ class CameraDevice(typing.Protocol):
 
     def remove_all_gain_images(self) -> None:
         """Remove all gain reference images."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     @property
     def binning_values(self) -> typing.List[int]:
@@ -472,7 +472,7 @@ class CameraDevice3(typing.Protocol):
 
     def remove_all_dark_images(self) -> None:
         """Remove all dark reference images."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     @property
     def is_gain_normalization_enabled(self) -> bool:
@@ -502,7 +502,7 @@ class CameraDevice3(typing.Protocol):
 
     def remove_all_gain_images(self) -> None:
         """Remove all gain reference images."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     @property
     def binning_values(self) -> typing.List[int]:
@@ -743,15 +743,15 @@ class CameraDevice3(typing.Protocol):
 
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     def show_configuration_dialog(self, api_broker: typing.Any) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
     def start_monitor(self) -> None:
         """Show a monitor dialog, if needed. Dialog can be modal or modeless."""
-        pass
+        return  # required to avoid being recognized as abstract by mypy
 
 
 class InstrumentController(abc.ABC):
@@ -2112,6 +2112,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
         # prepare does nothing in camera device 3
         pass
+
+    def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
+        # prepare does nothing in camera device 3
+        return list()
 
     def acquire_sequence(self, n: int) -> typing.Sequence[ImportExportManager.DataElementType]:
         frame_parameters = self.get_current_frame_parameters()

@@ -112,6 +112,12 @@ class VideoHardwareSource(HardwareSource.ConcreteHardwareSource):
     def _create_acquisition_view_task(self) -> AcquisitionTask:
         return AcquisitionTask(self.hardware_source_id, self.__camera, self.display_name)
 
+    def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
+        raise NotImplementedError()
+
+    def get_record_frame_parameters(self) -> HardwareSource.FrameParameters:
+        raise NotImplementedError()
+
 
 class VideoDeviceFactoryLike(typing.Protocol):
     factory_id: str
