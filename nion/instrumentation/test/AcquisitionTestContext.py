@@ -7,7 +7,6 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift.test import TestContext
 from nion.utils import Event
-from nion.utils import Geometry
 from nion.utils import Registry
 from nionswift_plugin.usim import CameraDevice
 from nionswift_plugin.usim import InstrumentDevice
@@ -17,22 +16,11 @@ from nionswift_plugin.usim import ScanDevice
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
     def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025):
         super().__init__()
-
-        # HardwareSource.run()
-        # camera_base.run(configuration_location)
-        # scan_base.run()
-        # video_base.run()
-        # CameraControlPanel.run()
-        # ScanControlPanel.run()
-        # MultipleShiftEELSAcquire.run()
-        # VideoControlPanel.run()
-
         HardwareSource.run()
         instrument = self.setup_stem_controller()
         DriftTracker.run()
         ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
-        scan_base.run()
-        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, Registry.get_component("scan_hardware_source"))
+        scan_hardware_source = self.setup_scan_hardware_source(instrument)
         camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
         HardwareSource.HardwareSourceManager().hardware_sources = []
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
@@ -54,11 +42,15 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
             ex.close()
         stem_controller.unregister_event_loop()
         self.camera_hardware_source.close()
+        self.scan_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
+        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
+        Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
         DriftTracker.stop()
         ScanDevice.stop()
-        scan_base.stop()
         Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
+        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source"})
+        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"scan_hardware_source"})
         HardwareSource.HardwareSourceManager()._close_instruments()
         HardwareSource.stop()
         super().close()
@@ -70,6 +62,23 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         instrument = InstrumentDevice.Instrument("usim_stem_controller")
         Registry.register_component(instrument, {"stem_controller"})
         return instrument
+
+    def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController) -> scan_base.ScanHardwareSource:
+        instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
+        device = ScanDevice.Device(instrument)
+        scan_device = typing.cast(scan_base.ScanDevice, device)
+        Registry.register_component(scan_device, {"scan_device"})
+        scan_modes = (
+            scan_base.ScanSettingsMode("Fast", "fast", scan_device.get_profile_frame_parameters(0)),
+            scan_base.ScanSettingsMode("Slow", "slow", scan_device.get_profile_frame_parameters(1)),
+            scan_base.ScanSettingsMode("Record", "record", scan_device.get_profile_frame_parameters(2))
+        )
+        scan_settings = scan_base.ScanSettings(scan_modes, 0, 2)
+        scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
+        setattr(scan_device, "hardware_source", scan_hardware_source)
+        Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller
+        HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
+        return scan_hardware_source
 
     def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)

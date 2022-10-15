@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # standard libraries
 import abc
+import asyncio
 import collections
 import contextlib
 import copy
@@ -9,10 +10,13 @@ import dataclasses
 import datetime
 import functools
 import gettext
+import json
 import logging
 import math
 import numpy
 import numpy.typing
+import os
+import pathlib
 import queue
 import threading
 import time
@@ -31,6 +35,7 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Process
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
@@ -42,6 +47,15 @@ _ = gettext.gettext
 
 
 class ScanFrameParameters:
+    """Scan frame parameters.
+
+    This should almost never be instantiated directly. The settings objects is responsible for constructing scan
+    frame parameters suitable for a particular scan module. Scan frame parameters can be copied using `copy.copy`
+    or they can be created from a dictionary using `settings.get_frame_parameters_from_dict`.
+
+    NOTE: some scan modules do not customize the scan frame parameters. The settings object for those scan modules
+    are allowed to use this class directly.
+    """
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         d: typing.Dict[str, typing.Any] = dict()
@@ -387,7 +401,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__is_continuous = is_continuous
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
-        self.__frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        self.__frame_parameters = copy.copy(frame_parameters)
         self.__frame_number: typing.Optional[int] = None
         self.__scan_id: typing.Optional[uuid.UUID] = None
         self.__last_scan_id: typing.Optional[uuid.UUID] = None
@@ -398,12 +412,12 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__subscan_enabled = False
 
     def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
-        self.__frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        self.__frame_parameters = copy.copy(frame_parameters)
         self.__activate_frame_parameters()
 
     @property
     def frame_parameters(self) -> typing.Optional[ScanFrameParameters]:
-        return ScanFrameParameters(self.__frame_parameters.as_dict())
+        return copy.copy(self.__frame_parameters)
 
     def _start_acquisition(self) -> bool:
         if not super()._start_acquisition():
@@ -515,7 +529,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         return data_elements
 
     def __activate_frame_parameters(self) -> None:
-        device_frame_parameters = ScanFrameParameters(self.__frame_parameters.as_dict())
+        device_frame_parameters = copy.copy(self.__frame_parameters)
         context_size = device_frame_parameters.size
         device_frame_parameters.fov_size_nm = Geometry.FloatSize(device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm)
         self.__device.set_frame_parameters(device_frame_parameters)
@@ -546,6 +560,8 @@ def apply_section_rect(scan_frame_parameters: ScanFrameParameters, section_rect:
 
 
 class ScanDevice(typing.Protocol):
+    scan_device_id: str
+    scan_device_name: str
 
     def close(self) -> None: ...
     def get_channel_name(self, channel_index: int) -> str: ...
@@ -555,16 +571,16 @@ class ScanDevice(typing.Protocol):
     def start_frame(self, is_continuous: bool) -> int: ...
     def cancel(self) -> None: ...
     def stop(self) -> None: ...
-    def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[ImportExportManager.DataElementType], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], int, int]: ...
+    def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[ImportExportManager.DataElementType], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], typing.Optional[int], int]: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def set_scan_context_probe_position(self, scan_context: stem_controller_module.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def get_profile_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
     def set_profile_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
-    def open_configuration_interface(self) -> None: ...
-    def show_configuration_dialog(self, api_broker: typing.Any) -> None: ...
-    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
+    def open_configuration_interface(self) -> None: return
+    def show_configuration_dialog(self, api_broker: typing.Any) -> None: return
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
@@ -587,7 +603,8 @@ class ScanDevice(typing.Protocol):
     def current_frame_parameters(self) -> ScanFrameParameters: raise NotImplementedError()
 
     @property
-    def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]: raise NotImplementedError()
+    def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]:
+        return list()
 
     on_device_state_changed: typing.Optional[typing.Callable[[typing.Sequence[ScanFrameParameters], typing.Sequence[typing.Tuple[str, bool]]], None]]
 
@@ -730,6 +747,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
+    def get_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
+        # return the data channels functioning as scan contexts.
+        return tuple(filter(lambda data_channel: data_channel.is_context, self.data_channels))
+
     record_index: int
     priority: int = 100
 
@@ -777,10 +798,308 @@ class ChannelState:
     enabled: bool
 
 
+@dataclasses.dataclass
+class ScanSettingsMode:
+    """Define a scan settings mode.
+
+    name is a user visible name.
+
+    mode_id is used for storing the mode reference in a file. it is not user visible and should be an identifier.
+
+    frame_parameters are the associated frame parameters. these may be a subclass of ScanFrameParameters.
+    """
+    name: str
+    mode_id: str
+    frame_parameters: ScanFrameParameters
+
+
+class ScanSettingsProtocol(typing.Protocol):
+    """Define a protocol for storing and observing a set of frame parameters.
+
+    """
+
+    # events that might be used within the UI.
+    current_frame_parameters_changed_event: Event.Event
+    record_frame_parameters_changed_event: Event.Event
+    profile_changed_event: Event.Event
+    frame_parameters_changed_event: Event.Event
+
+    # optional event and identifier for settings. defining settings_id signals that
+    # the settings should be managed as a dict by the container of this class. the container
+    # will call apply_settings to initialize settings and then expect settings_changed_event
+    # to be fired when settings change.
+    settings_changed_event: Event.Event
+    settings_id: str
+
+    def close(self) -> None:
+        ...
+
+    def initialize(self, configuration_location: typing.Optional[pathlib.Path] = None, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> None:
+        ...
+
+    def apply_settings(self, settings_dict: typing.Mapping[str, typing.Any]) -> None:
+        """Initialize the settings with the settings_dict."""
+        ...
+
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
+        """Return camera frame parameters from dict.
+
+        Subclasses may override this method to provide a custom subclass of ScanFrameParameters.
+        """
+        raise NotImplementedError()
+
+    def set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        """Set the current frame parameters.
+
+        Fire the current frame parameters changed event and optionally the settings changed event.
+        """
+        ...
+
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
+        """Get the current frame parameters."""
+        raise NotImplementedError()
+
+    def set_record_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        """Set the record frame parameters.
+
+        Fire the record frame parameters changed event and optionally the settings changed event.
+        """
+        ...
+
+    def get_record_frame_parameters(self) -> ScanFrameParameters:
+        """Get the record frame parameters."""
+        raise NotImplementedError()
+
+    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
+        """Set the frame parameters with the settings index and fire the frame parameters changed event.
+
+        If the settings index matches the current settings index, call set current frame parameters.
+
+        If the settings index matches the record settings index, call set record frame parameters.
+        """
+        ...
+
+    def _update_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
+        # like set_frame_parameters except it passes False to current_frame_parameters_changed.
+        # use when settings change at the low level and must be reflected in UI.
+        ...
+
+    def get_frame_parameters(self, settings_index: int) -> ScanFrameParameters:
+        """Get the frame parameters for the settings index."""
+        ...
+
+    def set_selected_profile_index(self, settings_index: int) -> None:
+        """Set the current settings index.
+
+        Call set current frame parameters if it changed.
+
+        Fire profile changed event if it changed.
+        """
+        ...
+
+    @property
+    def selected_profile_index(self) -> int:
+        raise NotImplementedError()
+
+
+ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParameters]
+
+
+class ScanSettings(ScanSettingsProtocol):
+    """A concrete implementation of ScanSettingsProtocol.
+
+    Pass a list of scan modes (name/identifier/frame-parameters), the current settings index, and the index of the
+    scan mode to be used for record behavior.
+
+    If your scan module subclasses ScanFrameParameters, provide a frame_parameters_factory function to construct
+    your subclass from a dictionary.
+    """
+
+    def __init__(self,
+                 scan_modes: typing.Sequence[ScanSettingsMode],
+                 current_settings_index: int = 0,
+                 record_settings_index: int = 0,
+                 frame_parameters_factory: typing.Optional[ScanFrameParametersFactory] = None) -> None:
+        assert len(scan_modes) > 0
+
+        # these events must be defined
+        self.current_frame_parameters_changed_event = Event.Event()
+        self.record_frame_parameters_changed_event = Event.Event()
+        self.profile_changed_event = Event.Event()
+        self.frame_parameters_changed_event = Event.Event()
+
+        # optional event and identifier for settings. defining settings_id signals that
+        # the settings should be managed as a dict by the container of this class. the container
+        # will call apply_settings to initialize settings and then expect settings_changed_event
+        # to be fired when settings change.
+        self.settings_changed_event = Event.Event()
+        self.settings_id = str()
+
+        # scan specific
+        self.__scan_modes = tuple(scan_modes)
+        self.__current_settings_index = current_settings_index
+        self.__record_settings_index = record_settings_index
+        self.__frame_parameters_factory = frame_parameters_factory
+        self.__frame_parameters = self.__scan_modes[self.__current_settings_index].frame_parameters
+        self.__record_parameters = self.__scan_modes[self.__record_settings_index].frame_parameters
+
+    def close(self) -> None:
+        pass
+
+    def initialize(self, configuration_location: typing.Optional[pathlib.Path] = None, event_loop: typing.Optional[asyncio.AbstractEventLoop] = None, **kwargs: typing.Any) -> None:
+        pass
+
+    def apply_settings(self, settings_dict: typing.Mapping[str, typing.Any]) -> None:
+        """Initialize the settings with the settings_dict."""
+        pass
+
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
+        """Return camera frame parameters from dict."""
+        if callable(self.__frame_parameters_factory):
+            return self.__frame_parameters_factory(d)
+        # fall back to regular scan frame parameters if no factory is provided.
+        return ScanFrameParameters(d)
+
+    def set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        """Set the current frame parameters.
+
+        Fire the current frame parameters changed event and optionally the settings changed event.
+        """
+        self.__frame_parameters = copy.copy(frame_parameters)
+        # self.settings_changed_event.fire(self.__save_settings())
+        self.current_frame_parameters_changed_event.fire(frame_parameters, True)
+
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
+        """Get the current frame parameters."""
+        return copy.copy(self.__frame_parameters)
+
+    def set_record_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        """Set the record frame parameters.
+
+        Fire the record frame parameters changed event and optionally the settings changed event.
+        """
+        self.__record_parameters = copy.copy(frame_parameters)
+        self.record_frame_parameters_changed_event.fire(frame_parameters)
+
+    def get_record_frame_parameters(self) -> ScanFrameParameters:
+        """Get the record frame parameters."""
+        return self.__record_parameters
+
+    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
+        """Set the frame parameters with the settings index and fire the frame parameters changed event.
+
+        If the settings index matches the current settings index, call set current frame parameters.
+
+        If the settings index matches the record settings index, call set record frame parameters.
+        """
+        assert 0 <= settings_index < len(self.__scan_modes)
+        frame_parameters = copy.copy(frame_parameters)
+        self.__scan_modes[settings_index].frame_parameters = frame_parameters
+        # update the local frame parameters
+        if settings_index == self.__current_settings_index:
+            self.set_current_frame_parameters(frame_parameters)
+        if settings_index == self.__record_settings_index:
+            self.set_record_frame_parameters(frame_parameters)
+        # self.settings_changed_event.fire(self.__save_settings())
+        self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
+
+    def _update_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
+        # like set_frame_parameters except it passes False to current_frame_parameters_changed.
+        # use when settings change at the low level and must be reflected in UI.
+        assert 0 <= settings_index < len(self.__scan_modes)
+        frame_parameters = copy.copy(frame_parameters)
+        self.__scan_modes[settings_index].frame_parameters = frame_parameters
+        # update the local frame parameters
+        if settings_index == self.__current_settings_index:
+            self.__frame_parameters = copy.copy(frame_parameters)
+            self.current_frame_parameters_changed_event.fire(frame_parameters, False)
+        if settings_index == self.__record_settings_index:
+            self.__record_parameters = copy.copy(frame_parameters)
+        self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
+
+    def get_frame_parameters(self, settings_index: int) -> ScanFrameParameters:
+        """Get the frame parameters for the settings index."""
+        return copy.copy(self.__scan_modes[settings_index].frame_parameters)
+
+    def set_selected_profile_index(self, settings_index: int) -> None:
+        """Set the current settings index.
+
+        Call set current frame parameters if it changed.
+
+        Fire profile changed event if it changed.
+        """
+        assert 0 <= settings_index < len(self.__scan_modes)
+        if self.__current_settings_index != settings_index:
+            self.__current_settings_index = settings_index
+            # set current frame parameters
+            self.set_current_frame_parameters(self.__scan_modes[self.__current_settings_index].frame_parameters)
+            # self.settings_changed_event.fire(self.__save_settings())
+            self.profile_changed_event.fire(settings_index)
+
+    @property
+    def selected_profile_index(self) -> int:
+        """Return the current settings index."""
+        return self.__current_settings_index
+
+    @property
+    def scan_modes(self) -> typing.Sequence[ScanSettingsMode]:
+        return tuple(self.__scan_modes)
+
+    @property
+    def modes(self) -> typing.Sequence[str]:
+        return tuple(scan_mode.name for scan_mode in self.__scan_modes)
+
+    def get_mode(self) -> str:
+        """Return the current mode (named version of current settings index)."""
+        return self.__scan_modes[self.__current_settings_index].name
+
+    def set_mode(self, mode: str) -> None:
+        """Set the current mode (named version of current settings index)."""
+        self.set_selected_profile_index(self.modes.index(mode))
+
+
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, hardware_source_id: str, display_name: str):
-        super().__init__(hardware_source_id, display_name)
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path]) -> None:
+        super().__init__(device.scan_device_id, device.scan_device_name)
+
+        # configure the event loop object
+        logger = logging.getLogger()
+        old_level = logger.level
+        logger.setLevel(logging.INFO)
+        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
+        logger.setLevel(old_level)
+
+        self.__settings = settings
+        self.__settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
+
+        def handle_current_frame_parameters_changed(frame_parameters: ScanFrameParameters, is_context: bool) -> None:
+            self.__set_current_frame_parameters(frame_parameters, is_context)
+
+        self.__current_frame_parameters_changed_event_listener = self.__settings.current_frame_parameters_changed_event.listen(handle_current_frame_parameters_changed)
+        self.__record_frame_parameters_changed_event_listener = self.__settings.record_frame_parameters_changed_event.listen(self.__set_record_frame_parameters)
+
+        # add optional support for settings. to enable auto settings handling, the camera settings object must define
+        # a settings_id property (which can just be the camera id), an apply_settings method which takes a settings
+        # dict read from the config file and applies it as the settings, and a settings_changed_event which must be
+        # fired when the settings changed (at which point they will be written to the config file).
+        self.__settings_changed_event_listener = None
+        if configuration_location and self.__settings.settings_id:
+            config_file = configuration_location / pathlib.Path(self.__settings.settings_id + "_config.json")
+            logging.info("Scan device configuration: " + str(config_file))
+            if config_file.is_file():
+                with open(config_file) as f:
+                    settings_dict = json.load(f)
+                self.__settings.apply_settings(settings_dict)
+
+            def settings_changed(settings_dict: typing.Mapping[str, typing.Any]) -> None:
+                # atomically overwrite
+                temp_filepath = config_file.with_suffix(".temp")
+                with open(temp_filepath, "w") as fp:
+                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
+                os.replace(temp_filepath, config_file)
+
+            self.__settings_changed_event_listener = self.__settings.settings_changed_event.listen(settings_changed)
 
         self.features["is_scanning"] = True
 
@@ -789,6 +1108,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.frame_parameters_changed_event = Event.Event()
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
+
+        self.__profile_changed_event_listener = self.__settings.profile_changed_event.listen(self.profile_changed_event.fire)
+        self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
         self.__stem_controller = stem_controller_
 
@@ -808,7 +1130,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # add data channel for each device channel
         channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
         for channel_info in channel_info_list:
-            self.add_data_channel(channel_info.channel_id, channel_info.name)
+            self.add_data_channel(channel_info.channel_id, channel_info.name, is_context=True)
         # add an associated sub-scan channel for each device channel
         for channel_index, channel_info in enumerate(channel_info_list):
             subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
@@ -817,12 +1139,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         self.__last_idle_position: typing.Optional[Geometry.FloatPoint] = None  # used for testing
 
-        # configure the initial profiles from the device
-        self.__profiles: typing.List[ScanFrameParameters] = list()
-        self.__profiles.extend(self.__get_initial_profiles())
-        self.__current_profile_index = self.__get_initial_profile_index()
-        self.__frame_parameters = self.__profiles[0]
-        self.__record_parameters = self.__profiles[2]
+        self.__frame_parameters = self.__settings.get_current_frame_parameters()
+        self.__record_parameters = self.__settings.get_record_frame_parameters()
 
         self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
@@ -836,6 +1154,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.acquisition_state_changed_event = Event.Event()
 
     def close(self) -> None:
+        Process.close_event_loop(self.__event_loop)
+        self.__event_loop = typing.cast(asyncio.AbstractEventLoop, None)
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
@@ -855,6 +1175,19 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__line_scan_vector_changed_event_listener.close()
             self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
         super().close()
+        if self.__settings_changed_event_listener:
+            self.__settings_changed_event_listener.close()
+            self.__settings_changed_event_listener = None
+        self.__profile_changed_event_listener.close()
+        self.__profile_changed_event_listener = typing.cast(typing.Any, None)
+        self.__frame_parameters_changed_event_listener.close()
+        self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__current_frame_parameters_changed_event_listener.close()
+        self.__current_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__record_frame_parameters_changed_event_listener.close()
+        self.__record_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+        self.__settings.close()
+        self.__settings = typing.cast(typing.Any, None)
 
         # keep the device around until super close is called, since super
         # may do something that requires the device.
@@ -863,6 +1196,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__device = typing.cast(ScanDevice, None)
 
     def periodic(self) -> None:
+        self.__event_loop.stop()
+        self.__event_loop.run_forever()
         self.__handle_executing_task_queue()
 
     @property
@@ -894,6 +1229,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__stem_controller
 
     @property
+    def scan_settings(self) -> ScanSettingsProtocol:
+        return self.__settings
+
+    @property
     def scan_device(self) -> ScanDevice:
         return self.__device
 
@@ -912,9 +1251,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         if "frame_parameters" in kwargs:
-            self.set_current_frame_parameters(ScanFrameParameters(kwargs["frame_parameters"]))
+            frame_parameters = self.__settings.get_frame_parameters_from_dict(kwargs["frame_parameters"])
+            self.set_current_frame_parameters(frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
-            self.set_current_frame_parameters(ScanFrameParameters(args[0]))
+            frame_parameters = self.__settings.get_frame_parameters_from_dict(args[0])
+            self.set_current_frame_parameters(frame_parameters)
         super().start_playing(*args, **kwargs)
 
     def get_enabled_channels(self) -> typing.Sequence[int]:
@@ -981,7 +1322,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             camera_readout_size_squeezed = tuple(camera_readout_size)
             axes_descriptor = AxesDescriptor(None, [0, 1], [2, 3])
 
-        scan_calibrations = ScanFrameParameters(scan_frame_parameters.as_dict()).get_scan_calibrations()
+        scan_calibrations = copy.copy(scan_frame_parameters).get_scan_calibrations()
 
         data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
         data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
@@ -990,7 +1331,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         camera.update_camera_properties(camera_metadata, camera_frame_parameters)
 
         scan_metadata: typing.Dict[str, typing.Any] = dict()
-        update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, ScanFrameParameters(scan_frame_parameters.as_dict()), scan_frame_parameters.scan_id, dict())
+        update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, copy.copy(scan_frame_parameters), scan_frame_parameters.scan_id, dict())
 
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
         update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
@@ -1011,7 +1352,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1) -> GrabSynchronizedResult:
         synchronized_scan_data_stream = make_synchronized_scan_data_stream(scan_hardware_source=self,
-                                                                           scan_frame_parameters=ScanFrameParameters(scan_frame_parameters.as_dict()),
+                                                                           scan_frame_parameters=copy.copy(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
                                                                            camera_frame_parameters=camera_frame_parameters,
                                                                            camera_data_channel=camera_data_channel,
@@ -1284,7 +1625,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
-        record_parameters = ScanFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
+        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParameters from
+        # their dict via the settings to allow it to customize the frame parameters.
+        record_parameters = self.__settings.get_frame_parameters_from_dict(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
@@ -1327,24 +1670,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return xdatas
 
     def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
-        frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
-        self.__profiles[profile_index] = frame_parameters
-        self.__device.set_profile_frame_parameters(profile_index, frame_parameters)
-        if profile_index == self.__current_profile_index:
-            self.set_current_frame_parameters(frame_parameters)
-        if profile_index == 2:
-            self.set_record_frame_parameters(frame_parameters)
-        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
+        self.__settings.set_frame_parameters(profile_index, frame_parameters)
 
     def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters:
-        return copy.copy(self.__profiles[profile_index])
+        return self.__settings.get_frame_parameters(profile_index)
 
     def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
         assert isinstance(frame_parameters, ScanFrameParameters)
         self.__set_current_frame_parameters(frame_parameters, True)
 
     def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, is_context: bool, update_task: bool = True) -> None:
-        frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        frame_parameters = copy.copy(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
         if frame_parameters.subscan_pixel_size:
             frame_parameters.channel_modifier = "subscan"
@@ -1360,21 +1696,26 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 self.__stem_controller._clear_scan_context()
         elif update_task:
             # handle case where current profile has been changed but scan is not running.
-            device_frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+            device_frame_parameters = copy.copy(frame_parameters)
             context_size = device_frame_parameters.size
             device_frame_parameters.fov_size_nm = Geometry.FloatSize(device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm)
             self.__device.set_frame_parameters(device_frame_parameters)
             self.__stem_controller._confirm_scan_context(frame_parameters.size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
-        self.__frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        self.__frame_parameters = copy.copy(frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
-        return ScanFrameParameters(self.__frame_parameters.as_dict())
+        return copy.copy(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        self.__record_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        self.__set_record_frame_parameters(frame_parameters)
+
+    def __set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
+        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParameters from
+        # their dict via the settings to allow it to customize the frame parameters.
+        self.__record_parameters = self.__settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
 
     def get_record_frame_parameters(self) -> HardwareSource.FrameParameters:
-        return ScanFrameParameters(self.__record_parameters.as_dict())
+        return copy.copy(self.__record_parameters)
 
     @property
     def channel_count(self) -> int:
@@ -1429,27 +1770,18 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__thread.start()
 
     def set_selected_profile_index(self, profile_index: int) -> None:
-        self.__current_profile_index = profile_index
-        self.set_current_frame_parameters(self.__profiles[self.__current_profile_index])
-        self.profile_changed_event.fire(profile_index)
+        self.__settings.set_selected_profile_index(profile_index)
 
     @property
     def selected_profile_index(self) -> int:
-        return self.__current_profile_index
+        return self.__settings.selected_profile_index
 
     def __update_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         # update the frame parameters as they are changed from the low level.
         # the low level frame parameters should be treated as if they are updating
         # the existing profiles since the low level device has no way to know
         # the complete set of frame parameters being used at this level.
-        self.__profiles[profile_index] = frame_parameters
-        if profile_index == self.__current_profile_index:
-            self.__frame_parameters = frame_parameters
-            # validates the frame parameters (applies subscan, etc.)
-            self.__set_current_frame_parameters(self.__frame_parameters, False, update_task=False)
-        if profile_index == 2:
-            self.__record_parameters = frame_parameters
-        self.frame_parameters_changed_event.fire(profile_index, frame_parameters)
+        self.__settings._update_frame_parameters(profile_index, frame_parameters)
 
     def _update_frame_parameters_test(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         self.__update_frame_parameters(profile_index, frame_parameters)
@@ -1462,7 +1794,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # current values is different semantics than the scan control panel, which _does_ set current values if
         # the current profile is selected. Hrrmmm.
         with self.__latest_values_lock:
-            self.__latest_values[profile_index] = ScanFrameParameters(frame_parameters.as_dict())
+            self.__latest_values[profile_index] = copy.copy(frame_parameters)
         def do_update_parameters() -> None:
             with self.__latest_values_lock:
                 for profile_index in self.__latest_values.keys():
@@ -1509,7 +1841,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__channel_states_changed(channel_states)
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
-        return ScanFrameParameters(d)
+        return self.__settings.get_frame_parameters_from_dict(d)
 
     def calculate_frame_time(self, frame_parameters: ScanFrameParameters) -> float:
         size = frame_parameters.size
@@ -2035,29 +2367,64 @@ def update_instrument_properties(stem_properties: typing.MutableMapping[str, typ
             instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
+def find_stem_controller(stem_controller_id: typing.Optional[str]) -> typing.Optional[stem_controller_module.STEMController]:
+    stem_controller: typing.Optional[stem_controller_module.STEMController] = None
+    if not stem_controller and stem_controller_id:
+        stem_controller = typing.cast(typing.Any, HardwareSource.HardwareSourceManager().get_instrument_by_id(stem_controller_id))
+        if not stem_controller:
+            stem_controller = Registry.get_component("stem_controller")
+    return stem_controller
+
+
+class ScanModule(typing.Protocol):
+    stem_controller_id: str
+    device: ScanDevice
+    settings: ScanSettingsProtocol
+
+
 _component_registered_listener = None
 _component_unregistered_listener = None
 
-def run() -> None:
+def run(configuration_location: pathlib.Path) -> None:
     def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-        if "scan_device" in component_types:
-            stem_controller: typing.Optional[stem_controller_module.STEMController] = None
-            stem_controller_id = getattr(component, "stem_controller_id", None)
-            if not stem_controller and stem_controller_id:
-                stem_controller = typing.cast(typing.Any, HardwareSource.HardwareSourceManager().get_instrument_by_id(component.stem_controller_id))
-            if not stem_controller and not stem_controller_id:
-                stem_controller = Registry.get_component("stem_controller")
+        stem_controller: typing.Optional[stem_controller_module.STEMController]
+        if "scan_module" in component_types:
+            scan_module = typing.cast(ScanModule, component)
+            stem_controller = find_stem_controller(scan_module.stem_controller_id)
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 stem_controller = stem_controller_module.STEMController()
-            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, component, component.scan_device_id, component.scan_device_name)
-            if hasattr(component, "priority"):
-                scan_hardware_source.priority = component.priority
+            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location)
+            if hasattr(scan_module, "priority"):
+                setattr(scan_hardware_source, "priority", getattr(scan_module, "priority"))
+            Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
+            HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
+            component.hardware_source = scan_hardware_source
+        if "scan_device" in component_types:
+            scan_device = typing.cast(ScanDevice, component)
+            stem_controller = find_stem_controller(getattr(scan_device, "stem_controller_id", None))
+            if not stem_controller:
+                print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
+                stem_controller = stem_controller_module.STEMController()
+            scan_modes = (
+                ScanSettingsMode(_("Fast"), "fast", scan_device.get_profile_frame_parameters(0)),
+                ScanSettingsMode(_("Slow"), "slow", scan_device.get_profile_frame_parameters(1)),
+                ScanSettingsMode(_("Record"), "record", scan_device.get_profile_frame_parameters(2))
+            )
+            scan_settings = ScanSettings(scan_modes, 0, 2)
+            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, configuration_location)
+            if hasattr(scan_device, "priority"):
+                scan_hardware_source.priority = getattr(scan_device, "priority")
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
             component.hardware_source = scan_hardware_source
 
     def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
+        if "scan_module" in component_types:
+            scan_hardware_source = component.hardware_source
+            Registry.unregister_component(scan_hardware_source)
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
+            scan_hardware_source.close()
         if "scan_device" in component_types:
             scan_hardware_source = component.hardware_source
             Registry.unregister_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})

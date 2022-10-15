@@ -49,7 +49,7 @@ def run() -> None:
         HardwareSource.run()
         DriftTracker.run()
         camera_base.run(configuration_location)
-        scan_base.run()
+        scan_base.run(configuration_location)
         video_base.run()
         CameraControlPanel.run()
         ScanControlPanel.run()

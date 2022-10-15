@@ -674,13 +674,14 @@ class DataChannel:
 
     def __init__(self, hardware_source: HardwareSource, index: int, channel_id: typing.Optional[str] = None,
                  name: typing.Optional[str] = None, src_channel_index: typing.Optional[int] = None,
-                 processor: typing.Optional[SumProcessor] = None) -> None:
+                 processor: typing.Optional[SumProcessor] = None, is_context: bool = False) -> None:
         self.__hardware_source = hardware_source
         self.__index = index
         self.__channel_id = channel_id
         self.__name = name
         self.__src_channel_index = src_channel_index
         self.__processor = processor
+        self.__is_context = is_context
         self.__start_count = 0
         self.__state: typing.Optional[str] = None
         self.__data_shape: typing.Optional[DataAndMetadata.ShapeType] = None
@@ -729,6 +730,10 @@ class DataChannel:
     @property
     def processor(self) -> typing.Optional[SumProcessor]:
         return self.__processor
+
+    @property
+    def is_context(self) -> bool:
+        return self.__is_context
 
     @property
     def data_and_metadata(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
@@ -902,7 +907,7 @@ class HardwareSource(typing.Protocol):
     abort_event: Event.Event
     acquisition_state_changed_event: Event.Event
 
-    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None: ...
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
@@ -1097,21 +1102,20 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         for data_element in data_elements:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
-            # find channel_index for channel_id
-            channel_index = next((data_channel.index for data_channel in self.__data_channels if data_channel.channel_id == channel_id), 0)
-            data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-            # data_and_metadata data may still point to low level code memory at this point.
-            channel_state = data_element.get("state", "complete" if not is_error else "error")
-            if channel_state != "complete" and is_stopping and not is_error:
-                channel_state = "marked"
-            data_shape = data_element.get("data_shape")
-            dest_sub_area = data_element.get("dest_sub_area")
-            sub_area = data_element.get("sub_area")
-            data_channel = self.__data_channels[channel_index]
-            # data_channel.update will make a copy of the data_and_metadata
-            data_channel.update(data_and_metadata, channel_state, data_shape, dest_sub_area, sub_area, view_id)
-            data_channels.append(data_channel)
-            xdatas.append(data_channel.data_and_metadata)
+            data_channel = next(filter(lambda dc: dc.channel_id == channel_id, self.__data_channels), None)
+            if data_channel:
+                data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                # data_and_metadata data may still point to low level code memory at this point.
+                channel_state = data_element.get("state", "complete" if not is_error else "error")
+                if channel_state != "complete" and is_stopping and not is_error:
+                    channel_state = "marked"
+                data_shape = data_element.get("data_shape")
+                dest_sub_area = data_element.get("dest_sub_area")
+                sub_area = data_element.get("sub_area")
+                # data_channel.update will make a copy of the data_and_metadata
+                data_channel.update(data_and_metadata, channel_state, data_shape, dest_sub_area, sub_area, view_id)
+                data_channels.append(data_channel)
+                xdatas.append(data_channel.data_and_metadata)
         # update channel buffers with processors
         for data_channel in self.__data_channels:
             src_channel_index = data_channel.src_channel_index
@@ -1343,8 +1347,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def __data_channel_state_changed(self, data_channel: DataChannel) -> None:
         self.data_channel_state_changed_event.fire(data_channel)
 
-    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None) -> None:
-        data_channel = DataChannel(self, len(self.__data_channels), channel_id, name)
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None:
+        data_channel = DataChannel(self, len(self.__data_channels), channel_id, name, is_context=is_context)
         self.__data_channels.append(data_channel)
         self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
 

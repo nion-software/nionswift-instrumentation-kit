@@ -450,8 +450,8 @@ def get_control_values(configuration: Schema.Entity, control_values_list_key: st
 
 
 def wrap_acquisition_device_data_stream_for_series(data_stream: Acquisition.DataStream, control_customization: AcquisitionPreferences.ControlCustomization, control_values_range: ControlValuesRange, device_map: typing.Mapping[str, DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> AcquisitionMethodResult:
-    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
-    # get the associated control handler that was created in created_handler and used within the stack
+    # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    # get the associated control handler that was created in create_handler and used within the stack
     # of control handlers declarative components.
     assert data_stream
     if control_values_range.count > 1:
@@ -580,7 +580,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         item = self._control_combo_box_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            # get the associated control handler that was created in created_handler and used within the stack
+            # get the associated control handler that was created in create_handler and used within the stack
             # of control handlers declarative components.
             control_handler = self.__control_handlers.get(control_customization.control_id)
             if control_handler and data_stream:
@@ -776,7 +776,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         item = self._control_combo_box_handler.selected_item_value_stream.value
         if item:
             control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
-            # get the associated control handlers that were created in created_handler and used within the stack
+            # get the associated control handlers that were created in create_handler and used within the stack
             # of control handlers declarative components.
             x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
             y_control_handler = self.__y_control_handlers.get(control_customization.control_id)
@@ -2224,7 +2224,7 @@ class AcquisitionController(Declarative.Handler):
             try:
                 apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
                 try:
-                    # call the acquire data stream method to carry out the acquisition.
+                    # call the _acquire_data_stream_method to carry out the acquisition.
                     self._acquire_data_stream(apply_result.data_stream, apply_result.title_base, apply_result.channel_names, build_result.drift_tracker)
                 finally:
                     apply_result.data_stream.remove_ref()

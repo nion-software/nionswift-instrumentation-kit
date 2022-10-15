@@ -2496,7 +2496,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             camera_metadata: typing.Dict[str, typing.Any] = dict()
             self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
             metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
-            # this is a hack to prevent some of the potentially misleading metadata
+            # this is a hack to prevent potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
             # metadata for now, camera implementers should be aware that this is likely

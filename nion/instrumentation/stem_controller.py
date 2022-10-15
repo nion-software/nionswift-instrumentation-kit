@@ -787,12 +787,11 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
         scan_controller = stem_controller.scan_controller
         if scan_controller:
-            for data_channel in scan_controller.data_channels:
-                channel_id = data_channel.channel_id
-                if channel_id and not channel_id.endswith("subscan") and channel_id != "drift":
-                    data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, channel_id)
-                    if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
-                        return True
+            context_data_channels = scan_controller.get_context_data_channels()
+            for data_channel in context_data_channels:
+                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
+                if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
+                    return True
         return False
 
     return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
