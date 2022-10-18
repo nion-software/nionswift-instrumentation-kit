@@ -74,11 +74,6 @@ class ScanFrameParameters:
             center_nm_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.pop("center_nm"))
             if center_nm_tuple:
                 self.center_nm = Geometry.FloatPoint.make(center_nm_tuple)
-        self.__fov_size_nm: typing.Optional[Geometry.FloatSize] = None
-        if "fov_size_nm" in d:
-            fov_size_nm_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.pop("fov_size_nm"))
-            if fov_size_nm_tuple:
-                self.fov_size_nm = Geometry.FloatSize.make(fov_size_nm_tuple)  # this is a device level parameter; not used at the user level
         self.pixel_time_us: float = d.pop("pixel_time_us", 10)
         self.fov_nm: float = d.pop("fov_nm", 8)
         self.rotation_rad = d.pop("rotation_rad", 0)
@@ -152,11 +147,10 @@ class ScanFrameParameters:
 
     @property
     def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
-        return self.__fov_size_nm
-
-    @fov_size_nm.setter
-    def fov_size_nm(self, value: typing.Optional[Geometry.FloatSizeTuple]) -> None:
-        self.__fov_size_nm = Geometry.FloatSize.make(value) if value else None
+        # return the fov size with the same aspect ratio as the size
+        # the width of the fov_size_nm will be the same as the fov_nm
+        # the height will depend on the aspect ratio of the pixel shape.
+        return Geometry.FloatSize(self.fov_nm * self.size.aspect_ratio, self.fov_nm)
 
     @property
     def subscan_pixel_size(self) -> typing.Optional[Geometry.IntSize]:
@@ -224,8 +218,6 @@ class ScanFrameParameters:
 
         if self.scan_id:
             d["scan_id"] = str(self.scan_id)
-        if self.fov_size_nm:
-            d["fov_size_nm"] = self.fov_size_nm.as_tuple()
         if self.scan_id:
             d["scan_id"] = str(self.scan_id)
         if self.subscan_pixel_size is not None:
@@ -269,7 +261,6 @@ class ScanFrameParameters:
     def __repr__(self) -> str:
         return "size pixels: " + str(self.size) +\
                "\ncenter nm: " + str(self.center_nm) +\
-               "\nfov size nm: " + str(self.fov_size_nm) +\
                "\npixel time: " + str(self.pixel_time_us) +\
                "\nfield of view: " + str(self.fov_nm) +\
                "\nrotation: " + str(self.rotation_rad) +\
@@ -530,8 +521,6 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __activate_frame_parameters(self) -> None:
         device_frame_parameters = copy.copy(self.__frame_parameters)
-        context_size = device_frame_parameters.size
-        device_frame_parameters.fov_size_nm = Geometry.FloatSize(device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm)
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
@@ -1697,8 +1686,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         elif update_task:
             # handle case where current profile has been changed but scan is not running.
             device_frame_parameters = copy.copy(frame_parameters)
-            context_size = device_frame_parameters.size
-            device_frame_parameters.fov_size_nm = Geometry.FloatSize(device_frame_parameters.fov_nm * context_size.aspect_ratio, device_frame_parameters.fov_nm)
             self.__device.set_frame_parameters(device_frame_parameters)
             self.__stem_controller._confirm_scan_context(frame_parameters.size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)

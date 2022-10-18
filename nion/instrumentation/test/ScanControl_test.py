@@ -1592,7 +1592,7 @@ class TestScanControlClass(unittest.TestCase):
             hardware_source = test_context.scan_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             # ensure it is initially dict-like
-            frame_parameters.fov_size_nm = Geometry.FloatSize(8, 8)
+            frame_parameters.fov_nm = 8.0
             self.assertEqual(frame_parameters.size, frame_parameters["size"])
             self.assertEqual(frame_parameters.center_nm, frame_parameters["center_nm"])
             self.assertEqual(frame_parameters.fov_nm, frame_parameters["fov_nm"])

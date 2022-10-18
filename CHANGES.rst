@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Make fov_size_nm be a computed property representing fov with aspect ratio applied.
+
 0.20.8 (2022-09-13)
 -------------------
 - Replace flyback_pixels property with calculate_flyback_pixels method.
