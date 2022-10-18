@@ -153,7 +153,23 @@ class ScanFrameParameters:
         return Geometry.FloatSize(self.fov_nm * self.size.aspect_ratio, self.fov_nm)
 
     @property
+    def pixel_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
+        if self.__size and self.__size.height > 0.0 and self.__size.width > 0.0:
+            return Geometry.FloatSize(height=self.fov_nm / self.__size.height, width=self.fov_nm / self.__size.width)
+        return None
+
+    @pixel_size_nm.setter
+    def pixel_size_nm(self, pixel_size_nm: typing.Optional[Geometry.FloatSize]) -> None:
+        # the free parameter is always the size; keep the fov fixed.
+        if pixel_size_nm and pixel_size_nm.height > 0.0 and pixel_size_nm.width > 0.0:
+            self.__size = Geometry.IntSize(
+                height=max(1, round(self.fov_nm / pixel_size_nm.height)),
+                width=max(1, round(self.fov_nm / pixel_size_nm.width))
+            )
+
+    @property
     def subscan_pixel_size(self) -> typing.Optional[Geometry.IntSize]:
+        # TODO: consider deprecating this and renaming to subscan_size (to be consistent with 'pixel_size_nm' naming).
         return self.__subscan_pixel_size
 
     @subscan_pixel_size.setter
@@ -175,6 +191,24 @@ class ScanFrameParameters:
     @subscan_fractional_center.setter
     def subscan_fractional_center(self, value: typing.Optional[Geometry.FloatPointTuple]) -> None:
         self.__subscan_fractional_center = Geometry.FloatPoint.make(value) if value else None
+
+    @property
+    def subscan_pixel_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
+        if self.__subscan_pixel_size and self.__subscan_fractional_size and self.__subscan_pixel_size.height > 0.0 and self.__subscan_pixel_size.width > 0.0:
+            return Geometry.FloatSize(
+                height=self.__subscan_fractional_size.height * self.fov_nm / self.__subscan_pixel_size.height,
+                width=self.__subscan_fractional_size.width * self.fov_nm / self.__subscan_pixel_size.width
+            )
+        return None
+
+    @subscan_pixel_size_nm.setter
+    def subscan_pixel_size_nm(self, pixel_size_nm: typing.Optional[Geometry.FloatSize]) -> None:
+        # the free parameter is always the subscan size; keep the fov fixed.
+        if pixel_size_nm and pixel_size_nm.height > 0.0 and pixel_size_nm.width > 0.0 and self.__subscan_fractional_size:
+            self.__subscan_pixel_size = Geometry.IntSize(
+                height=max(1, round(self.__subscan_fractional_size.height * self.fov_nm / pixel_size_nm.height)),
+                width=max(1, round(self.__subscan_fractional_size.width * self.fov_nm / pixel_size_nm.width))
+            )
 
     @property
     def top_left_override(self) -> typing.Optional[Geometry.IntPoint]:

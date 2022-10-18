@@ -4,6 +4,7 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 - Make fov_size_nm be a computed property representing fov with aspect ratio applied.
+- Add pixel_size_nm and subscan_pixel_size_nm computed properties to frame parameters.
 
 0.20.8 (2022-09-13)
 -------------------
