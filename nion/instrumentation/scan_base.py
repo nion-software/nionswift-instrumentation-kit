@@ -357,8 +357,8 @@ def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], s
 def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, scan_properties: typing.Mapping[str, typing.Any]) -> None:
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
-    center_x_nm = float(scan_properties.get("center_x_nm", 0.0))
-    center_y_nm = float(scan_properties.get("center_y_nm", 0.0))
+    center_x_nm = scan_frame_parameters.center_nm.x
+    center_y_nm = scan_frame_parameters.center_nm.y
     fov_nm = scan_frame_parameters.fov_nm  # context fov_nm, not actual fov_nm returned from low level
     if scan_frame_parameters.size[0] > scan_frame_parameters.size[1]:
         fractional_size = scan_frame_parameters.subscan_fractional_size[0] if scan_frame_parameters.subscan_fractional_size else 1.0
@@ -372,16 +372,27 @@ def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any
     data_element["version"] = 1
     data_element["channel_id"] = channel_id  # needed to match to the channel
     data_element["channel_name"] = channel_name  # needed to match to the channel
+    assert len(data_shape) in (1, 2)
     if scan_properties.get("calibration_style") == "time":
-        data_element["spatial_calibrations"] = (
-            {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
-            {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-        )
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
+        else:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
     else:
-        data_element["spatial_calibrations"] = (
-            {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-            {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-        )
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
+        else:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
 
 
 def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:

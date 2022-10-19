@@ -5,6 +5,7 @@ UNRELEASED
 ----------
 - Make fov_size_nm be a computed property representing fov with aspect ratio applied.
 - Add pixel_size_nm and subscan_pixel_size_nm computed properties to frame parameters.
+- Handle scan data calibrations when scan data is 1D.
 
 0.20.8 (2022-09-13)
 -------------------
