@@ -1394,7 +1394,6 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     scan_size = scan_context_description.scan_size
     scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
     scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
-    scan_frame_parameters.scan_id = uuid.uuid4()
 
     # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
     # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
@@ -1735,15 +1734,13 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     assert scan_hardware_source is not None
 
     # configure the scan uuid and scan frame parameters.
-    scan_uuid = uuid.uuid4()
     scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
     scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
-    scan_frame_parameters.scan_id = scan_uuid
 
     # gather the scan metadata.
     scan_metadata: typing.Dict[str, typing.Any] = dict()
     scan_base.update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id,
-                                   scan_hardware_source.display_name, scan_frame_parameters, scan_uuid, dict())
+                                   scan_hardware_source.display_name, scan_frame_parameters, None, dict())
 
     instrument_metadata: typing.Dict[str, typing.Any] = dict()
     scan_base.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,

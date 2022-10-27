@@ -94,8 +94,6 @@ class ScanAcquisitionController:
 
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, self.__scan_specifier.size)
 
-        scan_frame_parameters.scan_id = uuid.uuid4()
-
         # useful code for testing to exit cleanly at this point.
         # self.acquisition_state_changed_event.fire(SequenceState.scanning)
         # self.acquisition_state_changed_event.fire(SequenceState.idle)
