@@ -1134,6 +1134,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
 
+        self.__channel_states_lock = threading.RLock()
+        self.__channel_states: typing.List[ChannelState] = list()
+        self.__pending_channel_states: typing.Optional[typing.List[ChannelState]] = None
+
         self.__profile_changed_event_listener = self.__settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
@@ -1824,7 +1828,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_count = self.channel_count
         assert len(channel_states) == channel_count
         def channel_states_changed() -> None:
-            for channel_index, channel_state in enumerate(channel_states):
+            with self.__channel_states_lock:
+                self.__channel_states = self.__pending_channel_states or list()
+                self.__pending_channel_states = None
+            for channel_index, channel_state in enumerate(self.__channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
             at_least_one_enabled = False
             for channel_index in range(channel_count):
@@ -1833,7 +1840,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                     break
             if not at_least_one_enabled:
                 self.stop_playing()
-        self.__task_queue.put(channel_states_changed)
+        with self.__channel_states_lock:
+            if list(channel_states) != list(self.__channel_states):
+                self.__pending_channel_states = list(channel_states)
+                self.__task_queue.put(channel_states_changed)
 
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
         for channel_index in range(self.channel_count):
