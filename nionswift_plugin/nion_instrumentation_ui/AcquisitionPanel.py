@@ -1747,7 +1747,8 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
                                            scan_hardware_source.scan_device)
 
     # build the scan frame data stream.
-    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker)
+    scan_id = uuid.uuid4()
+    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker)
 
     # potentially break the scan into multiple sections; this is an unused capability currently.
     scan_size = scan_data_stream.scan_size
@@ -1757,7 +1758,7 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     for section in range(section_count):
         start = section * section_height
         stop = min(start + section_height, scan_size.height)
-        collectors.append(Acquisition.CollectedDataStream(scan_data_stream, (stop - start, scan_size.width), scan_frame_parameters.get_scan_calibrations()))
+        collectors.append(Acquisition.CollectedDataStream(scan_data_stream, (stop - start, scan_size.width), scan_base.get_scan_calibrations(scan_frame_parameters)))
     collector = Acquisition.StackedDataStream(collectors)
     # construct the channel names.
     channel_names: typing.Dict[Acquisition.Channel, str] = dict()
@@ -2349,7 +2350,7 @@ class CameraDeviceController(DeviceController):
 
 
 class ScanDeviceController(DeviceController):
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParametersLike):
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
 

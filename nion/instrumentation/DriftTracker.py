@@ -252,7 +252,7 @@ class DriftCorrectionBehavior:
     def __init__(self,
                  drift_tracker: DriftTracker,
                  scan_hardware_source: scan_base.ScanHardwareSource,
-                 scan_frame_parameters: scan_base.ScanFrameParameters,
+                 scan_frame_parameters: scan_base.ScanFrameParametersLike,
                  drift_scan_interval: int,
                  *, use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
@@ -279,7 +279,7 @@ class DriftCorrectionBehavior:
             # this method must be thread safe
             # start with the context frame parameters and adjust for the drift region
             frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
-            context_size = frame_parameters.size.to_float_size()
+            context_size = frame_parameters.pixel_size.to_float_size()
             drift_channel_id = self.__scan_hardware_source.drift_channel_id
             drift_region = self.__scan_hardware_source.drift_region
             drift_rotation = self.__scan_hardware_source.drift_rotation
@@ -352,7 +352,7 @@ class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
     it has created with the functor object.
     """
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParametersLike, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
         self.__drift_tracker = drift_tracker

@@ -73,7 +73,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
             scan_base.ScanSettingsMode("Slow", "slow", scan_device.get_profile_frame_parameters(1)),
             scan_base.ScanSettingsMode("Record", "record", scan_device.get_profile_frame_parameters(2))
         )
-        scan_settings = scan_base.ScanSettings(scan_modes, 0, 2)
+        scan_settings = scan_base.ScanSettings(scan_modes, lambda d: scan_base.ScanFrameParameters(d), 0, 2)
         scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
         setattr(scan_device, "hardware_source", scan_hardware_source)
         Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller

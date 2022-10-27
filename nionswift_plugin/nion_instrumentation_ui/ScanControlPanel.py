@@ -180,7 +180,7 @@ class ScanControlStateController:
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
-        self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
+        self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParametersLike], None]] = None
         self.on_linked_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, bool], None]] = None
         self.on_data_channel_state_changed : typing.Optional[typing.Callable[[int, str, str, bool], None]] = None
@@ -283,7 +283,7 @@ class ScanControlStateController:
         if callable(self.on_profile_changed):
             self.on_profile_changed(profile_label)
 
-    def __update_frame_parameters(self, profile_index: int, frame_parameters: scan_base.ScanFrameParameters) -> None:
+    def __update_frame_parameters(self, profile_index: int, frame_parameters: scan_base.ScanFrameParametersLike) -> None:
         if callable(self.on_frame_parameters_changed):
             if profile_index == self.__scan_hardware_source.selected_profile_index:
                 self.on_frame_parameters_changed(frame_parameters)
@@ -476,14 +476,14 @@ class ScanControlStateController:
         frame_parameters.ac_line_sync = checked
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def __update_frame_size(self, frame_parameters: scan_base.ScanFrameParameters, field: str) -> None:
-        size = frame_parameters.size
+    def __update_frame_size(self, frame_parameters: scan_base.ScanFrameParametersLike, field: str) -> None:
+        size = frame_parameters.pixel_size
         if self.__linked:
             if field == "width":
                 size = Geometry.IntSize(size.width, size.width)
             else:
                 size = Geometry.IntSize(size.height, size.height)
-        frame_parameters.size = size
+        frame_parameters.pixel_size = size
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
     def handle_linked_changed(self, linked: bool) -> None:
@@ -496,32 +496,32 @@ class ScanControlStateController:
 
     def handle_width_changed(self, width_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(width_str))
+        frame_parameters.pixel_size = Geometry.IntSize(int(frame_parameters.pixel_size[0]), int(width_str))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_decrease_width(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]/2))
+        frame_parameters.pixel_size = Geometry.IntSize(int(frame_parameters.pixel_size[0]), int(frame_parameters.pixel_size[1]/2))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_increase_width(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]), int(frame_parameters.size[1]*2))
+        frame_parameters.pixel_size = Geometry.IntSize(int(frame_parameters.pixel_size[0]), int(frame_parameters.pixel_size[1]*2))
         self.__update_frame_size(frame_parameters, "width")
 
     def handle_height_changed(self, height_str: str) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(height_str), int(frame_parameters.size[1]))
+        frame_parameters.pixel_size = Geometry.IntSize(int(height_str), int(frame_parameters.pixel_size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_decrease_height(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]/2), int(frame_parameters.size[1]))
+        frame_parameters.pixel_size = Geometry.IntSize(int(frame_parameters.pixel_size[0]/2), int(frame_parameters.pixel_size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_increase_height(self) -> None:
         frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-        frame_parameters.size = Geometry.IntSize(int(frame_parameters.size[0]*2), int(frame_parameters.size[1]))
+        frame_parameters.pixel_size = Geometry.IntSize(int(frame_parameters.pixel_size[0]*2), int(frame_parameters.pixel_size[1]))
         self.__update_frame_size(frame_parameters, "height")
 
     def handle_time_changed(self, time_str: str) -> None:
@@ -1389,9 +1389,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # the current_text must be set on ui thread
             self.document_controller.queue_task(lambda: setattr(profile_combo, "current_text", profile_label))
 
-        def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParameters) -> None:
-            width_field.text = str(int(frame_parameters.size[1]))
-            height_field.text = str(int(frame_parameters.size[0]))
+        def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParametersLike) -> None:
+            width_field.text = str(int(frame_parameters.pixel_size[1]))
+            height_field.text = str(int(frame_parameters.pixel_size[0]))
             time_field.text = str("{0:.2f}".format(float(frame_parameters.pixel_time_us)))
             fov_field.text = str("{0:.1f}".format(float(frame_parameters.fov_nm)))
             rotation_field.text = str("{0:.1f}".format(float(frame_parameters.rotation_rad) * 180.0 / math.pi))

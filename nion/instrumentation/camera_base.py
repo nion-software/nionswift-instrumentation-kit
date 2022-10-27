@@ -2383,6 +2383,10 @@ class CameraFrameParameters:
         self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in value]
 
 
+class CameraAcquisitionTaskParameters(HardwareSource.AcquisitionTaskParameters):
+    pass
+
+
 def crop_and_calibrate(uncropped_xdata: DataAndMetadata.DataAndMetadata, flyback_pixels: int,
                        scan_calibrations: typing.Optional[DataAndMetadata.CalibrationListType],
                        data_calibrations: DataAndMetadata.CalibrationListType,
@@ -2673,7 +2677,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):
-            self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, self.__camera_frame_parameters)
+            acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
+            self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
             self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
         else:
             assert self.__camera_device_stream_interface
@@ -2718,7 +2723,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 self.fire_data_available(data_stream_event)
                 self.__record_count -= 1
                 if self.__record_count > 0:
-                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, self.__camera_frame_parameters)
+                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
+                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
         else:
             assert self.__camera_device_stream_interface
             partial_data = self.__camera_device_stream_interface.get_next_data()

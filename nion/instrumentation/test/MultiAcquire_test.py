@@ -200,7 +200,6 @@ class TestMultiAcquire(unittest.TestCase):
                                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                                 camera_frame_parameters.processing = multi_acquire_settings['processing']
                                 camera_frame_parameters.active_masks = masks
-                                scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                                     camera=camera_hardware_source,
                                                                                                     camera_frame_parameters=camera_frame_parameters)
@@ -321,7 +320,6 @@ class TestMultiAcquire(unittest.TestCase):
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
                 camera_frame_parameters.processing = multi_acquire_settings['processing']
-                scan_frame_parameters.scan_id = scan_frame_parameters.scan_id or uuid.uuid4()
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,
                                                                                     camera_frame_parameters=camera_frame_parameters)

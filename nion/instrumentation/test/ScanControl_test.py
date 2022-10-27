@@ -1593,14 +1593,14 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters = hardware_source.get_frame_parameters(0)
             # ensure it is initially dict-like
             frame_parameters.fov_nm = 8.0
-            self.assertEqual(frame_parameters.size, frame_parameters["size"])
-            self.assertEqual(frame_parameters.center_nm, frame_parameters["center_nm"])
-            self.assertEqual(frame_parameters.fov_nm, frame_parameters["fov_nm"])
-            self.assertEqual(frame_parameters.fov_size_nm, frame_parameters["fov_size_nm"])
+            self.assertEqual(frame_parameters.size, frame_parameters.size)
+            self.assertEqual(frame_parameters.center_nm, frame_parameters.center_nm)
+            self.assertEqual(frame_parameters.fov_nm, frame_parameters.fov_nm)
+            self.assertEqual(frame_parameters.fov_size_nm, frame_parameters.fov_size_nm)
             # try setting values
-            frame_parameters["size"] = Geometry.IntSize(4, 4)
-            frame_parameters["center_nm"] = Geometry.FloatPoint(5.0, 5.0)
-            frame_parameters["fov_nm"] = 16.0
+            frame_parameters.size = Geometry.IntSize(4, 4)
+            frame_parameters.center_nm = Geometry.FloatPoint(5.0, 5.0)
+            frame_parameters.fov_nm = 16.0
             self.assertEqual(Geometry.IntSize(4, 4), frame_parameters.size)
             self.assertEqual(Geometry.FloatPoint(5.0, 5.0), frame_parameters.center_nm)
             self.assertEqual(16.0, frame_parameters.fov_nm)
@@ -1609,28 +1609,22 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters.center_nm = (50.0, 50.0)
             self.assertEqual(Geometry.IntSize(40, 40), frame_parameters.size)
             self.assertEqual(Geometry.FloatPoint(50.0, 50.0), frame_parameters.center_nm)
-            frame_parameters["size"] = (41, 41)
-            frame_parameters["center_nm"] = (51.0, 51.0)
+            frame_parameters.size = (41, 41)
+            frame_parameters.center_nm = (51.0, 51.0)
             self.assertEqual(Geometry.IntSize(41, 41), frame_parameters.size)
             self.assertEqual(Geometry.FloatPoint(51.0, 51.0), frame_parameters.center_nm)
             # test optional parameters take tuples and None
             self.assertIsNone(frame_parameters.subscan_pixel_size)
             frame_parameters.subscan_pixel_size = (20, 20)
             self.assertEqual(Geometry.IntSize(20, 20), frame_parameters.subscan_pixel_size)
-            self.assertEqual(Geometry.IntSize(20, 20), frame_parameters["subscan_pixel_size"])
             frame_parameters.subscan_pixel_size = Geometry.IntSize(21, 21)
             self.assertEqual(Geometry.IntSize(21, 21), frame_parameters.subscan_pixel_size)
-            frame_parameters["subscan_pixel_size"] = Geometry.IntSize(22, 22)
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(22, 22)
             self.assertEqual(Geometry.IntSize(22, 22), frame_parameters.subscan_pixel_size)
             frame_parameters.subscan_pixel_size = None
             self.assertIsNone(frame_parameters.subscan_pixel_size)
             frame_parameters.subscan_pixel_size = Geometry.IntSize(21, 21)
-            frame_parameters["subscan_pixel_size"] = None
-            # test extra parameters get copied
-            frame_parameters["extra"] = 8
-            self.assertEqual(8, frame_parameters["extra"])
-            frame_parameters_copy = scan_base.ScanFrameParameters(frame_parameters.as_dict())
-            self.assertEqual(8, frame_parameters_copy["extra"])
+            frame_parameters.subscan_pixel_size = None
             # test dict is writeable to json
             json.dumps(frame_parameters.as_dict())
 

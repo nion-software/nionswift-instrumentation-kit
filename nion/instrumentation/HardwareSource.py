@@ -15,6 +15,7 @@ from __future__ import annotations
 import abc
 import contextlib
 import copy
+import dataclasses
 import enum
 import functools
 import gettext
@@ -846,6 +847,17 @@ class FrameParameters(typing.Protocol):
     def as_dict(self) -> typing.Dict[str, typing.Any]: ...
 
 
+class AcquisitionTaskParameters(typing.Protocol):
+    pass
+
+
+@dataclasses.dataclass
+class AcquisitionParameters:
+    """Internal class describing an acquisition."""
+    frame_parameters: FrameParameters
+    acquisition_task_parameters: AcquisitionTaskParameters
+
+
 class HardwareSource(typing.Protocol):
 
     # methods
@@ -1251,7 +1263,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     # thread safe
     def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> None:
         if not self.is_recording:
-            record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters)
+            # pass kwargs for acquisition_task_parameters until things are cleaned up universally
+            record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters, **kwargs)
             old_finished_callback_fn = record_task.finished_callback_fn
 
             def finished(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
@@ -1609,7 +1622,7 @@ class ViewTask:
 class RecordTask:
     """Run acquisition in a thread and record the result."""
 
-    def __init__(self, hardware_source: HardwareSource, frame_parameters: FrameParameters) -> None:
+    def __init__(self, hardware_source: HardwareSource, acquisition_parameters: AcquisitionParameters) -> None:
         self.__hardware_source = hardware_source
 
         assert not self.__hardware_source.is_recording
@@ -1621,8 +1634,9 @@ class RecordTask:
         self.__recording_started = threading.Event()
 
         def record_thread() -> None:
-            self.__hardware_source.set_record_frame_parameters(frame_parameters)
-            self.__hardware_source.start_recording()
+            self.__hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
+            # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
+            self.__hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
             self.__recording_started.set()
             self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
             self.__hardware_source.stop_recording(sync_timeout=3.0)

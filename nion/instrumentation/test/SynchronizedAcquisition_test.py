@@ -406,7 +406,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual(100.0, Metadata.get_metadata_value(metadata, "stem.scan.fov_nm"))
             self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.pixel_time_us"))
             self.assertEqual(0.0, Metadata.get_metadata_value(metadata, "stem.scan.rotation"))
-            self.assertIsNotNone(uuid.UUID(Metadata.get_metadata_value(metadata, "stem.scan.scan_id")))
+            # note: scan_id is not required here since there will be multiple scans.
             self.assertIsNone(Metadata.get_metadata_value(metadata, "stem.scan.line_time_us"))
             self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
