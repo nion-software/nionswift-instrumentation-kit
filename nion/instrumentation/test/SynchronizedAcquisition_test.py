@@ -1063,7 +1063,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source._update_frame_parameters_test(0, scan_base.ScanFrameParameters(updated_frame_parameters))
             current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             # import pprint; print(pprint.pformat(dict(current_frame_parameters)))
-            self.assertIsNotNone(current_frame_parameters.channel_modifier)
             self.assertIsNotNone(current_frame_parameters.subscan_fractional_center)
             self.assertIsNotNone(current_frame_parameters.subscan_fractional_size)
             self.assertIsNotNone(current_frame_parameters.subscan_pixel_size)

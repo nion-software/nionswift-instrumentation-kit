@@ -93,7 +93,6 @@ class ScanFrameParameters:
             if subscan_fractional_center_tuple:
                 self.subscan_fractional_center = Geometry.FloatPoint.make(subscan_fractional_center_tuple)
         self.subscan_rotation: float = d.pop("subscan_rotation", 0.0)
-        self.channel_modifier: typing.Optional[str] = d.pop("channel_modifier", None)
         self.channel_override: typing.Optional[str] = d.pop("channel_override", None)
         self.external_clock_wait_time_ms: int = d.pop("external_clock_wait_time_ms", 0)
         self.external_clock_mode: int = d.pop("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
@@ -262,8 +261,6 @@ class ScanFrameParameters:
             d["subscan_fractional_center"] = self.subscan_fractional_center.as_tuple()
         if self.subscan_rotation:  # don't store None or 0.0
             d["subscan_rotation"] = self.subscan_rotation
-        if self.channel_modifier:  # don't store None or 0.0
-            d["channel_modifier"] = self.channel_modifier
         if self.channel_override:  # don't store None or 0.0
             d["channel_override"] = self.channel_override
 
@@ -309,7 +306,6 @@ class ScanFrameParameters:
                ("\nsubscan fractional size: " + str(self.subscan_fractional_size) if self.subscan_fractional_size is not None else "") +\
                ("\nsubscan fractional center: " + str(self.subscan_fractional_center) if self.subscan_fractional_center is not None else "") +\
                ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_rotation is not None else "") +\
-               ("\nchannel modifier: " + str(self.channel_modifier) if self.channel_modifier is not None else "") +\
                ("\nchannel override: " + str(self.channel_override) if self.channel_override is not None else "")
 
     def get_scan_calibrations(self) -> typing.Tuple[Calibration.Calibration, Calibration.Calibration]:
@@ -540,8 +536,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             scan_id = self.__scan_id
             channel_name = self.__device.get_channel_name(channel_index)
             channel_override = self.__frame_parameters.channel_override
-            channel_modifier = self.__frame_parameters.channel_modifier
-            channel_id = channel_override or (channel_id + (("_" + channel_modifier) if channel_modifier else ""))
+            channel_id = channel_override or (channel_id + ("_subscan" if self.__frame_parameters.subscan_pixel_size else ""))
 
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
@@ -570,8 +565,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
 
 def apply_section_rect(scan_frame_parameters: ScanFrameParameters, section_rect: Geometry.IntRect,
-                       scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect,
-                       channel_modifier: typing.Optional[str]) -> ScanFrameParameters:
+                       scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect) -> ScanFrameParameters:
     section_rect_f = section_rect.to_float_rect()
     subscan_rotation = scan_frame_parameters.subscan_rotation
     subscan_fractional_center0 = scan_frame_parameters.subscan_fractional_center or Geometry.FloatPoint(0.5, 0.5)
@@ -585,8 +579,6 @@ def apply_section_rect(scan_frame_parameters: ScanFrameParameters, section_rect:
     section_frame_parameters.subscan_pixel_size = section_rect.size
     section_frame_parameters.subscan_fractional_size = subscan_fractional_size
     section_frame_parameters.subscan_fractional_center = subscan_fractional_center
-    if channel_modifier:
-        section_frame_parameters.channel_modifier = channel_modifier
     section_frame_parameters.data_shape_override = scan_size  # no flyback addition since this is data from scan device
     section_frame_parameters.state_override = "complete" if section_rect.bottom == scan_size.height and section_rect.right == scan_size.width else "partial"
     section_frame_parameters.top_left_override = section_rect.top_left
@@ -812,7 +804,6 @@ class GrabSynchronizedInfo:
     is_subscan: bool
     camera_readout_size: Geometry.IntSize
     camera_readout_size_squeezed: DataAndMetadata.ShapeType
-    channel_modifier: typing.Optional[str]
     scan_calibrations: typing.Tuple[Calibration.Calibration, Calibration.Calibration]
     data_calibrations: typing.Tuple[Calibration.Calibration, ...]
     data_intensity_calibration: Calibration.Calibration
@@ -1318,7 +1309,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return None
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
-        channel_modifier: typing.Optional[str]
         scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
@@ -1331,7 +1321,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             assert fractional_size and fractional_center
             fractional_area = Geometry.FloatRect.from_center_and_size(fractional_center, fractional_size)
             is_subscan = True
-            channel_modifier = "subscan"
         else:
             scan_param_height = scan_frame_parameters.size.height
             scan_param_width = scan_frame_parameters.size.width
@@ -1339,7 +1328,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 scan_param_height = scan_max_area // scan_param_width
             fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
             is_subscan = False
-            channel_modifier = None
 
         camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.binning))
 
@@ -1371,10 +1359,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
 
         return GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
-                                    camera_readout_size_squeezed, channel_modifier,
-                                    scan_calibrations, data_calibrations, data_intensity_calibration,
-                                    instrument_metadata, camera_metadata, scan_metadata,
-                                    axes_descriptor)
+                                    camera_readout_size_squeezed, scan_calibrations, data_calibrations,
+                                    data_intensity_calibration, instrument_metadata, camera_metadata,
+                                    scan_metadata, axes_descriptor)
 
     def grab_synchronized(self, *,
                           data_channel: typing.Optional[Acquisition.DataChannel] = None,
@@ -1716,10 +1703,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, is_context: bool, update_task: bool = True) -> None:
         frame_parameters = copy.copy(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
-        if frame_parameters.subscan_pixel_size:
-            frame_parameters.channel_modifier = "subscan"
-        else:
-            frame_parameters.channel_modifier = None
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, ScanAcquisitionTask):
             if update_task:
@@ -2080,7 +2063,6 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
         self.__enabled_channels = scan_hardware_source.get_enabled_channels()
-        self.__channel_modifier: typing.Optional[str] = None
         scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
@@ -2093,7 +2075,6 @@ class ScanFrameDataStream(Acquisition.DataStream):
             assert fractional_size and fractional_center
             self.__fractional_area = Geometry.FloatRect.from_center_and_size(fractional_center, fractional_size)
             is_subscan = True
-            self.__channel_modifier = "subscan"
         else:
             scan_param_height = scan_frame_parameters.size.height
             scan_param_width = scan_frame_parameters.size.width
@@ -2101,7 +2082,6 @@ class ScanFrameDataStream(Acquisition.DataStream):
                 scan_param_height = scan_max_area // scan_param_width
             self.__fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
             is_subscan = False
-            self.__channel_modifier = None
         self.__scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
         if is_subscan:
             self.__scan_frame_parameters.subscan_pixel_size = self.__scan_size
@@ -2187,8 +2167,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         # class to be continually started but still produce the proper output in the view channels.
         section_rect = stream_args.slice_rect
         section_rect = section_rect + Geometry.IntPoint(y=self.__section_offset)
-        section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size,
-                                                      self.__fractional_area, self.__channel_modifier)
+        section_frame_parameters = apply_section_rect(scan_frame_parameters, section_rect, scan_size, self.__fractional_area)
         self.__section_rect = section_rect
         self.__section_offset = section_rect.bottom % scan_size.height
         self.__started = True
