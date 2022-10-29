@@ -1211,11 +1211,11 @@ class TestScanControlClass(unittest.TestCase):
             stem_controller_ = test_context.instrument
             scan_hardware_source.start_playing()
             scan_hardware_source.get_next_xdatas_to_start()  # grab at least one frame
-            scan_hardware_source._update_frame_parameters_test(0, scan_hardware_source.get_current_frame_parameters())
+            scan_hardware_source.set_frame_parameters(0, scan_hardware_source.get_current_frame_parameters())
             scan_context1 = copy.deepcopy(stem_controller_.scan_context)
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.get_next_xdatas_to_start()  # grab at least one frame
-            scan_hardware_source._update_frame_parameters_test(0, scan_hardware_source.get_current_frame_parameters())
+            scan_hardware_source.set_frame_parameters(0, scan_hardware_source.get_current_frame_parameters())
             scan_hardware_source.stop_playing()
             scan_context2 = copy.deepcopy(stem_controller_.scan_context)
             self.assertTrue(scan_context1.is_valid)
@@ -1232,7 +1232,6 @@ class TestScanControlClass(unittest.TestCase):
             fov_nm = frame_parameters.fov_nm
             frame_parameters.fov_nm //= 2
             scan_hardware_source.set_frame_parameters(0, frame_parameters)
-            scan_hardware_source._update_frame_parameters_test(0, scan_hardware_source.get_current_frame_parameters())
             self.assertEqual(fov_nm // 2, scan_hardware_source.scan_device.current_frame_parameters.fov_nm)
             self.assertFalse(stem_controller_.scan_context.is_valid)
 

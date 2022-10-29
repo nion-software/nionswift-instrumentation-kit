@@ -1060,7 +1060,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             for k in list(updated_frame_parameters.keys()):
                 if k not in ("size", "center_nm", "pixel_time_us", "fov_nm", "rotation_rad", "flyback_time_us"):
                     updated_frame_parameters.pop(k)
-            scan_hardware_source._update_frame_parameters_test(0, scan_base.ScanFrameParameters(updated_frame_parameters))
+            scan_hardware_source.set_frame_parameters(0, scan_base.ScanFrameParameters(updated_frame_parameters))
             current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             # import pprint; print(pprint.pformat(dict(current_frame_parameters)))
             self.assertIsNotNone(current_frame_parameters.subscan_fractional_center)
