@@ -252,7 +252,7 @@ class DriftCorrectionBehavior:
     def __init__(self,
                  drift_tracker: DriftTracker,
                  scan_hardware_source: scan_base.ScanHardwareSource,
-                 scan_frame_parameters: scan_base.ScanFrameParametersLike,
+                 scan_frame_parameters: scan_base.ScanFrameParameters,
                  drift_scan_interval: int,
                  *, use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
@@ -352,7 +352,7 @@ class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
     it has created with the functor object.
     """
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParametersLike, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
         self.__drift_tracker = drift_tracker

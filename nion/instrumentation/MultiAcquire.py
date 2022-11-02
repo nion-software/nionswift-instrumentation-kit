@@ -448,7 +448,7 @@ class SISequenceAcquisitionHandler:
                  camera_frame_parameters: camera_base.CameraFrameParameters,
                  scan_controller: scan_base.ScanHardwareSource,
                  scan_data_channel: ScanDataChannel,
-                 scan_frame_parameters: scan_base.ScanFrameParametersLike,
+                 scan_frame_parameters: scan_base.ScanFrameParameters,
                  si_sequence_behavior: typing.Optional[SISequenceBehavior] = None) -> None:
 
         self.__camera = camera
@@ -627,7 +627,7 @@ class MultiAcquireController:
         time.sleep(self.__active_settings['blanker_delay'])
 
     def __calculate_total_acquisition_time(self, spectrum_parameters: MultiEELSParameters, settings: MultiEELSSettings,
-                                           scan_parameters: typing.Optional[scan_base.ScanFrameParametersLike] = None,
+                                           scan_parameters: typing.Optional[scan_base.ScanFrameParameters] = None,
                                            include_shift_delay: bool = False) -> float:
         total_time = 0
         if scan_parameters is not None:

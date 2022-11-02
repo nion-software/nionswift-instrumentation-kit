@@ -180,7 +180,7 @@ class ScanControlStateController:
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
-        self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParametersLike], None]] = None
+        self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
         self.on_linked_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, bool], None]] = None
         self.on_data_channel_state_changed : typing.Optional[typing.Callable[[int, str, str, bool], None]] = None
@@ -283,7 +283,7 @@ class ScanControlStateController:
         if callable(self.on_profile_changed):
             self.on_profile_changed(profile_label)
 
-    def __update_frame_parameters(self, profile_index: int, frame_parameters: scan_base.ScanFrameParametersLike) -> None:
+    def __update_frame_parameters(self, profile_index: int, frame_parameters: scan_base.ScanFrameParameters) -> None:
         if callable(self.on_frame_parameters_changed):
             if profile_index == self.__scan_hardware_source.selected_profile_index:
                 self.on_frame_parameters_changed(frame_parameters)
@@ -476,7 +476,7 @@ class ScanControlStateController:
         frame_parameters.ac_line_sync = checked
         self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
-    def __update_frame_size(self, frame_parameters: scan_base.ScanFrameParametersLike, field: str) -> None:
+    def __update_frame_size(self, frame_parameters: scan_base.ScanFrameParameters, field: str) -> None:
         size = frame_parameters.pixel_size
         if self.__linked:
             if field == "width":
@@ -1389,7 +1389,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # the current_text must be set on ui thread
             self.document_controller.queue_task(lambda: setattr(profile_combo, "current_text", profile_label))
 
-        def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParametersLike) -> None:
+        def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParameters) -> None:
             width_field.text = str(int(frame_parameters.pixel_size[1]))
             height_field.text = str(int(frame_parameters.pixel_size[0]))
             time_field.text = str("{0:.2f}".format(float(frame_parameters.pixel_time_us)))

@@ -577,7 +577,7 @@ class MultiAcquirePanelDelegate:
         time_estimate_row.add_spacing(6)
         self.multi_acquire_controller.stem_controller = self.stem_controller
         self.multi_acquire_controller.scan_controller = self.scan_controller
-        def frame_parameters_changed(profile_index: int, frame_parameters: scan_base.ScanFrameParametersLike) -> None:
+        def frame_parameters_changed(profile_index: int, frame_parameters: scan_base.ScanFrameParameters) -> None:
             self.update_time_estimate()
         if self.scan_controller:
             self.__scan_frame_parameters_changed_event_listener = self.scan_controller.frame_parameters_changed_event.listen(frame_parameters_changed)

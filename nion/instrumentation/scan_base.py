@@ -46,24 +46,47 @@ _NDArray = numpy.typing.NDArray[typing.Any]
 _ = gettext.gettext
 
 
-class ScanFrameParametersLike(HardwareSource.FrameParameters, typing.Protocol):
-    fov_nm: float
-    rotation_rad: float
-    center_nm: Geometry.FloatPoint
-    pixel_time_us: float
-    pixel_size: Geometry.IntSize
-    pixel_size_nm: Geometry.FloatSize
-    subscan_pixel_size: typing.Optional[Geometry.IntSize]
-    subscan_fractional_size: typing.Optional[Geometry.FloatSize]
-    subscan_fractional_center: typing.Optional[Geometry.FloatPoint]
-    subscan_pixel_size_nm: typing.Optional[Geometry.FloatSize]
-    subscan_rotation: float
-    ac_line_sync: bool
-    channel_override: typing.Optional[str]
+import copy
+from nion.utils import Observable
+
+class ParametersBase(Observable.Observable):
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        super().__init__()
+        self.__d: typing.Dict[str, typing.Any] = dict()
+        assert not args or isinstance(args[0], dict)
+        if isinstance(args[0], dict):
+            self.__d.update(args[0])
+        self.__d.update(kwargs)
+
+    def __copy__(self) -> ParametersBase:
+        return copy.deepcopy(self)
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ParametersBase:
+        deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
+        memo[id(self)] = deepcopy
+        return deepcopy
+
+    def as_dict(self) -> typing.Dict[str, typing.Any]:
+        return copy.deepcopy(self.__d)
+
+    def has_parameter(self, name: str) -> bool:
+        return name in self.__d
+
+    def get_parameter(self, name: str, default_value: typing.Any = None) -> typing.Any:
+        return self.__d.get(name, default_value)
+
+    def set_parameter(self, name: str, value: typing.Any) -> None:
+        if value is not None:
+            self.__d[name] = value
+        else:
+            self.__d.pop(name, None)
+
+    def clear_parameter(self, name: str) -> None:
+        self.__d.pop(name, None)
 
 
-# subclass of ScanFrameParametersLike when mypy #13954 is fixed.
-class ScanFrameParameters:
+# subclass of ScanFrameParameters when mypy #13954 is fixed.
+class ScanFrameParameters(ParametersBase):
     """Scan frame parameters.
 
     This should almost never be instantiated directly. The settings objects is responsible for constructing scan
@@ -75,200 +98,163 @@ class ScanFrameParameters:
     """
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        d: typing.Dict[str, typing.Any] = dict()
-        assert not args or isinstance(args[0], dict)
-        if isinstance(args[0], dict):
-            d.update(args[0])
-        d.update(kwargs)
-        self.__size = Geometry.IntSize(512, 512)
-        if "size" in d:
-            size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.pop("size"))
-            if size_tuple:
-                self.size = Geometry.IntSize.make(size_tuple)
-        self.__center_nm = Geometry.FloatPoint()
-        if "center_nm" in d:
-            center_nm_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.pop("center_nm"))
-            if center_nm_tuple:
-                self.center_nm = Geometry.FloatPoint.make(center_nm_tuple)
-        self.pixel_time_us: float = d.pop("pixel_time_us", 10)
-        self.fov_nm: float = d.pop("fov_nm", 8)
-        self.rotation_rad = d.pop("rotation_rad", 0)
-        self.__subscan_pixel_size: typing.Optional[Geometry.IntSize] = None
-        if "subscan_pixel_size" in d:
-            subscan_pixel_size_tuple = typing.cast(typing.Optional[Geometry.SizeIntTuple], d.pop("subscan_pixel_size"))
-            if subscan_pixel_size_tuple:
-                self.subscan_pixel_size = Geometry.IntSize.make(subscan_pixel_size_tuple)
-        self.__subscan_fractional_size: typing.Optional[Geometry.FloatSize] = None
-        if "subscan_fractional_size" in d:
-            subscan_fractional_size_tuple = typing.cast(typing.Optional[Geometry.SizeFloatTuple], d.pop("subscan_fractional_size"))
-            if subscan_fractional_size_tuple:
-                self.subscan_fractional_size = Geometry.FloatSize.make(subscan_fractional_size_tuple)
-        self.__subscan_fractional_center: typing.Optional[Geometry.FloatPoint] = None
-        if "subscan_fractional_center" in d:
-            subscan_fractional_center_tuple = typing.cast(typing.Optional[Geometry.PointFloatTuple], d.pop("subscan_fractional_center"))
-            if subscan_fractional_center_tuple:
-                self.subscan_fractional_center = Geometry.FloatPoint.make(subscan_fractional_center_tuple)
-        self.subscan_rotation: float = d.pop("subscan_rotation", 0.0)
-        self.channel_override: typing.Optional[str] = d.pop("channel_override", None)
-        self.external_clock_wait_time_ms: int = d.pop("external_clock_wait_time_ms", 0)
-        self.external_clock_mode: int = d.pop("external_clock_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
-        self.external_scan_mode: int = d.pop("external_scan_mode", 0)  # 0=off, 1=on:rising, 2=on:falling
-        self.external_scan_ratio: float = d.pop("external_scan_ratio", 1.0)
-        self.ac_line_sync: bool = d.pop("ac_line_sync", False)
-        self.ac_frame_sync: bool = d.pop("ac_frame_sync", True)
-        self.flyback_time_us: float = d.pop("flyback_time_us", 30.0)
-
-    def __copy__(self) -> ScanFrameParametersLike:
-        return copy.deepcopy(self)
-
-    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ScanFrameParametersLike:
-        deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
-        memo[id(self)] = deepcopy
-        return deepcopy
+        super().__init__(*args, **kwargs)
+        if self.has_parameter("size") and not self.has_parameter("pixel_size"):
+            self.pixel_size = Geometry.IntSize.make(self.get_parameter("size"))
 
     @property
-    def size(self) -> Geometry.IntSize:
-        return self.__size
+    def fov_nm(self) -> float:
+        return typing.cast(float, self.get_parameter("fov_nm", 8.0))
 
-    @size.setter
-    def size(self, value: Geometry.IntSizeTuple) -> None:
-        self.__size = Geometry.IntSize.make(value)
+    @fov_nm.setter
+    def fov_nm(self, value: float) -> None:
+        self.set_parameter("fov_nm", value)
 
     @property
-    def pixel_size(self) -> Geometry.IntSize:
-        return self.__size
+    def rotation_rad(self) -> float:
+        return typing.cast(float, self.get_parameter("rotation_rad", 0.0))
 
-    @pixel_size.setter
-    def pixel_size(self, value: Geometry.IntSizeTuple) -> None:
-        self.__size = Geometry.IntSize.make(value)
+    @rotation_rad.setter
+    def rotation_rad(self, value: float) -> None:
+        self.set_parameter("rotation_rad", value)
 
     @property
     def center_nm(self) -> Geometry.FloatPoint:
-        return self.__center_nm
+        # parameters must be convertible to JSON; center_nm must be stored as a tuple.
+        return Geometry.FloatPoint.make(self.get_parameter("center_nm", (0, 0)))
 
     @center_nm.setter
-    def center_nm(self, value: Geometry.FloatPoint) -> None:
-        self.__center_nm = Geometry.FloatPoint.make(value)
+    def center_nm(self, value: Geometry.FloatPointTuple) -> None:
+        # parameters must be convertible to JSON; center_nm must be stored as a tuple.
+        self.set_parameter("center_nm", Geometry.FloatPoint.make(value).as_tuple())
 
     @property
-    def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
-        # return the fov size with the same aspect ratio as the size
-        # the width of the fov_size_nm will be the same as the fov_nm
-        # the height will depend on the aspect ratio of the pixel shape.
-        return Geometry.FloatSize(self.fov_nm * self.size.aspect_ratio, self.fov_nm)
+    def pixel_time_us(self) -> float:
+        return typing.cast(float, self.get_parameter("pixel_time_us", 10.0))
+
+    @pixel_time_us.setter
+    def pixel_time_us(self, value: float) -> None:
+        self.set_parameter("pixel_time_us", value)
 
     @property
-    def rotation_deg(self) -> float:
-        return math.degrees(self.rotation_rad)
+    def pixel_size(self) -> Geometry.IntSize:
+        # parameters must be convertible to JSON; pixel_size must be stored as a tuple.
+        return Geometry.IntSize.make(self.get_parameter("pixel_size", (512, 512)))
+
+    @pixel_size.setter
+    def pixel_size(self, value: Geometry.IntSizeTuple) -> None:
+        # parameters must be convertible to JSON; center_nm must be stored as a tuple.
+        self.set_parameter("pixel_size", Geometry.IntSize.make(value).as_tuple())
+
+    @property
+    def size(self) -> Geometry.IntSize:
+        return self.pixel_size
+
+    @size.setter
+    def size(self, value: Geometry.IntSize) -> None:
+        self.pixel_size = value
 
     @property
     def pixel_size_nm(self) -> Geometry.FloatSize:
-        if self.__size and self.__size.height > 0.0 and self.__size.width > 0.0:
-            return Geometry.FloatSize(height=self.fov_nm / self.__size.height, width=self.fov_nm / self.__size.width)
-        return Geometry.FloatSize()
+        return Geometry.FloatSize(height=self.fov_nm / self.pixel_size.height, width=self.fov_nm / self.pixel_size.width)
 
     @pixel_size_nm.setter
     def pixel_size_nm(self, pixel_size_nm: Geometry.FloatSize) -> None:
         # the free parameter is always the size; keep the fov fixed.
         if pixel_size_nm and pixel_size_nm.height > 0.0 and pixel_size_nm.width > 0.0:
-            self.__size = Geometry.IntSize(
+            self.pixel_size = Geometry.IntSize(
                 height=max(1, round(self.fov_nm / pixel_size_nm.height)),
                 width=max(1, round(self.fov_nm / pixel_size_nm.width))
             )
 
     @property
     def subscan_pixel_size(self) -> typing.Optional[Geometry.IntSize]:
-        # TODO: consider deprecating this and renaming to subscan_size (to be consistent with 'pixel_size_nm' naming).
-        return self.__subscan_pixel_size
+        # parameters must be convertible to JSON; subscan_pixel_size must be stored as a tuple.
+        subscan_pixel_size_tuple = self.get_parameter("subscan_pixel_size", None)
+        return Geometry.IntSize.make(subscan_pixel_size_tuple) if subscan_pixel_size_tuple else None
 
     @subscan_pixel_size.setter
     def subscan_pixel_size(self, value: typing.Optional[Geometry.IntSizeTuple]) -> None:
-        self.__subscan_pixel_size = Geometry.IntSize.make(value) if value else None
+        # parameters must be convertible to JSON; subscan_pixel_size must be stored as a tuple.
+        self.set_parameter("subscan_pixel_size", Geometry.IntSize.make(value).as_tuple() if value else None)
 
     @property
     def subscan_fractional_size(self) -> typing.Optional[Geometry.FloatSize]:
-        return self.__subscan_fractional_size
+        # parameters must be convertible to JSON; subscan_fractional_size must be stored as a tuple.
+        subscan_fractional_size_tuple = self.get_parameter("subscan_fractional_size", None)
+        return Geometry.FloatSize.make(subscan_fractional_size_tuple) if subscan_fractional_size_tuple else None
 
     @subscan_fractional_size.setter
     def subscan_fractional_size(self, value: typing.Optional[Geometry.FloatSizeTuple]) -> None:
-        self.__subscan_fractional_size = Geometry.FloatSize.make(value) if value else None
+        # parameters must be convertible to JSON; subscan_fractional_size must be stored as a tuple.
+        self.set_parameter("subscan_fractional_size", Geometry.FloatSize.make(value).as_tuple() if value else None)
 
     @property
     def subscan_fractional_center(self) -> typing.Optional[Geometry.FloatPoint]:
-        return self.__subscan_fractional_center
+        # parameters must be convertible to JSON; subscan_fractional_center must be stored as a tuple.
+        subscan_fractional_center_tuple = self.get_parameter("subscan_fractional_center", None)
+        return Geometry.FloatPoint.make(subscan_fractional_center_tuple) if subscan_fractional_center_tuple else None
 
     @subscan_fractional_center.setter
     def subscan_fractional_center(self, value: typing.Optional[Geometry.FloatPointTuple]) -> None:
-        self.__subscan_fractional_center = Geometry.FloatPoint.make(value) if value else None
+        # parameters must be convertible to JSON; subscan_fractional_center must be stored as a tuple.
+        self.set_parameter("subscan_fractional_center", Geometry.FloatPoint.make(value).as_tuple() if value else None)
 
     @property
     def subscan_pixel_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
-        if self.__subscan_pixel_size and self.__subscan_fractional_size and self.__subscan_pixel_size.height > 0.0 and self.__subscan_pixel_size.width > 0.0:
+        if self.subscan_pixel_size and self.subscan_fractional_size and self.subscan_pixel_size.height > 0.0 and self.subscan_pixel_size.width > 0.0:
             return Geometry.FloatSize(
-                height=self.__subscan_fractional_size.height * self.fov_nm / self.__subscan_pixel_size.height,
-                width=self.__subscan_fractional_size.width * self.fov_nm / self.__subscan_pixel_size.width
+                height=self.subscan_fractional_size.height * self.fov_nm / self.subscan_pixel_size.height,
+                width=self.subscan_fractional_size.width * self.fov_nm / self.subscan_pixel_size.width
             )
         return None
 
     @subscan_pixel_size_nm.setter
     def subscan_pixel_size_nm(self, pixel_size_nm: typing.Optional[Geometry.FloatSize]) -> None:
         # the free parameter is always the subscan size; keep the fov fixed.
-        if pixel_size_nm and pixel_size_nm.height > 0.0 and pixel_size_nm.width > 0.0 and self.__subscan_fractional_size:
-            self.__subscan_pixel_size = Geometry.IntSize(
-                height=max(1, round(self.__subscan_fractional_size.height * self.fov_nm / pixel_size_nm.height)),
-                width=max(1, round(self.__subscan_fractional_size.width * self.fov_nm / pixel_size_nm.width))
+        if pixel_size_nm and pixel_size_nm.height > 0.0 and pixel_size_nm.width > 0.0 and self.subscan_fractional_size:
+            self.subscan_pixel_size = Geometry.IntSize(
+                height=max(1, round(self.subscan_fractional_size.height * self.fov_nm / pixel_size_nm.height)),
+                width=max(1, round(self.subscan_fractional_size.width * self.fov_nm / pixel_size_nm.width))
             )
 
-    def as_dict(self) -> typing.Dict[str, typing.Any]:
-        d: typing.Dict[str, typing.Any] = {
-            "size": self.size.as_tuple(),
-            "center_nm": self.center_nm.as_tuple(),
-            "pixel_time_us": self.pixel_time_us,
-            "fov_nm": self.fov_nm,
-            "rotation_rad": self.rotation_rad,
-            "external_clock_wait_time_ms": self.external_clock_wait_time_ms,
-            "external_clock_mode": self.external_clock_mode,
-            "external_scan_mode": self.external_scan_mode,
-            "external_scan_ratio": self.external_scan_ratio,
-            "ac_line_sync": self.ac_line_sync,
-            "ac_frame_sync": self.ac_frame_sync,
-            "flyback_time_us": self.flyback_time_us,
-        }
+    @property
+    def subscan_rotation(self) -> float:
+        return typing.cast(float, self.get_parameter("subscan_rotation", 0.0))
 
-        if self.subscan_pixel_size is not None:
-            d["subscan_pixel_size"] = self.subscan_pixel_size.as_tuple()
-        if self.subscan_fractional_size is not None:
-            d["subscan_fractional_size"] = self.subscan_fractional_size.as_tuple()
-        if self.subscan_fractional_center is not None:
-            d["subscan_fractional_center"] = self.subscan_fractional_center.as_tuple()
-        if self.subscan_rotation:  # don't store None or 0.0
-            d["subscan_rotation"] = self.subscan_rotation
-        if self.channel_override:  # don't store None or 0.0
-            d["channel_override"] = self.channel_override
+    @subscan_rotation.setter
+    def subscan_rotation(self, value: float) -> None:
+        self.set_parameter("subscan_rotation", value)
 
-        return d
+    @property
+    def ac_line_sync(self) -> bool:
+        return typing.cast(bool, self.get_parameter("ac_line_sync", False))
 
-    def __repr__(self) -> str:
-        return "size pixels: " + str(self.size) +\
-               "\ncenter nm: " + str(self.center_nm) +\
-               "\npixel time: " + str(self.pixel_time_us) +\
-               "\nfield of view: " + str(self.fov_nm) +\
-               "\nrotation: " + str(self.rotation_rad) +\
-               "\nexternal clock wait time: " + str(self.external_clock_wait_time_ms) +\
-               "\nexternal clock mode: " + str(self.external_clock_mode) +\
-               "\nexternal scan mode: " + str(self.external_scan_mode) +\
-               "\nexternal scan ratio: " + str(self.external_scan_ratio) +\
-               "\nac line sync: " + str(self.ac_line_sync) +\
-               "\nac frame sync: " + str(self.ac_frame_sync) +\
-               "\nflyback time: " + str(self.flyback_time_us) +\
-               ("\nsubscan pixel size: " + str(self.subscan_pixel_size) if self.subscan_pixel_size is not None else "") +\
-               ("\nsubscan fractional size: " + str(self.subscan_fractional_size) if self.subscan_fractional_size is not None else "") +\
-               ("\nsubscan fractional center: " + str(self.subscan_fractional_center) if self.subscan_fractional_center is not None else "") +\
-               ("\nsubscan rotation: " + str(self.subscan_rotation) if self.subscan_rotation is not None else "") +\
-               ("\nchannel override: " + str(self.channel_override) if self.channel_override is not None else "")
+    @ac_line_sync.setter
+    def ac_line_sync(self, value: bool) -> None:
+        self.set_parameter("ac_line_sync", value)
+
+    @property
+    def channel_override(self) -> typing.Optional[str]:
+        return typing.cast(typing.Optional[str], self.get_parameter("channel_override", None))
+
+    @channel_override.setter
+    def channel_override(self, value: typing.Optional[str]) -> None:
+        self.set_parameter("channel_override", value)
+
+    @property
+    def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
+        # return the fov size with the same aspect ratio as the size
+        # the width of the fov_size_nm will be the same as the fov_nm
+        # the height will depend on the aspect ratio of the pixel shape.
+        return Geometry.FloatSize(self.fov_nm * self.pixel_size.aspect_ratio, self.fov_nm)
+
+    @property
+    def rotation_deg(self) -> float:
+        return math.degrees(self.rotation_rad)
 
 
-def get_scan_calibrations(frame_parameters: ScanFrameParametersLike) -> typing.Tuple[Calibration.Calibration, Calibration.Calibration]:
+def get_scan_calibrations(frame_parameters: ScanFrameParameters) -> typing.Tuple[Calibration.Calibration, Calibration.Calibration]:
     scan_shape = frame_parameters.pixel_size
     center_x_nm = frame_parameters.center_nm.x
     center_y_nm = frame_parameters.center_nm.y
@@ -281,7 +267,7 @@ def get_scan_calibrations(frame_parameters: ScanFrameParametersLike) -> typing.T
     return scan_calibrations
 
 
-def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParametersLike, scan_id_str: typing.Optional[str]) -> None:
+def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, scan_id_str: typing.Optional[str]) -> None:
     if scan_id_str:
         properties["scan_id"] = scan_id_str
     properties["center_x_nm"] = scan_frame_parameters.center_nm.x
@@ -306,7 +292,7 @@ def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], s
 
 
 # set the calibrations for this image. does not touch metadata.
-def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParametersLike, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, scan_properties: typing.Mapping[str, typing.Any]) -> None:
+def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, scan_properties: typing.Mapping[str, typing.Any]) -> None:
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
     center_x_nm = scan_frame_parameters.center_nm.x
@@ -347,7 +333,7 @@ def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any
             )
 
 
-def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParametersLike, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:
+def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:
     scan_metadata["hardware_source_id"] = hardware_source_id
     scan_metadata["hardware_source_name"] = display_name
     update_scan_properties(scan_metadata, scan_frame_parameters, str(scan_id) if scan_id else None)
@@ -385,7 +371,7 @@ class ScanAcquisitionTaskParameters(HardwareSource.AcquisitionTaskParameters):
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def __init__(self, stem_controller_: stem_controller_module.STEMController, scan_hardware_source: ScanHardwareSource,
-                 device: ScanDevice, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParametersLike,
+                 device: ScanDevice, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
                  acquisition_task_parameters: typing.Optional[ScanAcquisitionTaskParameters], channel_ids: typing.Sequence[str],
                  display_name: str) -> None:
         # acquisition_task_parameters are internal parameters that are needed by this package. do not use externally.
@@ -411,13 +397,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__last_read_time = 0.0
         self.__subscan_enabled = False
 
-    def set_frame_parameters(self, frame_parameters: ScanFrameParametersLike) -> None:
+    def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         if self.__frame_parameters.as_dict() != frame_parameters.as_dict():
             self.__frame_parameters = copy.copy(frame_parameters)
             self.__activate_frame_parameters()
 
     @property
-    def frame_parameters(self) -> typing.Optional[ScanFrameParametersLike]:
+    def frame_parameters(self) -> typing.Optional[ScanFrameParameters]:
         return copy.copy(self.__frame_parameters)
 
     def _start_acquisition(self) -> bool:
@@ -533,8 +519,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__device.set_frame_parameters(device_frame_parameters)
 
 
-def apply_section_rect(scan_frame_parameters: ScanFrameParametersLike, acquisition_task_parameters: ScanAcquisitionTaskParameters,
-                       section_rect: Geometry.IntRect, scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect) -> ScanFrameParametersLike:
+def apply_section_rect(scan_frame_parameters: ScanFrameParameters, acquisition_task_parameters: ScanAcquisitionTaskParameters,
+                       section_rect: Geometry.IntRect, scan_size: Geometry.IntSize, fractional_area: Geometry.FloatRect) -> ScanFrameParameters:
     section_rect_f = section_rect.to_float_rect()
     subscan_rotation = scan_frame_parameters.subscan_rotation
     subscan_fractional_center0 = scan_frame_parameters.subscan_fractional_center or Geometry.FloatPoint(0.5, 0.5)
@@ -560,7 +546,7 @@ class ScanDevice(typing.Protocol):
     def close(self) -> None: ...
     def get_channel_name(self, channel_index: int) -> str: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> bool: ...
-    def set_frame_parameters(self, frame_parameters: ScanFrameParametersLike) -> None: ...
+    def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None: ...
     def save_frame_parameters(self) -> None: ...
     def start_frame(self, is_continuous: bool) -> int: ...
     def cancel(self) -> None: ...
@@ -569,8 +555,8 @@ class ScanDevice(typing.Protocol):
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def set_scan_context_probe_position(self, scan_context: stem_controller_module.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
-    def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParametersLike, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
-    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParametersLike) -> int: return 2
+    def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
@@ -590,13 +576,13 @@ class ScanDevice(typing.Protocol):
     def is_scanning(self) -> bool: raise NotImplementedError()
 
     @property
-    def current_frame_parameters(self) -> ScanFrameParametersLike: raise NotImplementedError()
+    def current_frame_parameters(self) -> ScanFrameParameters: raise NotImplementedError()
 
     @property
     def acquisition_metatdata_groups(self) -> typing.Sequence[typing.Tuple[typing.Sequence[str], str]]:
         return list()
 
-    on_device_state_changed: typing.Optional[typing.Callable[[typing.Sequence[ScanFrameParametersLike], typing.Sequence[typing.Tuple[str, bool]]], None]]
+    on_device_state_changed: typing.Optional[typing.Callable[[typing.Sequence[ScanFrameParameters], typing.Sequence[typing.Tuple[str, bool]]], None]]
 
 
 @typing.runtime_checkable
@@ -606,7 +592,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     def grab_synchronized(self, *,
                           data_channel: typing.Optional[Acquisition.DataChannel] = None,
-                          scan_frame_parameters: ScanFrameParametersLike,
+                          scan_frame_parameters: ScanFrameParameters,
                           camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: camera_base.CameraFrameParameters,
                           camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
@@ -614,7 +600,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1) -> GrabSynchronizedResult: ...
 
-    def record_immediate(self, frame_parameters: ScanFrameParametersLike,
+    def record_immediate(self, frame_parameters: ScanFrameParameters,
                          enabled_channels: typing.Optional[typing.Sequence[int]] = None,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
 
@@ -624,8 +610,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def selected_profile_index(self) -> int: raise NotImplementedError()
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
-    def get_frame_parameters(self, profile_index: int) -> ScanFrameParametersLike: ...
-    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParametersLike) -> None: ...
+    def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
+    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
 
     # properties
 
@@ -709,7 +695,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     # private. do not use outside instrumentation-kit.
 
-    def get_current_frame_parameters(self) -> ScanFrameParametersLike: ...
+    def get_current_frame_parameters(self) -> ScanFrameParameters: ...
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None: ...
     def get_record_frame_parameters(self) -> HardwareSource.FrameParameters: ...
     def periodic(self) -> None: ...
@@ -718,7 +704,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_channel_enabled(self, channel_index: int) -> bool: ...
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]: ...
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]: ...
-    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParametersLike, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
     def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
     def calculate_drift_scans(self) -> int: ...
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
@@ -731,11 +717,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def decrease_pmt(self, channel_index: int) -> None: ...
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int: ...
     def get_data_channel_state(self, channel_index: int) -> typing.Tuple[typing.Optional[str], typing.Optional[str], bool]: ...
-    def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParametersLike, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
+    def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
-    def scan_immediate(self, frame_parameters: ScanFrameParametersLike) -> None: ...
-    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParametersLike) -> int: ...
+    def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
     def get_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
         # return the data channels functioning as scan contexts.
@@ -799,7 +785,7 @@ class ScanSettingsMode:
     """
     name: str
     mode_id: str
-    frame_parameters: ScanFrameParametersLike
+    frame_parameters: ScanFrameParameters
 
 
 class ScanSettingsProtocol(typing.Protocol):
@@ -830,22 +816,22 @@ class ScanSettingsProtocol(typing.Protocol):
         """Initialize the settings with the settings_dict."""
         ...
 
-    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParametersLike:
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         """Return camera frame parameters from dict.
 
-        Subclasses may override this method to provide a custom subclass of ScanFrameParametersLike.
+        Subclasses may override this method to provide a custom subclass of ScanFrameParameters.
         """
         raise NotImplementedError()
 
-    def get_current_frame_parameters(self) -> ScanFrameParametersLike:
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
         """Get the current frame parameters."""
         raise NotImplementedError()
 
-    def get_record_frame_parameters(self) -> ScanFrameParametersLike:
+    def get_record_frame_parameters(self) -> ScanFrameParameters:
         """Get the record frame parameters."""
         raise NotImplementedError()
 
-    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParametersLike) -> None:
+    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
         """Set the frame parameters with the settings index and fire the frame parameters changed event.
 
         If the settings index matches the current settings index, call set current frame parameters.
@@ -854,7 +840,7 @@ class ScanSettingsProtocol(typing.Protocol):
         """
         ...
 
-    def get_frame_parameters(self, settings_index: int) -> ScanFrameParametersLike:
+    def get_frame_parameters(self, settings_index: int) -> ScanFrameParameters:
         """Get the frame parameters for the settings index."""
         ...
 
@@ -875,7 +861,7 @@ class ScanSettingsProtocol(typing.Protocol):
         return  # use return here to signal it is not abstract
 
 
-ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParametersLike]
+ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParameters]
 
 
 class ScanSettings(ScanSettingsProtocol):
@@ -926,11 +912,11 @@ class ScanSettings(ScanSettingsProtocol):
         """Initialize the settings with the settings_dict."""
         pass
 
-    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParametersLike:
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         """Return camera frame parameters from dict."""
         return self.__frame_parameters_factory(d)
 
-    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParametersLike) -> None:
+    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         """Set the current frame parameters.
 
         Fire the current frame parameters changed event and optionally the settings changed event.
@@ -939,11 +925,11 @@ class ScanSettings(ScanSettingsProtocol):
         # self.settings_changed_event.fire(self.__save_settings())
         self.current_frame_parameters_changed_event.fire(frame_parameters)
 
-    def get_current_frame_parameters(self) -> ScanFrameParametersLike:
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
         """Get the current frame parameters."""
         return copy.copy(self.__frame_parameters)
 
-    def __set_record_frame_parameters(self, frame_parameters: ScanFrameParametersLike) -> None:
+    def __set_record_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         """Set the record frame parameters.
 
         Fire the record frame parameters changed event and optionally the settings changed event.
@@ -951,11 +937,11 @@ class ScanSettings(ScanSettingsProtocol):
         self.__record_parameters = copy.copy(frame_parameters)
         self.record_frame_parameters_changed_event.fire(frame_parameters)
 
-    def get_record_frame_parameters(self) -> ScanFrameParametersLike:
+    def get_record_frame_parameters(self) -> ScanFrameParameters:
         """Get the record frame parameters."""
         return self.__record_parameters
 
-    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParametersLike) -> None:
+    def set_frame_parameters(self, settings_index: int, frame_parameters: ScanFrameParameters) -> None:
         """Set the frame parameters with the settings index and fire the frame parameters changed event.
 
         If the settings index matches the current settings index, call set current frame parameters.
@@ -973,7 +959,7 @@ class ScanSettings(ScanSettingsProtocol):
         # self.settings_changed_event.fire(self.__save_settings())
         self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
 
-    def get_frame_parameters(self, settings_index: int) -> ScanFrameParametersLike:
+    def get_frame_parameters(self, settings_index: int) -> ScanFrameParameters:
         """Get the frame parameters for the settings index."""
         return copy.copy(self.__scan_modes[settings_index].frame_parameters)
 
@@ -1104,7 +1090,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
         self.__latest_values_lock = threading.RLock()
-        self.__latest_values: typing.Dict[int, ScanFrameParametersLike] = dict()
+        self.__latest_values: typing.Dict[int, ScanFrameParameters] = dict()
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
@@ -1227,7 +1213,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]:
         return None
 
-    def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParametersLike, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
+    def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
         scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
@@ -1284,7 +1270,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def grab_synchronized(self, *,
                           data_channel: typing.Optional[Acquisition.DataChannel] = None,
-                          scan_frame_parameters: ScanFrameParametersLike,
+                          scan_frame_parameters: ScanFrameParameters,
                           camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: camera_base.CameraFrameParameters,
                           camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
@@ -1396,7 +1382,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
         return self.__stem_controller.line_scan_vector
 
-    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParametersLike, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         scan_context = self.scan_context
         if scan_context.is_valid:
             scan_context_size = scan_context.size
@@ -1409,7 +1395,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.rotation_rad = scan_context.rotation_rad or 0.0
         self.__apply_subscan_parameters(frame_parameters, size)
 
-    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParametersLike, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> None:
+    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         context_size = frame_parameters.pixel_size.to_float_size()
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
         if self.subscan_enabled and self.subscan_region:
@@ -1438,7 +1424,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_center = None
             frame_parameters.subscan_rotation = 0.0
 
-    def apply_subscan(self, frame_parameters: ScanFrameParametersLike) -> None:
+    def apply_subscan(self, frame_parameters: ScanFrameParameters) -> None:
         if frame_parameters.subscan_fractional_size and frame_parameters.subscan_fractional_center:
             pass  # let the parameters speak for themselves
         else:
@@ -1565,7 +1551,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__acquisition_task = view_task
 
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
-        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParametersLike from
+        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParameters from
         # their dict via the settings to allow it to customize the frame parameters.
         record_parameters = self.__settings.get_frame_parameters_from_dict(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
@@ -1576,7 +1562,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, acquisition_task_parameters, channel_ids, self.display_name)
 
-    def record_immediate(self, frame_parameters: ScanFrameParametersLike,
+    def record_immediate(self, frame_parameters: ScanFrameParameters,
                          enabled_channels: typing.Optional[typing.Sequence[int]] = None,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         assert not self.is_recording
@@ -1610,17 +1596,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             assert time.time() - start < float(sync_timeout)
         return xdatas
 
-    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParametersLike) -> None:
+    def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         self.__settings.set_frame_parameters(profile_index, frame_parameters)
 
-    def get_frame_parameters(self, profile_index: int) -> ScanFrameParametersLike:
+    def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters:
         return self.__settings.get_frame_parameters(profile_index)
 
     def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        scan_frame_parameters = typing.cast(ScanFrameParametersLike, frame_parameters)
+        scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         self.__set_current_frame_parameters(scan_frame_parameters)
 
-    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParametersLike, update_task: bool = True) -> None:
+    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, update_task: bool = True) -> None:
         frame_parameters = copy.copy(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
         acquisition_task = self.__acquisition_task
@@ -1640,14 +1626,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
 
-    def get_current_frame_parameters(self) -> ScanFrameParametersLike:
+    def get_current_frame_parameters(self) -> ScanFrameParameters:
         return copy.copy(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
         self.__set_record_frame_parameters(frame_parameters)
 
     def __set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
-        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParametersLike from
+        # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParameters from
         # their dict via the settings to allow it to customize the frame parameters.
         self.__record_parameters = self.__settings.get_frame_parameters_from_dict(frame_parameters.as_dict())
 
@@ -1713,7 +1699,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def selected_profile_index(self) -> int:
         return self.__settings.selected_profile_index
 
-    def __profile_frame_parameters_changed(self, profile_index: int, frame_parameters: ScanFrameParametersLike) -> None:
+    def __profile_frame_parameters_changed(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         # to avoid set-notify cycles, only set the low level again if parameters have changed. this is handled
         # in the scan acquisition task.
         with self.__latest_values_lock:
@@ -1761,7 +1747,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __make_channel_state(self, channel_index: int, channel_name: str, channel_enabled: bool) -> ChannelState:
         return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
-    def __device_state_changed(self, profile_frame_parameters_list: typing.Sequence[ScanFrameParametersLike], device_channel_states: typing.Sequence[typing.Tuple[str, bool]]) -> None:
+    def __device_state_changed(self, profile_frame_parameters_list: typing.Sequence[ScanFrameParameters], device_channel_states: typing.Sequence[typing.Tuple[str, bool]]) -> None:
         for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
             self.__profile_frame_parameters_changed(profile_index, profile_frame_parameters)
         channel_states = list()
@@ -1769,10 +1755,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))
         self.__channel_states_changed(channel_states)
 
-    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParametersLike:
+    def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         return self.__settings.get_frame_parameters_from_dict(d)
 
-    def calculate_frame_time(self, frame_parameters: ScanFrameParametersLike) -> float:
+    def calculate_frame_time(self, frame_parameters: ScanFrameParameters) -> float:
         size = frame_parameters.pixel_size
         pixel_time_us = frame_parameters.pixel_time_us
         return size.height * size.width * pixel_time_us / 1000000.0
@@ -1782,7 +1768,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def get_record_frame_time(self) -> float:
         frame_parameters = self.get_record_frame_parameters()
-        scan_frame_parameters = typing.cast(ScanFrameParametersLike, frame_parameters)
+        scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         return self.calculate_frame_time(scan_frame_parameters)
 
     def make_reference_key(self, **kwargs: typing.Any) -> str:
@@ -1850,7 +1836,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         return list()
 
-    def scan_immediate(self, frame_parameters: ScanFrameParametersLike) -> None:
+    def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None:
         old_frame_parameters = self.__device.current_frame_parameters
         self.__device.set_frame_parameters(frame_parameters)
         frame_number = self.__device.start_frame(False)
@@ -1858,7 +1844,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__device.stop()
         self.__device.set_frame_parameters(old_frame_parameters)
 
-    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParametersLike) -> int:
+    def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int:
         if callable(getattr(self.__device, "calculate_flyback_pixels", None)):
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
@@ -1961,7 +1947,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
 class ScanFrameDataStream(Acquisition.DataStream):
     def __init__(self, scan_hardware_source: ScanHardwareSource,
-                 scan_frame_parameters: ScanFrameParametersLike, scan_id: uuid.UUID,
+                 scan_frame_parameters: ScanFrameParameters, scan_id: uuid.UUID,
                  drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None,
                  camera_exposure_ms: typing.Optional[float] = None,
                  camera_data_stream: typing.Optional[camera_base.CameraFrameDataStream] = None):
@@ -2166,7 +2152,7 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
 
 def make_synchronized_scan_data_stream(
         scan_hardware_source: ScanHardwareSource,
-        scan_frame_parameters: ScanFrameParametersLike,
+        scan_frame_parameters: ScanFrameParameters,
         camera_hardware_source: camera_base.CameraHardwareSource,
         camera_frame_parameters: camera_base.CameraFrameParameters,
         camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
