@@ -65,15 +65,10 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
 
     def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController) -> scan_base.ScanHardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
-        device = ScanDevice.Device(instrument)
-        scan_device = typing.cast(scan_base.ScanDevice, device)
+        scan_module = ScanDevice.ScanModule(instrument)
+        scan_device = scan_module.device
+        scan_settings = scan_module.settings
         Registry.register_component(scan_device, {"scan_device"})
-        scan_modes = (
-            scan_base.ScanSettingsMode("Fast", "fast", scan_device.get_profile_frame_parameters(0)),
-            scan_base.ScanSettingsMode("Slow", "slow", scan_device.get_profile_frame_parameters(1)),
-            scan_base.ScanSettingsMode("Record", "record", scan_device.get_profile_frame_parameters(2))
-        )
-        scan_settings = scan_base.ScanSettings(scan_modes, lambda d: scan_base.ScanFrameParameters(d), 0, 2)
         scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
         setattr(scan_device, "hardware_source", scan_hardware_source)
         Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller

@@ -54,7 +54,7 @@ class ParametersBase(Observable.Observable):
         super().__init__()
         self.__d: typing.Dict[str, typing.Any] = dict()
         assert not args or isinstance(args[0], dict)
-        if isinstance(args[0], dict):
+        if args and isinstance(args[0], dict):
             self.__d.update(args[0])
         self.__d.update(kwargs)
 
@@ -2311,34 +2311,11 @@ def run(configuration_location: pathlib.Path) -> None:
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
             component.hardware_source = scan_hardware_source
-        if "scan_device" in component_types:
-            scan_device = typing.cast(ScanDevice, component)
-            stem_controller = find_stem_controller(getattr(scan_device, "stem_controller_id", None))
-            if not stem_controller:
-                print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
-                stem_controller = stem_controller_module.STEMController()
-            scan_modes = (
-                ScanSettingsMode(_("Fast"), "fast", scan_device.get_profile_frame_parameters(0)),
-                ScanSettingsMode(_("Slow"), "slow", scan_device.get_profile_frame_parameters(1)),
-                ScanSettingsMode(_("Record"), "record", scan_device.get_profile_frame_parameters(2))
-            )
-            scan_settings = ScanSettings(scan_modes, lambda d: ScanFrameParameters(d), 0, 2)
-            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, configuration_location)
-            if hasattr(scan_device, "priority"):
-                scan_hardware_source.priority = getattr(scan_device, "priority")
-            Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
-            HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
-            component.hardware_source = scan_hardware_source
 
     def component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
         if "scan_module" in component_types:
             scan_hardware_source = component.hardware_source
             Registry.unregister_component(scan_hardware_source)
-            HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
-            scan_hardware_source.close()
-        if "scan_device" in component_types:
-            scan_hardware_source = component.hardware_source
-            Registry.unregister_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
             HardwareSource.HardwareSourceManager().unregister_hardware_source(scan_hardware_source)
             scan_hardware_source.close()
 
