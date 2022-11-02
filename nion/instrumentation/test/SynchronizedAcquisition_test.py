@@ -1058,7 +1058,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller._wait()
             updated_frame_parameters = scan_hardware_source.get_current_frame_parameters().as_dict()
             for k in list(updated_frame_parameters.keys()):
-                if k not in ("size", "center_nm", "pixel_time_us", "fov_nm", "rotation_rad", "flyback_time_us"):
+                if k not in ("pixel_size", "center_nm", "pixel_time_us", "fov_nm", "rotation_rad", "flyback_time_us"):
                     updated_frame_parameters.pop(k)
             scan_hardware_source.set_frame_parameters(0, scan_base.ScanFrameParameters(updated_frame_parameters))
             current_frame_parameters = scan_hardware_source.get_current_frame_parameters()

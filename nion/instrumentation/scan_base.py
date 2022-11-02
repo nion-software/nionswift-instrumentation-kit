@@ -619,6 +619,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def scan_device(self) -> ScanDevice: raise NotImplementedError()
 
     @property
+    def scan_settings(self) -> ScanSettingsProtocol: raise NotImplementedError()
+
+    @property
     def stem_controller(self) -> stem_controller_module.STEMController: raise NotImplementedError()
 
     @property
@@ -734,8 +737,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
         raise NotImplementedError()
 
-    profile_changed_event: Event.Event
-    frame_parameters_changed_event: Event.Event
     probe_state_changed_event: Event.Event
     channel_state_changed_event: Event.Event
 
@@ -1168,12 +1169,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__stem_controller.scan_context
 
     @property
-    def stem_controller(self) -> stem_controller_module.STEMController:
-        return self.__stem_controller
-
-    @property
     def scan_settings(self) -> ScanSettingsProtocol:
         return self.__settings
+
+    @property
+    def stem_controller(self) -> stem_controller_module.STEMController:
+        return self.__stem_controller
 
     @property
     def scan_device(self) -> ScanDevice:

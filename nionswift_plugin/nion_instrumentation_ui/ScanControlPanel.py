@@ -307,8 +307,8 @@ class ScanControlStateController:
         if self.__scan_hardware_source:
             stem_controller = self.__scan_hardware_source.stem_controller
 
-            self.__profile_changed_event_listener = self.__scan_hardware_source.profile_changed_event.listen(self.__update_profile_index)
-            self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.frame_parameters_changed_event.listen(self.__update_frame_parameters)
+            self.__profile_changed_event_listener = self.__scan_hardware_source.scan_settings.profile_changed_event.listen(self.__update_profile_index)
+            self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_settings.frame_parameters_changed_event.listen(self.__update_frame_parameters)
             self.__data_channel_state_changed_event_listener = self.__scan_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
             self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__probe_state_changed_event_listener = self.__scan_hardware_source.probe_state_changed_event.listen(self.__probe_state_changed)
