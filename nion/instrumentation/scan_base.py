@@ -49,9 +49,8 @@ _ = gettext.gettext
 import copy
 from nion.utils import Observable
 
-class ParametersBase(Observable.Observable):
+class ParametersBase:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        super().__init__()
         self.__d: typing.Dict[str, typing.Any] = dict()
         assert not args or isinstance(args[0], dict)
         if args and isinstance(args[0], dict):
@@ -233,6 +232,17 @@ class ScanFrameParameters(ParametersBase):
     @ac_line_sync.setter
     def ac_line_sync(self, value: bool) -> None:
         self.set_parameter("ac_line_sync", value)
+
+    @property
+    def channel_indexes_enabled(self) -> typing.Optional[typing.Sequence[int]]:
+        maybe_channel_indexes_enabled = self.get_parameter("channel_indexes_enabled", list())
+        if maybe_channel_indexes_enabled is not None:
+            return typing.cast(typing.Sequence[int], maybe_channel_indexes_enabled)
+        return None
+
+    @channel_indexes_enabled.setter
+    def channel_indexes_enabled(self, value: typing.Sequence[int]) -> None:
+        self.set_parameter("channel_indexes_enabled", list(value) if value is not None else None)
 
     @property
     def channel_override(self) -> typing.Optional[str]:

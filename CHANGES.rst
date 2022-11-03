@@ -1,12 +1,14 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+0.21.0 (UNRELEASED)
+-------------------
+- Require scan_module (scan device and settings) rather than scan_device to be registered.
 - Check channel states for changes before rebuilding thumbnails (avoids UI flashing).
 - Make fov_size_nm be a computed property representing fov with aspect ratio applied.
 - Add pixel_size_nm and subscan_pixel_size_nm computed properties to frame parameters.
 - Handle scan data calibrations when scan data is 1D.
+- Add channel_indexes_enabled to frame parameters for future use.
 
 0.20.8 (2022-09-13)
 -------------------
