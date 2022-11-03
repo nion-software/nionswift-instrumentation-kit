@@ -2343,8 +2343,9 @@ def run(configuration_location: pathlib.Path) -> None:
     _component_registered_listener = Registry.listen_component_registered_event(component_registered)
     _component_unregistered_listener = Registry.listen_component_unregistered_event(component_unregistered)
 
-    for component in Registry.get_components_by_type("scan_device"):
-        component_registered(component, {"scan_device"})
+    # handle any scan modules that have already been registered
+    for component in Registry.get_components_by_type("scan_module"):
+        component_registered(component, {"scan_module"})
 
 
 def stop() -> None:
