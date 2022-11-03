@@ -889,7 +889,8 @@ class ScanSettings(ScanSettingsProtocol):
                  scan_modes: typing.Sequence[ScanSettingsMode],
                  frame_parameters_factory: ScanFrameParametersFactory,
                  current_settings_index: int = 0,
-                 record_settings_index: int = 0) -> None:
+                 record_settings_index: int = 0,
+                 open_configuration_dialog_fn: typing.Optional[typing.Callable[[], None]] = None) -> None:
         assert len(scan_modes) > 0
 
         # these events must be defined
@@ -912,6 +913,9 @@ class ScanSettings(ScanSettingsProtocol):
         self.__frame_parameters_factory = frame_parameters_factory
         self.__frame_parameters = self.__scan_modes[self.__current_settings_index].frame_parameters
         self.__record_parameters = self.__scan_modes[self.__record_settings_index].frame_parameters
+
+        # dialogs
+        self.__open_configuration_dialog_fn = open_configuration_dialog_fn
 
     def close(self) -> None:
         pass
@@ -1009,6 +1013,10 @@ class ScanSettings(ScanSettingsProtocol):
     def set_mode(self, mode: str) -> None:
         """Set the current mode (named version of current settings index)."""
         self.set_selected_profile_index(self.modes.index(mode))
+
+    def open_configuration_interface(self, api_broker: typing.Any) -> None:
+        if callable(self.__open_configuration_dialog_fn):
+            self.__open_configuration_dialog_fn()
 
 
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
