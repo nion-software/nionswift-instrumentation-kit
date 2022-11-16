@@ -12,7 +12,7 @@ from nion.utils import Stream
 from nion.utils.ReferenceCounting import weak_partial
 
 
-class PersistentStorageInterface:
+class PersistentStorageInterface(typing.Protocol):
     def get_persistent_string(self, key: str, default_value: typing.Optional[str] = None) -> str: ...
     def set_persistent_string(self, key: str, value: str) -> None: ...
 

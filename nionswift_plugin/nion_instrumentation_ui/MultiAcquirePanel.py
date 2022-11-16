@@ -876,7 +876,7 @@ class MultiAcquirePanelDelegate:
                 self.settings_changed()
 
             def about_to_close(self, geometry: str, state: str) -> None:
-                if self.on_reject:
+                if callable(self.on_reject):
                     self.on_reject()
                 super().about_to_close(geometry, state)
                 self.checkboxes = {}
