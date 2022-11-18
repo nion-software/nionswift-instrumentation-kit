@@ -46,9 +46,6 @@ _NDArray = numpy.typing.NDArray[typing.Any]
 _ = gettext.gettext
 
 
-import copy
-from nion.utils import Observable
-
 class ParametersBase:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         self.__d: typing.Dict[str, typing.Any] = dict()
