@@ -963,13 +963,18 @@ class ScanSettings(ScanSettingsProtocol):
         assert 0 <= settings_index < len(self.__scan_modes)
         frame_parameters = copy.copy(frame_parameters)
         self.__scan_modes[settings_index].frame_parameters = frame_parameters
-        # update the local frame parameters
+        # self.settings_changed_event.fire(self.__save_settings())
+        self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
+        # update the local frame parameters.
+        # in order to facilitate profile changes from the SuperScan, which are sent partially
+        # when setting the frame parameters, do this _after_ the profile parameters have changed
+        # (in the frame_parameters_changed_event). this way, setting the current frame parameters
+        # shouldn't cause partially updated profile parameters to be sent from the low level.
+        # this all needs to be reworked once the SuperScan UI behaves properly.
         if settings_index == self.__current_settings_index:
             self.__set_current_frame_parameters(frame_parameters)
         if settings_index == self.__record_settings_index:
             self.__set_record_frame_parameters(frame_parameters)
-        # self.settings_changed_event.fire(self.__save_settings())
-        self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
 
     def get_frame_parameters(self, settings_index: int) -> ScanFrameParameters:
         """Get the frame parameters for the settings index."""
