@@ -646,6 +646,18 @@ class CameraDevice3(typing.Protocol):
         """
         return dict()
 
+    def acquire_synchronized_prepare(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
+        """Begin synchronized acquire.
+
+        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        return
+
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         """Begin synchronized acquire.
 
@@ -695,6 +707,18 @@ class CameraDevice3(typing.Protocol):
         Future calls to acquire_synchronized_continue should have the is_cancelled flag set.
         """
         pass
+
+    def acquire_sequence_prepare(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> None:
+        """Begin sequence acquire.
+
+        The camera device can allocate memory to accommodate the count and begin acquisition immediately.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        return
 
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         """Begin sequence acquire.
@@ -2100,6 +2124,13 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         assert record_parameters is not None
         return CameraAcquisitionTask(self.__get_instrument_controller(), self, False, self.__camera_category, self.__signal_type, record_parameters)
 
+    def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
+        # added this because it turns out it is needed - sequence/sync prepare needs to go before
+        # the scan is started.
+        acquire_synchronized_prepare = getattr(self.__camera, "acquire_synchronized_prepare", None)
+        if callable(acquire_synchronized_prepare):
+            acquire_synchronized_prepare(self.get_current_frame_parameters(), data_shape, **kwargs)
+
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
 
@@ -2108,10 +2139,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def acquire_synchronized_end(self) -> None:
         self.__camera.acquire_synchronized_end()
-
-    def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
-        # prepare does nothing in camera device 3
-        pass
 
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
         # prepare does nothing in camera device 3
@@ -2192,8 +2219,11 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return self.__get_camera_calibrator().get_counts_per_electron()
 
     def acquire_sequence_prepare(self, n: int) -> None:
-        # prepare does nothing in camera device 3
-        pass
+        # added this because it turns out it is needed - sequence/sync prepare needs to go before
+        # the scan is started.
+        acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
+        if callable(acquire_sequence_prepare):
+            acquire_sequence_prepare(self.get_current_frame_parameters(), n)
 
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
