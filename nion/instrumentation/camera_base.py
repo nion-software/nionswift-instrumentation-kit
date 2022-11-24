@@ -2450,7 +2450,7 @@ class CameraDeviceStreamPartialData:
 class CameraDeviceStreamInterface(typing.Protocol):
     """An interface to a camera device to help implementation in a data stream."""
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None: ...
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int: ...
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None: ...
 
@@ -2476,7 +2476,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int:
         camera_frame_parameters = self.__camera_frame_parameters
         # clear the processing parameters in the original camera frame parameters.
         # processing will be configured based on the operator kwarg instead.
@@ -2504,6 +2504,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape)
+        return numpy.product(collection_shape, dtype=numpy.uint64)  # type: ignore
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
@@ -2573,7 +2574,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int:
         camera_frame_parameters = self.__camera_frame_parameters
         # clear the processing parameters in the original camera frame parameters.
         # processing will be configured based on the operator kwarg instead.
@@ -2600,6 +2601,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         self.__camera_hardware_source.acquire_sequence_prepare(stream_args.sequence_count)
+        return stream_args.sequence_count
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
@@ -2700,7 +2702,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         else:
             assert self.__camera_device_stream_interface
             self.__start = time.perf_counter()
-            self.__camera_device_stream_interface.prepare_stream(stream_args, **kwargs)
+            self.__total_count = self.__camera_device_stream_interface.prepare_stream(stream_args, **kwargs)
             self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
             while len(self.__camera_sequence_overheads) > 4:
                 self.__camera_sequence_overheads.pop(0)
@@ -2795,8 +2797,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                                                                         Acquisition.DataStreamStateEnum.COMPLETE)
                     self.fire_data_available(data_stream_event)
                     # total_count is the total for this entire stream.
-                    total_count = numpy.product(self.get_info(channel).data_metadata.data_shape, dtype=numpy.int64).item()
-                    self.__progress = valid_index / total_count
+                    self.__progress = valid_index / self.__total_count
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
 

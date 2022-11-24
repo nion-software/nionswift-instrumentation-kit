@@ -44,6 +44,10 @@ class ScanDataStream(Acquisition.DataStream):
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
         self.prepare_count += 1
 
+    @property
+    def _progress(self) -> float:
+        return ((self.__frame_index + (self.__partial_index / self.__scan_length)) / self.__frame_count)
+
     def _send_next(self) -> None:
         assert self.__frame_index < self.__frame_count
         assert self.__partial_index < self.__scan_length

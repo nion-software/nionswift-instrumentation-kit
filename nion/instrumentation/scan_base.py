@@ -2108,6 +2108,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def _abort_stream(self) -> None:
         self.__scan_hardware_source.abort_recording()
 
+    @property
+    def _progress(self) -> float:
+        return sum(self.__sent_rows.values()) / self.__scan_size[0] / len(self.channels)
+
     def _send_next(self) -> None:
         with self.__lock:
             for channel in self.__buffers.keys():
@@ -2133,7 +2137,6 @@ class ScanFrameDataStream(Acquisition.DataStream):
                                                                      scan_data.timezone,
                                                                      scan_data.timezone_offset)
                         source_slice = (slice(start, stop),)
-                        data_stream_state = Acquisition.DataStreamStateEnum.COMPLETE if is_complete else Acquisition.DataStreamStateEnum.PARTIAL
                         scan_data_data = scan_data.data
                         assert scan_data_data is not None
                         data_stream_event = Acquisition.DataStreamEventArgs(self,

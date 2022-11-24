@@ -475,7 +475,11 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     @property
     def progress(self) -> float:
-        return self._progress if not self.is_finished else 1.0
+        if not self.is_finished:
+            progress = self._progress
+            assert 0 <= progress <= 1.0, f"{self}"
+            return progress
+        return 1.0
 
     @property
     def _progress(self) -> float:
@@ -617,8 +621,6 @@ class CollectedDataStream(DataStream):
     The data is formed into a collection by resending it reshaped into the
     collection with additional slice information. No data is copied during
     reshaping.
-
-    Optionally pass in a list of sub-slices to break collection into sections.
     """
 
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
@@ -634,6 +636,7 @@ class CollectedDataStream(DataStream):
         # needs starts tracks whether the downstream data stream needs a start call.
         self.__data_stream_started = False
         self.__all_channels_need_start = False
+        self.__is_frames = False  # used for progress computation
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -688,7 +691,10 @@ class CollectedDataStream(DataStream):
         if not incomplete_indexes:
             return 0.0
         index = min(incomplete_indexes)
-        return (index + p) / count
+        # if child data stream is submitting frames, we can just use the child data stream progress
+        # as the progress of this collection; on the other hand, if it is submitting partial data,
+        # we must compute it.
+        return p if self.__is_frames else (index + p) / count
 
     def _send_next(self) -> None:
         assert self.__data_stream_started
@@ -791,6 +797,7 @@ class CollectedDataStream(DataStream):
             current_index = index
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
+            self.__is_frames = True
             assert remaining_count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
             assert current_index + remaining_count <= collection_count
             assert remaining_count > 0
@@ -863,6 +870,7 @@ class CollectedDataStream(DataStream):
             # incoming data is partial
             # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
             # remaining dimensions. add dimensions for collection dimensions to the new source data.
+            self.__is_frames = False
             new_source_slice = (index_slice(0), ) * collection_rank + tuple(data_stream_event.source_slice)
             new_source_data = data_stream_event.source_data.reshape((1,) * collection_rank + data_stream_event.source_data.shape)
             # new state is complete if data chunk is complete and it will put us at the end of our collection.
