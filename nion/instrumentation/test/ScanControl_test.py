@@ -1543,6 +1543,42 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             self.assertEqual(0, len(document_model.display_items[0].graphics))
 
+    def test_reloading_document_cleans_only_acquisition_display_items(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = True
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = False
+            scan_hardware_source.line_scan_enabled = False
+            test_context.instrument.probe_position = Geometry.FloatPoint(0.5, 0.5)
+            document_controller.periodic()
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            self.assertEqual(4, len(document_model.display_items[0].graphics))
+            self.assertEqual(1, len(document_model.display_items))
+            document_model.get_display_item_snapshot_new(document_model.display_items[0])
+            self.assertEqual(4, len(document_model.display_items[1].graphics))
+            self.assertEqual(2, len(document_model.display_items))
+            document_controller.close()
+            test_context.instrument.probe_position = None
+            scan_hardware_source.subscan_enabled = False
+            test_context.instrument.subscan_region = None
+            scan_hardware_source.line_scan_enabled = False
+            test_context.instrument.line_scan_vector = None
+            scan_hardware_source.drift_enabled = False
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            document_model = test_context.document_model
+            self.assertEqual(2, len(document_model.display_items))
+            self.assertEqual(0, len(document_model.display_items[0].graphics))
+            self.assertEqual(4, len(document_model.display_items[1].graphics))
+
     def test_graphics_are_enabled_when_switching_project(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller

@@ -779,9 +779,10 @@ class DisplayItemListModel(Observable.Observable):
     def clean(self, graphic_id: str) -> None:
         display_items = self.__document_model.display_items
         for display_item in display_items:
-            for graphic in display_item.graphics:
-                if graphic.graphic_id == graphic_id:
-                    display_item.remove_graphic(graphic).close()
+            if self.__predicate(display_item):
+                for graphic in display_item.graphics:
+                    if graphic.graphic_id == graphic_id:
+                        display_item.remove_graphic(graphic).close()
 
 def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
