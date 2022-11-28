@@ -1605,6 +1605,38 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             self.assertEqual(4, len(document_model.display_items[0].graphics))
 
+    def test_subscan_graphic_is_created_after_creating_new_project(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual(1, len(document_model.display_items))
+            scan_hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = False
+            document_controller.periodic()
+            self.assertEqual(2, len(document_model.display_items))
+            self.assertEqual(1, len(document_model.display_items[0].graphics))
+            self.assertEqual(0, len(document_model.display_items[1].graphics))
+            document_controller.close()
+            test_context.reset_profile()
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            self.assertEqual(0, len(document_model.display_items))
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual(1, len(document_model.display_items))
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = True
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_enabled = False
+            document_controller.periodic()
+            self.assertEqual(2, len(document_model.display_items))
+            self.assertEqual(1, len(document_model.display_items[0].graphics))
+            self.assertEqual(0, len(document_model.display_items[1].graphics))
+
     def test_acquisition_preferences(self):
         dir = pathlib.Path.cwd() / "__Test"
         if dir.exists():

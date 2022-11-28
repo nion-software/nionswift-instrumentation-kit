@@ -700,13 +700,20 @@ class GraphicSetController:
 
 
 class DisplayItemListModel(Observable.Observable):
-    """Make an observable list model from the item source with a list as the item."""
+    """Make an observable list model from the item source with a list as the item.
 
-    def __init__(self, document_model: DocumentModel.DocumentModel, item_key: str,
+    item_inserted/item_removed notifications will always occur on the main thread.
+    """
+
+    def __init__(self,
+                 document_model: DocumentModel.DocumentModel,
+                 call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None],
+                 item_key: str,
                  predicate: typing.Callable[[DisplayItem.DisplayItem], bool],
                  change_event: typing.Optional[Event.Event] = None):
         super().__init__()
         self.__document_model = document_model
+        self.__call_soon_threadsafe = call_soon_threadsafe
         self.__item_key = item_key
         self.__predicate = predicate
         self.__items : typing.List[DisplayItem.DisplayItem] = list()
@@ -737,6 +744,7 @@ class DisplayItemListModel(Observable.Observable):
         self.__item_removed_listener = typing.cast(typing.Any, None)
         self.__document_close_listener.close()
         self.__document_close_listener = typing.cast(typing.Any, None)
+        self.__call_soon_threadsafe = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
     def __item_inserted(self, key: str, display_item: DisplayItem.DisplayItem, index: int) -> None:
@@ -760,7 +768,7 @@ class DisplayItemListModel(Observable.Observable):
             return self.items
         raise AttributeError()
 
-    def refilter(self) -> None:
+    def __refilter(self) -> None:
         self.item_set = set(self.__items)
         for display_item in self.__document_model.display_items:
             if self.__predicate(display_item):
@@ -776,6 +784,12 @@ class DisplayItemListModel(Observable.Observable):
                     self.__items.pop(index)
                     self.notify_remove_item(self.__item_key, display_item, index)
 
+    def refilter(self) -> None:
+        if threading.current_thread() == threading.main_thread():
+            self.__refilter()
+        else:
+            self.__call_soon_threadsafe(self.__refilter)
+
     def clean(self, graphic_id: str) -> None:
         display_items = self.__document_model.display_items
         for display_item in display_items:
@@ -784,7 +798,7 @@ class DisplayItemListModel(Observable.Observable):
                     if graphic.graphic_id == graphic_id:
                         display_item.remove_graphic(graphic).close()
 
-def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController) -> DisplayItemListModel:
+def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None]) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
         scan_controller = stem_controller.scan_controller
         if scan_controller:
@@ -795,7 +809,7 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
                     return True
         return False
 
-    return DisplayItemListModel(document_model, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
+    return DisplayItemListModel(document_model, call_soon_threadsafe, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
 
 
 class EventLoopMonitor:
@@ -834,7 +848,8 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__class__.count += 1
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller)
+        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(ProbeView.__display_item_inserted, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(ProbeView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -856,6 +871,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
+        self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -880,6 +896,11 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__scan_display_items_model.clean("probe")
         self.__scan_display_items_model.refilter()
         self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
+
+    def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            stem_controller = self.__stem_controller
+            self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
 
     # implement methods for the graphic set handler
 
@@ -923,7 +944,8 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__class__.count += 1
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller)
+        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(SubscanView.__display_item_inserted, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(SubscanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -942,6 +964,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
+        self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -975,6 +998,10 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__scan_display_items_model.clean("subscan")
         self.__scan_display_items_model.refilter()
         self.__update_subscan_region()
+
+    def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_subscan_region()
 
     # implement methods for the graphic set handler
 
@@ -1025,7 +1052,8 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__class__.count += 1
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller)
+        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(LineScanView.__display_item_inserted, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(LineScanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -1043,6 +1071,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
+        self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -1069,6 +1098,10 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__scan_display_items_model.clean("line_scan")
         self.__scan_display_items_model.refilter()
         self.__update_line_scan_vector()
+
+    def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_line_scan_vector()
 
     # implement methods for the graphic set handler
 
@@ -1116,7 +1149,8 @@ class DriftView(EventLoopMonitor):
         self.__class__.count += 1
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller)
+        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(DriftView.__display_item_inserted, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(DriftView.__clean, self))
         self.__graphic_display_item : typing.Optional[DisplayItem.DisplayItem] = None
         self.__graphic : typing.Optional[Graphics.RectangleGraphic] = None
@@ -1144,6 +1178,7 @@ class DriftView(EventLoopMonitor):
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
+        self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -1250,6 +1285,10 @@ class DriftView(EventLoopMonitor):
     def __clean(self) -> None:
         self.__scan_display_items_model.clean("drift")
         self.__update_drift_region()
+
+    def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_drift_region()
 
 
 class ScanContextController:
