@@ -1033,6 +1033,27 @@ class TestScanControlClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             ScanControlPanel.stop()
 
+    def test_switch_windows_while_acquiring(self):
+        # this intermittently would lead to dangling async routines. leaving this here in case it occurs again.
+        with self.__test_context() as test_context:
+            ScanControlPanel.run()
+            scan_hardware_source = test_context.scan_hardware_source
+            document_controller = test_context.document_controller
+            document_controller.workspace_controller.create_panels(["scan-control-panel-" + scan_hardware_source.hardware_source_id])
+            display_panel = document_controller.selected_display_panel
+            display_panel.change_display_panel_content({"controller_type": "scan-live", "hardware_source_id": scan_hardware_source.hardware_source_id, "channel_id": scan_hardware_source.get_channel_state(0).channel_id})
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = True
+            document_controller.close()
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            document_controller = test_context.document_controller
+            document_controller.workspace_controller.create_panels(["scan-control-panel-" + scan_hardware_source.hardware_source_id])
+            document_controller.periodic()
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
+            ScanControlPanel.stop()
+
     def test_subscan_state_goes_from_invalid_to_disabled_upon_first_acquisition(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller

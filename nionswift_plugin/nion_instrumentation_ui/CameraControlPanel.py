@@ -10,6 +10,7 @@ import math
 import numpy
 import pkgutil
 import sys
+import threading
 import time
 import typing
 
@@ -585,11 +586,37 @@ def make_exposure_str(exposure: float, exposure_precision: int) -> str:
     return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
 
 
+class TaskHelper:
+    def __init__(self) -> None:
+        self.__pending_task_lock = threading.RLock()
+        self.__pending_task: typing.Optional[asyncio.Task[None]] = None
+
+    def close(self) -> None:
+        with self.__pending_task_lock:
+            if self.__pending_task:
+                self.__pending_task.cancel()
+                self.__pending_task = None
+
+    def register_task(self, task: asyncio.Task[None]) -> None:
+        with self.__pending_task_lock:
+            if self.__pending_task:
+                self.__pending_task.cancel()
+                self.__pending_task = None
+            self.__pending_task = task
+
+            def clear_pending(t: asyncio.Task[None]) -> None:
+                self.__pending_task = task
+
+            task.add_done_callback(clear_pending)
+
+
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def __init__(self, document_controller: DocumentController.DocumentController, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
+
+        self.__acquisition_state_changed_task = TaskHelper()
 
         self.document_controller = document_controller
 
@@ -840,7 +867,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                 acquisition_state = acquisition_state or "stopped"
                 play_state_label.text = map_channel_state_to_text[acquisition_state]
 
-            self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
+            self.__acquisition_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value)))
 
         def camera_current_changed(camera_current: typing.Optional[float]) -> None:
             if camera_current:
@@ -889,9 +916,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = typing.cast(typing.Any, None)
         self.__image_display_mouse_released_event_listener.close()
         self.__image_display_mouse_released_event_listener = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_task.close()
         super().close()
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
@@ -998,6 +1026,8 @@ class CameraDisplayPanelController:
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
         self.type = CameraDisplayPanelController.type
 
+        self.__acquisition_state_changed_task = TaskHelper()
+
         self.__hardware_source_id = hardware_source_id
 
         # configure the hardware source state controller
@@ -1073,7 +1103,7 @@ class CameraDisplayPanelController:
                 status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
+            self.__acquisition_state_changed_task.register_task(self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value)))
 
         def display_name_changed(display_name: str) -> None:
             self.__display_name = display_name
@@ -1140,9 +1170,10 @@ class CameraDisplayPanelController:
     def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_task.close()
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id

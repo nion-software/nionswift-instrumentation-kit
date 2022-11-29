@@ -10,6 +10,7 @@ import logging.handlers
 import math
 import pkgutil
 import sys
+import threading
 import typing
 
 # third party libraries
@@ -1018,6 +1019,30 @@ class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
             drawing_context.stroke()
 
 
+class TaskHelper:
+    def __init__(self) -> None:
+        self.__pending_task_lock = threading.RLock()
+        self.__pending_task: typing.Optional[asyncio.Task[None]] = None
+
+    def close(self) -> None:
+        with self.__pending_task_lock:
+            if self.__pending_task:
+                self.__pending_task.cancel()
+                self.__pending_task = None
+
+    def register_task(self, task: asyncio.Task[None]) -> None:
+        with self.__pending_task_lock:
+            if self.__pending_task:
+                self.__pending_task.cancel()
+                self.__pending_task = None
+            self.__pending_task = task
+
+            def clear_pending(t: asyncio.Task[None]) -> None:
+                self.__pending_task = task
+
+            task.add_done_callback(clear_pending)
+
+
 class ScanControlWidget(Widgets.CompositeWidgetBase):
 
     """A controller for the scan control widget.
@@ -1031,6 +1056,10 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
     def __init__(self, document_controller: DocumentController.DocumentController, scan_controller: scan_base.ScanHardwareSource) -> None:
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
+
+        self.__acquisition_state_changed_task = TaskHelper()
+        self.__subscan_state_changed_task = TaskHelper()
+        self.__drift_state_changed_task = TaskHelper()
 
         self.document_controller = document_controller
 
@@ -1440,7 +1469,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 play_state_label.text = map_channel_state_to_text[acquisition_state]
 
             acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
-            self.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states))
+            self.__acquisition_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states)))
 
         def probe_state_changed(probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
             map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
@@ -1503,7 +1532,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         def subscan_state_changed(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
             # handle subscan state changes from the low level
-            self.document_controller.event_loop.create_task(update_subscan_state(subscan_state, line_scan_state))
+            self.__subscan_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_subscan_state(subscan_state, line_scan_state)))
 
         async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
             enabled = subscan_state != stem_controller.SubscanState.INVALID
@@ -1515,7 +1544,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             drift_settings_unit.current_item = drift_settings.interval_units
 
         def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
-            self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, drift_settings, subscan_state))
+            self.__drift_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, drift_settings, subscan_state)))
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -1552,9 +1581,13 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener= typing.cast(typing.Any, None)
         self.__image_display_mouse_released_event_listener.close()
         self.__image_display_mouse_released_event_listener= typing.cast(typing.Any, None)
+        # disconnect the acquisition state changed listener before closing the state controller.
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_task.close()
+        self.__subscan_state_changed_task.close()
+        self.__drift_state_changed_task.close()
         super().close()
 
     def periodic(self) -> None:
@@ -1637,6 +1670,8 @@ class ScanDisplayPanelController:
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         assert isinstance(hardware_source, scan_base.ScanHardwareSource)
         self.type = ScanDisplayPanelController.type
+
+        self.__acquisition_state_changed_task = TaskHelper()
 
         self.__hardware_source_id = hardware_source_id
         self.__data_channel_id = data_channel_id
@@ -1753,7 +1788,7 @@ class ScanDisplayPanelController:
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
             acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
-            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states))
+            self.__acquisition_state_changed_task.register_task(self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states)))
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
@@ -1814,9 +1849,10 @@ class ScanDisplayPanelController:
     def close(self) -> None:
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
+        self.__acquisition_state_changed_task.close()
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
