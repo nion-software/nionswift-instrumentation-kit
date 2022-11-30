@@ -1638,8 +1638,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
             else:
                 # subscan is active, decide if the changed frame parameters should clear the scan context
-                if self.__frame_parameters.fov_nm != frame_parameters.fov_nm or self.__frame_parameters.rotation_rad != self.__frame_parameters.rotation_rad:
-                    self.__stem_controller._clear_scan_context()
+                self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         elif update_task:
             # handle case where current profile has been changed but scan is not running.
             device_frame_parameters = copy.copy(frame_parameters)

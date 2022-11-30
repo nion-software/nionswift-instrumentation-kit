@@ -1264,6 +1264,41 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(scan_context1.is_valid)
             self.assertTrue(scan_context2.is_valid)
 
+    def test_scan_context_handled_after_changing_parameters_during_subscan_and_stopping(self):
+        test_cases = [
+            # fov_nm, rotation_rad, and center_nm are context parameters and should clear the context if changed.
+            # changing the size should only clear the context if the aspect ratio changes.
+            # changing pixel time should not clear the context.
+            (True, "fov_nm", 20, False),
+            (True, "rotation_rad", 1.0, False),
+            (True, "center_nm", Geometry.FloatPoint(0.1, 0.1), False),
+            (True, "size", Geometry.IntSize(24, 24), True),
+            (True, "size", Geometry.IntSize(24, 28), False),
+            (False, "pixel_time_us", 5, True),
+        ]
+        for param_in_context, param_name, param_value, expected_context_valid in test_cases:
+            with self.__test_context() as test_context:
+                scan_hardware_source = test_context.scan_hardware_source
+                stem_controller_ = test_context.instrument
+                scan_hardware_source.start_playing(sync_timeout=3.0)
+                scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                self.assertTrue(stem_controller_.scan_context.is_valid)
+                scan_hardware_source.subscan_enabled = True
+                scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                scan_context_before = copy.deepcopy(stem_controller_.scan_context)
+                frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
+                setattr(frame_parameters_0, param_name, param_value)
+                scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+                scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+                scan_context_after = copy.deepcopy(stem_controller_.scan_context)
+                if param_in_context:
+                    self.assertNotEqual(param_value, getattr(scan_context_before, param_name))
+                    if expected_context_valid:
+                        self.assertEqual(param_value, getattr(scan_context_after, param_name))
+                self.assertTrue(scan_context_before.is_valid)
+                self.assertEqual(expected_context_valid, scan_context_after.is_valid)
+
     def test_changing_rotation_and_fov_update_device_parameters_immediately(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller

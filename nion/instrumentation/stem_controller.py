@@ -106,7 +106,7 @@ class ScanContext:
         self.rotation_rad: typing.Optional[float] = None
 
     def __repr__(self) -> str:
-        if self.fov_nm and self.size and self.rotation_rad:
+        if self.fov_nm and self.size and self.rotation_rad is not None:
             return f"{self.size} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg"
         else:
             return "NO CONTEXT"
@@ -414,10 +414,16 @@ class STEMController(Observable.Observable):
             self.scan_context_changed_event.fire()
 
     def _confirm_scan_context(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
-        current_context = copy.deepcopy(self.scan_context)
-        current_context.update(size, center_nm, fov_nm, rotation_rad)
-        if current_context != self.scan_context:
+        new_context = copy.deepcopy(self.scan_context)
+        new_context.update(size, center_nm, fov_nm, rotation_rad)
+        new_aspect_ratio = size.aspect_ratio
+        current_aspect_ratio = self.scan_context.size.aspect_ratio if self.scan_context.size else 0.0
+
+        if new_context.fov_nm != self.scan_context.fov_nm or new_context.center_nm != self.scan_context.center_nm or new_context.rotation_rad != self.scan_context.rotation_rad or new_aspect_ratio != current_aspect_ratio:
             self._clear_scan_context()
+        else:
+            # ensure size is updated
+            self.scan_context.update(size, center_nm, fov_nm, rotation_rad)
 
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
