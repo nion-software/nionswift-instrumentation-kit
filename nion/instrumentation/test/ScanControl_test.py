@@ -1019,6 +1019,28 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, probe_graphic.position)
             self.assertEqual(stem_controller_.probe_position, scan_hardware_source._get_last_idle_position_for_test())
 
+    def test_disabling_and_reenabling_probe_should_return_to_the_same_position(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            stem_controller_ = test_context.instrument
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_state_controller = self.__create_state_controller(test_context)
+            scan_state_controller.handle_positioned_check_box(True)
+            self.assertEqual(stem_controller_.probe_position, Geometry.FloatPoint(y=0.5, x=0.5))
+            self._acquire_one(document_controller, scan_hardware_source)
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(1, len(display_item.graphics))
+            stem_controller_.set_probe_position(Geometry.FloatPoint(y=0.4, x=0.6))
+            scan_state_controller.handle_positioned_check_box(False)
+            document_controller.periodic()
+            self.assertEqual(0, len(display_item.graphics))
+            scan_state_controller.handle_positioned_check_box(True)
+            document_controller.periodic()
+            self.assertEqual(1, len(display_item.graphics))
+            self.assertEqual(stem_controller_.probe_position, Geometry.FloatPoint(y=0.4, x=0.6))
+
     def test_acquire_into_empty_scan_controlled_display_panel(self):
         with self.__test_context() as test_context:
             ScanControlPanel.run()

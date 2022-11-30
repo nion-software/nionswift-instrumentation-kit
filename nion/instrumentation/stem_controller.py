@@ -190,6 +190,7 @@ class STEMController(Observable.Observable):
     def __init__(self) -> None:
         super().__init__()
         self.__probe_position: typing.Optional[Geometry.FloatPoint] = None
+        self.__last_probe_position = Geometry.FloatPoint(0.5, 0.5)
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext()
@@ -216,6 +217,7 @@ class STEMController(Observable.Observable):
 
     def reset(self) -> None:
         self.__probe_position = None
+        self.__last_probe_position = Geometry.FloatPoint(y=0.5, x=0.5)
         self.__probe_state_stack.clear()
         self.__probe_state_stack.append("parked")
         self.__scan_context.clear()
@@ -429,6 +431,7 @@ class STEMController(Observable.Observable):
             value = Geometry.FloatPoint(y=max(min(value.y, 1.0), 0.0), x=max(min(value.x, 1.0), 0.0))
         if self.probe_position != value:
             self.__probe_position = value
+            self.__last_probe_position = self.__probe_position if self.__probe_position else self.__last_probe_position
             self.notify_property_changed("probe_position")
             # update the probe position for listeners and also explicitly update for probe_graphic_connections.
             self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
@@ -440,7 +443,7 @@ class STEMController(Observable.Observable):
         """Validate the probe position.
 
         This is called when the user switches from not controlling to controlling the position."""
-        self.set_probe_position(Geometry.FloatPoint(y=0.5, x=0.5))
+        self.set_probe_position(self.__last_probe_position)
 
     @property
     def probe_state(self) -> str:
