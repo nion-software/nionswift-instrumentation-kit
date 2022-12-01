@@ -1764,7 +1764,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return None
 
     def __make_channel_id(self, channel_index: int) -> str:
-        return "abcdefgh"[channel_index]
+        return "abcdefghijklmnopqrstuvwxyz"[channel_index]
 
     def __make_channel_state(self, channel_index: int, channel_name: str, channel_enabled: bool) -> ChannelState:
         return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
