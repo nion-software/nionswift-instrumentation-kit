@@ -1023,7 +1023,7 @@ class ScanSettings(ScanSettingsProtocol):
 
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path]) -> None:
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str]) -> None:
         super().__init__(device.scan_device_id, device.scan_device_name)
 
         # configure the event loop object
@@ -1062,6 +1062,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__settings_changed_event_listener = self.__settings.settings_changed_event.listen(settings_changed)
 
         self.features["is_scanning"] = True
+        if panel_type:
+            self.features["panel_type"] = panel_type
 
         # define events
         self.profile_changed_event = Event.Event()
@@ -2313,6 +2315,8 @@ class ScanModule(typing.Protocol):
     stem_controller_id: str
     device: ScanDevice
     settings: ScanSettingsProtocol
+    panel_type: typing.Optional[str] = None  # match a 'scan_panel' registry component
+    panel_delegate_type: typing.Optional[str] = None  # currently unused
 
 
 _component_registered_listener = None
@@ -2327,7 +2331,7 @@ def run(configuration_location: pathlib.Path) -> None:
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 stem_controller = stem_controller_module.STEMController()
-            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location)
+            scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
             if hasattr(scan_module, "priority"):
                 setattr(scan_hardware_source, "priority", getattr(scan_module, "priority"))
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})

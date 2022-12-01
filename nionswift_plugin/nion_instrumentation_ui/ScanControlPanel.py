@@ -37,6 +37,7 @@ from nion.ui import PreferencesDialog
 from nion.utils import Converter
 from nion.utils import Geometry
 from nion.utils import Model
+from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
@@ -1914,6 +1915,29 @@ class DriftScanPreferencesPanel:
         return Declarative.DeclarativeWidget(ui, event_loop or asyncio.get_event_loop(), Handler(getattr(AcquisitionPreferences.acquisition_preferences, "drift_scan_customization")))
 
 
+def create_scan_panel(document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> Panel.Panel:
+    """Create a custom scan panel.
+
+    The panel type is specified in the 'panel_type' key in the properties dict.
+
+    The panel type must match the 'panel_type' of a 'scan_panel' factory in the Registry.
+
+    The matching panel factory must return a ui_handler for the panel which is used to produce the UI.
+    """
+    panel_type = properties.get("panel_type")
+    for component in Registry.get_components_by_type("scan_panel"):
+        if component.panel_type == panel_type:
+            hardware_source_id = properties["hardware_source_id"]
+            hardware_source = typing.cast(scan_base.ScanHardwareSource, HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id))
+            scan_device = hardware_source.scan_device
+            scan_settings = hardware_source.scan_settings
+            ui_handler = component.get_ui_handler(api_broker=PlugInManager.APIBroker(), event_loop=document_controller.event_loop, hardware_source_id=hardware_source_id, scan_device=scan_device, scan_settings=scan_settings)
+            panel = Panel.Panel(document_controller, panel_id, "scan-control-panel")
+            panel.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler)
+            return panel
+    raise Exception(f"Unable to create scan panel: {panel_id}")
+
+
 # Register the preferences panel.
 PreferencesDialog.PreferencesManager().register_preference_pane(DriftScanPreferencesPanel())
 
@@ -1970,9 +1994,18 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
 
         factory_id = "scan-live-" + hardware_source.hardware_source_id
         DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory(factory_id, ScanDisplayPanelControllerFactory())
+
         name = hardware_source.display_name + " " + _("Scan Control")
-        properties = {"hardware_source_id": hardware_source.hardware_source_id}
-        Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", properties)
+        panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
+        Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
+
+        panel_type = hardware_source.features.get("panel_type")
+        if not panel_type:
+            Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
+        else:
+            panel_properties["panel_type"] = panel_type
+            Workspace.WorkspaceManager().register_panel(typing.cast(typing.Type[typing.Any], create_scan_panel), panel_id, name, ["left", "right"], "left", panel_properties)
+
 
 def unregister_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
     if hardware_source.features.get("is_scanning", False):
