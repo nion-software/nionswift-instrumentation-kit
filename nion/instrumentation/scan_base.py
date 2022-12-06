@@ -1023,7 +1023,7 @@ class ScanSettings(ScanSettingsProtocol):
 
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str]) -> None:
+    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str] = None) -> None:
         super().__init__(device.scan_device_id, device.scan_device_name)
 
         # configure the event loop object
