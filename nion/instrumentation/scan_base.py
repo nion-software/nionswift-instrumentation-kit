@@ -317,27 +317,28 @@ def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any
     data_element["version"] = 1
     data_element["channel_id"] = channel_id  # needed to match to the channel
     data_element["channel_name"] = channel_name  # needed to match to the channel
-    assert len(data_shape) in (1, 2)
-    if scan_properties.get("calibration_style") == "time":
-        if len(data_shape) == 2:
-            data_element["spatial_calibrations"] = (
-                {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
-                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-            )
+    if not "spatial_calibrations" in data_element:
+        assert len(data_shape) in (1, 2)
+        if scan_properties.get("calibration_style") == "time":
+            if len(data_shape) == 2:
+                data_element["spatial_calibrations"] = (
+                    {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
+                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+                )
+            elif len(data_shape) == 1:
+                data_element["spatial_calibrations"] = (
+                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+                )
         else:
-            data_element["spatial_calibrations"] = (
-                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-            )
-    else:
-        if len(data_shape) == 2:
-            data_element["spatial_calibrations"] = (
-                {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-            )
-        else:
-            data_element["spatial_calibrations"] = (
-                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-            )
+            if len(data_shape) == 2:
+                data_element["spatial_calibrations"] = (
+                    {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+                )
+            elif len(data_shape) == 1:
+                data_element["spatial_calibrations"] = (
+                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+                )
 
 
 def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:
@@ -1794,6 +1795,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.calculate_frame_time(scan_frame_parameters)
 
     def make_reference_key(self, **kwargs: typing.Any) -> str:
+        # NOTE: this is a public API method currently. see scanning.rst.
         # TODO: specifying the channel key in an acquisition? and sub channels?
         is_subscan = kwargs.get("subscan", False)
         channel_index = kwargs.get("channel_index")
