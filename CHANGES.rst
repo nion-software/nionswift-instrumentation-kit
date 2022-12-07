@@ -1,14 +1,22 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.21.0 (UNRELEASED)
+0.21.0 (2022-12-07)
 -------------------
+- Fix sync issue with SI (prep scan after camera stopped).
 - Require scan_module (scan device and settings) rather than scan_device to be registered.
-- Check channel states for changes before rebuilding thumbnails (avoids UI flashing).
+- Improve progress bars for 1D line scans.
+- Only remove graphics from active acquisition data items (fix #127).
+- Enable graphics properly when switching projects (fix #133).
+- Only invalidate context field of view, rotation, or center changes (fix #140).
+- Retain probe position when disabling and re-enabling (fix #139).
+- Check channel states for changes before rebuilding thumbnails to avoid flashing.
+- Allow scan modules to supply their own control panel UI.
 - Make fov_size_nm be a computed property representing fov with aspect ratio applied.
 - Add pixel_size_nm and subscan_pixel_size_nm computed properties to frame parameters.
-- Handle scan data calibrations when scan data is 1D.
+- Handle scan data calibrations when scan data is 1D. Pass through 3D.
 - Add channel_indexes_enabled to frame parameters for future use.
+- Enable support for Python 3.11.
 
 0.20.8 (2022-09-13)
 -------------------
