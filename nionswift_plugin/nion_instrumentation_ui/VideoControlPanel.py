@@ -365,7 +365,7 @@ class VideoSourcePanel(Panel.Panel):
 
         self.__hardware_source_widgets: typing.Dict[str, VideoSourceWidget] = dict()
 
-        hardware_sources = HardwareSource.HardwareSourceManager().hardware_sources
+        hardware_sources = list(HardwareSource.HardwareSourceManager().hardware_sources)
         hardware_sources.sort(key=lambda hardware_source: hardware_source.display_name or _("Unknown"))
 
         def hardware_source_added(hardware_source: HardwareSource.HardwareSource) -> None:
