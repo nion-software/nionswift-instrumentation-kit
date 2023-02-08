@@ -24,6 +24,7 @@ import threading
 import time
 import typing
 import uuid
+import weakref
 
 # library imports
 import numpy
@@ -31,6 +32,7 @@ import numpy
 # local imports
 from nion.data import Core
 from nion.data import DataAndMetadata
+from nion.instrumentation import ListListener
 from nion.swift.model import Activity
 from nion.swift.model import DataItem
 from nion.swift.model import DisplayItem
@@ -40,6 +42,7 @@ from nion.swift.model import Metadata
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import ListModel
 from nion.utils import Observable
 from nion.utils import Registry
 from nion.utils.ReferenceCounting import weak_partial
@@ -103,14 +106,23 @@ class HardwareSourceBridge:
         self.__document_model = document_model
         self.__data_items_to_append_lock = threading.RLock()
         self.__data_items_to_append: typing.List[typing.Tuple[str, DataItem.DataItem]] = list()
-        self.__data_channel_updated_listeners: typing.Dict[str, typing.List[Event.EventListener]] = dict()
-        self.__data_channel_start_listeners: typing.Dict[str, typing.List[Event.EventListener]] = dict()
-        self.__data_channel_stop_listeners: typing.Dict[str, typing.List[Event.EventListener]] = dict()
-        self.__data_channel_states_updated_listeners: typing.Dict[str, Event.EventListener] = dict()
-        self.__hardware_source_added_listener = HardwareSourceManager().hardware_source_added_event.listen(self.__hardware_source_added)
-        self.__hardware_source_removed_listener = HardwareSourceManager().hardware_source_removed_event.listen(self.__hardware_source_removed)
-        for hardware_source in HardwareSourceManager().hardware_sources:
-            self.__hardware_source_added(hardware_source)
+        self.__hardware_sources_list_listener = ListListener.ListListener(
+            HardwareSourceManager()._hardware_source_list_model,
+            ListListener.ListItemEventsHandlerFactory(
+            {
+                "data_channel_states_updated": weak_partial(HardwareSourceBridge.__data_channel_states_updated, self),
+            })
+        )
+
+        self.__hardware_sources_list_listener2 = ListListener.ListListener(
+            HardwareSourceManager()._hardware_source_list_model,
+            ListListener.ListItemItemsHandlerFactory("data_channel_list_model", ListListener.ListItemEventsHandlerFactory(
+            {
+                "data_channel_start_event": weak_partial(HardwareSourceBridge.__data_channel_start, self),
+                "data_channel_stop_event": weak_partial(HardwareSourceBridge.__data_channel_stop, self),
+                "data_channel_updated_event": weak_partial(HardwareSourceBridge.__data_channel_updated, self),
+            }))
+        )
 
     def close(self) -> None:
         # close hardware source related stuff
@@ -118,54 +130,14 @@ class HardwareSourceBridge:
         with self.__data_items_to_append_lock:
             for key, data_item in self.__data_items_to_append:
                 data_item.close()
-        self.__hardware_source_added_listener.close()
-        self.__hardware_source_added_listener = typing.cast(typing.Any, None)
-        self.__hardware_source_removed_listener.close()
-        self.__hardware_source_removed_listener = typing.cast(typing.Any, None)
-        for listener in self.__data_channel_states_updated_listeners.values():
-            listener.close()
-        self.__data_channel_states_updated_listeners = typing.cast(typing.Any, None)
+        self.__hardware_sources_list_listener2 = typing.cast(typing.Any, None)
+        self.__hardware_sources_list_listener = typing.cast(typing.Any, None)
         HardwareSourceManager()._hardware_source_bridge_closed()
-        for listeners in self.__data_channel_updated_listeners.values():
-            for listener in listeners:
-                listener.close()
-        for listeners in self.__data_channel_start_listeners.values():
-            for listener in listeners:
-                listener.close()
-        for listeners in self.__data_channel_stop_listeners.values():
-            for listener in listeners:
-                listener.close()
-        self.__data_channel_updated_listeners = typing.cast(typing.Any, None)
-        self.__data_channel_start_listeners = typing.cast(typing.Any, None)
-        self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
     def __call_soon(self, fn: typing.Callable[[], None]) -> None:
         assert self.__document_model
         self.__document_model._call_soon(fn)
-
-    def __hardware_source_added(self, hardware_source: HardwareSource) -> None:
-        self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id] = hardware_source.data_channel_states_updated.listen(functools.partial(self.__data_channel_states_updated, hardware_source))
-        for data_channel in hardware_source.data_channels:
-            data_channel_updated_listener = data_channel.data_channel_updated_event.listen(functools.partial(self.__data_channel_updated, hardware_source, data_channel))
-            self.__data_channel_updated_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_updated_listener)
-            data_channel_start_listener = data_channel.data_channel_start_event.listen(functools.partial(self.__data_channel_start, hardware_source, data_channel))
-            self.__data_channel_start_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_start_listener)
-            data_channel_stop_listener = data_channel.data_channel_stop_event.listen(functools.partial(self.__data_channel_stop, hardware_source, data_channel))
-            self.__data_channel_stop_listeners.setdefault(hardware_source.hardware_source_id, list()).append(data_channel_stop_listener)
-
-    def __hardware_source_removed(self, hardware_source: HardwareSource) -> None:
-        self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id].close()
-        del self.__data_channel_states_updated_listeners[hardware_source.hardware_source_id]
-        for listener in self.__data_channel_updated_listeners.get(hardware_source.hardware_source_id, list()):
-            listener.close()
-        for listener in self.__data_channel_start_listeners.get(hardware_source.hardware_source_id, list()):
-            listener.close()
-        for listener in self.__data_channel_stop_listeners.get(hardware_source.hardware_source_id, list()):
-            listener.close()
-        self.__data_channel_updated_listeners.pop(hardware_source.hardware_source_id, None)
-        self.__data_channel_start_listeners.pop(hardware_source.hardware_source_id, None)
-        self.__data_channel_stop_listeners.pop(hardware_source.hardware_source_id, None)
 
     def __construct_data_item_reference(self, hardware_source: HardwareSource, data_channel: DataChannel) -> DocumentModel.DocumentModel.DataItemReference:
         """Construct a data item reference.
@@ -252,7 +224,7 @@ class HardwareSourceBridge:
 class HardwareSourceManager(metaclass=Utility.Singleton):
     def __init__(self) -> None:
         super().__init__()
-        self.hardware_sources: typing.List[HardwareSource] = list()
+        self._hardware_source_list_model = ListModel.ListModel[HardwareSource]()
         self.instruments: typing.List[Instrument] = list()
         # we create a list of callbacks for when a hardware
         # source is added or removed
@@ -278,10 +250,10 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         for hardware_source in self.hardware_sources:
             if hasattr(hardware_source, "close"):
                 hardware_source.close()
-        self.hardware_sources = []
+        self._hardware_source_list_model.clear_items()
 
     def _reset(self) -> None:  # used for testing to start from scratch
-        self.hardware_sources = []
+        self._hardware_source_list_model.clear_items()
         self.instruments = []
         self.hardware_source_added_event = Event.Event()
         self.hardware_source_removed_event = Event.Event()
@@ -289,12 +261,16 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         self.instrument_removed_event = Event.Event()
         self.__aliases = {}
 
+    @property
+    def hardware_sources(self) -> typing.Sequence[HardwareSource]:
+        return self._hardware_source_list_model.items
+
     def register_hardware_source(self, hardware_source: HardwareSource) -> None:
-        self.hardware_sources.append(hardware_source)
+        self._hardware_source_list_model.append_item(hardware_source)
         self.hardware_source_added_event.fire(hardware_source)
 
     def unregister_hardware_source(self, hardware_source: HardwareSource) -> None:
-        self.hardware_sources.remove(hardware_source)
+        self._hardware_source_list_model.remove_item(self._hardware_source_list_model.items.index(hardware_source))
         self.hardware_source_removed_event.fire(hardware_source)
 
     def register_instrument(self, instrument_id: str, instrument: Instrument) -> None:
@@ -938,8 +914,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         super().__init__()
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
-        self.__data_channels: typing.List[DataChannel] = list()
-        self.__data_channel_state_changed_listeners: typing.List[Event.EventListener] = list()
+        self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
         self.__features: typing.Dict[str, typing.Any] = dict()
         self.data_channel_states_updated = Event.Event()
         self.xdatas_available_event = Event.Event()
@@ -959,9 +934,19 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
 
+        # listen for events on the data channels and pass them to methods on this instance.
+        # the item on which the event occurred is passed as the first parameter to the methods.
+        self.__data_channel_list_listener = ListListener.ListListener(
+            self.__data_channel_list_model,
+            ListListener.ListItemEventsHandlerFactory(
+            {
+                "data_channel_state_changed_event": weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self),
+            })
+        )
+
     def close(self) -> None:
         self.close_thread()
-        self.__data_channel_state_changed_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_list_listener = typing.cast(typing.Any, None)
 
     @property
     def features(self) -> typing.Dict[str, typing.Any]:
@@ -1114,7 +1099,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         for data_element in data_elements:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
-            data_channel = next(filter(lambda dc: dc.channel_id == channel_id, self.__data_channels), None)
+            data_channel = next(filter(lambda dc: dc.channel_id == channel_id, self.__data_channel_list_model.items), None)
             if data_channel:
                 data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                 # data_and_metadata data may still point to low level code memory at this point.
@@ -1129,10 +1114,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 data_channels.append(data_channel)
                 xdatas.append(data_channel.data_and_metadata)
         # update channel buffers with processors
-        for data_channel in self.__data_channels:
+        for data_channel in self.__data_channel_list_model.items:
             src_channel_index = data_channel.src_channel_index
             if src_channel_index is not None:
-                src_data_channel = self.__data_channels[src_channel_index]
+                src_data_channel = self.__data_channel_list_model.items[src_channel_index]
                 if src_data_channel in data_channels:
                     src_data_and_metadata = src_data_channel.data_and_metadata
                     data_channel_processor = data_channel.processor
@@ -1146,7 +1131,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     data_channels.append(data_channel)
                     xdatas.append(data_channel.data_and_metadata)
         # all channel buffers are clean now
-        for data_channel in self.__data_channels:
+        for data_channel in self.__data_channel_list_model.items:
             data_channel.is_error = is_error
             data_channel.is_dirty = False
 
@@ -1167,11 +1152,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                                                           "Acquisition Failed", str(e)))
 
     def __start(self) -> None:
-        for data_channel in self.__data_channels:
+        for data_channel in self.__data_channel_list_model.items:
             data_channel.start()
 
     def __stop(self) -> None:
-        for data_channel in self.__data_channels:
+        for data_channel in self.__data_channel_list_model.items:
             data_channel.stop()
         self.data_channel_states_updated.fire(list())
 
@@ -1351,24 +1336,26 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     @property
     def data_channel_count(self) -> int:
-        return len(self.__data_channels)
+        return len(self.__data_channel_list_model.items)
 
     @property
     def data_channels(self) -> typing.Sequence[DataChannel]:
-        return self.__data_channels
+        return self.__data_channel_list_model.items
+
+    @property
+    def data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
+        return self.__data_channel_list_model
 
     def __data_channel_state_changed(self, data_channel: DataChannel) -> None:
         self.data_channel_state_changed_event.fire(data_channel)
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None:
-        data_channel = DataChannel(self, len(self.__data_channels), channel_id, name, is_context=is_context)
-        self.__data_channels.append(data_channel)
-        self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
+        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), channel_id, name, is_context=is_context)
+        self.__data_channel_list_model.append_item(data_channel)
 
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
-        data_channel = DataChannel(self, len(self.__data_channels), processor.processor_id, None, channel_index, processor)
-        self.__data_channels.append(data_channel)
-        self.__data_channel_state_changed_listeners.append(data_channel.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self, data_channel)))
+        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), processor.processor_id, None, channel_index, processor)
+        self.__data_channel_list_model.append_item(data_channel)
 
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
