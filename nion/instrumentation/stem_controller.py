@@ -4,6 +4,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import copy
+import dataclasses
 import enum
 import functools
 import gettext
@@ -636,27 +637,45 @@ class AbstractGraphicSetHandler(abc.ABC):
         ...
 
 
+@dataclasses.dataclass
+class GraphicTracker:
+    display_item: DisplayItem.DisplayItem
+    graphic: Graphics.Graphic
+    graphic_property_changed_listener: Event.EventListener
+    remove_region_graphic_event_listener: Event.EventListener
+    display_about_to_be_removed_listener: Event.EventListener
+
+    def close(self) -> None:
+        self.display_item = typing.cast(typing.Any, None)
+        self.graphic = typing.cast(typing.Any, None)
+        self.graphic_property_changed_listener.close()
+        self.graphic_property_changed_listener = typing.cast(typing.Any, None)
+        self.remove_region_graphic_event_listener.close()
+        self.remove_region_graphic_event_listener = typing.cast(typing.Any, None)
+        self.display_about_to_be_removed_listener.close()
+        self.display_about_to_be_removed_listener = typing.cast(typing.Any, None)
+
+
 class GraphicSetController:
 
     def __init__(self, handler: AbstractGraphicSetHandler):
-        self.__graphic_trackers : typing.List[typing.Tuple[Graphics.Graphic, Event.EventListener, Event.EventListener, Event.EventListener]] = list()
+        self.__graphic_trackers : typing.List[GraphicTracker] = list()
         self.__handler = handler
 
     def close(self) -> None:
-        for _, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
-            graphic_property_changed_listener.close()
-            remove_region_graphic_event_listener.close()
-            display_about_to_be_removed_listener.close()
+        for graphic_tracker in self.__graphic_trackers:
+            graphic_tracker.close()
         self.__graphic_trackers = list()
 
     @property
     def graphics(self) -> typing.Sequence[Graphics.Graphic]:
-        return [t[0] for t in self.__graphic_trackers]
+        return [graphic_tracker.graphic for graphic_tracker in self.__graphic_trackers]
 
     def synchronize_graphics(self, display_items: typing.Sequence[DisplayItem.DisplayItem]) -> None:
         # create graphics for each scan data item if it doesn't exist
-        if not self.__graphic_trackers:
-            for display_item in display_items:
+        display_items_with_graphic_trackers = {graphic_tracker.display_item for graphic_tracker in self.__graphic_trackers}
+        for display_item in display_items:
+            if display_item not in display_items_with_graphic_trackers:
                 graphic = self.__handler._create_graphic()
 
                 def graphic_property_changed(graphic: Graphics.Graphic, name: str) -> None:
@@ -673,7 +692,7 @@ class GraphicSetController:
 
                 remove_region_graphic_event_listener = graphic.about_to_be_removed_event.listen(functools.partial(graphic_removed, graphic))
                 display_about_to_be_removed_listener = display_item.about_to_be_removed_event.listen(functools.partial(display_removed, graphic))
-                self.__graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+                self.__graphic_trackers.append(GraphicTracker(display_item, graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
                 display_item.add_graphic(graphic)
         # apply new value to any existing graphics
         for graphic in self.graphics:
@@ -684,27 +703,20 @@ class GraphicSetController:
         # are out of scope when the graphic is removed from its container via `remove_graphic`.
         # this ensures the listeners are inactive when `remove_graphic` is called.
         graphics = list()
-        for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
-            graphic_property_changed_listener.close()
-            remove_region_graphic_event_listener.close()
-            display_about_to_be_removed_listener.close()
-            graphics.append(graphic)
-            del graphic_property_changed_listener
-            del remove_region_graphic_event_listener
-            del display_about_to_be_removed_listener
+        for graphic_tracker in self.__graphic_trackers:
+            graphics.append(graphic_tracker.graphic)
+            graphic_tracker.close()
         self.__graphic_trackers = list()
         for graphic in graphics:
             graphic.display_item.remove_graphic(graphic).close()
 
     def __remove_one_graphic(self, graphic_to_remove: Graphics.Graphic) -> None:
-        graphic_trackers = list()
-        for graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener in self.__graphic_trackers:
-            if graphic_to_remove != graphic:
-                graphic_trackers.append((graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
+        graphic_trackers: typing.List[GraphicTracker] = list()
+        for graphic_tracker in self.__graphic_trackers:
+            if graphic_to_remove != graphic_tracker.graphic:
+                graphic_trackers.append(graphic_tracker)
             else:
-                graphic_property_changed_listener.close()
-                remove_region_graphic_event_listener.close()
-                display_about_to_be_removed_listener.close()
+                graphic_tracker.close()
         self.__graphic_trackers = graphic_trackers
 
 

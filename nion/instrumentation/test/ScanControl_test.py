@@ -1159,6 +1159,29 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
+    def test_subscan_appears_on_display_items_for_additional_channels(self):
+        # scan once, enable subscan, disable subscan. should be a graphic.
+        # add channel. scan once. should be a graphic on both displays.
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_state_controller = self.__create_state_controller(test_context)
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_state_controller.handle_subscan_enabled(True)
+            document_controller.periodic()
+            scan_state_controller.handle_subscan_enabled(False)
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(1, len(document_model.display_items))
+            self.assertEqual(1, len(display_item.graphics))
+            scan_hardware_source.set_channel_enabled(1, True)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual(2, len(document_model.display_items))
+            self.assertEqual(1, len(display_item.graphics))
+            display_item2 = document_model.get_display_item_for_data_item(document_model.data_items[1])
+            self.assertEqual(1, len(display_item2.graphics))
+
     def test_subscan_not_allowed_with_width_or_height_of_zero(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
