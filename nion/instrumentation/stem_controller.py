@@ -393,10 +393,12 @@ class STEMController(Observable.Observable):
         self.scan_context_data_items_changed_event.fire()
 
     def _update_scan_channel_map(self, channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
-        old_scan_context_channel_map = copy.copy(self.__scan_context_channel_map)
+        # old_scan_context_channel_map = copy.copy(self.__scan_context_channel_map)
         self.__scan_context_channel_map.update(channel_map)
-        if old_scan_context_channel_map != self.__scan_context_channel_map:
-            self.scan_context_data_items_changed_event.fire()
+        # always fire this even if the map is unchanged; properties (channel enabled) which affect
+        # downstream filtering might have changed.
+        # if old_scan_context_channel_map != self.__scan_context_channel_map:
+        self.scan_context_data_items_changed_event.fire()
 
     @property
     def scan_context(self) -> ScanContext:
@@ -694,6 +696,16 @@ class GraphicSetController:
                 display_about_to_be_removed_listener = display_item.about_to_be_removed_event.listen(functools.partial(display_removed, graphic))
                 self.__graphic_trackers.append(GraphicTracker(display_item, graphic, graphic_property_changed_listener, remove_region_graphic_event_listener, display_about_to_be_removed_listener))
                 display_item.add_graphic(graphic)
+        # remove graphics that are no longer valid. note: copy list because it may change during iteration.
+        for graphic_tracker in list(self.__graphic_trackers):
+            graphic_tracker_display_item = graphic_tracker.display_item
+            graphic_tracker_graphic = graphic_tracker.graphic
+            if graphic_tracker_display_item not in display_items:
+                # remove/close the graphic tracker associated with the graphic. this ensures that when the
+                # graphic is removed next it will not remove the graphics on the other context items.
+                self.__remove_one_graphic(graphic_tracker_graphic)
+                # this will update __graphic_trackers
+                graphic_tracker_display_item.remove_graphic(graphic_tracker_graphic).close()
         # apply new value to any existing graphics
         for graphic in self.graphics:
             self.__handler._update_graphic(graphic)
@@ -823,7 +835,7 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
         scan_controller = stem_controller.scan_controller
         if scan_controller:
-            context_data_channels = scan_controller.get_context_data_channels()
+            context_data_channels = scan_controller.get_enabled_context_data_channels()
             for data_channel in context_data_channels:
                 data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
                 if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
@@ -871,6 +883,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__document_model = document_model
         self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(ProbeView.__display_item_inserted, self))
+        self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(ProbeView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(ProbeView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -893,6 +906,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
+        self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -919,6 +933,11 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
 
     def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            stem_controller = self.__stem_controller
+            self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
+
+    def __display_item_removed(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
         if name == "display_items":
             stem_controller = self.__stem_controller
             self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
@@ -967,6 +986,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__document_model = document_model
         self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(SubscanView.__display_item_inserted, self))
+        self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(SubscanView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(SubscanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -986,6 +1006,7 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
+        self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -1021,6 +1042,10 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         self.__update_subscan_region()
 
     def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_subscan_region()
+
+    def __display_item_removed(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
         if name == "display_items":
             self.__update_subscan_region()
 
@@ -1075,6 +1100,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__document_model = document_model
         self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(LineScanView.__display_item_inserted, self))
+        self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(LineScanView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(LineScanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
@@ -1093,6 +1119,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
+        self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -1121,6 +1148,10 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         self.__update_line_scan_vector()
 
     def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_line_scan_vector()
+
+    def __display_item_removed(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
         if name == "display_items":
             self.__update_line_scan_vector()
 
@@ -1172,6 +1203,7 @@ class DriftView(EventLoopMonitor):
         self.__document_model = document_model
         self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(DriftView.__display_item_inserted, self))
+        self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(DriftView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(DriftView.__clean, self))
         self.__graphic_display_item : typing.Optional[DisplayItem.DisplayItem] = None
         self.__graphic : typing.Optional[Graphics.RectangleGraphic] = None
@@ -1200,6 +1232,7 @@ class DriftView(EventLoopMonitor):
         self.__document_model = typing.cast(typing.Any, None)
         self.__stem_controller = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
+        self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
@@ -1308,6 +1341,10 @@ class DriftView(EventLoopMonitor):
         self.__update_drift_region()
 
     def __display_item_inserted(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
+        if name == "display_items":
+            self.__update_drift_region()
+
+    def __display_item_removed(self, name: str, item: DisplayItem.DisplayItem, index: int) -> None:
         if name == "display_items":
             self.__update_drift_region()
 

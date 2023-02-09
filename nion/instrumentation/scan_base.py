@@ -734,9 +734,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
-    def get_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
-        # return the data channels functioning as scan contexts.
-        return tuple(filter(lambda data_channel: data_channel.is_context, self.data_channels))
+    def get_enabled_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
+        # return the enabled data channels functioning as scan contexts.
+        enabled_channel_indexes = self.get_enabled_channels()
+        enabled_data_channels = [self.data_channels[channel_index] for channel_index in enabled_channel_indexes]
+        return tuple(filter(lambda data_channel: data_channel.is_context, enabled_data_channels))
 
     record_index: int
     priority: int = 100
@@ -1757,6 +1759,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             if list(channel_states) != list(self.__channel_states):
                 self.__pending_channel_states = list(channel_states)
                 self.__task_queue.put(channel_states_changed)
+        self.data_channel_states_updated.fire(self.data_channels)
 
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
         for channel_index in range(self.channel_count):
