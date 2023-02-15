@@ -663,7 +663,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def selected_profile_index(self) -> int: raise NotImplementedError()
 
-    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
     def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
     def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
 
@@ -758,7 +757,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def periodic(self) -> None: ...
     def get_enabled_channels(self) -> typing.Sequence[int]: ...
     def get_channel_state(self, channel_index: int) -> ChannelState: ...
-    def get_channel_enabled(self, channel_index: int) -> bool: ...
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]: ...
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]: ...
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
@@ -784,12 +782,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_buffer_count(self) -> int: ...
     def clear_buffer(self) -> None: ...
     def pop_buffer(self, count: int) -> None: ...
-
-    def get_enabled_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
-        # return the enabled data channels functioning as scan contexts.
-        enabled_channel_indexes = self.get_enabled_channels()
-        enabled_data_channels = [self.data_channels[channel_index] for channel_index in enabled_channel_indexes]
-        return tuple(filter(lambda data_channel: data_channel.is_context, enabled_data_channels))
+    def get_enabled_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]: ...
 
     record_index: int
     priority: int = 100
@@ -1718,7 +1711,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     @property
     def channel_count(self) -> int:
-        return len(self.__device.channels_enabled)
+        return self.get_channel_count()
 
     def get_channel_state(self, channel_index: int) -> ChannelState:
         channels_enabled = self.__device.channels_enabled
@@ -1726,9 +1719,16 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         name = self.__device.get_channel_name(channel_index)
         return self.__make_channel_state(channel_index, name, channels_enabled[channel_index])
 
+    def get_channel_count(self) -> int:
+        return len(self.__device.channels_enabled)
+
     def get_channel_enabled(self, channel_index: int) -> bool:
         assert 0 <= channel_index < self.__device.channel_count
         return self.__device.channels_enabled[channel_index]
+
+    def get_channel_id(self, channel_index: int) -> typing.Optional[str]:
+        assert 0 <= channel_index < self.__device.channel_count
+        return self.__make_channel_id(channel_index)
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         changed = self.__device.set_channel_enabled(channel_index, enabled)
@@ -1949,6 +1949,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if callable(getattr(self.__device, "pop_buffer", None)):
             self.__device.pop_buffer(count)
 
+    def get_enabled_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
+        enabled_channel_indexes = self.get_enabled_channels()
+        return [self.data_channels[channel_index] for channel_index in enabled_channel_indexes]
+
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
         # probe_state can be 'parked', or 'scanning'
@@ -2119,17 +2123,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
                         buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
                         self.__available_rows[channel] = valid_rows
 
-        self.__data_channel_listeners = list()
-        for data_channel in scan_hardware_source.data_channels:
-            self.__data_channel_listeners.append(data_channel.data_channel_updated_event.listen(functools.partial(update_data, data_channel)))
+        self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(update_data)
 
     def about_to_delete(self) -> None:
         if self.__record_task:
             self.__record_task.close()
             self.__record_task = typing.cast(typing.Any, None)
-        for data_channel_listener in self.__data_channel_listeners:
-            data_channel_listener.close()
-        self.__data_channel_listeners.clear()
+        self.__data_channel_listener = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property

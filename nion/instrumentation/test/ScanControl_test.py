@@ -14,7 +14,6 @@ import uuid
 import numpy
 
 from nion.instrumentation import AcquisitionPreferences
-from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
@@ -1421,6 +1420,24 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing()
             display_item.remove_graphic(display_item.graphics[0]).close()
             self.assertFalse(scan_hardware_source.subscan_enabled)
+
+    def test_facade_view_task_with_multiple_channels(self):
+        with self.__test_context() as test_context:
+            hardware_source = test_context.scan_hardware_source
+            api = Facade.get_api("~1.0", "~1.0")
+            hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
+            scan_frame_parameters = hardware_source_facade.get_frame_parameters_for_profile_by_index(0)
+            view_task = hardware_source_facade.create_view_task(scan_frame_parameters, channels_enabled=[True, True])
+            with contextlib.closing(view_task):
+                data_and_metadata_list1 = view_task.grab_next_to_finish()
+                self.assertTrue(hardware_source_facade.is_playing)
+                data_and_metadata_list2 = view_task.grab_immediate()
+                data_and_metadata_list3 = view_task.grab_next_to_start()
+                self.assertEqual(2, len(data_and_metadata_list1))
+                self.assertIsNotNone(data_and_metadata_list1[0].data)
+                self.assertIsNotNone(data_and_metadata_list1[1].data)
+                self.assertIsNotNone(data_and_metadata_list2[0].data)
+                self.assertIsNotNone(data_and_metadata_list3[0].data)
 
     def test_facade_record_data_with_immediate_close(self):
         with self.__test_context() as test_context:

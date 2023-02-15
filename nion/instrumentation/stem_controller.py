@@ -835,11 +835,12 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
         scan_controller = stem_controller.scan_controller
         if scan_controller:
-            context_data_channels = scan_controller.get_enabled_context_data_channels()
-            for data_channel in context_data_channels:
-                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
-                if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
-                    return True
+            data_channels = scan_controller.get_enabled_data_channels()
+            for data_channel in data_channels:
+                if data_channel.is_context:
+                    data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
+                    if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
+                        return True
         return False
 
     return DisplayItemListModel(document_model, call_soon_threadsafe, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)

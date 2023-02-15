@@ -24,7 +24,6 @@ import threading
 import time
 import typing
 import uuid
-import weakref
 
 # library imports
 import numpy
@@ -111,17 +110,10 @@ class HardwareSourceBridge:
             ListListener.ListItemEventsHandlerFactory(
             {
                 "data_channel_states_updated": weak_partial(HardwareSourceBridge.__data_channel_states_updated, self),
-            })
-        )
-
-        self.__hardware_sources_list_listener2 = ListListener.ListListener(
-            HardwareSourceManager()._hardware_source_list_model,
-            ListListener.ListItemItemsHandlerFactory("data_channel_list_model", ListListener.ListItemEventsHandlerFactory(
-            {
                 "data_channel_start_event": weak_partial(HardwareSourceBridge.__data_channel_start, self),
                 "data_channel_stop_event": weak_partial(HardwareSourceBridge.__data_channel_stop, self),
                 "data_channel_updated_event": weak_partial(HardwareSourceBridge.__data_channel_updated, self),
-            }))
+            })
         )
 
     def close(self) -> None:
@@ -130,7 +122,6 @@ class HardwareSourceBridge:
         with self.__data_items_to_append_lock:
             for key, data_item in self.__data_items_to_append:
                 data_item.close()
-        self.__hardware_sources_list_listener2 = typing.cast(typing.Any, None)
         self.__hardware_sources_list_listener = typing.cast(typing.Any, None)
         HardwareSourceManager()._hardware_source_bridge_closed()
         self.__document_model = typing.cast(typing.Any, None)
@@ -176,10 +167,9 @@ class HardwareSourceBridge:
                 if data_item._closed:
                     return
                 self.__document_model.update_data_item_session(data_item)
-                src_channel_index = data_channel.src_channel_index
+                src_data_channel = hardware_source.get_source_data_channel(data_channel)
                 sum_processor = data_channel.processor
-                if sum_processor and src_channel_index is not None:
-                    src_data_channel = hardware_source.data_channels[src_channel_index]
+                if sum_processor and src_data_channel:
                     src_data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, src_data_channel.channel_id)
                     sum_processor.connect_data_item_reference(src_data_item_reference)
 
@@ -887,17 +877,24 @@ class HardwareSource(typing.Protocol):
     def data_channels(self) -> typing.Sequence[DataChannel]:
         return list()
 
-    # private. do not use outside of instrumentation-kit.
+    # private. do not use outside instrumentation-kit.
 
     data_channel_states_updated: Event.Event
-    data_channel_state_changed_event: Event.Event
     xdatas_available_event: Event.Event
     abort_event: Event.Event
     acquisition_state_changed_event: Event.Event
+    data_channel_updated_event: Event.Event
+    data_channel_start_event: Event.Event
+    data_channel_stop_event: Event.Event
+    data_channel_state_changed_event: Event.Event
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
+    def get_source_data_channel(self, data_channel: DataChannel) -> typing.Optional[DataChannel]: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
+    def get_channel_count(self) -> int: ...
+    def get_channel_enabled(self, channel_index: int) -> bool: ...
+    def get_channel_id(self, channel_index: int) -> typing.Optional[str]: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
     def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None: ...
     def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
@@ -920,6 +917,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
         self.acquisition_state_changed_event = Event.Event()
+        self.data_channel_updated_event = Event.Event()
+        self.data_channel_start_event = Event.Event()
+        self.data_channel_stop_event = Event.Event()
         self.data_channel_state_changed_event = Event.Event()
         self.__break_for_closing = False
         self.__acquire_thread_trigger = threading.Event()
@@ -940,7 +940,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.__data_channel_list_model,
             ListListener.ListItemEventsHandlerFactory(
             {
+                "data_channel_start_event": weak_partial(ConcreteHardwareSource.__data_channel_start, self),
+                "data_channel_stop_event": weak_partial(ConcreteHardwareSource.__data_channel_stop, self),
                 "data_channel_state_changed_event": weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self),
+                "data_channel_updated_event": weak_partial(ConcreteHardwareSource.__data_channel_updated, self),
             })
         )
 
@@ -1346,8 +1349,17 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
         return self.__data_channel_list_model
 
+    def __data_channel_start(self, data_channel: DataChannel) -> None:
+        self.data_channel_start_event.fire(data_channel)
+
+    def __data_channel_stop(self, data_channel: DataChannel) -> None:
+        self.data_channel_stop_event.fire(data_channel)
+
     def __data_channel_state_changed(self, data_channel: DataChannel) -> None:
         self.data_channel_state_changed_event.fire(data_channel)
+
+    def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        self.data_channel_updated_event.fire(data_channel, data_and_metadata)
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None:
         data_channel = DataChannel(self, len(self.__data_channel_list_model.items), channel_id, name, is_context=is_context)
@@ -1356,6 +1368,13 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
         data_channel = DataChannel(self, len(self.__data_channel_list_model.items), processor.processor_id, None, channel_index, processor)
         self.__data_channel_list_model.append_item(data_channel)
+
+    def get_source_data_channel(self, data_channel: DataChannel) -> typing.Optional[DataChannel]:
+        src_channel_index = data_channel.src_channel_index
+        sum_processor = data_channel.processor
+        if sum_processor and src_channel_index is not None:
+            return self.data_channels[src_channel_index]
+        return None
 
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
@@ -1387,6 +1406,15 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters:
         raise NotImplementedError()
+
+    def get_channel_count(self) -> int:
+        return 1
+
+    def get_channel_enabled(self, channel_index: int) -> bool:
+        return channel_index == 0
+
+    def get_channel_id(self, channel_index: int) -> typing.Optional[str]:
+        return None
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         pass
@@ -1564,10 +1592,8 @@ class ViewTask:
                 self.__hardware_source.set_channel_enabled(channel_index, channel_enabled)
         if not self.__was_playing:
             self.__hardware_source.start_playing()
-        self.__data_channel_buffer = DataChannelBuffer(self.__hardware_source.data_channels, buffer_size)
+        self.__data_channel_buffer = ViewTaskBuffer(self.__hardware_source, buffer_size)
         self.__data_channel_buffer.start()
-        self.on_will_start_frame = None  # prepare the hardware here
-        self.on_did_finish_frame = None  # restore the hardware here, modify the data_and_metadata here
 
     def close(self) -> None:
         """Close the task. Must be called when the task is no longer needed."""
@@ -1672,7 +1698,7 @@ def get_data_generator_by_id(hardware_source_id: str, sync: bool = True) -> typi
     yield get_last_data
 
 
-class DataChannelBuffer:
+class ViewTaskBuffer:
     """A fixed size buffer for a list of hardware source data channels.
 
     The buffer takes care of waiting until all channels in the list have produced
@@ -1684,54 +1710,40 @@ class DataChannelBuffer:
     """
 
     class State(enum.Enum):
-        idle = 0
-        started = 1
-        paused = 2
+        IDLE = 0
+        STARTED = 1
+        PAUSED = 2
 
-    def __init__(self, data_channels: typing.Sequence[DataChannel], buffer_size: int = 16) -> None:
+    def __init__(self, hardware_source: HardwareSource, buffer_size: int = 16) -> None:
+        self.__hardware_source = hardware_source
         self.__state_lock = threading.RLock()
-        self.__state = DataChannelBuffer.State.idle
+        self.__state = ViewTaskBuffer.State.IDLE
         self.__buffer_size = buffer_size
         self.__buffer_lock = threading.RLock()
         self.__buffer: typing.List[typing.List[DataAndMetadata.DataAndMetadata]] = list()
         self.__done_events: typing.List[threading.Event] = list()
-        self.__active_channel_ids: typing.Set[typing.Optional[str]] = set()
+        self.__enabled_channel_ids: typing.Set[typing.Optional[str]] = set()
         self.__latest: typing.Dict[typing.Optional[str], DataAndMetadata.DataAndMetadata] = dict()
-        self.__data_channel_updated_listeners: typing.List[Event.EventListener] = list()
-        self.__data_channel_start_listeners: typing.List[Event.EventListener] = list()
-        self.__data_channel_stop_listeners: typing.List[Event.EventListener] = list()
-        self.__data_channels = list(data_channels)
-        for data_channel in self.__data_channels:
-            data_channel_updated_listener = data_channel.data_channel_updated_event.listen(functools.partial(self.__data_channel_updated, data_channel))
-            self.__data_channel_updated_listeners.append(data_channel_updated_listener)
-            data_channel_start_listener = data_channel.data_channel_start_event.listen(functools.partial(self.__data_channel_start, data_channel))
-            self.__data_channel_start_listeners.append(data_channel_start_listener)
-            data_channel_stop_listener = data_channel.data_channel_stop_event.listen(functools.partial(self.__data_channel_stop, data_channel))
-            self.__data_channel_stop_listeners.append(data_channel_stop_listener)
-            if data_channel.is_started:
-                self.__active_channel_ids.add(data_channel.channel_id)
+        self.__data_channel_updated_listener = hardware_source.data_channel_updated_event.listen(weak_partial(ViewTaskBuffer.__data_channel_updated, self))
+        for channel_index in range(hardware_source.get_channel_count()):
+            if hardware_source.get_channel_enabled(channel_index):
+                self.__enabled_channel_ids.add(self.__hardware_source.get_channel_id(channel_index))
 
     def close(self) -> None:
-        for listener in self.__data_channel_updated_listeners:
-            listener.close()
-        for listener in self.__data_channel_start_listeners:
-            listener.close()
-        for listener in self.__data_channel_stop_listeners:
-            listener.close()
-        self.__data_channel_updated_listeners = typing.cast(typing.Any, None)
-        self.__data_channel_start_listeners = typing.cast(typing.Any, None)
-        self.__data_channel_stop_listeners = typing.cast(typing.Any, None)
+        self.__data_channel_updated_listener.close()
+        self.__data_channel_updated_listener = typing.cast(typing.Any, None)
 
     def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        if self.__state == DataChannelBuffer.State.started:
+        if self.__state == ViewTaskBuffer.State.STARTED:
             if data_channel.state == "complete":
                 with self.__buffer_lock:
                     self.__latest[data_channel.channel_id] = data_and_metadata
-                    if set(self.__latest.keys()).issuperset(self.__active_channel_ids):
+                    if set(self.__latest.keys()).issuperset(self.__enabled_channel_ids):
                         data_and_metadata_list = list()
-                        for data_channel in self.__data_channels:
-                            if data_channel.channel_id in self.__latest:
-                                data_and_metadata_list.append(copy.deepcopy(self.__latest[data_channel.channel_id]))
+                        for channel_index in range(self.__hardware_source.get_channel_count()):
+                            channel_id = self.__hardware_source.get_channel_id(channel_index)
+                            if channel_id in self.__latest:
+                                data_and_metadata_list.append(copy.deepcopy(self.__latest[channel_id]))
                         self.__buffer.append(data_and_metadata_list)
                         self.__latest = dict()
                         if len(self.__buffer) > self.__buffer_size:
@@ -1739,12 +1751,6 @@ class DataChannelBuffer:
                         for done_event in self.__done_events:
                             done_event.set()
                         self.__done_events = list()
-
-    def __data_channel_start(self, data_channel: DataChannel) -> None:
-        self.__active_channel_ids.add(data_channel.channel_id)
-
-    def __data_channel_stop(self, data_channel: DataChannel) -> None:
-        self.__active_channel_ids.remove(data_channel.channel_id)
 
     def grab_latest(self, timeout: typing.Optional[float] = None) -> typing.Sequence[DataAndMetadata.DataAndMetadata]:
         """Grab the most recent data from the buffer, blocking until one is available. Clear earlier data."""
@@ -1792,30 +1798,30 @@ class DataChannelBuffer:
 
         Thread safe and UI safe."""
         with self.__state_lock:
-            self.__state = DataChannelBuffer.State.started
+            self.__state = ViewTaskBuffer.State.STARTED
 
     def pause(self) -> None:
         """Pause recording.
 
         Thread safe and UI safe."""
         with self.__state_lock:
-            if self.__state == DataChannelBuffer.State.started:
-                self.__state = DataChannelBuffer.State.paused
+            if self.__state == ViewTaskBuffer.State.STARTED:
+                self.__state = ViewTaskBuffer.State.PAUSED
 
     def resume(self) -> None:
         """Resume recording after pause.
 
         Thread safe and UI safe."""
         with self.__state_lock:
-            if self.__state == DataChannelBuffer.State.paused:
-                self.__state = DataChannelBuffer.State.started
+            if self.__state == ViewTaskBuffer.State.PAUSED:
+                self.__state = ViewTaskBuffer.State.STARTED
 
     def stop(self) -> None:
         """Stop or abort recording.
 
         Thread safe and UI safe."""
         with self.__state_lock:
-            self.__state = DataChannelBuffer.State.idle
+            self.__state = ViewTaskBuffer.State.IDLE
 
 
 class MetadataDisplayComponent:
