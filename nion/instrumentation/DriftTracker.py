@@ -267,7 +267,7 @@ class DriftCorrectionBehavior:
         self.__scan_frame_parameters.subscan_fractional_size = None
         self.__scan_frame_parameters.subscan_fractional_center = None
         self.__scan_frame_parameters.subscan_rotation = 0.0
-        self.__scan_frame_parameters.channel_override = "drift"
+        self.__scan_frame_parameters.channel_variant = "drift"
         self.__drift_tracker.reset()
 
     def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:

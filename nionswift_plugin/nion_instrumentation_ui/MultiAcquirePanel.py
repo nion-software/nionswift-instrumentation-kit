@@ -399,7 +399,7 @@ class MultiAcquirePanelDelegate:
                         camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera.display_name, grab_synchronized_info,
                                                                              multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
                                                                              stack_metadata_keys=stack_metadata_keys)
-                        enabled_channels = scan_controller.get_enabled_channels()
+                        enabled_channels = scan_controller.get_enabled_channel_indexes()
                         enabled_channel_names = [scan_controller.get_channel_name(i) or str() for i in enabled_channels]
                         scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
                                                                          multi_acquire_parameters, multi_acquire_settings, current_parameters_index)

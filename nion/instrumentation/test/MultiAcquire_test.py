@@ -207,8 +207,8 @@ class TestMultiAcquire(unittest.TestCase):
                                 camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera_hardware_source.display_name, grab_synchronized_info,
                                                                                      multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
                                                                                      stack_metadata_keys=[['hardware_source', 'binning']])
-                                enabled_channels = scan_hardware_source.get_enabled_channels()
-                                enabled_channel_names = [scan_hardware_source.data_channels[i].name for i in enabled_channels]
+                                enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
+                                enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
                                 scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
                                                                                  multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
                                 camera_data_channel.start()
@@ -327,8 +327,8 @@ class TestMultiAcquire(unittest.TestCase):
                 camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera_hardware_source.display_name, grab_synchronized_info,
                                                                      multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
                                                                      stack_metadata_keys=[['hardware_source', 'defocus']])
-                enabled_channels = scan_hardware_source.get_enabled_channels()
-                enabled_channel_names = [scan_hardware_source.data_channels[i].name for i in enabled_channels]
+                enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
+                enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
                 scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
                                                                  multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
                 camera_data_channel.start()
