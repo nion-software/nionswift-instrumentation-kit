@@ -205,7 +205,6 @@ class STEMController(Observable.Observable):
         self.__drift_region: typing.Optional[Geometry.FloatRect] = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
@@ -214,7 +213,7 @@ class STEMController(Observable.Observable):
         self.__drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None
 
     def close(self) -> None:
-        self.__scan_context_channel_map = typing.cast(typing.Any, None)
+        pass
 
     def reset(self) -> None:
         self.__probe_position = None
@@ -231,7 +230,6 @@ class STEMController(Observable.Observable):
         self.__drift_region = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_channel_map.clear()
 
     # configuration methods
 
@@ -389,15 +387,11 @@ class STEMController(Observable.Observable):
             self.notify_property_changed("drift_settings")
 
     def disconnect_probe_connections(self) -> None:
-        self.__scan_context_channel_map = dict()
         self.scan_context_data_items_changed_event.fire()
 
-    def _update_scan_channel_map(self, channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
-        # old_scan_context_channel_map = copy.copy(self.__scan_context_channel_map)
-        self.__scan_context_channel_map.update(channel_map)
+    def data_channels_updated(self) -> None:
         # always fire this even if the map is unchanged; properties (channel enabled) which affect
         # downstream filtering might have changed.
-        # if old_scan_context_channel_map != self.__scan_context_channel_map:
         self.scan_context_data_items_changed_event.fire()
 
     @property

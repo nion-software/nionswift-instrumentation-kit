@@ -771,7 +771,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def increase_pmt(self, channel_index: int) -> None: ...
     def decrease_pmt(self, channel_index: int) -> None: ...
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int: ...
-    def get_data_channel_state(self, channel_index: int) -> typing.Tuple[typing.Optional[str], typing.Optional[str], bool]: ...
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
@@ -1742,18 +1741,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
         return channel_index + self.channel_count, channel_id + "_subscan", " ".join((channel_name, _("SubScan")))
 
-    def get_data_channel_state(self, channel_index: int) -> typing.Tuple[typing.Optional[str], typing.Optional[str], bool]:
-        # channel indexes larger than then the channel count will be subscan channels
-        if channel_index < self.channel_count:
-            channel_state = self.get_channel_state(channel_index)
-            return channel_state.channel_id, channel_state.name, channel_state.enabled if not self.subscan_enabled else False
-        elif channel_index < self.channel_count * 2:
-            channel_state = self.get_channel_state(channel_index - self.channel_count)
-            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_state.channel_id, channel_state.name)
-            return subscan_channel_id, subscan_channel_name, channel_state.enabled if self.subscan_enabled else False
-        else:
-            return self.data_channels[channel_index].channel_id, self.data_channels[channel_index].name, False
-
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
@@ -1814,7 +1801,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             if list(channel_states) != list(self.__channel_states):
                 self.__pending_channel_states = list(channel_states)
                 self.__task_queue.put(channel_states_changed)
-        self.data_channel_states_updated.fire(self.data_channels)
+        self.data_channels_updated()
 
     def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
         for channel_index in range(self.channel_count):
@@ -2007,8 +1994,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
-    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
-        self.__stem_controller._update_scan_channel_map(data_channel_map)
+    def data_channels_updated(self) -> None:
+        self.__stem_controller.data_channels_updated()
 
     @property
     def use_hardware_simulator(self) -> bool:
