@@ -869,14 +869,6 @@ class HardwareSource(typing.Protocol):
     def is_recording(self) -> bool:
         return False
 
-    @property
-    def data_channel_count(self) -> int:
-        return len(self.data_channels)
-
-    @property
-    def data_channels(self) -> typing.Sequence[DataChannel]:
-        return list()
-
     # private. do not use outside instrumentation-kit.
 
     data_channel_states_updated: Event.Event
@@ -895,6 +887,7 @@ class HardwareSource(typing.Protocol):
     def get_channel_count(self) -> int: ...
     def get_channel_enabled(self, channel_index: int) -> bool: ...
     def get_channel_id(self, channel_index: int) -> typing.Optional[str]: ...
+    def get_channel_name(self, channel_index: int) -> typing.Optional[str]: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
     def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None: ...
     def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
@@ -1373,7 +1366,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         src_channel_index = data_channel.src_channel_index
         sum_processor = data_channel.processor
         if sum_processor and src_channel_index is not None:
-            return self.data_channels[src_channel_index]
+            return self.__data_channel_list_model.items[src_channel_index]
         return None
 
     def get_property(self, name: str) -> typing.Any:
@@ -1414,6 +1407,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         return channel_index == 0
 
     def get_channel_id(self, channel_index: int) -> typing.Optional[str]:
+        return None
+
+    def get_channel_name(self, channel_index: int) -> typing.Optional[str]:
         return None
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
