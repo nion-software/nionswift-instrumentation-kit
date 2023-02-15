@@ -605,7 +605,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_enabled = True
             scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -635,7 +635,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_enabled = True
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             display_item = document_model.display_items[-1]
@@ -673,7 +673,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_enabled = True
             scan_hardware_source.drift_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             document_controller.periodic()
             display_item = document_model.display_items[-1]
@@ -715,7 +715,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_enabled = True
             scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -750,7 +750,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
             drift_tracker = scan_hardware_source.drift_tracker
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+            scan_hardware_source.drift_enabled = True
             scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             rotation = math.radians(30)  # note: this is only rotating the drift region, not the overall sample
             scan_hardware_source.drift_rotation = rotation
@@ -791,7 +791,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 test_context.instrument.sample_index = 2  # use CTS sample, custom position chosen using view mode in Swift
                 drift_tracker = scan_hardware_source.drift_tracker
                 self._acquire_one(document_controller, scan_hardware_source)
-                scan_hardware_source.drift_channel_id = scan_hardware_source.data_channels[0].channel_id
+                scan_hardware_source.drift_enabled = True
                 scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
                 document_controller.periodic()
                 # Change the default parameters (64 px and 16 us) to something different

@@ -1424,7 +1424,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     # construct the channel names.
     op = _("Synchronized")
     channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-    for c in scan_hardware_source.get_enabled_channels():
+    for c in scan_hardware_source.get_enabled_channel_indexes():
         channel_state = scan_hardware_source.get_channel_state(c)
         channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
         channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
@@ -1762,7 +1762,7 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     collector = Acquisition.StackedDataStream(collectors)
     # construct the channel names.
     channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-    for c in scan_hardware_source.get_enabled_channels():
+    for c in scan_hardware_source.get_enabled_channel_indexes():
         channel_state = scan_hardware_source.get_channel_state(c)
         channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
         channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name

@@ -1325,14 +1325,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 return new_xdatas
 
     @property
-    def data_channel_count(self) -> int:
-        return len(self.__data_channel_list_model.items)
-
-    @property
-    def data_channels(self) -> typing.Sequence[DataChannel]:
-        return self.__data_channel_list_model.items
-
-    @property
     def data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
         return self.__data_channel_list_model
 

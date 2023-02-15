@@ -106,7 +106,7 @@ class ScanAcquisitionController:
         camera_frame_parameters.processing = processing.value.processing_id
 
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-        for c in scan_hardware_source.get_enabled_channels():
+        for c in scan_hardware_source.get_enabled_channel_indexes():
             channel_state = scan_hardware_source.get_channel_state(c)
             channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
             channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
