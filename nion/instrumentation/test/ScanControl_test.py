@@ -373,7 +373,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
                 self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
                 self.assertEqual(channel_index, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
-                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).channel_id + "_subscan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
+                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).channel_id, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
                 self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).name + " SubScan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))

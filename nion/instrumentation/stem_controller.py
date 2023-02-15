@@ -832,7 +832,7 @@ def make_scan_display_item_list_model(document_model: DocumentModel.DocumentMode
             data_channels = scan_controller.get_enabled_data_channels()
             for data_channel in data_channels:
                 if data_channel.is_context:
-                    data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
+                    data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.data_channel_id)
                     if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
                         return True
         return False

@@ -137,7 +137,7 @@ class HardwareSourceBridge:
 
         This method is thread safe.
         """
-        data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
+        data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
         with data_item_reference.mutex:
             data_item = data_item_reference.data_item
             # if we still don't have a data item, create it.
@@ -175,14 +175,14 @@ class HardwareSourceBridge:
     def __data_channel_start(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
         def data_channel_start() -> None:
             assert threading.current_thread() == threading.main_thread()
-            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
+            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
             data_item_reference.start()
         self.__call_soon(data_channel_start)
 
     def __data_channel_stop(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
         def data_channel_stop() -> None:
             assert threading.current_thread() == threading.main_thread()
-            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
+            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
             data_item_reference.stop()
         self.__call_soon(data_channel_stop)
 
@@ -625,11 +625,13 @@ class DataChannel:
 
     def __init__(self, hardware_source: HardwareSource, index: int, channel_id: typing.Optional[str] = None,
                  name: typing.Optional[str] = None, src_channel_index: typing.Optional[int] = None,
-                 processor: typing.Optional[SumProcessor] = None, is_context: bool = False) -> None:
+                 processor: typing.Optional[SumProcessor] = None, variant: typing.Optional[str] = None,
+                 is_context: bool = False) -> None:
         self.__hardware_source = hardware_source
         self.__index = index
         self.__channel_id = channel_id
         self.__name = name
+        self.__variant = variant
         self.__src_channel_index = src_channel_index
         self.__processor = processor
         self.__is_context = is_context
@@ -653,6 +655,16 @@ class DataChannel:
     @property
     def channel_id(self) -> typing.Optional[str]:
         return self.__channel_id
+
+    @property
+    def variant(self) -> typing.Optional[str]:
+        return self.__variant
+
+    @property
+    def data_channel_id(self) -> typing.Optional[str]:
+        if self.__channel_id and self.__variant:
+            return "_".join((self.__channel_id, self.__variant))
+        return self.channel_id
 
     @property
     def name(self) -> typing.Optional[str]:
@@ -863,7 +875,7 @@ class HardwareSource(typing.Protocol):
     data_channel_stop_event: Event.Event
     data_channel_state_changed_event: Event.Event
 
-    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None: ...
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def get_channel_count(self) -> int: ...
@@ -1076,7 +1088,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         for data_element in data_elements:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
-            data_channel = next(filter(lambda dc: dc.channel_id == channel_id, self.__data_channel_list_model.items), None)
+            channel_variant = data_element.get("channel_variant")
+            data_channel = next(filter(lambda dc: dc.channel_id == channel_id and dc.variant == channel_variant, self.__data_channel_list_model.items), None)
             if data_channel:
                 data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                 # data_and_metadata data may still point to low level code memory at this point.
@@ -1335,8 +1348,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         self.data_channel_updated_event.fire(data_channel, data_and_metadata)
 
-    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None:
-        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), channel_id, name, is_context=is_context)
+    def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None:
+        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), channel_id, name, variant=variant, is_context=is_context)
         self.__data_channel_list_model.append_item(data_channel)
 
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
