@@ -107,7 +107,7 @@ class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
         super().__init__("described_hardware_source", "DescribedHardwareSource")
         self.add_data_channel()
         if processed:
-            self.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect.unit_rect()))
+            self.add_channel_processor(0, HardwareSource.SumProcessor())
         self.sleep = sleep
         self.shape = shape
         self.exposure = 0.0
@@ -124,7 +124,7 @@ class SummedHardwareSource(HardwareSource.ConcreteHardwareSource):
     def __init__(self, sleep=0.05):
         super().__init__("summed_hardware_source", "SummedHardwareSource")
         self.add_data_channel()
-        self.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect.unit_rect()))
+        self.add_channel_processor(0, HardwareSource.SumProcessor())
         self.sleep = sleep
         self.image = numpy.zeros((256, 256))
         self.exposure = 0.0

@@ -1308,7 +1308,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
         if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
-            self.processor = HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0)))
+            self.processor = HardwareSource.SumProcessor()
         self.features["has_processed_channel"] = self.processor is not None
         if hasattr(camera_settings, "masks"):
             self.features["has_masked_sum_option"] = True
@@ -1916,7 +1916,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
         if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
-            self.processor = HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0)))
+            self.processor = HardwareSource.SumProcessor()
         self.features["has_processed_channel"] = self.processor is not None
         if hasattr(camera_settings, "masks"):
             self.features["has_masked_sum_option"] = True
