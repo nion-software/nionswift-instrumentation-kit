@@ -1565,7 +1565,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def drift_enabled(self, enabled: bool) -> None:
         if enabled:
             if not self.drift_channel_id:
-                self.drift_channel_id = self.data_channels[0].channel_id
+                self.drift_channel_id = self.get_channel_id(0)
             if not self.drift_region:
                 self.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.25, x=0.75), Geometry.FloatSize(h=0.25, w=0.25))
         else:
@@ -1719,6 +1719,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_channel_id(self, channel_index: int) -> typing.Optional[str]:
         assert 0 <= channel_index < self.__device.channel_count
         return self.__make_channel_id(channel_index)
+
+    def get_channel_name(self, channel_index: int) -> typing.Optional[str]:
+        assert 0 <= channel_index < self.__device.channel_count
+        return self.__device.get_channel_name(channel_index)
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         changed = self.__device.set_channel_enabled(channel_index, enabled)

@@ -623,12 +623,18 @@ class ScanControlStateController:
         """ Returns the display name for the hardware source. """
         return self.__scan_hardware_source.display_name if self.__scan_hardware_source else _("N/A")
 
-    @property
-    def data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
-        return self.__scan_hardware_source.data_channels
-
     def get_channel_enabled(self, channel_index: int) -> bool:
         return self.__scan_hardware_source.get_channel_enabled(channel_index)
+
+    def get_channel_id(self, channel_index: int) -> str:
+        channel_id = self.__scan_hardware_source.get_channel_id(channel_index)
+        assert channel_id
+        return channel_id
+
+    def get_channel_name(self, channel_index: int) -> str:
+        channel_name = self.__scan_hardware_source.get_channel_name(channel_index)
+        assert channel_name
+        return channel_name
 
     # this message comes from the data buffer. it will always be invoked on a thread.
     def __acquisition_state_changed(self, is_playing: bool) -> None:
@@ -1493,9 +1499,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # then rebuild thumbnail for the channel_index, setting up the thumbnail widget, a drag
             # handler, and checkbox handler.
 
-            data_channel = self.__state_controller.data_channels[channel_index]
-            channel_id = data_channel.channel_id or str()
-            name = data_channel.name
+            channel_id = self.__state_controller.get_channel_id(channel_index)
+            name = self.__state_controller.get_channel_name(channel_index)
 
             thumbnail_column = typing.cast(UserInterface.BoxWidget, thumbnail_group.children[channel_index])
             thumbnail_column.remove_all()
@@ -1959,12 +1964,22 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
             def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
                 # return a list of actions that have been added to the menu.
                 assert isinstance(hardware_source, scan_base.ScanHardwareSource)
+                channel_tuples: typing.List[typing.Tuple[str, str]] = list()
+                for channel_index in range(hardware_source.channel_count):
+                    channel_id_ = hardware_source.get_channel_id(channel_index) or str()
+                    channel_name_ = hardware_source.get_channel_name(channel_index) or str()
+                    channel_tuples.append((channel_id_, channel_name_))
+                for channel_index in range(hardware_source.channel_count):
+                    channel_id_ = hardware_source.get_channel_id(channel_index) or str()
+                    channel_name_ = hardware_source.get_channel_name(channel_index) or str()
+                    channel_tuples.append((channel_id_ + "_subscan", channel_name_ + " " + _("Subscan")))
+                channel_tuples.append(("drift", _("Drift")))
                 actions = list()
-                for channel_index in range(hardware_source.data_channel_count):
-                    channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
+                for channel_id, channel_name in channel_tuples:
                     def switch_to_live_controller(hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
                         if selected_display_panel:
-                            d = {"type": "image", "controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
+                            d = {"type": "image", "controller_type": ScanDisplayPanelController.type,
+                                 "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                             selected_display_panel.change_display_panel_content(d)
 
                     display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
@@ -1986,10 +2001,11 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
 
             def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
                 assert isinstance(hardware_source, scan_base.ScanHardwareSource)
-                for channel_index in range(hardware_source.data_channel_count):
-                    channel_id, channel_name, __ = hardware_source.get_data_channel_state(channel_index)  # hack since there is no get_channel_info call
-                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
-                        return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
+                for channel_index in range(hardware_source.channel_count):
+                    channel_id_ = hardware_source.get_channel_id(channel_index) or str()
+                    for channel_id in (channel_id_, channel_id_ + "_subscan", "drift"):
+                        if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
+                            return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                 return None
 
         factory_id = "scan-live-" + hardware_source.hardware_source_id
