@@ -109,7 +109,6 @@ class HardwareSourceBridge:
             HardwareSourceManager()._hardware_source_list_model,
             ListListener.ListItemEventsHandlerFactory(
             {
-                "data_channel_states_updated": weak_partial(HardwareSourceBridge.__data_channel_states_updated, self),
                 "data_channel_start_event": weak_partial(HardwareSourceBridge.__data_channel_start, self),
                 "data_channel_stop_event": weak_partial(HardwareSourceBridge.__data_channel_stop, self),
                 "data_channel_updated_event": weak_partial(HardwareSourceBridge.__data_channel_updated, self),
@@ -197,16 +196,6 @@ class HardwareSourceBridge:
         data_item = data_item_reference.data_item
         assert data_item
         self.__document_model._queue_data_item_update(data_item, data_and_metadata)
-
-    def __data_channel_states_updated(self, hardware_source: HardwareSource, data_channels: typing.Sequence[DataChannel]) -> None:
-        channel_map: typing.Dict[str, DataItem.DataItem] = dict()
-        for data_channel in data_channels:
-            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.channel_id)
-            data_item = data_item_reference.data_item
-            channel_id = data_channel.channel_id
-            if channel_id and data_item:
-                channel_map[channel_id] = data_item
-        hardware_source.data_channel_map_updated(channel_map)
 
 
 # Keeps track of all registered hardware sources and instruments.
@@ -871,7 +860,6 @@ class HardwareSource(typing.Protocol):
 
     # private. do not use outside instrumentation-kit.
 
-    data_channel_states_updated: Event.Event
     xdatas_available_event: Event.Event
     abort_event: Event.Event
     acquisition_state_changed_event: Event.Event
@@ -889,7 +877,7 @@ class HardwareSource(typing.Protocol):
     def get_channel_id(self, channel_index: int) -> typing.Optional[str]: ...
     def get_channel_name(self, channel_index: int) -> typing.Optional[str]: ...
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
-    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None: ...
+    def data_channels_updated(self) -> None: ...
     def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
     def get_record_frame_parameters(self) -> FrameParameters: ...
 
@@ -906,7 +894,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__display_name = display_name
         self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
         self.__features: typing.Dict[str, typing.Any] = dict()
-        self.data_channel_states_updated = Event.Event()
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
         self.acquisition_state_changed_event = Event.Event()
@@ -1033,7 +1020,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 break
 
     # subclasses can implement this method which is called when the data channels are updated.
-    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
+    def data_channels_updated(self) -> None:
         pass
 
     # subclasses should implement this method to create a continuous-style acquisition task.
@@ -1131,7 +1118,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             data_channel.is_error = is_error
             data_channel.is_dirty = False
 
-        self.data_channel_states_updated.fire(data_channels)
+        self.data_channels_updated()
 
         if is_complete:
             # xdatas are may still be pointing to memory in low level code here
@@ -1154,7 +1141,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def __stop(self) -> None:
         for data_channel in self.__data_channel_list_model.items:
             data_channel.stop()
-        self.data_channel_states_updated.fire(list())
+        self.data_channels_updated()
 
     # return whether task is running
     def is_task_running(self, task_id: str) -> bool:
