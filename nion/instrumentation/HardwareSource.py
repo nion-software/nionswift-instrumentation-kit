@@ -166,11 +166,6 @@ class HardwareSourceBridge:
                 if data_item._closed:
                     return
                 self.__document_model.update_data_item_session(data_item)
-                src_data_channel = hardware_source.get_source_data_channel(data_channel)
-                sum_processor = data_channel.processor
-                if sum_processor and src_data_channel:
-                    src_data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, src_data_channel.channel_id)
-                    sum_processor.connect_data_item_reference(src_data_item_reference)
 
             assert data_item
             self.__call_soon(functools.partial(update_session, data_item))
@@ -870,7 +865,6 @@ class HardwareSource(typing.Protocol):
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
-    def get_source_data_channel(self, data_channel: DataChannel) -> typing.Optional[DataChannel]: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def get_channel_count(self) -> int: ...
     def get_channel_enabled(self, channel_index: int) -> bool: ...
@@ -1349,13 +1343,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         data_channel = DataChannel(self, len(self.__data_channel_list_model.items), processor.processor_id, None, channel_index, processor)
         self.__data_channel_list_model.append_item(data_channel)
 
-    def get_source_data_channel(self, data_channel: DataChannel) -> typing.Optional[DataChannel]:
-        src_channel_index = data_channel.src_channel_index
-        sum_processor = data_channel.processor
-        if sum_processor and src_channel_index is not None:
-            return self.__data_channel_list_model.items[src_channel_index]
-        return None
-
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
 
@@ -1463,15 +1450,10 @@ class DelegateHardwareSource(ConcreteHardwareSource):
 
 
 class SumProcessor(Observable.Observable):
-    def __init__(self, bounds: Geometry.FloatRect, processor_id: typing.Optional[str] = None, label: typing.Optional[str] = None) -> None:
+    def __init__(self, processor_id: typing.Optional[str] = None, label: typing.Optional[str] = None) -> None:
         super().__init__()
-        self.__bounds = bounds
         self.__processor_id = processor_id or "summed"
         self.__label = label or _("Summed")
-        self.__crop_graphic: typing.Optional[Graphics.RectangleGraphic] = None
-        self.__crop_listener: typing.Optional[Event.EventListener] = None
-        self.__remove_listener: typing.Optional[Event.EventListener] = None
-        self.__data_item_reference_changed_event_listener: typing.Optional[Event.EventListener] = None
 
     @property
     def label(self) -> str:
@@ -1481,86 +1463,14 @@ class SumProcessor(Observable.Observable):
     def processor_id(self) -> str:
         return self.__processor_id
 
-    @property
-    def bounds(self) -> Geometry.FloatRect:
-        return self.__bounds
-
-    @bounds.setter
-    def bounds(self, value: Geometry.FloatRectTuple) -> None:
-        bounds = Geometry.FloatRect.make(value)
-        if self.__bounds != bounds:
-            self.__bounds = bounds
-            self.notify_property_changed("bounds")
-            if self.__crop_graphic:
-                self.__crop_graphic.bounds = bounds
-
     def process(self, data_and_metadata: DataAndMetadata.DataAndMetadata) -> DataAndMetadata.DataAndMetadata:
-        if data_and_metadata.datum_dimension_count > 1 and data_and_metadata.data_shape[0] > 1:
-            cropped_xdata = Core.function_crop(data_and_metadata, self.__bounds.as_tuple())
-            assert cropped_xdata
-            summed = Core.function_sum(cropped_xdata, 0)
-            assert summed
-            summed._set_metadata(data_and_metadata.metadata)
-            return summed
-        elif len(data_and_metadata.data_shape) > 1:
+        if len(data_and_metadata.data_shape) > 1:
             summed = Core.function_sum(data_and_metadata, 0)
             assert summed
             summed._set_metadata(data_and_metadata.metadata)
             return summed
         else:
             return copy.deepcopy(data_and_metadata)
-
-    def connect_data_item_reference(self, data_item_reference: DocumentModel.DocumentModel.DataItemReference) -> None:
-        """Connect to the data item reference, creating a crop graphic if necessary.
-
-        If the data item reference does not yet have an associated data item, add a
-        listener and wait for the data item to be set, then connect.
-        """
-        display_item = data_item_reference.display_item
-        data_item = display_item.data_item if display_item else None
-        if data_item and display_item:
-            self.__connect_display(display_item)
-        else:
-            def data_item_reference_changed() -> None:
-                if self.__data_item_reference_changed_event_listener:
-                    self.__data_item_reference_changed_event_listener.close()
-                    self.__data_item_reference_changed_event_listener = None
-                self.connect_data_item_reference(data_item_reference)  # ugh. recursive mess.
-            self.__data_item_reference_changed_event_listener = data_item_reference.data_item_reference_changed_event.listen(data_item_reference_changed)
-
-    def __connect_display(self, display_item: DisplayItem.DisplayItem) -> None:
-        assert threading.current_thread() == threading.main_thread()
-        crop_graphic: typing.Optional[Graphics.RectangleGraphic] = None
-        for graphic in display_item.graphics:
-            if graphic.graphic_id == self.__processor_id and isinstance(graphic, Graphics.RectangleGraphic):
-                crop_graphic = graphic
-                break
-        def close_all() -> None:
-            self.__crop_graphic = None
-            if self.__crop_listener:
-                self.__crop_listener.close()
-                self.__crop_listener = None
-            if self.__remove_listener:
-                self.__remove_listener.close()
-                self.__remove_listener = None
-        if not crop_graphic:
-            close_all()
-            crop_graphic = Graphics.RectangleGraphic()
-            crop_graphic.bounds = self.bounds
-            crop_graphic.is_bounds_constrained = True
-            crop_graphic.graphic_id = self.__processor_id
-            crop_graphic.label = _("Crop")
-            display_item.add_graphic(crop_graphic)
-        if not self.__crop_listener:
-            def property_changed(k: str) -> None:
-                if k == "bounds" and crop_graphic:
-                    self.bounds = crop_graphic.bounds
-            def graphic_removed(k: str, v: Graphics.RectangleGraphic, i: int) -> None:
-                if v == crop_graphic:
-                    close_all()
-            self.__crop_listener = crop_graphic.property_changed_event.listen(property_changed)
-            self.__remove_listener = display_item.item_removed_event.listen(graphic_removed)
-            self.__crop_graphic = crop_graphic
 
 
 class ViewTask:
