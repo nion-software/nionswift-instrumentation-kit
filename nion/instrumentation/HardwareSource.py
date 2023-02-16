@@ -35,7 +35,6 @@ from nion.instrumentation import ListListener
 from nion.swift.model import Activity
 from nion.swift.model import DataItem
 from nion.swift.model import DisplayItem
-from nion.swift.model import Graphics
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
 from nion.swift.model import Utility
@@ -623,11 +622,11 @@ class DataChannel:
     main thread.
     """
 
-    def __init__(self, hardware_source: HardwareSource, index: int, channel_id: typing.Optional[str] = None,
+    def __init__(self, hardware_source_id: str, index: int, channel_id: typing.Optional[str] = None,
                  name: typing.Optional[str] = None, src_channel_index: typing.Optional[int] = None,
                  processor: typing.Optional[SumProcessor] = None, variant: typing.Optional[str] = None,
                  is_context: bool = False) -> None:
-        self.__hardware_source = hardware_source
+        self.__hardware_source_id = hardware_source_id
         self.__index = index
         self.__channel_id = channel_id
         self.__name = name
@@ -729,7 +728,7 @@ class DataChannel:
         self.__dest_sub_area = dest_sub_area_r
         self.__sub_area = sub_area_r
 
-        hardware_source_id = self.__hardware_source.hardware_source_id
+        hardware_source_id = self.__hardware_source_id
         channel_index = self.index
         channel_id = self.channel_id
         channel_name = self.name
@@ -877,6 +876,7 @@ class HardwareSource(typing.Protocol):
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
+    def remove_data_channel_with_variant(self, variant: str) -> None: ...
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> FrameParameters: ...
     def get_channel_count(self) -> int: ...
     def get_channel_enabled(self, channel_index: int) -> bool: ...
@@ -886,6 +886,114 @@ class HardwareSource(typing.Protocol):
     def data_channels_updated(self) -> None: ...
     def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
     def get_record_frame_parameters(self) -> FrameParameters: ...
+
+
+class DataChannelManager:
+    def __init__(self) -> None:
+        self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
+
+        self.data_channel_start = Event.Event()
+        self.data_channel_stop = Event.Event()
+        self.data_channel_state_changed = Event.Event()
+        self.data_channel_updated = Event.Event()
+
+        # listen for events on the data channels and pass them to methods on this instance.
+        # the item on which the event occurred is passed as the first parameter to the methods.
+        self.__data_channel_list_listener = ListListener.ListListener(
+            self.__data_channel_list_model,
+            ListListener.ListItemEventsHandlerFactory(
+            {
+                "data_channel_start_event": self.data_channel_start.fire,
+                "data_channel_stop_event": self.data_channel_stop.fire,
+                "data_channel_state_changed_event": self.data_channel_state_changed.fire,
+                "data_channel_updated_event": self.data_channel_updated.fire,
+            })
+        )
+
+    @property
+    def _data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
+        return self.__data_channel_list_model
+
+    def add_data_channel(self, hardware_source_id: str, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None:
+        data_channel = DataChannel(hardware_source_id, len(self.__data_channel_list_model.items), channel_id, name, variant=variant, is_context=is_context)
+        self.__data_channel_list_model.append_item(data_channel)
+
+    def add_channel_processor(self, hardware_source_id: str, channel_index: int, processor: SumProcessor) -> None:
+        data_channel = DataChannel(hardware_source_id, len(self.__data_channel_list_model.items), processor.processor_id, None, channel_index, processor)
+        self.__data_channel_list_model.append_item(data_channel)
+
+    def remove_data_channel_with_variant(self, variant: str) -> None:
+        data_channel = next(filter(lambda dc: dc.variant == variant, self.__data_channel_list_model.items), None)
+        assert data_channel
+        self.__data_channel_list_model.remove_item(self.__data_channel_list_model.items.index(data_channel))
+
+    def get_matching_data_channel_ids(self, channel_indexes: typing.Sequence[int], match_fn: typing.Callable[..., bool]) -> typing.Sequence[str]:
+        data_channels = [self._data_channel_list_model.items[channel_index] for channel_index in channel_indexes]
+        data_channel_ids: typing.List[str] = list()
+        for data_channel in data_channels:
+            if match_fn(data_channel):
+                data_channel_id = data_channel.data_channel_id
+                assert data_channel_id
+                data_channel_ids.append(data_channel_id)
+        return data_channel_ids
+
+    def process_data_elements(self, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_stopping: bool, e: typing.Optional[Exception]) -> typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        is_error = e is not None
+        xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+        data_channels: typing.List[DataChannel] = list()
+        for data_element in data_elements:
+            assert data_element is not None
+            channel_id = data_element.get("channel_id")
+            channel_variant = data_element.get("channel_variant")
+            data_channel = next(filter(lambda dc: dc.channel_id == channel_id and dc.variant == channel_variant, self.__data_channel_list_model.items), None)
+            if data_channel:
+                data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+                # data_and_metadata data may still point to low level code memory at this point.
+                channel_state = data_element.get("state", "complete" if not is_error else "error")
+                if channel_state != "complete" and is_stopping and not is_error:
+                    channel_state = "marked"
+                data_shape = data_element.get("data_shape")
+                dest_sub_area = data_element.get("dest_sub_area")
+                sub_area = data_element.get("sub_area")
+                # data_channel.update will make a copy of the data_and_metadata
+                data_channel.update(data_and_metadata, channel_state, data_shape, dest_sub_area, sub_area, view_id)
+                data_channels.append(data_channel)
+                xdatas.append(data_channel.data_and_metadata)
+        # update channel buffers with processors
+        for data_channel in self.__data_channel_list_model.items:
+            src_channel_index = data_channel.src_channel_index
+            if src_channel_index is not None:
+                src_data_channel = self.__data_channel_list_model.items[src_channel_index]
+                if src_data_channel in data_channels:
+                    src_data_and_metadata = src_data_channel.data_and_metadata
+                    data_channel_processor = data_channel.processor
+                    if not is_error:
+                        if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
+                            processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
+                            data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
+                    else:
+                        assert data_channel.data_and_metadata
+                        data_channel.update(data_channel.data_and_metadata, "error", None, None, None, view_id)
+                    data_channels.append(data_channel)
+                    xdatas.append(data_channel.data_and_metadata)
+        # all channel buffers are clean now
+        for data_channel in self.__data_channel_list_model.items:
+            data_channel.is_error = is_error
+            data_channel.is_dirty = False
+        return xdatas
+
+    def start(self) -> None:
+        for data_channel in self.__data_channel_list_model.items:
+            data_channel.start()
+
+    def stop(self) -> None:
+        for data_channel in self.__data_channel_list_model.items:
+            data_channel.stop()
+
+    # for testing only
+
+    def _test_update_data_channel(self, xdata: DataAndMetadata.DataAndMetadata) -> None:
+        self.__data_channel_list_model.items[0].update(xdata, "complete", None, None, None, None)
 
 
 class ConcreteHardwareSource(Observable.Observable, HardwareSource):
@@ -898,7 +1006,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         super().__init__()
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
-        self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
+        self.__data_channel_manager = DataChannelManager()
         self.__features: typing.Dict[str, typing.Any] = dict()
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
@@ -920,22 +1028,18 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
 
-        # listen for events on the data channels and pass them to methods on this instance.
-        # the item on which the event occurred is passed as the first parameter to the methods.
-        self.__data_channel_list_listener = ListListener.ListListener(
-            self.__data_channel_list_model,
-            ListListener.ListItemEventsHandlerFactory(
-            {
-                "data_channel_start_event": weak_partial(ConcreteHardwareSource.__data_channel_start, self),
-                "data_channel_stop_event": weak_partial(ConcreteHardwareSource.__data_channel_stop, self),
-                "data_channel_state_changed_event": weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self),
-                "data_channel_updated_event": weak_partial(ConcreteHardwareSource.__data_channel_updated, self),
-            })
-        )
+        self.__data_channel_start_event_listener = self.__data_channel_manager.data_channel_start.listen(weak_partial(ConcreteHardwareSource.__data_channel_start, self))
+        self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
+        self.__data_channel_state_changed_event = self.__data_channel_manager.data_channel_state_changed.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self))
+        self.__data_channel_updated_event = self.__data_channel_manager.data_channel_updated.listen(weak_partial(ConcreteHardwareSource.__data_channel_updated, self))
 
     def close(self) -> None:
         self.close_thread()
         self.__data_channel_list_listener = typing.cast(typing.Any, None)
+
+    @property
+    def _data_channel_manager(self) -> DataChannelManager:
+        return self.__data_channel_manager
 
     @property
     def features(self) -> typing.Dict[str, typing.Any]:
@@ -973,7 +1077,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         # acquire_thread_trigger should be set whenever the task list change.
         while self.__acquire_thread_trigger.wait():
             self.__acquire_thread_trigger.clear()
-            # record task gets highest priority
+            # record task gets the highest priority
             break_for_closing = self.__break_for_closing
             suspend_task_id_list = list()
             task_id = None
@@ -1082,48 +1186,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         beyond these three items, the data element will be converted to xdata using convert_data_element_to_data_and_metadata.
         thread safe
         """
-        is_error = e is not None
-        xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
-        data_channels: typing.List[DataChannel] = list()
-        for data_element in data_elements:
-            assert data_element is not None
-            channel_id = data_element.get("channel_id")
-            channel_variant = data_element.get("channel_variant")
-            data_channel = next(filter(lambda dc: dc.channel_id == channel_id and dc.variant == channel_variant, self.__data_channel_list_model.items), None)
-            if data_channel:
-                data_and_metadata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                # data_and_metadata data may still point to low level code memory at this point.
-                channel_state = data_element.get("state", "complete" if not is_error else "error")
-                if channel_state != "complete" and is_stopping and not is_error:
-                    channel_state = "marked"
-                data_shape = data_element.get("data_shape")
-                dest_sub_area = data_element.get("dest_sub_area")
-                sub_area = data_element.get("sub_area")
-                # data_channel.update will make a copy of the data_and_metadata
-                data_channel.update(data_and_metadata, channel_state, data_shape, dest_sub_area, sub_area, view_id)
-                data_channels.append(data_channel)
-                xdatas.append(data_channel.data_and_metadata)
-        # update channel buffers with processors
-        for data_channel in self.__data_channel_list_model.items:
-            src_channel_index = data_channel.src_channel_index
-            if src_channel_index is not None:
-                src_data_channel = self.__data_channel_list_model.items[src_channel_index]
-                if src_data_channel in data_channels:
-                    src_data_and_metadata = src_data_channel.data_and_metadata
-                    data_channel_processor = data_channel.processor
-                    if not is_error:
-                        if data_channel_processor and src_data_and_metadata and src_data_channel.is_dirty and src_data_channel.state == "complete":
-                            processed_data_and_metadata = data_channel_processor.process(src_data_and_metadata)
-                            data_channel.update(processed_data_and_metadata, "complete", None, None, None, view_id)
-                    else:
-                        assert data_channel.data_and_metadata
-                        data_channel.update(data_channel.data_and_metadata, "error", None, None, None, view_id)
-                    data_channels.append(data_channel)
-                    xdatas.append(data_channel.data_and_metadata)
-        # all channel buffers are clean now
-        for data_channel in self.__data_channel_list_model.items:
-            data_channel.is_error = is_error
-            data_channel.is_dirty = False
+        xdatas = self.__data_channel_manager.process_data_elements(data_elements, view_id, is_stopping, e)
 
         self.data_channels_updated()
 
@@ -1136,18 +1199,16 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             if callable(task.finished_callback_fn):
                 task.finished_callback_fn(data_promises)
 
-        if is_error:
+        if e is not None:
             from nion.swift.model import Notification
             Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition",
                                                           "Acquisition Failed", str(e)))
 
     def __start(self) -> None:
-        for data_channel in self.__data_channel_list_model.items:
-            data_channel.start()
+        self.__data_channel_manager.start()
 
     def __stop(self) -> None:
-        for data_channel in self.__data_channel_list_model.items:
-            data_channel.stop()
+        self.__data_channel_manager.stop()
         self.data_channels_updated()
 
     # return whether task is running
@@ -1324,10 +1385,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
                 return new_xdatas
 
-    @property
-    def data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
-        return self.__data_channel_list_model
-
     def __data_channel_start(self, data_channel: DataChannel) -> None:
         self.data_channel_start_event.fire(data_channel)
 
@@ -1341,12 +1398,13 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.data_channel_updated_event.fire(data_channel, data_and_metadata)
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None:
-        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), channel_id, name, variant=variant, is_context=is_context)
-        self.__data_channel_list_model.append_item(data_channel)
+        self.__data_channel_manager.add_data_channel(self.hardware_source_id, channel_id, name, variant=variant, is_context=is_context)
+
+    def remove_data_channel_with_variant(self, variant: str) -> None:
+        self.__data_channel_manager.remove_data_channel_with_variant(variant)
 
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None:
-        data_channel = DataChannel(self, len(self.__data_channel_list_model.items), processor.processor_id, None, channel_index, processor)
-        self.__data_channel_list_model.append_item(data_channel)
+        self.__data_channel_manager.add_channel_processor(self.hardware_source_id, channel_index, processor)
 
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
