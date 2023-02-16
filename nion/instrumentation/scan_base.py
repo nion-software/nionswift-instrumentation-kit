@@ -262,6 +262,16 @@ class ScanFrameParameters(ParametersBase):
     def channel_variant(self, value: typing.Optional[str]) -> None:
         self.set_parameter("channel_variant", value)
 
+    # channel_override for backwards compatibility
+
+    @property
+    def channel_override(self) -> typing.Optional[str]:
+        return self.channel_variant
+
+    @channel_override.setter
+    def channel_override(self, value: typing.Optional[str]) -> None:
+        self.channel_variant = value
+
     @property
     def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
         # return the fov size with the same aspect ratio as the size
@@ -1534,8 +1544,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if value:
             self.add_data_channel(value, _("Drift"), variant="drift")
         else:
-            drift_data_channel = next(filter(lambda dc: dc.variant == "drift", self.data_channel_list_model.items), None)
-            self.data_channel_list_model.remove_item(self.data_channel_list_model.items.index(drift_data_channel))
+            self.remove_data_channel_with_variant("drift")
         self.__stem_controller.drift_channel_id = value
 
     @property
@@ -1914,15 +1923,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return getattr(self.__device, "flyback_pixels", 0)
 
     def get_enabled_context_data_channel_ids(self) -> typing.Sequence[str]:
-        enabled_channel_indexes = self.get_enabled_channel_indexes()
-        data_channels = [self.data_channel_list_model.items[channel_index] for channel_index in enabled_channel_indexes]
-        data_channel_ids: typing.List[str] = list()
-        for data_channel in data_channels:
-            if data_channel.is_context:
-                data_channel_id = data_channel.data_channel_id
-                assert data_channel_id
-                data_channel_ids.append(data_channel_id)
-        return data_channel_ids
+        return self._data_channel_manager.get_matching_data_channel_ids(self.get_enabled_channel_indexes(), lambda x: getattr(x, "is_context", False))
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
