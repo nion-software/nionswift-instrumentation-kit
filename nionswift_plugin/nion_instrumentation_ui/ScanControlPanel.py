@@ -643,14 +643,11 @@ class ScanControlStateController:
             self.__captured_xdatas_available_listener = None
         self.queue_task(self.__update_buttons)
 
-    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
+    def __data_channel_state_changed(self, data_channel_event_args: HardwareSource.DataChannelEventArgs) -> None:
         # the value (dict) does not get copied; so copy it here.
         acquisition_states = copy.deepcopy(self.acquisition_state_model.value) or dict()
-        channel_id = data_channel.channel_id or "unknown"
-        if data_channel.is_started and data_channel.state:
-            acquisition_states[channel_id] = data_channel.state
-        else:
-            acquisition_states[channel_id] = "error" if data_channel.is_error else "stopped"
+        channel_id = data_channel_event_args.channel_id or "unknown"
+        acquisition_states[channel_id] = data_channel_event_args.data_channel_state
         self.acquisition_state_model.value = acquisition_states
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:

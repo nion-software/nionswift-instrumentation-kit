@@ -128,7 +128,7 @@ class HardwareSourceBridge:
         assert self.__document_model
         self.__document_model._call_soon(fn)
 
-    def __construct_data_item_reference(self, hardware_source: HardwareSource, data_channel: DataChannel) -> DocumentModel.DocumentModel.DataItemReference:
+    def __construct_data_item_reference(self, hardware_source: HardwareSource, data_channel_id: typing.Optional[str], data_channel_name: typing.Optional[str]) -> DocumentModel.DocumentModel.DataItemReference:
         """Construct a data item reference.
 
         Construct a data item reference and assign a data item to it. Update data item session id and session metadata.
@@ -136,13 +136,13 @@ class HardwareSourceBridge:
 
         This method is thread safe.
         """
-        data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
+        data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_id)
         with data_item_reference.mutex:
             data_item = data_item_reference.data_item
             # if we still don't have a data item, create it.
             if data_item is None:
                 data_item = DataItem.DataItem()
-                data_item.title = "%s (%s)" % (hardware_source.display_name, data_channel.name) if data_channel.name else hardware_source.display_name
+                data_item.title = "%s (%s)" % (hardware_source.display_name, data_channel_name) if data_channel_name else hardware_source.display_name
                 data_item.category = "temporary"
                 data_item_reference.data_item = data_item
 
@@ -171,22 +171,22 @@ class HardwareSourceBridge:
 
             return data_item_reference
 
-    def __data_channel_start(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
+    def __data_channel_start(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs) -> None:
         def data_channel_start() -> None:
             assert threading.current_thread() == threading.main_thread()
-            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
+            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_event_args.data_channel_id)
             data_item_reference.start()
         self.__call_soon(data_channel_start)
 
-    def __data_channel_stop(self, hardware_source: HardwareSource, data_channel: DataChannel) -> None:
+    def __data_channel_stop(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs) -> None:
         def data_channel_stop() -> None:
             assert threading.current_thread() == threading.main_thread()
-            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel.data_channel_id)
+            data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_event_args.data_channel_id)
             data_item_reference.stop()
         self.__call_soon(data_channel_stop)
 
-    def __data_channel_updated(self, hardware_source: HardwareSource, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        data_item_reference = self.__construct_data_item_reference(hardware_source, data_channel)
+    def __data_channel_updated(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        data_item_reference = self.__construct_data_item_reference(hardware_source, data_channel_event_args.data_channel_id, data_channel_event_args.name)
         data_item = data_item_reference.data_item
         assert data_item
         self.__document_model._queue_data_item_update(data_item, data_and_metadata)
@@ -596,6 +596,15 @@ class AcquisitionTask:
         raise NotImplementedError()
 
 
+@dataclasses.dataclass
+class DataChannelEventArgs:
+    channel_id: typing.Optional[str]
+    data_channel_id: typing.Optional[str]
+    name: typing.Optional[str]
+    data_channel_state: str
+    state: typing.Optional[str]
+
+
 class DataChannel:
     """A channel of raw data from a hardware source.
 
@@ -646,6 +655,13 @@ class DataChannel:
         self.data_channel_start_event = Event.Event()
         self.data_channel_stop_event = Event.Event()
         self.data_channel_state_changed_event = Event.Event()
+
+    def get_data_channel_event_args(self) -> DataChannelEventArgs:
+        if self.is_started and self.state:
+            data_channel_state = self.state
+        else:
+            data_channel_state = "error" if self.is_error else "stopped"
+        return DataChannelEventArgs(self.channel_id, self.data_channel_id, self.name, data_channel_state, self.state)
 
     @property
     def index(self) -> int:
@@ -892,10 +908,22 @@ class DataChannelManager:
     def __init__(self) -> None:
         self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
 
-        self.data_channel_start = Event.Event()
-        self.data_channel_stop = Event.Event()
-        self.data_channel_state_changed = Event.Event()
-        self.data_channel_updated = Event.Event()
+        self.data_channel_start_event = Event.Event()
+        self.data_channel_stop_event = Event.Event()
+        self.data_channel_state_changed_event = Event.Event()
+        self.data_channel_updated_event = Event.Event()
+
+        def handle_data_channel_start(dcm: DataChannelManager, data_channel: DataChannel) -> None:
+            dcm.data_channel_start_event.fire(data_channel.get_data_channel_event_args())
+
+        def handle_data_channel_stop(dcm: DataChannelManager, data_channel: DataChannel) -> None:
+            dcm.data_channel_stop_event.fire(data_channel.get_data_channel_event_args())
+
+        def handle_data_channel_state_changed(dcm: DataChannelManager, data_channel: DataChannel) -> None:
+            dcm.data_channel_state_changed_event.fire(data_channel.get_data_channel_event_args())
+
+        def handle_data_channel_updated(dcm: DataChannelManager, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+            dcm.data_channel_updated_event.fire(data_channel.get_data_channel_event_args(), data_and_metadata)
 
         # listen for events on the data channels and pass them to methods on this instance.
         # the item on which the event occurred is passed as the first parameter to the methods.
@@ -903,10 +931,10 @@ class DataChannelManager:
             self.__data_channel_list_model,
             ListListener.ListItemEventsHandlerFactory(
             {
-                "data_channel_start_event": self.data_channel_start.fire,
-                "data_channel_stop_event": self.data_channel_stop.fire,
-                "data_channel_state_changed_event": self.data_channel_state_changed.fire,
-                "data_channel_updated_event": self.data_channel_updated.fire,
+                "data_channel_start_event": weak_partial(handle_data_channel_start, self),
+                "data_channel_stop_event": weak_partial(handle_data_channel_stop, self),
+                "data_channel_state_changed_event": weak_partial(handle_data_channel_state_changed, self),
+                "data_channel_updated_event": weak_partial(handle_data_channel_updated, self),
             })
         )
 
@@ -1028,10 +1056,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
 
-        self.__data_channel_start_event_listener = self.__data_channel_manager.data_channel_start.listen(weak_partial(ConcreteHardwareSource.__data_channel_start, self))
-        self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
-        self.__data_channel_state_changed_event = self.__data_channel_manager.data_channel_state_changed.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self))
-        self.__data_channel_updated_event = self.__data_channel_manager.data_channel_updated.listen(weak_partial(ConcreteHardwareSource.__data_channel_updated, self))
+        self.__data_channel_start_event_listener = self.__data_channel_manager.data_channel_start_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_start, self))
+        self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
+        self.__data_channel_state_changed_event = self.__data_channel_manager.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self))
+        self.__data_channel_updated_event = self.__data_channel_manager.data_channel_updated_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_updated, self))
 
     def close(self) -> None:
         self.close_thread()
@@ -1385,17 +1413,17 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
                 return new_xdatas
 
-    def __data_channel_start(self, data_channel: DataChannel) -> None:
-        self.data_channel_start_event.fire(data_channel)
+    def __data_channel_start(self, data_channel_event_args: DataChannelEventArgs) -> None:
+        self.data_channel_start_event.fire(data_channel_event_args)
 
-    def __data_channel_stop(self, data_channel: DataChannel) -> None:
-        self.data_channel_stop_event.fire(data_channel)
+    def __data_channel_stop(self, data_channel_event_args: DataChannelEventArgs) -> None:
+        self.data_channel_stop_event.fire(data_channel_event_args)
 
-    def __data_channel_state_changed(self, data_channel: DataChannel) -> None:
-        self.data_channel_state_changed_event.fire(data_channel)
+    def __data_channel_state_changed(self, data_channel_event_args: DataChannelEventArgs) -> None:
+        self.data_channel_state_changed_event.fire(data_channel_event_args)
 
-    def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        self.data_channel_updated_event.fire(data_channel, data_and_metadata)
+    def __data_channel_updated(self, data_channel_event_args: DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        self.data_channel_updated_event.fire(data_channel_event_args, data_and_metadata)
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None:
         self.__data_channel_manager.add_data_channel(self.hardware_source_id, channel_id, name, variant=variant, is_context=is_context)
@@ -1689,11 +1717,11 @@ class ViewTaskBuffer:
         self.__data_channel_updated_listener.close()
         self.__data_channel_updated_listener = typing.cast(typing.Any, None)
 
-    def __data_channel_updated(self, data_channel: DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    def __data_channel_updated(self, data_channel_event_args: DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         if self.__state == ViewTaskBuffer.State.STARTED:
-            if data_channel.state == "complete":
+            if data_channel_event_args.state == "complete":
                 with self.__buffer_lock:
-                    self.__latest[data_channel.channel_id] = data_and_metadata
+                    self.__latest[data_channel_event_args.channel_id] = data_and_metadata
                     if set(self.__latest.keys()).issuperset(self.__enabled_channel_ids):
                         data_and_metadata_list = list()
                         for channel_index in range(self.__hardware_source.get_channel_count()):

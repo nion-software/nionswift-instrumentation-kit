@@ -171,11 +171,8 @@ class VideoSourceStateController:
     def __acquisition_state_changed(self, is_playing: bool) -> None:
         self.queue_task(self.__update_buttons)
 
-    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
-        if data_channel.is_started and data_channel.state:
-            self.acquisition_state_model.value = data_channel.state
-        else:
-            self.acquisition_state_model.value = "error" if data_channel.is_error else "stopped"
+    def __data_channel_state_changed(self, data_channel_event_args: HardwareSource.DataChannelEventArgs) -> None:
+        self.acquisition_state_model.value = data_channel_event_args.data_channel_state
 
 
 class VideoDisplayPanelController:
