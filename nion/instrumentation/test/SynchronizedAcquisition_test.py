@@ -955,7 +955,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     si_data_item = data_item
                 if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
                     si_haadf_data_item = data_item
-                if "SubScan" in data_item.title:
+                if "Subscan" in data_item.title:
                     subscan_data_item = data_item
             self.assertIsNotNone(si_data_item)
             self.assertIsNotNone(si_haadf_data_item)
@@ -1011,7 +1011,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     si_data_item = data_item
                 if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
                     si_haadf_data_item = data_item
-                if "SubScan" in data_item.title:
+                if "Subscan" in data_item.title:
                     subscan_data_item = data_item
             self.assertIsNotNone(si_data_item)
             self.assertIsNotNone(si_haadf_data_item)
@@ -1059,7 +1059,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     si_data_item = data_item
                 if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
                     si_haadf_data_item = data_item
-                if "SubScan" in data_item.title:
+                if "Subscan" in data_item.title:
                     subscan_data_item = data_item
             self.assertIsNotNone(si_data_item)
             self.assertIsNotNone(si_haadf_data_item)

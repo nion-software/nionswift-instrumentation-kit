@@ -663,11 +663,10 @@ class ScanControlStateController:
         data_channel_state_changed = self.on_data_channel_state_changed
         if callable(data_channel_state_changed):
             data_channel_state_changed(channel_index, channel_id, name, enabled)
-            subscan_channel_index, subscan_channel_id, subscan_channel_name, subscan_channel_variant = self.__scan_hardware_source.get_subscan_channel_info(channel_index, channel_id, name)
             data_channel_state_changed(
-                subscan_channel_index + (self.__scan_hardware_source.channel_count if subscan_channel_variant else 0),
-                subscan_channel_id + ("_" + subscan_channel_variant if subscan_channel_variant else ""),
-                subscan_channel_name,
+                channel_index + self.__scan_hardware_source.channel_count,
+                channel_id + "_subscan",
+                name + " " + _("Subscan"),
                 enabled)
         was_any_channel_enabled = any(self.__channel_enabled)
         self.__channel_enabled[channel_index] = enabled

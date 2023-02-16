@@ -241,6 +241,12 @@ class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
         self.blanked = False
         self.positioned = False
 
+    def get_channel_count(self):
+        return 2
+
+    def get_channel_id(self, channel_index):
+        return "ab"[channel_index]
+
     @property
     def scanning(self):
         return self.scanning_ref[0]
