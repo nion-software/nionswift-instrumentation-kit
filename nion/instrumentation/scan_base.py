@@ -763,8 +763,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def periodic(self) -> None: ...
     def get_enabled_channel_indexes(self) -> typing.Sequence[int]: ...
     def get_channel_state(self, channel_index: int) -> ChannelState: ...
-    def get_channel_index(self, channel_id: str) -> typing.Optional[int]: ...
-    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str, str]: ...
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
     def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
     def calculate_drift_scans(self) -> int: ...
@@ -782,7 +780,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
-    def get_enabled_context_data_channel_ids(self) -> typing.Sequence[str]: ...
 
     record_index: int
     priority: int = 100
@@ -1144,10 +1141,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
         for channel_info in channel_info_list:
             self.add_data_channel(channel_info.channel_id, channel_info.name, is_context=True)
-        # add an associated sub-scan channel for each device channel
-        for channel_index, channel_info in enumerate(channel_info_list):
-            subscan_channel_index, subscan_channel_id, subscan_channel_name, subscan_channel_variant = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
-            self.add_data_channel(subscan_channel_id, subscan_channel_name, variant=subscan_channel_variant)
 
         self.__last_idle_position: typing.Optional[Geometry.FloatPoint] = None  # used for testing
 
@@ -1743,9 +1736,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if changed:
             self.__channel_states_changed([self.get_channel_state(i) for i in range(self.channel_count)])
 
-    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str, str]:
-        return channel_index, channel_id, " ".join((channel_name, _("SubScan"))), "subscan"
-
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
@@ -1807,12 +1797,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 self.__pending_channel_states = list(channel_states)
                 self.__task_queue.put(channel_states_changed)
         self.data_channels_updated()
-
-    def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
-        for channel_index in range(self.channel_count):
-            if self.get_channel_state(channel_index).channel_id == channel_id:
-                return channel_index
-        return None
 
     def __make_channel_id(self, channel_index: int) -> str:
         return "abcdefghijklmnopqrstuvwxyz"[channel_index]
@@ -1921,9 +1905,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if callable(getattr(self.__device, "calculate_flyback_pixels", None)):
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
-
-    def get_enabled_context_data_channel_ids(self) -> typing.Sequence[str]:
-        return self._data_channel_manager.get_matching_data_channel_ids(self.get_enabled_channel_indexes(), lambda x: getattr(x, "is_context", False))
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position

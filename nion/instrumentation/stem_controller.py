@@ -825,13 +825,15 @@ class DisplayItemListModel(Observable.Observable):
                     if graphic.graphic_id == graphic_id:
                         display_item.remove_graphic(graphic).close()
 
+
 def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None]) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
-        scan_controller = stem_controller.scan_controller
-        if scan_controller:
-            data_channel_ids = scan_controller.get_enabled_context_data_channel_ids()
+        # acts as a filter for the display item list model.
+        scan_hardware_source = stem_controller.scan_controller
+        if scan_hardware_source:
+            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in scan_hardware_source.get_enabled_channel_indexes()]
             for data_channel_id in data_channel_ids:
-                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel_id)
+                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, data_channel_id)
                 if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
                     return True
         return False
