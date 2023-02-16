@@ -2104,12 +2104,12 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
         self.__started = False
 
-        def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        def update_data(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
             # when data arrives here, it will be part of the overall data item, even if it is only a partial
             # acquire of the data item. so the buffer data shape will reflect the overall data item.
             if self.__started:
                 with self.__lock:
-                    channel_id = data_channel.channel_id
+                    channel_id = data_channel_event_args.channel_id
                     assert channel_id
                     channel_index = scan_hardware_source.get_channel_index(channel_id)
                     channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
