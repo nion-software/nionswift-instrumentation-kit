@@ -29,7 +29,6 @@ from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
-    from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
     from nion.instrumentation import camera_base
     from nion.instrumentation import scan_base

@@ -913,7 +913,16 @@ class DataChannelSpecifier:
 
 
 class DataChannelDelegateProtocol(typing.Protocol):
-    def map_data_channel_specifier(self, data_channel_specifier: DataChannelSpecifier) -> DataChannelSpecifier: ...
+    # modify the data channel specifier. this allows more flexibility on how channels coming from the device are
+    # mapped to data channels (and subsequently data items). for example, to put the subscan output into the context
+    # image, one could simply return the same data_channel_specifier without the channel_variant field set.
+    # return None for default behavior.
+    def map_data_channel_specifier(self, data_channel_specifier: DataChannelSpecifier, **kwargs: typing.Any) -> typing.Optional[DataChannelSpecifier]:
+        return data_channel_specifier
+
+    # return a list of channel specifiers that will appear in the menu.
+    def get_view_data_channel_specifiers(self, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[DataChannelSpecifier]]:
+        return None
 
 
 class DataChannelManager:
@@ -1074,7 +1083,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
 
-        self.data_channel_specifier_mapper: typing.Optional[DataChannelDelegateProtocol] = None
+        self.data_channel_delegate: typing.Optional[DataChannelDelegateProtocol] = None
 
         self.__data_channel_start_event_listener = self.__data_channel_manager.data_channel_start_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_start, self))
         self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
@@ -1178,8 +1187,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 break
 
     def __map_data_channel_specifier(self, data_channel_specifier: DataChannelSpecifier) -> DataChannelSpecifier:
-        if self.data_channel_specifier_mapper:
-            return self.data_channel_specifier_mapper.map_data_channel_specifier(data_channel_specifier)
+        if self.data_channel_delegate:
+            new_data_channel_specifier = self.data_channel_delegate.map_data_channel_specifier(data_channel_specifier)
+            if new_data_channel_specifier:
+                return new_data_channel_specifier
         if data_channel_specifier.channel_variant == "subscan":
             return DataChannelSpecifier(data_channel_specifier.channel_id, data_channel_specifier.channel_variant, data_channel_specifier.channel_name + _(" Subscan"))
         return DataChannelSpecifier(data_channel_specifier.channel_id, None, data_channel_specifier.channel_name)

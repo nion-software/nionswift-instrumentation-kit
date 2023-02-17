@@ -793,6 +793,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
+    def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]: ...
 
     record_index: int
     priority: int = 100
@@ -929,6 +930,7 @@ class ScanSettingsProtocol(typing.Protocol):
 ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParameters]
 
 
+# useful to avoid extra imports
 ScanDataChannelDelegateProtocol = HardwareSource.DataChannelDelegateProtocol
 ScanDataChannelSpecifier = HardwareSource.DataChannelSpecifier
 
@@ -1914,6 +1916,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
 
+    def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]:
+        if self.data_channel_delegate:
+            return self.data_channel_delegate.get_view_data_channel_specifiers()
+        return None
+
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
         # probe_state can be 'parked', or 'scanning'
@@ -2373,7 +2380,7 @@ def run(configuration_location: pathlib.Path) -> None:
                 stem_controller = stem_controller_module.STEMController()
             scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
             if scan_module.data_channel_delegate:
-                scan_hardware_source.data_channel_specifier_mapper = scan_module.data_channel_delegate
+                scan_hardware_source.data_channel_delegate = scan_module.data_channel_delegate
             if hasattr(scan_module, "priority"):
                 setattr(scan_hardware_source, "priority", getattr(scan_module, "priority"))
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
