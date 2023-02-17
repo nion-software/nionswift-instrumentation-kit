@@ -1964,28 +1964,35 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
             def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
                 # return a list of actions that have been added to the menu.
                 assert isinstance(hardware_source, scan_base.ScanHardwareSource)
-                channel_tuples: typing.List[typing.Tuple[str, str]] = list()
-                for channel_index in range(hardware_source.channel_count):
-                    channel_id_ = hardware_source.get_channel_id(channel_index) or str()
-                    channel_name_ = hardware_source.get_channel_name(channel_index) or str()
-                    channel_tuples.append((channel_id_, channel_name_))
-                for channel_index in range(hardware_source.channel_count):
-                    channel_id_ = hardware_source.get_channel_id(channel_index) or str()
-                    channel_name_ = hardware_source.get_channel_name(channel_index) or str()
-                    channel_tuples.append((channel_id_ + "_subscan", channel_name_ + " " + _("Subscan")))
-                channel_tuples.append(("drift", _("Drift")))
+                maybe_view_data_channel_specifiers = hardware_source.get_view_data_channel_specifiers()
+                view_data_channel_specifiers: typing.List[scan_base.ScanDataChannelSpecifier]
+                if maybe_view_data_channel_specifiers:
+                    view_data_channel_specifiers = list(maybe_view_data_channel_specifiers)
+                else:
+                    view_data_channel_specifiers = list()
+                    for channel_index in range(hardware_source.channel_count):
+                        channel_id_ = hardware_source.get_channel_id(channel_index) or str()
+                        channel_name_ = hardware_source.get_channel_name(channel_index) or str()
+                        view_data_channel_specifiers.append(scan_base.ScanDataChannelSpecifier(channel_id_, None, channel_name_))
+                    for channel_index in range(hardware_source.channel_count):
+                        channel_id_ = hardware_source.get_channel_id(channel_index) or str()
+                        channel_name_ = hardware_source.get_channel_name(channel_index) or str()
+                        view_data_channel_specifiers.append(scan_base.ScanDataChannelSpecifier(channel_id_, "subscan", channel_name_ + " " + _("Subscan")))
+                    view_data_channel_specifiers.append(scan_base.ScanDataChannelSpecifier("drift", None, _("Drift")))
                 actions = list()
-                for channel_id, channel_name in channel_tuples:
+                for view_data_channel_specifier in view_data_channel_specifiers:
                     def switch_to_live_controller(hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
                         if selected_display_panel:
                             d = {"type": "image", "controller_type": ScanDisplayPanelController.type,
                                  "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                             selected_display_panel.change_display_panel_content(d)
 
-                    display_name = "%s (%s)" % (hardware_source.display_name, channel_name)
-                    action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, channel_id))
+                    display_name = "%s (%s)" % (hardware_source.display_name, view_data_channel_specifier.channel_name or "Scan Data")
+                    assert view_data_channel_specifier.channel_id
+                    data_channel_id = view_data_channel_specifier.channel_id + ("_" + view_data_channel_specifier.channel_variant if view_data_channel_specifier.channel_variant else "")
+                    action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, data_channel_id))
                     display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
-                    action.checked = isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.channel_id == channel_id and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
+                    action.checked = isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.channel_id == data_channel_id and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
                     actions.append(action)
                 return actions
 
