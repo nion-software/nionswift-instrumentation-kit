@@ -916,6 +916,10 @@ class ScanSettingsProtocol(typing.Protocol):
 ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParameters]
 
 
+ScanDataChannelDelegateProtocol = HardwareSource.DataChannelDelegateProtocol
+ScanDataChannelSpecifier = HardwareSource.DataChannelSpecifier
+
+
 class ScanSettings(ScanSettingsProtocol):
     """A concrete implementation of ScanSettingsProtocol.
 
@@ -1828,21 +1832,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         return self.calculate_frame_time(scan_frame_parameters)
 
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        # NOTE: this is a public API method currently. see scanning.rst.
-        # TODO: specifying the channel key in an acquisition? and sub channels?
-        is_subscan = kwargs.get("subscan", False)
-        channel_index = kwargs.get("channel_index")
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        if channel_index is not None:
-            if is_subscan:
-                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index), "subscan"])
-            else:
-                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
-        return self.hardware_source_id
-
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]:
         """Get recently acquired (buffered) data.
 
@@ -2348,6 +2337,7 @@ class ScanModule(typing.Protocol):
     settings: ScanSettingsProtocol
     panel_type: typing.Optional[str] = None  # match a 'scan_panel' registry component
     panel_delegate_type: typing.Optional[str] = None  # currently unused
+    data_channel_delegate: typing.Optional[HardwareSource.DataChannelDelegateProtocol] = None
 
 
 _component_registered_listener = None
@@ -2363,6 +2353,8 @@ def run(configuration_location: pathlib.Path) -> None:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 stem_controller = stem_controller_module.STEMController()
             scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
+            if scan_module.data_channel_delegate:
+                scan_hardware_source.data_channel_specifier_mapper = scan_module.data_channel_delegate
             if hasattr(scan_module, "priority"):
                 setattr(scan_hardware_source, "priority", getattr(scan_module, "priority"))
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
