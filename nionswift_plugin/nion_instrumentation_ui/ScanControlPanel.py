@@ -2013,7 +2013,6 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
 
         name = hardware_source.display_name + " " + _("Scan Control")
         panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
-        Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
 
         panel_type = hardware_source.features.get("panel_type")
         if not panel_type:
