@@ -615,6 +615,7 @@ def apply_section_rect(scan_frame_parameters: ScanFrameParameters, acquisition_t
 class ScanDevice(typing.Protocol):
     scan_device_id: str
     scan_device_name: str
+    scan_device_is_secondary: bool = False
 
     def close(self) -> None: ...
     def get_channel_name(self, channel_index: int) -> str: ...

@@ -256,8 +256,16 @@ class STEMController(Observable.Observable):
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
+        # for testing
         if self.__scan_controller:
             return self.__scan_controller
+        # prefer the primary scan_hardware_source. this is implemented a bit funny for
+        # backwards compatibility, with reverse logic.
+        for component in Registry.get_components_by_type("scan_hardware_source"):
+            scan_hardware_source = typing.cast("scan_base.ScanHardwareSource", component)
+            if not scan_hardware_source.scan_device.scan_device_is_secondary:
+                return scan_hardware_source
+        # otherwise return the only registered hardware source
         return typing.cast(typing.Optional["scan_base.ScanHardwareSource"],
                            Registry.get_component("scan_hardware_source"))
 
