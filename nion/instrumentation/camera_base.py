@@ -1429,12 +1429,6 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
         return None
 
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        return self.hardware_source_id
-
     @property
     def camera_settings(self) -> CameraSettings:
         return self.__camera_settings
@@ -2064,12 +2058,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
         return None
-
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        return self.hardware_source_id
 
     @property
     def camera_settings(self) -> CameraSettings:

@@ -905,9 +905,21 @@ class HardwareSource(typing.Protocol):
     def get_record_frame_parameters(self) -> FrameParameters: ...
 
 
+@dataclasses.dataclass
+class DataChannelSpecifier:
+    channel_id: typing.Optional[str]
+    channel_variant: typing.Optional[str]
+    channel_name: str
+
+
+class DataChannelDelegateProtocol(typing.Protocol):
+    def map_data_channel_specifier(self, data_channel_specifier: DataChannelSpecifier) -> DataChannelSpecifier: ...
+
+
 class DataChannelManager:
-    def __init__(self, hardware_source_id: str) -> None:
+    def __init__(self, hardware_source_id: str, data_channel_specifier_map_fn: typing.Callable[[DataChannelSpecifier], DataChannelSpecifier]) -> None:
         self.__hardware_source_id = hardware_source_id
+        self.__data_channel_specifier_map_fn = data_channel_specifier_map_fn
 
         self.__data_channel_list_model = ListModel.ListModel[DataChannel]()
         self.__is_started = False
@@ -942,10 +954,6 @@ class DataChannelManager:
             })
         )
 
-    @property
-    def _data_channel_list_model(self) -> ListModel.ListModel[DataChannel]:
-        return self.__data_channel_list_model
-
     def add_data_channel(self, hardware_source_id: str, channel_id: typing.Optional[str], channel_index: typing.Optional[int], name: typing.Optional[str], *, variant: typing.Optional[str] = None, is_context: bool = False) -> None:
         data_channel = DataChannel(hardware_source_id, channel_id, channel_index, name, variant=variant, is_context=is_context)
         self.__data_channel_list_model.append_item(data_channel)
@@ -967,11 +975,13 @@ class DataChannelManager:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
             channel_variant = data_element.get("channel_variant")
+            channel_name = data_element.get("channel_name", data_element.get("title", "Data"))
+            data_channel_specifier = self.__data_channel_specifier_map_fn(DataChannelSpecifier(channel_id, channel_variant, channel_name))
+            channel_id = data_channel_specifier.channel_id
+            channel_variant = data_channel_specifier.channel_variant
+            channel_name = data_channel_specifier.channel_name
             data_channel = next(filter(lambda dc: dc.channel_id == channel_id and dc.variant == channel_variant, self.__data_channel_list_model.items), None)
             if not data_channel:
-                channel_name = data_element.get("channel_name", data_element.get("title", "Data"))
-                if channel_variant == "subscan":
-                    channel_name = channel_name + _(" Subscan")
                 channel_index = 0
                 for data_channel in self.__data_channel_list_model.items:
                     if data_channel.channel_id == channel_id:
@@ -1042,7 +1052,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         super().__init__()
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
-        self.__data_channel_manager = DataChannelManager(hardware_source_id)
+        self.__data_channel_manager = DataChannelManager(hardware_source_id, weak_partial(ConcreteHardwareSource.__map_data_channel_specifier, self))
         self.__features: typing.Dict[str, typing.Any] = dict()
         self.xdatas_available_event = Event.Event()
         self.abort_event = Event.Event()
@@ -1063,6 +1073,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self._test_acquire_exception: typing.Optional[typing.Callable[[Exception], None]] = None
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
+
+        self.data_channel_specifier_mapper: typing.Optional[DataChannelDelegateProtocol] = None
 
         self.__data_channel_start_event_listener = self.__data_channel_manager.data_channel_start_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_start, self))
         self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
@@ -1164,6 +1176,13 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 self.__acquire_thread_trigger.set()
             if break_for_closing:
                 break
+
+    def __map_data_channel_specifier(self, data_channel_specifier: DataChannelSpecifier) -> DataChannelSpecifier:
+        if self.data_channel_specifier_mapper:
+            return self.data_channel_specifier_mapper.map_data_channel_specifier(data_channel_specifier)
+        if data_channel_specifier.channel_variant == "subscan":
+            return DataChannelSpecifier(data_channel_specifier.channel_id, data_channel_specifier.channel_variant, data_channel_specifier.channel_name + _(" Subscan"))
+        return DataChannelSpecifier(data_channel_specifier.channel_id, None, data_channel_specifier.channel_name)
 
     # subclasses can implement this method which is called when the data channels are updated.
     def data_channels_updated(self) -> None:
