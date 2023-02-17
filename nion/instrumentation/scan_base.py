@@ -348,7 +348,17 @@ def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], s
 
 
 # set the calibrations for this image. does not touch metadata.
-def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, channel_variant: typing.Optional[str], scan_properties: typing.Mapping[str, typing.Any]) -> None:
+def update_data_channel_specifier(data_element: typing.MutableMapping[str, typing.Any], data_channel_specifier: HardwareSource.DataChannelSpecifier) -> None:
+    data_element["title"] = data_channel_specifier.channel_name
+    data_element["version"] = 1
+    data_element["channel_id"] = data_channel_specifier.channel_id  # needed to match to the channel
+    if data_channel_specifier.channel_variant:
+        data_element["channel_variant"] = data_channel_specifier.channel_variant  # needed to match to the channel
+    data_element["channel_name"] = data_channel_specifier.channel_name  # needed to match to the channel
+
+
+# set the calibrations for this image. does not touch metadata.
+def update_scan_data_element_spatial_calibrations(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], scan_properties: typing.Mapping[str, typing.Any]) -> None:
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
     center_x_nm = scan_frame_parameters.center_nm.x
@@ -362,34 +372,27 @@ def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any
         fractional_size = scan_frame_parameters.subscan_fractional_size[1] if scan_frame_parameters.subscan_fractional_size else 1.0
         pixel_size = scan_frame_parameters.subscan_pixel_size[1] if scan_frame_parameters.subscan_pixel_size else scan_frame_parameters.pixel_size[1]
         pixel_size_nm = fov_nm * fractional_size / pixel_size
-    data_element["title"] = channel_name
-    data_element["version"] = 1
-    data_element["channel_id"] = channel_id  # needed to match to the channel
-    if channel_variant:
-        data_element["channel_variant"] = channel_variant  # needed to match to the channel
-    data_element["channel_name"] = channel_name  # needed to match to the channel
-    if not "spatial_calibrations" in data_element:
-        assert len(data_shape) in (1, 2)
-        if scan_properties.get("calibration_style") == "time":
-            if len(data_shape) == 2:
-                data_element["spatial_calibrations"] = (
-                    {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
-                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-                )
-            elif len(data_shape) == 1:
-                data_element["spatial_calibrations"] = (
-                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-                )
-        else:
-            if len(data_shape) == 2:
-                data_element["spatial_calibrations"] = (
-                    {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-                )
-            elif len(data_shape) == 1:
-                data_element["spatial_calibrations"] = (
-                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-                )
+    assert len(data_shape) in (1, 2)
+    if scan_properties.get("calibration_style") == "time":
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
+        elif len(data_shape) == 1:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
+    else:
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
+        elif len(data_shape) == 1:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
 
 
 def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:
@@ -550,6 +553,10 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             scan_id = self.__scan_id
             channel_name = self.__device.get_channel_name(channel_index)
             is_subscan = self.__frame_parameters.subscan_pixel_size and not self.__frame_parameters.subscan_type_partial
+            # channel variant can be passed back from the acquisition device; but if it isn't, then subscan is
+            # added if the subscan_pixel_size is set. the scan devices (modules) will still have a chance to modify
+            # the channel specifier via the DataChannelDelegateProtocol.map_data_channel_specifier before the channel
+            # specifier is used to send the data to a data channel.
             channel_variant = self.__frame_parameters.channel_variant
             channel_variant = channel_variant or ("subscan" if is_subscan else None)
             # create the 'data_element' in the format that must be returned from this method
@@ -559,7 +566,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
             if instrument_metadata:
                 data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-            update_scan_data_element(data_element, self.__frame_parameters, _data.shape, channel_name, channel_id, channel_variant, _scan_properties)
+            update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
+            # the spatial calibrations from the incoming data override the calculated calibrations.
+            # also, the calculated calibrations are only valid for 2D incoming data.
+            if "spatial_calibrations" in _data_element:
+                data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
+            else:
+                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
             update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.__display_name, self.__frame_parameters, scan_id, _scan_properties)
             update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.__display_name, _data.shape, self.__frame_number, channel_name, channel_id, _scan_properties)
             update_data_element(data_element, complete, sub_area, _data)
@@ -1881,7 +1894,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                     update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
                     if instrument_metadata:
                         data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-                    update_scan_data_element(data_element, self.__frame_parameters, _data.shape, channel_name, channel_id, channel_variant, _scan_properties)
+                    update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
+                    # the spatial calibrations from the incoming data override the calculated calibrations.
+                    # also, the calculated calibrations are only valid for 2D incoming data.
+                    if "spatial_calibrations" in _data_element:
+                        data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
+                    else:
+                        update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
                     update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
                     update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
                     data_element["data"] = _data
