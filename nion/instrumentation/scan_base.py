@@ -271,6 +271,32 @@ def get_scan_calibrations(frame_parameters: ScanFrameParameters) -> typing.Tuple
         Calibration.Calibration(-center_y_nm - pixel_size_nm * scan_shape[0] * 0.5, pixel_size_nm, "nm"),
         Calibration.Calibration(-center_x_nm - pixel_size_nm * scan_shape[1] * 0.5, pixel_size_nm, "nm")
     )
+    # calculate the subscan in terms of the context calibration, to account for center_nm
+    # x' = x * scale + offset => c1
+    # c1(mn) == c2(0.0)
+    # c1(mx) == c2(1.0)
+    # mn * scale1 + offset1 == offset2
+    # mx * scale1 + offset1 == sw * scale2 + offset2
+    # => (mx * scale1 + offset1 - offset2) / sw == scale2
+    if frame_parameters.subscan_fractional_size and frame_parameters.subscan_fractional_center and frame_parameters.subscan_pixel_size:
+        subscan_fractional_min0 = frame_parameters.subscan_fractional_center.y - frame_parameters.subscan_fractional_size.height / 2
+        subscan_fractional_max0 = subscan_fractional_min0 + frame_parameters.subscan_fractional_size.height
+        subscan_min0 = scan_shape.height * subscan_fractional_min0
+        subscan_max0 = scan_shape.height * subscan_fractional_max0
+        new_offset0 = scan_calibrations[0].convert_to_calibrated_value(subscan_min0)
+        new_scale0 = (scan_calibrations[0].convert_to_calibrated_value(subscan_max0) - new_offset0) / frame_parameters.subscan_pixel_size.height
+
+        subscan_fractional_min1 = frame_parameters.subscan_fractional_center.x - frame_parameters.subscan_fractional_size.width / 2
+        subscan_fractional_max1 = subscan_fractional_min1 + frame_parameters.subscan_fractional_size.width
+        subscan_min1 = scan_shape.width * subscan_fractional_min1
+        subscan_max1 = scan_shape.width * subscan_fractional_max1
+        new_offset1 = scan_calibrations[1].convert_to_calibrated_value(subscan_min1)
+        new_scale1 = (scan_calibrations[1].convert_to_calibrated_value(subscan_max1) - new_offset1) / frame_parameters.subscan_pixel_size.width
+
+        scan_calibrations = (
+            Calibration.Calibration(new_offset0, new_scale0, scan_calibrations[0].units),
+            Calibration.Calibration(new_offset1, new_scale1, scan_calibrations[1].units),
+        )
     return scan_calibrations
 
 

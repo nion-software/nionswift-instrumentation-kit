@@ -22,6 +22,7 @@ from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import scan_base
+from nion.instrumentation import stem_controller as STEMControllerModule
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation.test import AcquisitionTestContext
 from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
@@ -886,13 +887,16 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((32, 32), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((32, 32), metadata["scan"]["scan_size"])
 
-    def test_scan_acquisition_controller_with_rect(self):
+    def test_scan_acquisition_controller_with_subscan(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
+            context_data_item = document_model.data_items[0]
+            context_dimensional_calibrations = context_data_item.dimensional_calibrations
+            context_data_shape = context_data_item.data_shape
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
             scan_specifier = ScanAcquisition.ScanSpecifier()
@@ -919,13 +923,72 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     subscan_data_item = data_item
             self.assertIsNotNone(si_data_item)
             self.assertIsNotNone(si_haadf_data_item)
-            self.assertEqual((4, 4, 512), si_data_item.data_shape)
+
+            # ensure the calibrations are correct for si_haadf and si
+            self.assertEqual(context_dimensional_calibrations[0].convert_to_calibrated_size_str(context_data_shape[0] * 0.5),
+                             si_haadf_data_item.dimensional_calibrations[0].convert_to_calibrated_size_str(si_haadf_data_item.data_shape[0]))
+            self.assertEqual(context_dimensional_calibrations[1].convert_to_calibrated_size_str(context_data_shape[1] * 0.5),
+                             si_haadf_data_item.dimensional_calibrations[1].convert_to_calibrated_size_str(si_haadf_data_item.data_shape[1]))
+            self.assertEqual(context_dimensional_calibrations[0].convert_to_calibrated_size_str(context_data_shape[0] * 0.5),
+                             si_data_item.dimensional_calibrations[0].convert_to_calibrated_size_str(si_data_item.data_shape[0]))
+            self.assertEqual(context_dimensional_calibrations[1].convert_to_calibrated_size_str(context_data_shape[1] * 0.5),
+                             si_data_item.dimensional_calibrations[1].convert_to_calibrated_size_str(si_data_item.data_shape[1]))
+
             self.assertTrue(numpy.array_equal(si_haadf_data_item.data, subscan_data_item.data))
             metadata = si_data_item.metadata
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
-    def test_scan_acquisition_controller_with_rect_and_sections(self):
+    def test_scan_acquisition_controller_with_linescan(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            stem_controller = test_context.instrument
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            context_data_item = document_model.data_items[0]
+            context_dimensional_calibrations = context_data_item.dimensional_calibrations
+            context_data_shape = context_data_item.data_shape
+            stem_controller.line_scan_state = STEMControllerModule.LineScanState.ENABLED
+            stem_controller.line_scan_vector = (0.25, 0.25), (0.25, 0.75)
+            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+            scan_specifier.size = 1, 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
+            scan_acquisition_controller._wait()
+            document_controller.periodic()
+            self.assertFalse(any(d.is_live for d in document_model.data_items))
+            si_data_item = None
+            si_haadf_data_item = None
+            subscan_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
+                    si_data_item = data_item
+                if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
+                    si_haadf_data_item = data_item
+                if "SubScan" in data_item.title:
+                    subscan_data_item = data_item
+            self.assertIsNotNone(si_data_item)
+            self.assertIsNotNone(si_haadf_data_item)
+
+            # ensure the calibrations are correct for si_haadf and si
+            # note: scan is horizontal; the vertical calibration is invalid
+            self.assertEqual(context_dimensional_calibrations[1].convert_to_calibrated_size_str(context_data_shape[1] * 0.5),
+                             si_haadf_data_item.dimensional_calibrations[1].convert_to_calibrated_size_str(si_haadf_data_item.data_shape[1]))
+            self.assertEqual(context_dimensional_calibrations[1].convert_to_calibrated_size_str(context_data_shape[1] * 0.5),
+                             si_data_item.dimensional_calibrations[1].convert_to_calibrated_size_str(si_data_item.data_shape[1]))
+
+            self.assertEqual((1, 4, 512), si_data_item.data_shape)
+            self.assertTrue(numpy.array_equal(si_haadf_data_item.data, subscan_data_item.data))
+            metadata = si_data_item.metadata
+
+    def test_scan_acquisition_controller_with_subscan_and_sections(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
@@ -964,7 +1027,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
-    def test_scan_acquisition_controller_with_rect_4d(self):
+    def test_scan_acquisition_controller_with_subscan_4d(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
