@@ -45,7 +45,7 @@ class TestMultiAcquire(unittest.TestCase):
                 # the simulator cant go super fast, so make sure we give it enough time
                 total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
                 # add some extra overhead time
-                total_acquisition_time += 0.15
+                total_acquisition_time += 0.30
                 total_acquisition_time += settings['x_shift_delay']*2
             total_acquisition_time += settings['x_shift_delay']*2
             total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
