@@ -163,6 +163,19 @@ class ScanFrameParameters(ParametersBase):
                 width=max(1, round(self.fov_nm / pixel_size_nm.width))
             )
 
+    # subscan_type_partial is for internal use only. the intention is that sometimes subscan is used for true
+    # subscan acquisition while other times it is used to break a larger acquisition into partial sections.
+    # in order to know where to route the data (to a context data item or to a subscan data item), this flag
+    # is set when doing partial acquisition.
+
+    @property
+    def subscan_type_partial(self) -> bool:
+        return typing.cast(bool, self.get_parameter("subscan_type_partial", False))
+
+    @subscan_type_partial.setter
+    def subscan_type_partial(self, value: bool) -> None:
+        self.set_parameter("subscan_type_partial", value)
+
     @property
     def subscan_pixel_size(self) -> typing.Optional[Geometry.IntSize]:
         # parameters must be convertible to JSON; subscan_pixel_size must be stored as a tuple.
@@ -525,7 +538,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             scan_id = self.__scan_id
             channel_name = self.__device.get_channel_name(channel_index)
             channel_override = self.__frame_parameters.channel_override
-            channel_id = channel_override or (channel_id + ("_subscan" if self.__frame_parameters.subscan_pixel_size else ""))
+            is_subscan = self.__frame_parameters.subscan_pixel_size and not self.__frame_parameters.subscan_type_partial
+            channel_id = channel_override or (channel_id + ("_subscan" if is_subscan else ""))
 
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
@@ -567,6 +581,7 @@ def apply_section_rect(scan_frame_parameters: ScanFrameParameters, acquisition_t
     section_frame_parameters.subscan_pixel_size = section_rect.size
     section_frame_parameters.subscan_fractional_size = subscan_fractional_size
     section_frame_parameters.subscan_fractional_center = subscan_fractional_center
+    section_frame_parameters.subscan_type_partial = not scan_frame_parameters.subscan_pixel_size
     acquisition_task_parameters.data_shape_override = scan_size  # no flyback addition since this is data from scan device
     acquisition_task_parameters.state_override = "complete" if section_rect.bottom == scan_size.height and section_rect.right == scan_size.width else "partial"
     acquisition_task_parameters.top_left_override = section_rect.top_left

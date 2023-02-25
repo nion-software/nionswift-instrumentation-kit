@@ -832,7 +832,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_hardware_source.subscan_enabled = True
             scan_specifier = ScanAcquisition.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
@@ -844,6 +843,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            # ensure extra data items are not created
+            self.assertEqual(3, len(document_model.data_items))
+            # ensure no data is live after finishing
             self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             for data_item in document_model.data_items:
@@ -853,7 +855,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIsNotNone(si_data_item)
             self.assertEqual((4, 4, 512), si_data_item.data_shape)
             metadata = si_data_item.metadata
-            self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
+            self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
     def slow_test_scan_acquisition_controller_eels(self):
@@ -910,6 +912,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            # ensure extra data items are not created but that data is put into the subscan
+            self.assertEqual(4, len(document_model.data_items))
+            # ensure no data is live after finishing
             self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             si_haadf_data_item = None
@@ -963,6 +968,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            # ensure extra data items are not created but that data is put into the subscan
+            self.assertEqual(4, len(document_model.data_items))
+            # ensure no data is live after finishing
             self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             si_haadf_data_item = None
@@ -1008,6 +1016,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False), section_height_override=2)
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            # ensure extra data items are not created but that data is put into the subscan
+            self.assertEqual(4, len(document_model.data_items))
+            # ensure no data is live after finishing
             self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             si_haadf_data_item = None
@@ -1047,6 +1058,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.NONE, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
             document_controller.periodic()
+            # ensure extra data items are not created but that data is put into the subscan
+            self.assertEqual(4, len(document_model.data_items))
+            # ensure no data is live after finishing
             self.assertFalse(any(d.is_live for d in document_model.data_items))
             si_data_item = None
             for data_item in document_model.data_items:
