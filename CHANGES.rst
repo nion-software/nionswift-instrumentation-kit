@@ -1,6 +1,13 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.21.1 (2023-02-28)
+-------------------
+- Fix #151. Properly calibrate subscan/line-scan during synchronized acquisition.
+- Improve handling of partial acquisition, directing data to desired data item.
+- Fix more acquisition graphic edge cases: graphics only on enabled context displays.
+- Fix issue where acquisition graphics would not appear on new channels.
+
 0.21.0 (2022-12-07)
 -------------------
 - Fix sync issue with SI (prep scan after camera stopped).
