@@ -1043,15 +1043,15 @@ class HardwareSourceChannelChooserHandler(Declarative.Handler):
         pass
 
     @property
-    def channel_index(self) -> int:
+    def channel_index(self) -> typing.Optional[int]:
         # map from the channel model (channel identifier string) to a channel index.
         m = {o.channel_id: o for o in self.__channel_descriptions}
-        return self.__channel_descriptions.index(m[self.__channel_model.value]) if self.__channel_model.value in m else 0
+        return self.__channel_descriptions.index(m[self.__channel_model.value]) if self.__channel_model.value in m else None
 
     @channel_index.setter
-    def channel_index(self, value: int) -> None:
+    def channel_index(self, value: typing.Optional[int]) -> None:
         # map from the channel index to the channel model (channel identifier string).
-        channel_id = self.__channel_descriptions[value].channel_id if 0 <= value < len(self.__channel_descriptions) else "image"
+        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else "image"
         if channel_id != self.__channel_model.value:
             self.__channel_model.value = channel_id
             self.notify_property_changed("channel_index")
