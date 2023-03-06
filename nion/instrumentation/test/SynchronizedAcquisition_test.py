@@ -421,7 +421,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
                                                                                     Facade.DocumentWindow(document_controller),
@@ -832,7 +832,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -870,7 +870,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_hardware_source.start_playing(sync_timeout=3.0)
                 camera_hardware_source.start_playing(sync_timeout=3.0)
                 # acquire a scan
-                scan_specifier = ScanAcquisition.ScanSpecifier()
+                scan_specifier = STEMControllerModule.ScanSpecifier()
                 scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
                 scan_specifier.size = 4, 4
                 scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -897,7 +897,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 32, 32  # must be large enough to split acquisition into parts to highlight one error
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -932,7 +932,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             context_data_shape = context_data_item.data_shape
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -988,7 +988,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             context_data_shape = context_data_item.data_shape
             stem_controller.line_scan_state = STEMControllerModule.LineScanState.ENABLED
             stem_controller.line_scan_vector = (0.25, 0.25), (0.25, 0.75)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 1, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -1036,7 +1036,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -1078,7 +1078,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -1118,7 +1118,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     camera_hardware_source.set_frame_parameters(0, camera_frame_parameters)
                     self._acquire_one(document_controller, scan_hardware_source)
                     scan_hardware_source.subscan_enabled = True
-                    scan_specifier = ScanAcquisition.ScanSpecifier()
+                    scan_specifier = STEMControllerModule.ScanSpecifier()
                     scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
                     scan_specifier.size = 4, 4
                     scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
@@ -1154,7 +1154,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             scan_hardware_source.subscan_enabled = True
             self._acquire_one(document_controller, scan_hardware_source)
-            scan_specifier = ScanAcquisition.ScanSpecifier()
+            scan_specifier = STEMControllerModule.ScanSpecifier()
             scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
             scan_specifier.size = 4, 4
             scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),

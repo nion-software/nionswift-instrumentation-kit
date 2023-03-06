@@ -45,15 +45,6 @@ class SequenceState(enum.Enum):
     scanning = 1
 
 
-class ScanSpecifier:
-
-    def __init__(self) -> None:
-        self.scan_context: typing.Optional[stem_controller.ScanContext] = None
-        self.scan_count = 1
-        self.size: typing.Optional[typing.Tuple[int, int]] = None
-        self.drift_interval_lines = 0
-        self.drift_interval_scans = 0
-
 
 @dataclasses.dataclass
 class ScanProcessing:
@@ -72,7 +63,7 @@ class ScanAcquisitionProcessing(enum.Enum):
 
 class ScanAcquisitionController:
 
-    def __init__(self, api: typing.Any, document_controller: Facade.DocumentWindow, scan_hardware_source: Facade.HardwareSource, camera_hardware_source: Facade.HardwareSource, scan_specifier: ScanSpecifier) -> None:
+    def __init__(self, api: typing.Any, document_controller: Facade.DocumentWindow, scan_hardware_source: Facade.HardwareSource, camera_hardware_source: Facade.HardwareSource, scan_specifier: stem_controller.ScanSpecifier) -> None:
         self.__api = api
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
@@ -246,7 +237,7 @@ class PanelDelegate:
         self.__scan_count = 1
         self.__camera_width = 0
         self.__camera_height = 0
-        self.__scan_specifier = ScanSpecifier()
+        self.__scan_specifier = stem_controller.ScanSpecifier()
         self.__scan_width = 32  # the width/length of the scan in pixels
         self.__scan_pixels = 0  # the total number of scan pixels
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
@@ -264,99 +255,30 @@ class PanelDelegate:
         self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
 
         def clear_scan_context_fields() -> None:
-            self.__roi_description.text = _("Scan context not active")
-            self.__scan_label_widget.text = None
-            self.__scan_specifier.scan_context = stem_controller.ScanContext()
-            self.__scan_specifier.scan_count = 1
-            self.__scan_specifier.size = None
-            self.__scan_specifier.drift_interval_lines = 0
-            self.__scan_specifier.drift_interval_scans = 0
-            self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
-            self.__scan_pixels = 0
+            self.__scan_specifier.clear()
+            self.__roi_description.text = self.__scan_specifier.roi_description
+            self.__scan_label_widget.text = self.__scan_specifier.scan_description
+            self.__scan_pixels = self.__scan_specifier.scan_pixel_count
 
         def update_context() -> None:
             assert self.__scan_hardware_source_choice
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
             if not scan_hardware_source:
                 clear_scan_context_fields()
+                self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
                 return
 
             scan_context = scan_hardware_source.scan_context
-
-            scan_context_size = scan_context.size
             exposure_ms = self.__exposure_time_ms_value_model.value or 0.0 if self.__exposure_time_ms_value_model else 0.0
-            if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
-                end = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[1])
-                length = int(Geometry.distance(start, end) * scan_context_size.height)
-                max_dim = max(scan_context_size.width, scan_context_size.height)
-                length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, max_dim), samples=max_dim)
-                line_str = _("Line Scan")
-                self.__roi_description.text = f"{line_str} {length_str} ({length} px)"
-                scan_str = _("Scan (1D)")
-                scan_length = max(self.__scan_width, 1)
-                drift_scans = scan_hardware_source.calculate_drift_scans()
-                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else str()
-                self.__scan_label_widget.text = f"{scan_str} {scan_length} px" + drift_str
-                self.__scan_pixels = scan_length
-                self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
-                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
-                self.__scan_specifier.size = 1, scan_length
-                self.__scan_specifier.drift_interval_lines = 0
-                self.__scan_specifier.drift_interval_scans = drift_scans
-                self.__acquire_button._widget.enabled = True
-            elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                width = scan_hardware_source.subscan_region.width * scan_context_size.width
-                height = scan_hardware_source.subscan_region.height * scan_context_size.height
-                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context_size.width), samples=scan_context_size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context_size.height), samples=scan_context_size.height)
-                rect_str = _("Subscan")
-                self.__roi_description.text = f"{rect_str} {width_str} x {height_str} ({int(width)} px x {int(height)} px)"
-                scan_str = _("Scan (2D)")
-                scan_width = self.__scan_width
-                scan_height = int(self.__scan_width * height / width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
-                drift_str = f" / Drift every {drift_lines} lines" if drift_lines > 0 else str()
-                drift_scans = scan_hardware_source.calculate_drift_scans()
-                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else drift_str
-                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
-                self.__scan_pixels = scan_width * scan_height
-                self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
-                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
-                self.__scan_specifier.size = scan_height, scan_width
-                self.__scan_specifier.drift_interval_lines = drift_lines
-                self.__scan_specifier.drift_interval_scans = drift_scans
-                self.__acquire_button._widget.enabled = True
-            elif scan_context.is_valid:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                width = scan_context_size.width
-                height = scan_context_size.height
-                width_str = calibration.convert_to_calibrated_size_str(width, value_range=(0, scan_context_size.width), samples=scan_context_size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height, value_range=(0, scan_context_size.height), samples=scan_context_size.height)
-                data_str = _("Context Scan")
-                self.__roi_description.text = f"{data_str} {width_str} x {height_str} ({int(width)} x {int(height)})"
-                scan_str = _("Scan (2D)")
-                scan_width = self.__scan_width
-                scan_height = int(self.__scan_width * height / width)
-                drift_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_ms / 1000) if scan_hardware_source else 0
-                drift_str = f" / Drift every {drift_lines} lines" if drift_lines > 0 else str()
-                drift_scans = scan_hardware_source.calculate_drift_scans()
-                drift_str = f" / Drift every {drift_scans} scans" if drift_scans > 0 else drift_str
-                self.__scan_label_widget.text = f"{scan_str} {scan_width} x {scan_height} px" + drift_str
-                self.__scan_pixels = scan_width * scan_height
-                self.__scan_specifier.scan_context = copy.deepcopy(scan_context)
-                self.__scan_specifier.scan_count = max(self.__scan_count, 1)
-                self.__scan_specifier.size = scan_height, scan_width
-                self.__scan_specifier.drift_interval_lines = drift_lines
-                self.__scan_specifier.drift_interval_scans = drift_scans
-                self.__acquire_button._widget.enabled = True
-            else:
-                clear_scan_context_fields()
+
+            self.__scan_specifier.update(scan_hardware_source, exposure_ms, self.__scan_width, self.__scan_count, scan_hardware_source.drift_enabled)
+
+            self.__roi_description.text = self.__scan_specifier.roi_description
+            self.__scan_label_widget.text = self.__scan_specifier.scan_description
+            self.__scan_pixels = self.__scan_specifier.scan_pixel_count
+
+            # focus will be on the SI data, so enable if scanning
+            self.__acquire_button._widget.enabled = scan_context.is_valid or (self.__acquisition_state == SequenceState.scanning)
 
             self.__scan_count_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_count)
 

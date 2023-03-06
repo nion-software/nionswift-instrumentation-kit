@@ -1194,71 +1194,16 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
             scan_context = scan_hardware_source.scan_context
 
             exposure_time = camera_hardware_source.get_frame_parameters(0).exposure_ms / 1000
-            scan_width = self.__scan_width_model.value
+            scan_width = self.__scan_width_model.value or 32
             assert scan_width is not None
 
-            scan_context_size = scan_context.size
-            if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
-                end = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[1])
-                length = int(Geometry.distance(start, end) * scan_context_size.height)
-                max_dim = max(scan_context_size.width, scan_context_size.height)
-                length_str = calibration.convert_to_calibrated_size_str(length, value_range=(0, max_dim), samples=max_dim)
-                line_str = _("Line Scan")
-                context_text = f"{line_str} {length_str}"
-                scan_length = max(scan_width or 0, 1)
-                scan_text = f"{scan_length} px"
-                scan_size = Geometry.IntSize(height=1, width=scan_length)
-                drift_interval_lines = 0
-                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
-                enable_drift_correction = False
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
-            elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                width = scan_hardware_source.subscan_region.width * scan_context_size.width
-                height = scan_hardware_source.subscan_region.height * scan_context_size.height
-                width_str = calibration.convert_to_calibrated_size_str(width,
-                                                                       value_range=(0, scan_context_size.width),
-                                                                       samples=scan_context_size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height,
-                                                                        value_range=(0, scan_context_size.height),
-                                                                        samples=scan_context_size.height)
-                rect_str = _("Subscan")
-                context_text = f"{rect_str} {width_str} x {height_str}"
-                scan_height = int(scan_width * height / width)
-                scan_text = f"{scan_width} x {scan_height}"
-                scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
-                drift_interval_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
-                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
-                enable_drift_correction = False
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
-            elif scan_context.is_valid:
-                assert scan_context_size
-                calibration = scan_context.calibration
-                width = scan_context_size.width
-                height = scan_context_size.height
-                width_str = calibration.convert_to_calibrated_size_str(width,
-                                                                       value_range=(0, scan_context_size.width),
-                                                                       samples=scan_context_size.width)
-                height_str = calibration.convert_to_calibrated_size_str(height,
-                                                                        value_range=(0, scan_context_size.height),
-                                                                        samples=scan_context_size.height)
-                data_str = _("Context Scan")
-                context_text = f"{data_str} {width_str} x {height_str}"
-                scan_height = int(scan_width * height / width)
-                scan_text = f"{scan_width} x {scan_height}"
-                scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
-                drift_interval_lines = scan_hardware_source.calculate_drift_lines(scan_width, exposure_time)
-                drift_interval_scans = scan_hardware_source.calculate_drift_scans()
-                enable_drift_correction = False
-                self.send_value(SynchronizedScanDescription(context_text, True, scan_text, scan_size, drift_interval_lines, drift_interval_scans, enable_drift_correction))
+            scan_specifier = stem_controller.ScanSpecifier()
+            scan_specifier.update(scan_hardware_source, exposure_time * 1000, scan_width, 1, False)
+
+            if scan_context.is_valid:
+                self.send_value(SynchronizedScanDescription(scan_specifier.context_description, True, scan_specifier.scan_description, scan_specifier.scan_size, scan_specifier.drift_interval_lines, scan_specifier.drift_interval_scans, False))
             else:
-                context_text = _("No scan context")
-                scan_text = str()
-                self.send_value(SynchronizedScanDescription(context_text, False, scan_text, Geometry.IntSize(), 0, 0, False))
+                self.send_value(SynchronizedScanDescription(scan_specifier.context_description, False, scan_specifier.scan_description, Geometry.IntSize(), 0, 0, False))
 
 
 class CameraExposureValueStream(Stream.ValueStream[float]):
