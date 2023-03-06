@@ -1,4 +1,5 @@
 # system imports
+import gettext
 import operator
 import typing
 
@@ -12,6 +13,9 @@ from nion.utils import Stream
 from nion.utils.ReferenceCounting import weak_partial
 
 
+_ = gettext.gettext
+
+
 class PersistentStorageInterface(typing.Protocol):
     def get_persistent_string(self, key: str, default_value: typing.Optional[str] = None) -> str: ...
     def set_persistent_string(self, key: str, value: str) -> None: ...
@@ -19,9 +23,11 @@ class PersistentStorageInterface(typing.Protocol):
 
 class HardwareSourceChoice:
     def __init__(self, choice_model: Model.PropertyModel[str],
-                 filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]] = None):
+                 filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]] = None,
+                 *, allow_none: bool = False) -> None:
         self.__choice_model = choice_model
-        self.hardware_sources_model = Model.PropertyModel[typing.List[HardwareSource.HardwareSource]](list())
+        self.__allow_none = allow_none
+        self.hardware_sources_model = Model.PropertyModel[typing.List[typing.Optional[HardwareSource.HardwareSource]]](list())
         self.hardware_source_index_model = Model.PropertyModel[int](0)
         self.hardware_source_changed_event = Event.Event()
         self.__filter = filter or (lambda x: True)
@@ -33,7 +39,7 @@ class HardwareSourceChoice:
         new_index = None
         hardware_sources = self.hardware_sources_model.value or list()
         for index, hardware_source in enumerate(hardware_sources):
-            if hardware_source.hardware_source_id == hardware_source_id:
+            if hardware_source and hardware_source.hardware_source_id == hardware_source_id:
                 new_index = index
                 break
         new_index = new_index if new_index is not None else 0 if len(hardware_sources) > 0 else None
@@ -56,7 +62,7 @@ class HardwareSourceChoice:
         return len(hardware_sources)
 
     @property
-    def hardware_sources(self) -> typing.Sequence[HardwareSource.HardwareSource]:
+    def hardware_sources(self) -> typing.Sequence[typing.Optional[HardwareSource.HardwareSource]]:
         return self.hardware_sources_model.value or list()
 
     @property
@@ -66,7 +72,10 @@ class HardwareSourceChoice:
         return hardware_sources[index] if 0 <= index < len(hardware_sources) else None
 
     def create_combo_box(self, ui: UserInterface.UserInterface) -> UserInterface.ComboBoxWidget:
-        combo_box = ui.create_combo_box_widget(self.hardware_sources_model.value, item_getter=operator.attrgetter("display_name"))
+        def item_getter(item: typing.Optional[HardwareSource.HardwareSource]) -> str:
+            return item.display_name if item else _("None")
+
+        combo_box = ui.create_combo_box_widget(self.hardware_sources_model.value, item_getter=item_getter)
         combo_box.bind_items(Binding.PropertyBinding(self.hardware_sources_model, "value"))
         combo_box.bind_current_index(Binding.PropertyBinding(self.hardware_source_index_model, "value"))
         return combo_box
@@ -76,14 +85,17 @@ class HardwareSourceChoice:
         old_index = self.hardware_source_index_model.value or 0
         hardware_sources = self.hardware_sources_model.value or list()
         old_hardware_source = hardware_sources[old_index] if 0 <= old_index < len(hardware_sources) else None
-        items = list()
+        items: typing.List[typing.Optional[HardwareSource.HardwareSource]] = list()
         for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
             if self.__filter(hardware_source):
                 items.append(hardware_source)
-        self.hardware_sources_model.value = sorted(items, key=operator.attrgetter("display_name"))
+        items = sorted(items, key=operator.attrgetter("display_name"))
+        if self.__allow_none:
+            items.insert(0, None)
+        self.hardware_sources_model.value = items
         new_index = None
-        for index, hardware_source in enumerate(self.hardware_sources_model.value):
-            if hardware_source == old_hardware_source:
+        for index, maybe_hardware_source in enumerate(self.hardware_sources_model.value):
+            if maybe_hardware_source == old_hardware_source:
                 new_index = index
                 break
         new_index = new_index if new_index is not None else 0 if len(self.hardware_sources_model.value) > 0 else None
@@ -94,7 +106,8 @@ class HardwareSourceChoice:
         if key == "value":
             hardware_sources = self.hardware_sources_model.value or list()
             index = self.hardware_source_index_model.value or 0
-            hardware_source_id = hardware_sources[index].hardware_source_id
+            hardware_source = hardware_sources[index]
+            hardware_source_id = hardware_source.hardware_source_id if hardware_source else None
             self.__choice_model.value = hardware_source_id
             self.hardware_source_changed_event.fire(self.hardware_source)
 

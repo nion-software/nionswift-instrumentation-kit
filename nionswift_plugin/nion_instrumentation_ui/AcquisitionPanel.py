@@ -966,7 +966,7 @@ class HardwareSourceHandler(Declarative.Handler):
 
     @property
     def hardware_source_display_names(self) -> typing.List[str]:
-        return [x.display_name for x in self.hardware_source_choice.hardware_sources]
+        return [hardware_source.display_name if hardware_source else _("None") for hardware_source in self.hardware_source_choice.hardware_sources]
 
 
 @dataclasses.dataclass
