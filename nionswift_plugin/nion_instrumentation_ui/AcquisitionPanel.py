@@ -1104,28 +1104,7 @@ class AcquisitionDeviceComponentHandler(ComponentHandler):
         raise NotImplementedError()
 
 
-@dataclasses.dataclass
-class SynchronizedScanDescription:
-    """Describes the parameters for a synchronized scan.
-
-    context_text is a string explaining the current scan context.
-    context_valid is True if the context is valid.
-    scan_text is a string explaining the planned scan.
-    scan_size is an IntSize of the scan size.
-    drift_interval_lines is an int of how often to do drift correction.
-    drift_interval_scans is an int of how often to do drift correction.
-    enable_drift_correction is a bool of whether to do drift correction between scans.
-    """
-    context_text: str
-    context_valid: bool
-    scan_text: str
-    scan_size: Geometry.IntSize
-    drift_interval_lines: int
-    drift_interval_scans: int
-    enable_drift_correction: bool
-
-
-class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScanDescription]):
+class ScanSpecifierValueStream(Stream.ValueStream[stem_controller.ScanSpecifier]):
     """A value stream of the synchronized scan description of the latest values of a camera hardware source stream and
     scan hardware source stream.
 
@@ -1138,9 +1117,9 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
         self.__scan_hardware_source_stream = scan_hardware_source_stream.add_ref()
         self.__scan_width_model = scan_width_model
         self.__hardware_source_stream_listener = self.__scan_hardware_source_stream.value_stream.listen(
-            weak_partial(SynchronizedScanDescriptionValueStream.__hardware_source_stream_changed, self))
+            weak_partial(ScanSpecifierValueStream.__hardware_source_stream_changed, self))
 
-        def property_changed(vs: SynchronizedScanDescriptionValueStream, property: str) -> None:
+        def property_changed(vs: ScanSpecifierValueStream, property: str) -> None:
             vs.__update_context()
 
         self.__scan_width_changed_listener = self.__scan_width_model.property_changed_event.listen(
@@ -1150,9 +1129,9 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
         self.__scan_context_changed_listener: typing.Optional[Event.EventListener] = None
         if self.__stem_controller:
             self.__stem_controller_property_listener = self.__stem_controller.property_changed_event.listen(
-                weak_partial(SynchronizedScanDescriptionValueStream.__stem_controller_property_changed, self))
+                weak_partial(ScanSpecifierValueStream.__stem_controller_property_changed, self))
             self.__scan_context_changed_listener = self.__stem_controller.scan_context_changed_event.listen(
-                weak_partial(SynchronizedScanDescriptionValueStream.__scan_context_changed, self))
+                weak_partial(ScanSpecifierValueStream.__scan_context_changed, self))
         self.__update_context()
 
     def about_to_delete(self) -> None:
@@ -1199,11 +1178,7 @@ class SynchronizedScanDescriptionValueStream(Stream.ValueStream[SynchronizedScan
 
             scan_specifier = stem_controller.ScanSpecifier()
             scan_specifier.update(scan_hardware_source, exposure_time * 1000, scan_width, 1, False)
-
-            if scan_context.is_valid:
-                self.send_value(SynchronizedScanDescription(scan_specifier.context_description, True, scan_specifier.scan_description, scan_specifier.scan_size, scan_specifier.drift_interval_lines, scan_specifier.drift_interval_scans, False))
-            else:
-                self.send_value(SynchronizedScanDescription(scan_specifier.context_description, False, scan_specifier.scan_description, Geometry.IntSize(), 0, 0, False))
+            self.send_value(scan_specifier)
 
 
 class CameraExposureValueStream(Stream.ValueStream[float]):
@@ -1313,7 +1288,7 @@ class CameraDetailsHandler(Declarative.Handler):
             self.exposure_value_stream.exposure_time_ms = self.exposure_model.value if self.exposure_model.value else 0.0
 
 
-def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: SynchronizedScanDescription, camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
+def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: stem_controller.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
     # first get the camera hardware source and the camera channel description.
@@ -1350,7 +1325,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     if drift_tracker and scan_context_description.drift_interval_lines > 0:
         drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
         section_height = scan_context_description.drift_interval_lines
-    enable_drift_tracker = drift_tracker is not None and scan_context_description.enable_drift_correction
+    enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
 
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
     synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
@@ -1424,9 +1399,9 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
 
         # the scan context description value stream observes the scan and camera hardware sources to produce
-        # a description of the upcoming scan. it also supplies a context_valid flag which can be used to enable
+        # a description of the upcoming scan. it also supplies a scan_context_valid flag which can be used to enable
         # the acquire button in the UI.
-        self.__scan_context_description_value_stream = SynchronizedScanDescriptionValueStream(
+        self.__scan_context_description_value_stream = ScanSpecifierValueStream(
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice),
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice),
             self.scan_width,
@@ -1435,24 +1410,24 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # the scan context value model is the text description of the scan context extracted from the value stream.
         self.scan_context_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
-            lambda x: x.context_text if x is not None else str()
+            lambda x: x.context_description if x is not None else str()
         ))
 
         # the scan context value model is the text description of the upcoming scan extracted from the value stream.
         self.scan_value_model = Model.StreamValueModel(Stream.MapStream(
             self.__scan_context_description_value_stream,
-            lambda x: x.scan_text if x is not None else str()
+            lambda x: x.scan_description if x is not None else str()
         ))
 
         # a converter for the scan width.
         self.scan_width_converter = Converter.IntegerToStringConverter()
 
-        # the acquire valid value stream is a value stream of bool values extracted from the scan context description.
+        # the acquire_valid_value_stream is a value stream of bool values extracted from the scan context description.
         # it is used to enable the acquire button. but to do so, this stream must be read from the enclosing
         # declarative component handler. this stream is not used within this class. perhaps there is a better way to
         # do this.
         self.acquire_valid_value_stream = Stream.MapStream(self.__scan_context_description_value_stream,
-                                                           lambda x: x.context_valid if x is not None else False).add_ref()
+                                                           lambda x: x.scan_context_valid if x is not None else False).add_ref()
 
         u = Declarative.DeclarativeUI()
 
@@ -1966,7 +1941,7 @@ def _acquire_data_stream(data_stream: Acquisition.DataStream,
                          title_base: str,
                          channel_names: typing.Dict[Acquisition.Channel, str],
                          drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
-    """Perform acquisition of of the data stream."""
+    """Perform acquisition of the data stream."""
 
     # define a callback method to display the data item.
     def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:

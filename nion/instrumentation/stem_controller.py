@@ -169,21 +169,35 @@ class ScanContext:
         return Calibration.Calibration()
 
 
+@dataclasses.dataclass
 class ScanSpecifier:
-    """Describe a scan, including status messages."""
-    def __init__(self) -> None:
-        self.scan_context: typing.Optional[ScanContext] = None
-        self.scan_context_valid = False
-        self.scan_count = 1
-        self.size: typing.Optional[typing.Tuple[int, int]] = None
-        self.scan_size = Geometry.IntSize()
-        self.scan_pixel_count = 0
-        self.drift_interval_lines = 0
-        self.drift_interval_scans = 0
-        self.drift_correction_enabled = False
-        self.roi_description = str()
-        self.context_description = str()
-        self.scan_description = str()
+    """Describe a scan, including status messages.
+
+    scan_context is a ScanContext describing the current scan context.
+    scan_context_valid is True if the context is valid.
+    scan_count is the number of scans for the acquisition.
+    size is a tuple of the scan size.
+    scan_size is an IntSize of the scan size.
+    scan_pixel_count is the total number of pixels in the scan.
+    drift_interval_lines is an int of how often to do drift correction.
+    drift_interval_scans is an int of how often to do drift correction.
+    drift_correction_enabled is a bool of whether to do drift correction between scans.
+    roi_description is a string describing the current scan roi, a longer version of context description.
+    context_description is a string explaining the current scan context.
+    scan_description is a string explaining the planned scan.
+    """
+    scan_context: typing.Optional[ScanContext] = None
+    scan_context_valid = False
+    scan_count = 1
+    size: typing.Optional[typing.Tuple[int, int]] = None
+    scan_size = Geometry.IntSize()
+    scan_pixel_count = 0
+    drift_interval_lines = 0
+    drift_interval_scans = 0
+    drift_correction_enabled = False
+    roi_description = str()
+    context_description = str()
+    scan_description = str()
 
     def clear(self) -> None:
         self.scan_context = ScanContext()
