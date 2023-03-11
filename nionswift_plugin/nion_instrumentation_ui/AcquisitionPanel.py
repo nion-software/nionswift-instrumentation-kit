@@ -1098,6 +1098,9 @@ class AcquisitionDeviceResult:
 
 class AcquisitionDeviceComponentHandler(ComponentHandler):
     """Define methods for acquisition device components."""
+    component_id: str
+
+    acquire_valid_value_stream: Stream.AbstractStream[bool]
 
     def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
@@ -1167,12 +1170,14 @@ class ScanSpecifierValueStream(Stream.ValueStream[stem_controller.ScanSpecifier]
     def __update_context(self) -> None:
         maybe_camera_hardware_source = self.__camera_hardware_source_stream.value
         maybe_scan_hardware_source = self.__scan_hardware_source_stream.value
-        if maybe_camera_hardware_source and maybe_scan_hardware_source:
-            camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, maybe_camera_hardware_source)
+        if maybe_scan_hardware_source:
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, maybe_scan_hardware_source)
-            scan_context = scan_hardware_source.scan_context
 
-            exposure_time = camera_hardware_source.get_frame_parameters(0).exposure_ms / 1000
+            if maybe_camera_hardware_source:
+                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, maybe_camera_hardware_source)
+                exposure_time = camera_hardware_source.get_frame_parameters(0).exposure_ms / 1000
+            else:
+                exposure_time = scan_hardware_source.get_frame_parameters(0).pixel_time_us / 1E6
             scan_width = self.__scan_width_model.value or 32
             assert scan_width is not None
 
@@ -1601,8 +1606,9 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
             lambda hardware_source: hardware_source.features.get("is_camera", False))
 
         # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
-        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration,
-                                                                                              "camera_channel_id")
+        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
+
+        self.acquire_valid_value_stream = Stream.ConstantStream(True)
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1718,6 +1724,8 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         # it will not be presented in the UI unless multiple choices exist.
         self.__scan_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__scan_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_scanning", False))
 
+        self.acquire_valid_value_stream = Stream.ConstantStream(True)
+
         u = Declarative.DeclarativeUI()
         if len(self.__scan_hardware_source_choice.hardware_sources) > 1:
             self.ui_view = u.create_column(
@@ -1770,7 +1778,7 @@ Schema.entity("acquisition_device_component_synchronized_scan", AcquisitionDevic
     "camera_device_id": Schema.prop(Schema.STRING),
     "camera_channel_id": Schema.prop(Schema.STRING),
     "scan_device_id": Schema.prop(Schema.STRING),
-    "scan_width": Schema.prop(Schema.INT, default=32),
+    "scan_width": Schema.prop(Schema.INT, default=32, optional=True),
 })
 
 # ScanAcquisitionDeviceComponentHandler
@@ -2000,6 +2008,56 @@ def _acquire_data_stream(data_stream: Acquisition.DataStream,
     acquisition_state._acquisition_ex.acquire_async(event_loop=document_controller.event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
 
 
+T = typing.TypeVar('T')
+
+
+class StreamStreamer(Stream.ValueStream[T], typing.Generic[T]):
+    """A utility stream for stream a set of streams. There must be a better way!"""
+
+    def __init__(self, streams_stream: Stream.AbstractStream[Stream.AbstractStream[T]]) -> None:
+        super().__init__()
+        self.__streams_stream = streams_stream.add_ref()
+        self.__sub_stream_listener: typing.Optional[Event.EventListener] = None
+        self.__sub_stream: typing.Optional[Stream.AbstractStream[T]] = None
+        self.__listener = self.__streams_stream.value_stream.listen(weak_partial(StreamStreamer.__attach_stream, self))
+        self.__attach_stream(self.__streams_stream.value)
+
+    def close(self) -> None:
+        self.__streams_stream.remove_ref()
+        self.__listener.close()
+        self.__listener = typing.cast(typing.Any, None)
+        if self.__sub_stream_listener:
+            self.__sub_stream_listener.close()
+            self.__sub_stream_listener = None
+        if self.__sub_stream:
+            self.__sub_stream.remove_ref()
+            self.__sub_stream = None
+
+    def __attach_stream(self, value_stream: typing.Optional[Stream.AbstractStream[T]]) -> None:
+        # watching the stream of streams, this gets called with a new stream when it changes.
+        if self.__sub_stream_listener:
+            self.__sub_stream_listener.close()
+            self.__sub_stream_listener = None
+        if self.__sub_stream:
+            self.__sub_stream.remove_ref()
+            self.__sub_stream = None
+        # create the stream for the value
+        self.__sub_stream = value_stream.add_ref() if value_stream else None
+        # watch the new stream, sending it's value to this value stream when it changes
+        if self.__sub_stream:
+            self.__sub_stream_listener = self.__sub_stream.value_stream.listen(weak_partial(StreamStreamer.send_value, self))
+            self.send_value(self.__sub_stream.value)
+        else:
+            # initialize the first value
+            self.send_value(None)
+
+
+@dataclasses.dataclass
+class HandlerEntry:
+    handler: Declarative.HandlerLike
+    used: bool = False
+
+
 class AcquisitionController(Declarative.Handler):
     """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
 
@@ -2018,24 +2076,39 @@ class AcquisitionController(Declarative.Handler):
         # pass the configuration and desired accessor strings for each.
         # these get closed by the declarative machinery
         self.__acquisition_method_component = ComponentComboBoxHandler("acquisition-method-component",
-                                                                       _("Iterator Method"),
+                                                                       _("Repeat Mode"),
                                                                        acquisition_configuration,
                                                                        acquisition_preferences,
                                                                        "acquisition_method_component_id",
                                                                        "acquisition_method_components",
                                                                        PreferencesButtonHandler(document_controller))
-        self.__acquisition_device_component = ComponentComboBoxHandler("acquisition-device-component",
-                                                                       _("Detector"),
-                                                                       acquisition_configuration,
-                                                                       acquisition_preferences,
-                                                                       "acquisition_device_component_id",
-                                                                       "acquisition_device_components")
-        # must delete the components if they are not added to another widget.
-        self.__acquisition_method_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_method_component
-        self.__acquisition_device_component_to_delete: typing.Optional[ComponentComboBoxHandler] = self.__acquisition_device_component
+
+        # create components for the scan, synchronized scan, and camera controls
+        device_component_handlers = [
+            ScanAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences),
+            SynchronizedScanAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences),
+            CameraAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences)
+        ]
+
+        # create a list of handlers to be returned from create_handler. this is an experimental system for components.
+        self.__handlers: typing.Dict[str, HandlerEntry] = dict()
+        self.__handlers["acquisition-method-component"] = HandlerEntry(self.__acquisition_method_component)
+        self.__handlers["scan-control-component"] = HandlerEntry(device_component_handlers[0])
+        self.__handlers["scan-synchronized-control-component"] = HandlerEntry(device_component_handlers[1])
+        self.__handlers["camera-control-component"] = HandlerEntry(device_component_handlers[2])
 
         # define whether this controller is in an error state
         self.is_error = False
+
+        # define the list of acquisition modes
+        acquisition_modes = [device_component_handler.component_id for device_component_handler in device_component_handlers]
+
+        # define the acquisition mode - this determines which page is shown for further configuration
+        self.acquisition_mode_model = Model.PropertyChangedPropertyModel[str](acquisition_configuration, "acquisition_device_component_id")
+        self.acquisition_mode_model.value = self.acquisition_mode_model.value if self.acquisition_mode_model.value in acquisition_modes else acquisition_modes[0]
+
+        # define a converter from the acquisition mode to an index for the page control
+        self.acquisition_mode_to_index_converter = Converter.ValuesToIndexConverter(acquisition_modes)
 
         # define the progress value model, a simple bool 'is_acquiring' model, and a button text model that
         # updates according to whether acquire is running or not.
@@ -2045,55 +2118,18 @@ class AcquisitionController(Declarative.Handler):
             Stream.PropertyChangedEventStream(self.is_acquiring_model, "value"),
             lambda b: _("Acquire") if not b else _("Cancel")))
 
-        T = typing.TypeVar('T')
+        # create the button enabled property model.
+        # the device_component_stream is a stream that maps the acquisition mode to the device component handler.
+        # the get_acquire_valid_value_stream function maps the device component handler its
+        # associated acquire_valid_value_stream, which is a stream of bools.
+        # finally, the button_enabled_model turns the stream of bools into a property model.
 
-        class StreamStreamer(Stream.ValueStream[T], typing.Generic[T]):
-            """A utility stream for stream a set of streams. There must be a better way!"""
+        self.__device_component_stream = Stream.MapStream[str, AcquisitionDeviceComponentHandler](Stream.PropertyChangedEventStream(self.acquisition_mode_model, "value"), lambda component_id: device_component_handlers[acquisition_modes.index(component_id) if component_id in acquisition_modes else 0])
 
-            def __init__(self, streams_stream: Stream.AbstractStream[Stream.AbstractStream[T]]) -> None:
-                super().__init__()
-                self.__streams_stream = streams_stream.add_ref()
-                self.__sub_stream_listener: typing.Optional[Event.EventListener] = None
-                self.__sub_stream: typing.Optional[Stream.AbstractStream[T]] = None
-                self.__listener = self.__streams_stream.value_stream.listen(weak_partial(StreamStreamer.__attach_stream, self))
-                self.__attach_stream(self.__streams_stream.value)
+        def get_acquire_valid_value_stream(device_component: typing.Optional[AcquisitionDeviceComponentHandler]) -> Stream.AbstractStream[bool]:
+            return device_component.acquire_valid_value_stream if device_component else Stream.ConstantStream(False)
 
-            def close(self) -> None:
-                self.__streams_stream.remove_ref()
-                self.__listener.close()
-                self.__listener = typing.cast(typing.Any, None)
-                if self.__sub_stream_listener:
-                    self.__sub_stream_listener.close()
-                    self.__sub_stream_listener = None
-                if self.__sub_stream:
-                    self.__sub_stream.remove_ref()
-                    self.__sub_stream = None
-
-            def __attach_stream(self, value_stream: typing.Optional[Stream.AbstractStream[T]]) -> None:
-                # watching the stream of streams, this gets called with a new stream when it changes.
-                if self.__sub_stream_listener:
-                    self.__sub_stream_listener.close()
-                    self.__sub_stream_listener = None
-                if self.__sub_stream:
-                    self.__sub_stream.remove_ref()
-                    self.__sub_stream = None
-                # create the stream for the value
-                self.__sub_stream = value_stream.add_ref() if value_stream else None
-                # watch the new stream, sending it's value to this value stream when it changes
-                if self.__sub_stream:
-                    self.__sub_stream_listener = self.__sub_stream.value_stream.listen(weak_partial(StreamStreamer.send_value, self))
-                    self.send_value(self.__sub_stream.value)
-                else:
-                    # initialize the first value
-                    self.send_value(None)
-
-        # configure the button enabled. the selected_item_value_stream will give the selected acquisition frame
-        # component. this may have a acquire_valid_value_stream property. the stream streamer listens to that stream
-        # and sends its value as its own value when it changes. argh!
-        self.button_enabled_model = Model.StreamValueModel(StreamStreamer(
-            Stream.MapStream[typing.Any, typing.Any](self.__acquisition_device_component.selected_item_value_stream,
-                             lambda c: getattr(c, "acquire_valid_value_stream", Stream.ConstantStream(True)))
-        ))
+        self.button_enabled_model = Model.StreamValueModel(StreamStreamer[bool](Stream.MapStream[AcquisitionDeviceComponentHandler, Stream.AbstractStream[bool]](self.__device_component_stream, get_acquire_valid_value_stream)))
 
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
@@ -2104,16 +2140,31 @@ class AcquisitionController(Declarative.Handler):
             u.create_component_instance(identifier="acquisition-method-component"),
             u.create_spacing(8),
             u.create_divider(orientation="horizontal", height=8),
-            u.create_component_instance(identifier="acquisition-device-component"),
-            u.create_spacing(8),
+            u.create_row(
+                u.create_label(text="Mode"),
+                u.create_radio_button(text="Scan", value=acquisition_modes[0], group_value="@binding(acquisition_mode_model.value)"),
+                u.create_radio_button(text="Scan Sychronized", value=acquisition_modes[1], group_value="@binding(acquisition_mode_model.value)"),
+                u.create_radio_button(text="Camera", value=acquisition_modes[2], group_value="@binding(acquisition_mode_model.value)"),
+                u.create_stretch(),
+                spacing=8
+            ),
+            u.create_stack(
+                u.create_column(u.create_component_instance(identifier="scan-control-component"), u.create_stretch(), spacing=8),
+                u.create_column(u.create_component_instance(identifier="scan-synchronized-control-component"), u.create_stretch(), spacing=8),
+                u.create_column(u.create_component_instance(identifier="camera-control-component"), u.create_stretch(), spacing=8),
+                current_index="@binding(acquisition_mode_model.value, converter=acquisition_mode_to_index_converter)",
+            ),
             u.create_divider(orientation="horizontal", height=8),
             u.create_row(
-                u.create_push_button(text="@binding(button_text_model.value)", enabled="@binding(button_enabled_model.value)", on_clicked="handle_button", width=80),
+                u.create_push_button(text="@binding(button_text_model.value)",
+                                     enabled="@binding(button_enabled_model.value)", on_clicked="handle_button",
+                                     width=80),
                 u.create_progress_bar(value="@binding(progress_value_model.value)", width=180),
                 u.create_stretch(),
                 spacing=8,
             ),
             u.create_stretch(),
+            spacing=8,
             margin=8
         )
 
@@ -2126,12 +2177,10 @@ class AcquisitionController(Declarative.Handler):
         self.progress_value_model = typing.cast(typing.Any, None)
         self.button_text_model.close()
         self.button_text_model = typing.cast(typing.Any, None)
-        if self.__acquisition_method_component_to_delete:
-            self.__acquisition_method_component_to_delete.close()
-            self.__acquisition_method_component_to_delete = typing.cast(typing.Any, None)
-        if self.__acquisition_device_component_to_delete:
-            self.__acquisition_device_component_to_delete.close()
-            self.__acquisition_device_component_to_delete = typing.cast(typing.Any, None)
+        for handler_entry in self.__handlers.values():
+            if not handler_entry.used:
+                handler_entry.handler.close()
+        self.__handlers.clear()
         super().close()
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
@@ -2141,7 +2190,9 @@ class AcquisitionController(Declarative.Handler):
         else:
             # starting acquisition means building the device data stream using the acquisition device component and
             # then wrapping the device data stream using the acquisition method component.
-            build_result = self.__acquisition_device_component.current_item.build_acquisition_device_data_stream()
+            device_component = self.__device_component_stream.value
+            assert device_component
+            build_result = device_component.build_acquisition_device_data_stream()
             try:
                 apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
                 try:
@@ -2169,12 +2220,9 @@ class AcquisitionController(Declarative.Handler):
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
-        if component_id == "acquisition-method-component":
-            self.__acquisition_method_component_to_delete = None
-            return self.__acquisition_method_component
-        if component_id == "acquisition-device-component":
-            self.__acquisition_device_component_to_delete = None
-            return self.__acquisition_device_component
+        if component_id in self.__handlers:
+            self.__handlers[component_id].used = True
+            return self.__handlers[component_id].handler
         return None
 
 
