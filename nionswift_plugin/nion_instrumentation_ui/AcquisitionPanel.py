@@ -18,13 +18,14 @@ import dataclasses
 import functools
 import gettext
 import logging
+import math
 import operator
 import pathlib
 import pkgutil
-import numpy
 import time
 import typing
 import uuid
+import weakref
 
 # local libraries
 from nion.data import Calibration
@@ -1225,63 +1226,101 @@ class ScanSpecifierValueStream(Stream.ValueStream[stem_controller.ScanSpecifier]
             self.send_value(scan_specifier)
 
 
-class CameraExposureValueStream(Stream.ValueStream[float]):
-    """A value stream of the camera exposure of the latest values of a hardware source stream.
+exposure_units = {0: "s", -1: "s", -2: "s", -3: "ms", -4: "ms", -5: "ms", -6: "us", -7: "us", -8: "us", -9: "ns", -10: "ns", -11: "ns"}
+exposure_format = {0: ".1", -1: ".1", -2: ".2", -3: ".1", -4: ".1", -5: ".2", -6: ".1", -7: ".1", -8: ".2", -9: ".1", -10: ".1", -11: ".2"}
+
+def make_exposure_str(exposure: float, exposure_precision: int) -> str:
+    format_str = f"{{0:{exposure_format[exposure_precision]}f}}"
+    return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
+
+
+class CameraExposureModel(Observable.Observable):
+    """A model of the camera exposure and related values of a hardware source stream.
 
     Listens to the hardware_source_stream for changes. And then listens to the current hardware source
-    for parameter changes. Sends out new exposure_time_ms values when changed.
+    for parameter changes. Sends out new exposure_time, exposure_precision, exposure_units_str, and exposure_str
+    values when changed.
 
     Always uses profile 0 for camera exposure.
     """
-    def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource]):
+    def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource]) -> None:
         super().__init__()
         self.__hardware_source_stream = hardware_source_stream.add_ref()
         # use weak_partial to avoid self reference and facilitate no-close.
         self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(
-            weak_partial(CameraExposureValueStream.__hardware_source_stream_changed, self))
+            weak_partial(CameraExposureModel.__hardware_source_stream_changed, self))
         self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
         hardware_source = hardware_source_stream.value
         assert hardware_source
         self.__hardware_source_stream_changed(hardware_source)
+        self.__exposure_time = 0.0
+        self.__exposure_precision = 0
+        self.__exposure_str = str()
+        self.__exposure_units_str = str()
 
-    def about_to_delete(self) -> None:
-        if self.__frame_parameters_changed_listener:
-            self.__frame_parameters_changed_listener.close()
-            self.__frame_parameters_changed_listener = None
-        self.__hardware_source_stream_listener.close()
-        self.__hardware_source_stream_listener = typing.cast(typing.Any, None)
-        self.__hardware_source_stream.remove_ref()
-        super().about_to_delete()
+        def finalize() -> None:
+            hardware_source_stream.remove_ref()
+
+        weakref.finalize(self, finalize)
 
     def __hardware_source_stream_changed(self, hardware_source: HardwareSource.HardwareSource) -> None:
-        # when the hardware source choice changes, update the frame parameters listener.
+        # when the hardware source choice changes, update the frame parameters listener. close the old one.
         if self.__frame_parameters_changed_listener:
             self.__frame_parameters_changed_listener.close()
             self.__frame_parameters_changed_listener = None
         if hardware_source and hardware_source.features.get("is_camera"):
             camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
-            # use weak_partial to avoid self reference and facilitate no-close.
+            self.__notify(camera_hardware_source)
+            # reconfigure listener. use weak_partial to avoid self reference and facilitate no-close.
             self.__frame_parameters_changed_listener = camera_hardware_source.frame_parameters_changed_event.listen(
-                weak_partial(CameraExposureValueStream.__frame_parameters_changed, self, camera_hardware_source))
+                weak_partial(CameraExposureModel.__frame_parameters_changed, self, camera_hardware_source))
+
+    def __notify(self, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
+        # notify
+        frame_parameters = camera_hardware_source.get_frame_parameters(0)
+        self.__exposure_time = frame_parameters.exposure
+        self.__exposure_precision = camera_hardware_source.exposure_precision
+        self.__exposure_str = make_exposure_str(self.__exposure_time, self.__exposure_precision)
+        self.__exposure_units_str = exposure_units[self.__exposure_precision]
+        self.notify_property_changed("exposure_time")
+        self.notify_property_changed("exposure_precision")
+        self.notify_property_changed("exposure_str")
+        self.notify_property_changed("exposure_units_str")
 
     def __frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
         if profile_index == 0:
-            self.send_value(camera_hardware_source.get_frame_parameters(0).exposure_ms)
+            self.__notify(camera_hardware_source)
 
     @property
-    def exposure_time_ms(self) -> float:
-        return self.value if self.value else 0.0
+    def exposure_time(self) -> float:
+        return self.__exposure_time
 
-    @exposure_time_ms.setter
-    def exposure_time_ms(self, exposure_time_ms: float) -> None:
-        if exposure_time_ms and exposure_time_ms > 0:
-            # cast to typing.Any until HardwareSource protocols are implemented sanely.
-            hardware_source = typing.cast(typing.Any, self.__hardware_source_stream.value)
+    @exposure_time.setter
+    def exposure_time(self, exposure_time: float) -> None:
+        if exposure_time and exposure_time > 0:
+            hardware_source = typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.__hardware_source_stream.value)
             if hardware_source:
                 frame_parameters = hardware_source.get_frame_parameters(0)
-                frame_parameters.exposure_ms = exposure_time_ms
+                frame_parameters.exposure = exposure_time
                 hardware_source.set_frame_parameters(0, frame_parameters)
+
+    @property
+    def exposure_precision(self) -> int:
+        return self.__exposure_precision
+
+    @property
+    def exposure_str(self) -> str:
+        return self.__exposure_str
+
+    @exposure_str.setter
+    def exposure_str(self, exposure_str: str) -> None:
+        converter = Converter.FloatToStringConverter()
+        scaled_exposure = converter.convert_back(exposure_str) or 0.0
+        self.exposure_time = scaled_exposure * math.pow(10, math.trunc(self.__exposure_precision / 3) * 3)
+
+    @property
+    def exposure_units_str(self) -> str:
+        return self.__exposure_units_str
 
 
 class CameraDetailsHandler(Declarative.Handler):
@@ -1293,24 +1332,20 @@ class CameraDetailsHandler(Declarative.Handler):
     def __init__(self, hardware_source_choice: HardwareSourceChoice.HardwareSourceChoice):
         super().__init__()
 
-        # the exposure value stream gives the stream of exposure values from the hardware source choice
-        self.exposure_value_stream = typing.cast(CameraExposureValueStream, CameraExposureValueStream(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice)).add_ref())
         # the exposure model converts the exposure value stream to a property model that supports binding.
-        self.exposure_model = Model.StreamValueModel(self.exposure_value_stream)
-        # the exposure value converter converts the exposure value to a string and back in the line edit.
-        self.exposure_value_converter = Converter.PhysicalValueToStringConverter("ms", 1, "{:.4f}")
-
-        # need to explicitly watch the exposure model for a value change from the UI so that it can update the exposure
-        # value stream. this is a hack; check whether there is a better way when encountering this code in the future -
-        # something like standardized support for setting values in the value streams.
-        self.__exposure_model_listener = self.exposure_model.property_changed_event.listen(weak_partial(CameraDetailsHandler.__exposure_changed, self))
+        self.exposure_model = CameraExposureModel(HardwareSourceChoice.HardwareSourceChoiceStream(hardware_source_choice))
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_row(
             u.create_stack(
                 u.create_row(
-                    u.create_label(text=_("Camera Exposure Time")),
-                    u.create_line_edit(text="@binding(exposure_model.value, converter=exposure_value_converter)", width=80),
+                    u.create_row(
+                        u.create_label(text=_("Camera Exposure Time")),
+                        u.create_label(text=_(" (")),
+                        u.create_label(text="@binding(exposure_model.exposure_units_str)"),
+                        u.create_label(text=_(")")),
+                    ),
+                    u.create_line_edit(text="@binding(exposure_model.exposure_str)", width=80),
                     u.create_stretch(),
                     spacing=8
                 )
@@ -1319,17 +1354,8 @@ class CameraDetailsHandler(Declarative.Handler):
         )
 
     def close(self) -> None:
-        self.__exposure_model_listener.close()
-        self.__exposure_model_listener = typing.cast(typing.Any, None)
-        self.exposure_model.close()
         self.exposure_model = typing.cast(typing.Any, None)
-        self.exposure_value_stream.remove_ref()
-        self.exposure_value_stream = typing.cast(typing.Any, None)
         super().close()
-
-    def __exposure_changed(self, k: str) -> None:
-        if k == "value":
-            self.exposure_value_stream.exposure_time_ms = self.exposure_model.value if self.exposure_model.value else 0.0
 
 
 def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: stem_controller.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
