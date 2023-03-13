@@ -22,7 +22,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
         scan_hardware_source = self.setup_scan_hardware_source(instrument)
         camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
-        HardwareSource.HardwareSourceManager().hardware_sources = []
+        HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
         self.instrument = instrument

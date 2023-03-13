@@ -29,7 +29,6 @@ from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
-    from nion.swift.model import DataItem
     from nion.swift.model import DisplayItem
     from nion.instrumentation import camera_base
     from nion.instrumentation import scan_base
@@ -205,7 +204,6 @@ class STEMController(Observable.Observable):
         self.__drift_region: typing.Optional[Geometry.FloatRect] = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_channel_map : typing.Dict[str, DataItem.DataItem] = dict()
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
@@ -214,7 +212,7 @@ class STEMController(Observable.Observable):
         self.__drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None
 
     def close(self) -> None:
-        self.__scan_context_channel_map = typing.cast(typing.Any, None)
+        pass
 
     def reset(self) -> None:
         self.__probe_position = None
@@ -231,7 +229,6 @@ class STEMController(Observable.Observable):
         self.__drift_region = None
         self.__drift_rotation = 0.0
         self.__drift_settings = DriftCorrectionSettings()
-        self.__scan_context_channel_map.clear()
 
     # configuration methods
 
@@ -259,8 +256,16 @@ class STEMController(Observable.Observable):
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
+        # for testing
         if self.__scan_controller:
             return self.__scan_controller
+        # prefer the primary scan_hardware_source. this is implemented a bit funny for
+        # backwards compatibility, with reverse logic.
+        for component in Registry.get_components_by_type("scan_hardware_source"):
+            scan_hardware_source = typing.cast("scan_base.ScanHardwareSource", component)
+            if not scan_hardware_source.scan_device.scan_device_is_secondary:
+                return scan_hardware_source
+        # otherwise return the only registered hardware source
         return typing.cast(typing.Optional["scan_base.ScanHardwareSource"],
                            Registry.get_component("scan_hardware_source"))
 
@@ -389,15 +394,11 @@ class STEMController(Observable.Observable):
             self.notify_property_changed("drift_settings")
 
     def disconnect_probe_connections(self) -> None:
-        self.__scan_context_channel_map = dict()
         self.scan_context_data_items_changed_event.fire()
 
-    def _update_scan_channel_map(self, channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
-        # old_scan_context_channel_map = copy.copy(self.__scan_context_channel_map)
-        self.__scan_context_channel_map.update(channel_map)
+    def data_channels_updated(self) -> None:
         # always fire this even if the map is unchanged; properties (channel enabled) which affect
         # downstream filtering might have changed.
-        # if old_scan_context_channel_map != self.__scan_context_channel_map:
         self.scan_context_data_items_changed_event.fire()
 
     @property
@@ -831,13 +832,15 @@ class DisplayItemListModel(Observable.Observable):
                     if graphic.graphic_id == graphic_id:
                         display_item.remove_graphic(graphic).close()
 
+
 def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None]) -> DisplayItemListModel:
     def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
-        scan_controller = stem_controller.scan_controller
-        if scan_controller:
-            context_data_channels = scan_controller.get_enabled_context_data_channels()
-            for data_channel in context_data_channels:
-                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, data_channel.channel_id)
+        # acts as a filter for the display item list model.
+        scan_hardware_source = stem_controller.scan_controller
+        if scan_hardware_source:
+            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in scan_hardware_source.get_enabled_channel_indexes()]
+            for data_channel_id in data_channel_ids:
+                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, data_channel_id)
                 if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
                     return True
         return False

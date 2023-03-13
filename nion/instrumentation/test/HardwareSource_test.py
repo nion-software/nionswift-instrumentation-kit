@@ -107,7 +107,7 @@ class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
         super().__init__("described_hardware_source", "DescribedHardwareSource")
         self.add_data_channel()
         if processed:
-            self.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect.unit_rect()))
+            self.add_channel_processor(0, HardwareSource.SumProcessor())
         self.sleep = sleep
         self.shape = shape
         self.exposure = 0.0
@@ -124,7 +124,7 @@ class SummedHardwareSource(HardwareSource.ConcreteHardwareSource):
     def __init__(self, sleep=0.05):
         super().__init__("summed_hardware_source", "SummedHardwareSource")
         self.add_data_channel()
-        self.add_channel_processor(0, HardwareSource.SumProcessor(Geometry.FloatRect.unit_rect()))
+        self.add_channel_processor(0, HardwareSource.SumProcessor())
         self.sleep = sleep
         self.image = numpy.zeros((256, 256))
         self.exposure = 0.0
@@ -240,6 +240,12 @@ class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
         self.stages_per_frame = 1
         self.blanked = False
         self.positioned = False
+
+    def get_channel_count(self):
+        return 2
+
+    def get_channel_id(self, channel_index):
+        return "ab"[channel_index]
 
     @property
     def scanning(self):
@@ -810,7 +816,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             data_item = DataItem.DataItem(data)
             document_model.append_data_item(data_item)
             document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, "a"), data_item)
-            hardware_source.data_channels[0].update(DataAndMetadata.new_data_and_metadata(data), "complete", None, None, None, None)
+            hardware_source._data_channel_manager._test_update_data_channel(DataAndMetadata.new_data_and_metadata(data))
             hardware_source.sleep = 0.20
             hardware_source.start_playing()
             time.sleep(0.02)

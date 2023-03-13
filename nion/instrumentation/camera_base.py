@@ -1308,7 +1308,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
         if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
-            self.processor = HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0)))
+            self.processor = HardwareSource.SumProcessor()
         self.features["has_processed_channel"] = self.processor is not None
         if hasattr(camera_settings, "masks"):
             self.features["has_masked_sum_option"] = True
@@ -1427,12 +1427,6 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
         return None
-
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        return self.hardware_source_id
 
     @property
     def camera_settings(self) -> CameraSettings:
@@ -1916,7 +1910,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if self.__camera_category.lower() == "eels":
             self.features["is_eels_camera"] = True
         if getattr(camera, "has_processed_channel", True if self.__camera_category.lower() == "eels" else False):
-            self.processor = HardwareSource.SumProcessor(Geometry.FloatRect(Geometry.FloatPoint(0.25, 0.0), Geometry.FloatSize(0.5, 1.0)))
+            self.processor = HardwareSource.SumProcessor()
         self.features["has_processed_channel"] = self.processor is not None
         if hasattr(camera_settings, "masks"):
             self.features["has_masked_sum_option"] = True
@@ -2063,12 +2057,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def grab_buffer(self, count: int, *, start: typing.Optional[int] = None, **kwargs: typing.Any) -> typing.Optional[typing.List[typing.List[DataAndMetadata.DataAndMetadata]]]:
         return None
-
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        return self.hardware_source_id
 
     @property
     def camera_settings(self) -> CameraSettings:

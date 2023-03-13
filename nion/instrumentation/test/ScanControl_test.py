@@ -14,7 +14,6 @@ import uuid
 import numpy
 
 from nion.instrumentation import AcquisitionPreferences
-from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
@@ -373,9 +372,9 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertNotIn("autostem", metadata_source.metadata["hardware_source"])
                 self.assertEqual(scan_hardware_source.stem_controller.GetVal("EHT"), Metadata.get_metadata_value(metadata_source, "stem.high_tension"))
                 self.assertEqual(scan_hardware_source.stem_controller.GetVal("C10"), Metadata.get_metadata_value(metadata_source, "stem.defocus"))
-                self.assertEqual(channel_index, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
-                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).channel_id + "_subscan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
-                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).name + " SubScan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
+                self.assertEqual(channel_index % 4, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_index"))
+                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).channel_id, Metadata.get_metadata_value(metadata_source, "stem.scan.channel_id"))
+                self.assertEqual(scan_hardware_source.get_channel_state(channel_index % 4).name + " Subscan", Metadata.get_metadata_value(metadata_source, "stem.scan.channel_name"))
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
                 self.assertEqual(0.0, Metadata.get_metadata_value(metadata_source, "stem.scan.center_x_nm"))
                 self.assertAlmostEqual(frame_parameters.size[0] * frame_parameters.subscan_fractional_size[0] * frame_parameters.size[1] * frame_parameters.subscan_fractional_size[1] * frame_parameters.pixel_time_us / 1E6, Metadata.get_metadata_value(metadata_source, "stem.scan.frame_time"))
@@ -1422,6 +1421,24 @@ class TestScanControlClass(unittest.TestCase):
             display_item.remove_graphic(display_item.graphics[0]).close()
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
+    def test_facade_view_task_with_multiple_channels(self):
+        with self.__test_context() as test_context:
+            hardware_source = test_context.scan_hardware_source
+            api = Facade.get_api("~1.0", "~1.0")
+            hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
+            scan_frame_parameters = hardware_source_facade.get_frame_parameters_for_profile_by_index(0)
+            view_task = hardware_source_facade.create_view_task(scan_frame_parameters, channels_enabled=[True, True])
+            with contextlib.closing(view_task):
+                data_and_metadata_list1 = view_task.grab_next_to_finish()
+                self.assertTrue(hardware_source_facade.is_playing)
+                data_and_metadata_list2 = view_task.grab_immediate()
+                data_and_metadata_list3 = view_task.grab_next_to_start()
+                self.assertEqual(2, len(data_and_metadata_list1))
+                self.assertIsNotNone(data_and_metadata_list1[0].data)
+                self.assertIsNotNone(data_and_metadata_list1[1].data)
+                self.assertIsNotNone(data_and_metadata_list2[0].data)
+                self.assertIsNotNone(data_and_metadata_list3[0].data)
+
     def test_facade_record_data_with_immediate_close(self):
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
@@ -1433,9 +1450,9 @@ class TestScanControlClass(unittest.TestCase):
             scan_frame_parameters["ac_line_sync"] = False
             scan_frame_parameters["ac_frame_sync"] = False
             # this tests an issue for a race condition where thread for record task isn't started before the task
-            # is canceled, resulting in the close waiting for the thread and the thread waiting for the acquire.
+            # is canceled, resulting in the close waiting for the thread and the thread waiting to acquire.
             # this reduces the problem, but it's still possible that during external sync, the acquisition starts
-            # before being canceled and must timeout.
+            # before being canceled and must time out.
             with contextlib.closing(hardware_source_facade.create_record_task(scan_frame_parameters)) as task:
                 pass
 

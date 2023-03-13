@@ -171,11 +171,8 @@ class VideoSourceStateController:
     def __acquisition_state_changed(self, is_playing: bool) -> None:
         self.queue_task(self.__update_buttons)
 
-    def __data_channel_state_changed(self, data_channel: HardwareSource.DataChannel) -> None:
-        if data_channel.is_started and data_channel.state:
-            self.acquisition_state_model.value = data_channel.state
-        else:
-            self.acquisition_state_model.value = "error" if data_channel.is_error else "stopped"
+    def __data_channel_state_changed(self, data_channel_event_args: HardwareSource.DataChannelEventArgs) -> None:
+        self.acquisition_state_model.value = data_channel_event_args.data_channel_state
 
 
 class VideoDisplayPanelController:
@@ -365,7 +362,7 @@ class VideoSourcePanel(Panel.Panel):
 
         self.__hardware_source_widgets: typing.Dict[str, VideoSourceWidget] = dict()
 
-        hardware_sources = HardwareSource.HardwareSourceManager().hardware_sources
+        hardware_sources = list(HardwareSource.HardwareSourceManager().hardware_sources)
         hardware_sources.sort(key=lambda hardware_source: hardware_source.display_name or _("Unknown"))
 
         def hardware_source_added(hardware_source: HardwareSource.HardwareSource) -> None:

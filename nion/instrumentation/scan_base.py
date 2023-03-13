@@ -255,12 +255,22 @@ class ScanFrameParameters(ParametersBase):
         self.set_parameter("channel_indexes_enabled", list(value) if value is not None else None)
 
     @property
+    def channel_variant(self) -> typing.Optional[str]:
+        return typing.cast(typing.Optional[str], self.get_parameter("channel_variant", None))
+
+    @channel_variant.setter
+    def channel_variant(self, value: typing.Optional[str]) -> None:
+        self.set_parameter("channel_variant", value)
+
+    # channel_override for backwards compatibility
+
+    @property
     def channel_override(self) -> typing.Optional[str]:
-        return typing.cast(typing.Optional[str], self.get_parameter("channel_override", None))
+        return self.channel_variant
 
     @channel_override.setter
     def channel_override(self, value: typing.Optional[str]) -> None:
-        self.set_parameter("channel_override", value)
+        self.channel_variant = value
 
     @property
     def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
@@ -338,7 +348,17 @@ def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], s
 
 
 # set the calibrations for this image. does not touch metadata.
-def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], channel_name: str, channel_id: str, scan_properties: typing.Mapping[str, typing.Any]) -> None:
+def update_data_channel_specifier(data_element: typing.MutableMapping[str, typing.Any], data_channel_specifier: HardwareSource.DataChannelSpecifier) -> None:
+    data_element["title"] = data_channel_specifier.channel_name
+    data_element["version"] = 1
+    data_element["channel_id"] = data_channel_specifier.channel_id  # needed to match to the channel
+    if data_channel_specifier.channel_variant:
+        data_element["channel_variant"] = data_channel_specifier.channel_variant  # needed to match to the channel
+    data_element["channel_name"] = data_channel_specifier.channel_name  # needed to match to the channel
+
+
+# set the calibrations for this image. does not touch metadata.
+def update_scan_data_element_spatial_calibrations(data_element: typing.MutableMapping[str, typing.Any], scan_frame_parameters: ScanFrameParameters, data_shape: typing.Tuple[int, int], scan_properties: typing.Mapping[str, typing.Any]) -> None:
     pixel_time_us = float(scan_properties["pixel_time_us"])
     line_time_us = float(scan_properties["line_time_us"]) if "line_time_us" in scan_properties else pixel_time_us * data_shape[1]
     center_x_nm = scan_frame_parameters.center_nm.x
@@ -352,32 +372,27 @@ def update_scan_data_element(data_element: typing.MutableMapping[str, typing.Any
         fractional_size = scan_frame_parameters.subscan_fractional_size[1] if scan_frame_parameters.subscan_fractional_size else 1.0
         pixel_size = scan_frame_parameters.subscan_pixel_size[1] if scan_frame_parameters.subscan_pixel_size else scan_frame_parameters.pixel_size[1]
         pixel_size_nm = fov_nm * fractional_size / pixel_size
-    data_element["title"] = channel_name
-    data_element["version"] = 1
-    data_element["channel_id"] = channel_id  # needed to match to the channel
-    data_element["channel_name"] = channel_name  # needed to match to the channel
-    if not "spatial_calibrations" in data_element:
-        assert len(data_shape) in (1, 2)
-        if scan_properties.get("calibration_style") == "time":
-            if len(data_shape) == 2:
-                data_element["spatial_calibrations"] = (
-                    {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
-                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-                )
-            elif len(data_shape) == 1:
-                data_element["spatial_calibrations"] = (
-                    {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
-                )
-        else:
-            if len(data_shape) == 2:
-                data_element["spatial_calibrations"] = (
-                    {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
-                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-                )
-            elif len(data_shape) == 1:
-                data_element["spatial_calibrations"] = (
-                    {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
-                )
+    assert len(data_shape) in (1, 2)
+    if scan_properties.get("calibration_style") == "time":
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": line_time_us / 1E6, "units": "s"},
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
+        elif len(data_shape) == 1:
+            data_element["spatial_calibrations"] = (
+                {"offset": 0.0, "scale": pixel_time_us / 1E6, "units": "s"}
+            )
+    else:
+        if len(data_shape) == 2:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_y_nm - pixel_size_nm * data_shape[0] * 0.5, "scale": pixel_size_nm, "units": "nm"},
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
+        elif len(data_shape) == 1:
+            data_element["spatial_calibrations"] = (
+                {"offset": -center_x_nm - pixel_size_nm * data_shape[1] * 0.5, "scale": pixel_size_nm, "units": "nm"}
+            )
 
 
 def update_scan_metadata(scan_metadata: typing.MutableMapping[str, typing.Any], hardware_source_id: str, display_name: str, scan_frame_parameters: ScanFrameParameters, scan_id: typing.Optional[uuid.UUID], scan_properties: typing.Mapping[str, typing.Any]) -> None:
@@ -537,10 +552,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             _scan_properties = _data_element["properties"]
             scan_id = self.__scan_id
             channel_name = self.__device.get_channel_name(channel_index)
-            channel_override = self.__frame_parameters.channel_override
             is_subscan = self.__frame_parameters.subscan_pixel_size and not self.__frame_parameters.subscan_type_partial
-            channel_id = channel_override or (channel_id + ("_subscan" if is_subscan else ""))
-
+            # channel variant can be passed back from the acquisition device; but if it isn't, then subscan is
+            # added if the subscan_pixel_size is set. the scan devices (modules) will still have a chance to modify
+            # the channel specifier via the DataChannelDelegateProtocol.map_data_channel_specifier before the channel
+            # specifier is used to send the data to a data channel.
+            channel_variant = self.__frame_parameters.channel_variant
+            channel_variant = channel_variant or ("subscan" if is_subscan else None)
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
             data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
@@ -548,7 +566,13 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
             if instrument_metadata:
                 data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-            update_scan_data_element(data_element, self.__frame_parameters, _data.shape, channel_name, channel_id, _scan_properties)
+            update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
+            # the spatial calibrations from the incoming data override the calculated calibrations.
+            # also, the calculated calibrations are only valid for 2D incoming data.
+            if "spatial_calibrations" in _data_element:
+                data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
+            else:
+                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
             update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.__display_name, self.__frame_parameters, scan_id, _scan_properties)
             update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.__display_name, _data.shape, self.__frame_number, channel_name, channel_id, _scan_properties)
             update_data_element(data_element, complete, sub_area, _data)
@@ -591,6 +615,7 @@ def apply_section_rect(scan_frame_parameters: ScanFrameParameters, acquisition_t
 class ScanDevice(typing.Protocol):
     scan_device_id: str
     scan_device_name: str
+    scan_device_is_secondary: bool = False
 
     def close(self) -> None: ...
     def get_channel_name(self, channel_index: int) -> str: ...
@@ -658,7 +683,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def selected_profile_index(self) -> int: raise NotImplementedError()
 
-    def set_channel_enabled(self, channel_index: int, enabled: bool) -> None: ...
     def get_frame_parameters(self, profile_index: int) -> ScanFrameParameters: ...
     def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None: ...
 
@@ -751,11 +775,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None: ...
     def get_record_frame_parameters(self) -> HardwareSource.FrameParameters: ...
     def periodic(self) -> None: ...
-    def get_enabled_channels(self) -> typing.Sequence[int]: ...
+    def get_enabled_channel_indexes(self) -> typing.Sequence[int]: ...
     def get_channel_state(self, channel_index: int) -> ChannelState: ...
-    def get_channel_enabled(self, channel_index: int) -> bool: ...
-    def get_channel_index(self, channel_id: str) -> typing.Optional[int]: ...
-    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]: ...
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
     def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
     def calculate_drift_scans(self) -> int: ...
@@ -768,18 +789,12 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def increase_pmt(self, channel_index: int) -> None: ...
     def decrease_pmt(self, channel_index: int) -> None: ...
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int: ...
-    def get_data_channel_state(self, channel_index: int) -> typing.Tuple[typing.Optional[str], typing.Optional[str], bool]: ...
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
-
-    def get_enabled_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
-        # return the enabled data channels functioning as scan contexts.
-        enabled_channel_indexes = self.get_enabled_channels()
-        enabled_data_channels = [self.data_channels[channel_index] for channel_index in enabled_channel_indexes]
-        return tuple(filter(lambda data_channel: data_channel.is_context, enabled_data_channels))
+    def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]: ...
 
     record_index: int
     priority: int = 100
@@ -914,6 +929,11 @@ class ScanSettingsProtocol(typing.Protocol):
 
 
 ScanFrameParametersFactory = typing.Callable[[typing.Mapping[str, typing.Any]], ScanFrameParameters]
+
+
+# useful to avoid extra imports
+ScanDataChannelDelegateProtocol = HardwareSource.DataChannelDelegateProtocol
+ScanDataChannelSpecifier = HardwareSource.DataChannelSpecifier
 
 
 class ScanSettings(ScanSettingsProtocol):
@@ -1141,11 +1161,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_info_list = [ChannelInfo(self.__make_channel_id(channel_index), self.__device.get_channel_name(channel_index)) for channel_index in range(self.__device.channel_count)]
         for channel_info in channel_info_list:
             self.add_data_channel(channel_info.channel_id, channel_info.name, is_context=True)
-        # add an associated sub-scan channel for each device channel
-        for channel_index, channel_info in enumerate(channel_info_list):
-            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_info.channel_id , channel_info.name)
-            self.add_data_channel(subscan_channel_id, subscan_channel_name)
-        self.add_data_channel("drift", _("Drift"))
 
         self.__last_idle_position: typing.Optional[Geometry.FloatPoint] = None  # used for testing
 
@@ -1255,7 +1270,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.set_current_frame_parameters(frame_parameters)
         super().start_playing(*args, **kwargs)
 
-    def get_enabled_channels(self) -> typing.Sequence[int]:
+    def get_enabled_channel_indexes(self) -> typing.Sequence[int]:
         indexes = list()
         for index, enabled in enumerate(self.__device.channels_enabled):
             if enabled:
@@ -1538,6 +1553,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     @drift_channel_id.setter
     def drift_channel_id(self, value: typing.Optional[str]) -> None:
+        # dynamically add/remove the data channel for drift
+        if value:
+            self.add_data_channel(value, _("Drift"), variant="drift")
+        else:
+            self.remove_data_channel_with_variant("drift")
         self.__stem_controller.drift_channel_id = value
 
     @property
@@ -1572,7 +1592,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def drift_enabled(self, enabled: bool) -> None:
         if enabled:
             if not self.drift_channel_id:
-                self.drift_channel_id = self.data_channels[0].channel_id
+                self.drift_channel_id = self.get_channel_id(0)
             if not self.drift_region:
                 self.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.25, x=0.75), Geometry.FloatSize(h=0.25, w=0.25))
         else:
@@ -1634,7 +1654,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         assert not self.is_recording
         frame_parameters = copy.deepcopy(frame_parameters)
-        old_enabled_channels = self.get_enabled_channels()
+        old_enabled_channels = self.get_enabled_channel_indexes()
         channel_states = [self.get_channel_state(i) for i in range(self.__device.channel_count)]
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         if enabled_channels is not None:
@@ -1708,7 +1728,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     @property
     def channel_count(self) -> int:
-        return len(self.__device.channels_enabled)
+        return self.get_channel_count()
 
     def get_channel_state(self, channel_index: int) -> ChannelState:
         channels_enabled = self.__device.channels_enabled
@@ -1716,29 +1736,25 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         name = self.__device.get_channel_name(channel_index)
         return self.__make_channel_state(channel_index, name, channels_enabled[channel_index])
 
+    def get_channel_count(self) -> int:
+        return len(self.__device.channels_enabled)
+
     def get_channel_enabled(self, channel_index: int) -> bool:
         assert 0 <= channel_index < self.__device.channel_count
         return self.__device.channels_enabled[channel_index]
+
+    def get_channel_id(self, channel_index: int) -> typing.Optional[str]:
+        assert 0 <= channel_index < self.__device.channel_count
+        return self.__make_channel_id(channel_index)
+
+    def get_channel_name(self, channel_index: int) -> typing.Optional[str]:
+        assert 0 <= channel_index < self.__device.channel_count
+        return self.__device.get_channel_name(channel_index)
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         changed = self.__device.set_channel_enabled(channel_index, enabled)
         if changed:
             self.__channel_states_changed([self.get_channel_state(i) for i in range(self.channel_count)])
-
-    def get_subscan_channel_info(self, channel_index: int, channel_id: str, channel_name: str) -> typing.Tuple[int, str, str]:
-        return channel_index + self.channel_count, channel_id + "_subscan", " ".join((channel_name, _("SubScan")))
-
-    def get_data_channel_state(self, channel_index: int) -> typing.Tuple[typing.Optional[str], typing.Optional[str], bool]:
-        # channel indexes larger than then the channel count will be subscan channels
-        if channel_index < self.channel_count:
-            channel_state = self.get_channel_state(channel_index)
-            return channel_state.channel_id, channel_state.name, channel_state.enabled if not self.subscan_enabled else False
-        elif channel_index < self.channel_count * 2:
-            channel_state = self.get_channel_state(channel_index - self.channel_count)
-            subscan_channel_index, subscan_channel_id, subscan_channel_name = self.get_subscan_channel_info(channel_index, channel_state.channel_id, channel_state.name)
-            return subscan_channel_id, subscan_channel_name, channel_state.enabled if self.subscan_enabled else False
-        else:
-            return self.data_channels[channel_index].channel_id, self.data_channels[channel_index].name, False
 
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
@@ -1800,13 +1816,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             if list(channel_states) != list(self.__channel_states):
                 self.__pending_channel_states = list(channel_states)
                 self.__task_queue.put(channel_states_changed)
-        self.data_channel_states_updated.fire(self.data_channels)
-
-    def get_channel_index(self, channel_id: str) -> typing.Optional[int]:
-        for channel_index in range(self.channel_count):
-            if self.get_channel_state(channel_index).channel_id == channel_id:
-                return channel_index
-        return None
+        self.data_channels_updated()
 
     def __make_channel_id(self, channel_index: int) -> str:
         return "abcdefghijklmnopqrstuvwxyz"[channel_index]
@@ -1838,21 +1848,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         return self.calculate_frame_time(scan_frame_parameters)
 
-    def make_reference_key(self, **kwargs: typing.Any) -> str:
-        # NOTE: this is a public API method currently. see scanning.rst.
-        # TODO: specifying the channel key in an acquisition? and sub channels?
-        is_subscan = kwargs.get("subscan", False)
-        channel_index = kwargs.get("channel_index")
-        reference_key = kwargs.get("reference_key")
-        if reference_key:
-            return "_".join([self.hardware_source_id, str(reference_key)])
-        if channel_index is not None:
-            if is_subscan:
-                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index), "subscan"])
-            else:
-                return "_".join([self.hardware_source_id, self.__make_channel_id(channel_index)])
-        return self.hardware_source_id
-
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]:
         """Get recently acquired (buffered) data.
 
@@ -1881,8 +1876,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 for channel_index, (_data_element, channel_state) in enumerate(zip(data_element_group, enabled_channel_states)):
                     channel_name = channel_state.name
                     channel_id = channel_state.channel_id
-                    if self.subscan_enabled:
-                        channel_id += "_subscan"
+                    channel_variant = "subscan" if self.subscan_enabled else None
                     _data = _data_element["data"]
                     _scan_properties = _data_element["properties"]
 
@@ -1893,7 +1887,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                     update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
                     if instrument_metadata:
                         data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-                    update_scan_data_element(data_element, self.__frame_parameters, _data.shape, channel_name, channel_id, _scan_properties)
+                    update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
+                    # the spatial calibrations from the incoming data override the calculated calibrations.
+                    # also, the calculated calibrations are only valid for 2D incoming data.
+                    if "spatial_calibrations" in _data_element:
+                        data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
+                    else:
+                        update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
                     update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
                     update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
                     data_element["data"] = _data
@@ -1916,6 +1916,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if callable(getattr(self.__device, "calculate_flyback_pixels", None)):
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
+
+    def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]:
+        if self.data_channel_delegate:
+            return self.data_channel_delegate.get_view_data_channel_specifiers()
+        return None
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
@@ -1967,8 +1972,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.validate_probe_position()
 
     # override from the HardwareSource parent class.
-    def data_channel_map_updated(self, data_channel_map: typing.Mapping[str, DataItem.DataItem]) -> None:
-        self.__stem_controller._update_scan_channel_map(data_channel_map)
+    def data_channels_updated(self) -> None:
+        self.__stem_controller.data_channels_updated()
 
     @property
     def use_hardware_simulator(self) -> bool:
@@ -2029,7 +2034,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__drift_tracker = drift_tracker
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
-        self.__enabled_channels = scan_hardware_source.get_enabled_channels()
+        self.__enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
         scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
@@ -2064,14 +2069,14 @@ class ScanFrameDataStream(Acquisition.DataStream):
 
         self.__started = False
 
-        def update_data(data_channel: HardwareSource.DataChannel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        def update_data(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
             # when data arrives here, it will be part of the overall data item, even if it is only a partial
             # acquire of the data item. so the buffer data shape will reflect the overall data item.
             if self.__started:
                 with self.__lock:
-                    channel_index = data_channel.index
-                    if scan_hardware_source.channel_count <= data_channel.index < scan_hardware_source.channel_count * 2:
-                        channel_index -= scan_hardware_source.channel_count
+                    channel_id = data_channel_event_args.channel_id
+                    assert channel_id
+                    channel_index = scan_hardware_source.get_channel_index(channel_id)
                     channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
                     # valid_rows will represent the number of valid rows within this section, not within the overall
                     # data. so valid and available rows need to be offset by the section rect top.
@@ -2087,17 +2092,13 @@ class ScanFrameDataStream(Acquisition.DataStream):
                         buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
                         self.__available_rows[channel] = valid_rows
 
-        self.__data_channel_listeners = list()
-        for data_channel in scan_hardware_source.data_channels:
-            self.__data_channel_listeners.append(data_channel.data_channel_updated_event.listen(functools.partial(update_data, data_channel)))
+        self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(update_data)
 
     def about_to_delete(self) -> None:
         if self.__record_task:
             self.__record_task.close()
             self.__record_task = typing.cast(typing.Any, None)
-        for data_channel_listener in self.__data_channel_listeners:
-            data_channel_listener.close()
-        self.__data_channel_listeners.clear()
+        self.__data_channel_listener = typing.cast(typing.Any, None)
         super().about_to_delete()
 
     @property
@@ -2363,6 +2364,7 @@ class ScanModule(typing.Protocol):
     settings: ScanSettingsProtocol
     panel_type: typing.Optional[str] = None  # match a 'scan_panel' registry component
     panel_delegate_type: typing.Optional[str] = None  # currently unused
+    data_channel_delegate: typing.Optional[HardwareSource.DataChannelDelegateProtocol] = None
 
 
 _component_registered_listener = None
@@ -2378,6 +2380,8 @@ def run(configuration_location: pathlib.Path) -> None:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
                 stem_controller = stem_controller_module.STEMController()
             scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
+            if scan_module.data_channel_delegate:
+                scan_hardware_source.data_channel_delegate = scan_module.data_channel_delegate
             if hasattr(scan_module, "priority"):
                 setattr(scan_hardware_source, "priority", getattr(scan_module, "priority"))
             Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})
