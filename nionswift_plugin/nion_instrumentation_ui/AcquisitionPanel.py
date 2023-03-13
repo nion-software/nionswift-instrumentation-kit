@@ -1036,91 +1036,6 @@ hardware_source_channel_descriptions = {
 }
 
 
-class HardwareSourceChannelChooserHandler(Declarative.Handler):
-    """A declarative component handler for a hardware source choice channel combo box.
-
-    The hardware_source_choice parameter is the associated hardware source choice from which to build the available
-    channels.
-
-    The channel_model parameter is a model representing the persistent channel description id. It will be read and
-    written as the UI is presented, as the user changes the hardware source, and as the user makes an different
-    channel selection.
-
-    channel_descriptions is a list of channel descriptions. It is a read-only observable property.
-    channel_index is the selected index. It is a read/write observable property.
-    """
-
-    def __init__(self, hardware_source_choice: HardwareSourceChoice.HardwareSourceChoice, channel_model: Model.PropertyModel[str]):
-        super().__init__()
-        self.__hardware_source_choice = hardware_source_choice
-        self.__channel_descriptions: typing.List[HardwareSourceChannelDescription] = list()
-        self.__channel_model = channel_model
-        # use weak_partial to avoid self reference and facilitate no-close.
-        self.__hardware_sources_list_changed_listener = hardware_source_choice.hardware_sources_model.property_changed_event.listen(
-            weak_partial(HardwareSourceChannelChooserHandler.__update_channel_descriptions, self))
-        self.__hardware_source_changed_listener = hardware_source_choice.hardware_source_index_model.property_changed_event.listen(
-            weak_partial(HardwareSourceChannelChooserHandler.__update_channel_descriptions, self))
-        self.__update_channel_descriptions("value")
-        u = Declarative.DeclarativeUI()
-        self.ui_view = u.create_combo_box(items_ref="@binding(channel_descriptions)", current_index="@binding(channel_index)")
-
-    def close(self) -> None:
-        self.__hardware_sources_list_changed_listener.close()
-        self.__hardware_sources_list_changed_listener = typing.cast(typing.Any, None)
-        self.__hardware_source_changed_listener.close()
-        self.__hardware_source_changed_listener = typing.cast(typing.Any, None)
-        self.__channel_model = typing.cast(typing.Any, None)
-        self.__hardware_source_choice = typing.cast(typing.Any, None)
-        super().close()
-
-    @property
-    def channel_descriptions(self) -> typing.List[HardwareSourceChannelDescription]:
-        return self.__channel_descriptions
-
-    @channel_descriptions.setter
-    def channel_descriptions(self, value: typing.List[HardwareSourceChannelDescription]) -> None:
-        # hack to work around lack of read-only binding
-        pass
-
-    @property
-    def channel_index(self) -> typing.Optional[int]:
-        # map from the channel model (channel identifier string) to a channel index.
-        m = {o.channel_id: o for o in self.__channel_descriptions}
-        return self.__channel_descriptions.index(m[self.__channel_model.value]) if self.__channel_model.value in m else None
-
-    @channel_index.setter
-    def channel_index(self, value: typing.Optional[int]) -> None:
-        # map from the channel index to the channel model (channel identifier string).
-        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else "image"
-        if channel_id != self.__channel_model.value:
-            self.__channel_model.value = channel_id
-            self.notify_property_changed("channel_index")
-
-    def __update_channel_descriptions(self, k: str) -> None:
-        # when the list of hardware sources changes or the selected hardware source changes, the list of available
-        # channels needs to be updated. the selected channel may also be updated if it is no longer available.
-        if k == "value":
-            hardware_source = self.__hardware_source_choice.hardware_source
-            if hardware_source and hardware_source.features.get("is_camera", False):
-                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-                if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
-                    channel_descriptions = [hardware_source_channel_descriptions["ronchigram"]]
-                elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
-                    channel_descriptions = [hardware_source_channel_descriptions["eels_spectrum"], hardware_source_channel_descriptions["eels_image"]]
-                else:
-                    channel_descriptions = [hardware_source_channel_descriptions["image"]]
-            else:
-                channel_descriptions = [hardware_source_channel_descriptions["image"]]
-            output = hardware_source_channel_descriptions.get(self.__channel_model.value or str())
-            if not output or output not in channel_descriptions:
-                output = channel_descriptions[0]
-            channel_descriptions_changed = channel_descriptions != self.__channel_descriptions
-            self.__channel_descriptions = channel_descriptions
-            self.__channel_model.value = output.channel_id
-            if channel_descriptions_changed:
-                self.notify_property_changed("channel_descriptions")
-
-
 @dataclasses.dataclass
 class AcquisitionDeviceResult:
     """Define result values for acquisition device component build function.
@@ -1240,32 +1155,41 @@ class CameraSettingsModel(Observable.Observable):
     Listens to the hardware_source_stream for changes. And then listens to the current hardware source
     for parameter changes. Sends out new exposure_time, exposure_precision, exposure_units_str, and exposure_str
     values when changed.
+
+    channel_descriptions is a list of channel descriptions. It is a read-only observable property.
+    channel_index is the selected index. It is a read/write observable property.
     """
     def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource], configuration: Schema.Entity) -> None:
         super().__init__()
         self.__hardware_source_stream = hardware_source_stream.add_ref()
         # the camera exposure model is a property model made by observing camera_exposure in the configuration.
         self.__camera_config_exposure_model = Model.PropertyChangedPropertyModel[float](configuration, "camera_exposure")
-        # use weak_partial to avoid self reference and facilitate no-close.
-        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(weak_partial(CameraSettingsModel.__hardware_source_stream_changed, self))
-        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
-        hardware_source = hardware_source_stream.value
-        assert hardware_source
-        self.__hardware_source_stream_changed(hardware_source)
+        # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
+        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
+        # internal values
         self.__exposure_time = 0.0
         self.__exposure_precision = 0
         self.__exposure_str: typing.Optional[str] = None
         self.__exposure_placeholder_str = str()
         self.__exposure_units_str = str()
+        self.__channel_descriptions: typing.List[HardwareSourceChannelDescription] = list()
 
+        # use weak_partial to avoid self reference and facilitate no-close.
+        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(weak_partial(CameraSettingsModel.__hardware_source_stream_changed, self))
         self.__exposure_changed_listener = self.__camera_config_exposure_model.property_changed_event.listen(weak_partial(CameraSettingsModel.__handle_exposure_changed, self))
+        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+
+        hardware_source = hardware_source_stream.value
+        assert hardware_source
+
+        self.__hardware_source_stream_changed(hardware_source)
+        self.__handle_exposure_changed("value")
+        self.__update_channel_descriptions()
 
         def finalize() -> None:
             hardware_source_stream.remove_ref()
 
         weakref.finalize(self, finalize)
-
-        self.__handle_exposure_changed("value")
 
     def __handle_exposure_changed(self, property: str) -> None:
         if property == "value":
@@ -1284,6 +1208,7 @@ class CameraSettingsModel(Observable.Observable):
             # reconfigure listener. use weak_partial to avoid self reference and facilitate no-close.
             self.__frame_parameters_changed_listener = camera_hardware_source.current_frame_parameters_changed_event.listen(
                 weak_partial(CameraSettingsModel.__frame_parameters_changed, self, camera_hardware_source))
+            self.__update_channel_descriptions()
 
     def __notify(self, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
         # notify
@@ -1302,6 +1227,51 @@ class CameraSettingsModel(Observable.Observable):
 
     def __frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters) -> None:
         self.__notify(camera_hardware_source)
+
+    @property
+    def channel_descriptions(self) -> typing.List[HardwareSourceChannelDescription]:
+        return self.__channel_descriptions
+
+    @channel_descriptions.setter
+    def channel_descriptions(self, value: typing.List[HardwareSourceChannelDescription]) -> None:
+        # hack to work around lack of read-only binding
+        pass
+
+    @property
+    def channel_index(self) -> typing.Optional[int]:
+        # map from the channel model (channel identifier string) to a channel index.
+        m = {o.channel_id: o for o in self.__channel_descriptions}
+        return self.__channel_descriptions.index(m[self.__camera_hardware_source_channel_model.value]) if self.__camera_hardware_source_channel_model.value in m else None
+
+    @channel_index.setter
+    def channel_index(self, value: typing.Optional[int]) -> None:
+        # map from the channel index to the channel model (channel identifier string).
+        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else "image"
+        if channel_id != self.__camera_hardware_source_channel_model.value:
+            self.__camera_hardware_source_channel_model.value = channel_id
+            self.notify_property_changed("channel_index")
+
+    def __update_channel_descriptions(self) -> None:
+        # when the list of hardware sources changes or the selected hardware source changes, the list of available
+        # channels needs to be updated. the selected channel may also be updated if it is no longer available.
+        camera_hardware_source = self.camera_hardware_source
+        if camera_hardware_source:
+            if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
+                channel_descriptions = [hardware_source_channel_descriptions["ronchigram"]]
+            elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
+                channel_descriptions = [hardware_source_channel_descriptions["eels_spectrum"], hardware_source_channel_descriptions["eels_image"]]
+            else:
+                channel_descriptions = [hardware_source_channel_descriptions["image"]]
+        else:
+            channel_descriptions = [hardware_source_channel_descriptions["image"]]
+        output = hardware_source_channel_descriptions.get(self.__camera_hardware_source_channel_model.value or str())
+        if not output or output not in channel_descriptions:
+            output = channel_descriptions[0]
+        channel_descriptions_changed = channel_descriptions != self.__channel_descriptions
+        self.__channel_descriptions = channel_descriptions
+        self.__camera_hardware_source_channel_model.value = output.channel_id
+        if channel_descriptions_changed:
+            self.notify_property_changed("channel_descriptions")
 
     @property
     def exposure_time(self) -> typing.Optional[float]:
@@ -1348,6 +1318,10 @@ class CameraSettingsModel(Observable.Observable):
             camera_frame_parameters.exposure = self.__camera_config_exposure_model.value or camera_hardware_source.get_current_frame_parameters().exposure
             return camera_frame_parameters
         return None
+
+    @property
+    def camera_channel(self) -> typing.Optional[str]:
+        return self.__camera_hardware_source_channel_model.value
 
 
 class CameraDetailsHandler(Declarative.Handler):
@@ -1484,7 +1458,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
 
         # the camera settings represent the settings for the camera. in addition to handling the model updates,
         # it can provide the current camera_hardware_source and camera_frame_parameters.
-        self.__camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
+        self._camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
             self.__camera_hardware_source_choice_handler.hardware_source_choice), configuration)
 
         # the scan hardware source handler is a declarative component handler that facilitates a combo box.
@@ -1494,9 +1468,6 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             lambda hardware_source: hardware_source.features.get("is_scanning", False),
             title=_("Scan Detector"),
             force_enabled=True)
-
-        # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
-        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
 
         # the scan width model is a property model made by observing the scan_width property in the configuration.
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
@@ -1540,7 +1511,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         column_items.append(
             u.create_row(
                 u.create_component_instance(identifier="camera-hardware-source-choice-component"),
-                u.create_component_instance(identifier="acquisition-device-component-output"),
+                u.create_combo_box(items_ref="@binding(_camera_settings_model.channel_descriptions)", current_index="@binding(_camera_settings_model.channel_index)"),
                 u.create_stretch(),
                 spacing=8
             )
@@ -1586,12 +1557,11 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.__scan_context_description_value_stream = typing.cast(typing.Any, None)
         self.scan_context_value_model.close()
         self.scan_context_value_model = typing.cast(typing.Any, None)
-        self.__camera_hardware_source_channel_model.close()
-        self.__camera_hardware_source_channel_model = typing.cast(typing.Any, None)
         self.scan_width.close()
         self.scan_width = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_handler = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice_handler = typing.cast(typing.Any, None)
+        self._camera_settings_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
@@ -1600,22 +1570,21 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             return self.__camera_hardware_source_choice_handler
         elif component_id == "scan-hardware-source-choice-component":
             return self.__scan_hardware_source_choice_handler
-        elif component_id == "acquisition-device-component-output":
-            return HardwareSourceChannelChooserHandler(self.__camera_hardware_source_choice_handler.hardware_source_choice, self.__camera_hardware_source_channel_model)
         elif component_id == "acquisition-device-component-details":
-            return CameraDetailsHandler(self.__camera_settings_model)
+            return CameraDetailsHandler(self._camera_settings_model)
         return None
 
     def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
-        camera_hardware_source = self.__camera_settings_model.camera_hardware_source
-        camera_frame_parameters = self.__camera_settings_model.camera_frame_parameters
+        camera_hardware_source = self._camera_settings_model.camera_hardware_source
+        camera_frame_parameters = self._camera_settings_model.camera_frame_parameters
+        camera_channel = self._camera_settings_model.camera_channel
         assert camera_hardware_source
         assert camera_frame_parameters
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_handler.hardware_source)
         scan_context_description = self.__scan_context_description_value_stream.value
         assert scan_context_description
-        return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, camera_frame_parameters, self.__camera_hardware_source_channel_model.value)
+        return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, camera_frame_parameters, camera_channel)
 
 
 def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
@@ -1697,11 +1666,8 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
         # the camera settings represent the settings for the camera. in addition to handling the model updates,
         # it can provide the current camera_hardware_source and camera_frame_parameters.
-        self.__camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
+        self._camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
             self.__camera_hardware_source_choice_handler.hardware_source_choice), configuration)
-
-        # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
-        self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
 
         # a camera is always valid.
         self.acquire_valid_value_stream = Stream.ConstantStream(True)
@@ -1710,7 +1676,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         self.ui_view = u.create_column(
             u.create_row(
                 u.create_component_instance(identifier="acquisition-device-component"),
-                u.create_component_instance(identifier="acquisition-device-component-output"),
+                u.create_combo_box(items_ref="@binding(_camera_settings_model.channel_descriptions)", current_index="@binding(_camera_settings_model.channel_index)"),
                 u.create_stretch(),
                 spacing=8
             ),
@@ -1723,32 +1689,29 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         )
 
     def close(self) -> None:
-        self.__camera_hardware_source_channel_model.close()
-        self.__camera_hardware_source_channel_model = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice_handler = typing.cast(typing.Any, None)
-        self.__camera_settings_model = typing.cast(typing.Any, None)
+        self._camera_settings_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
         if component_id == "acquisition-device-component":
             return self.__camera_hardware_source_choice_handler
-        elif component_id == "acquisition-device-component-output":
-            return HardwareSourceChannelChooserHandler(self.__camera_hardware_source_choice_handler.hardware_source_choice, self.__camera_hardware_source_channel_model)
         elif component_id == "acquisition-device-component-details":
-            return CameraDetailsHandler(self.__camera_settings_model)
+            return CameraDetailsHandler(self._camera_settings_model)
         return None
 
     def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
         # grab the camera hardware source and frame parameters
-        camera_hardware_source = self.__camera_settings_model.camera_hardware_source
-        camera_frame_parameters = self.__camera_settings_model.camera_frame_parameters
+        camera_hardware_source = self._camera_settings_model.camera_hardware_source
+        camera_frame_parameters = self._camera_settings_model.camera_frame_parameters
+        camera_channel = self._camera_settings_model.camera_channel
         assert camera_hardware_source
         assert camera_frame_parameters
 
-        return build_camera_device_data_stream(camera_hardware_source, camera_frame_parameters, self.__camera_hardware_source_channel_model.value)
+        return build_camera_device_data_stream(camera_hardware_source, camera_frame_parameters, camera_channel)
 
 
 def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource) -> AcquisitionDeviceResult:
