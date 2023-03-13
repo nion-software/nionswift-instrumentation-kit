@@ -1831,6 +1831,7 @@ Schema.entity("acquisition_device_component_synchronized_scan", AcquisitionDevic
     "camera_channel_id": Schema.prop(Schema.STRING),
     "scan_device_id": Schema.prop(Schema.STRING),
     "scan_width": Schema.prop(Schema.INT, default=32, optional=True),
+    "camera_exposure": Schema.prop(Schema.FLOAT, optional=True),
 })
 
 # ScanAcquisitionDeviceComponentHandler
@@ -2136,11 +2137,31 @@ class AcquisitionController(Declarative.Handler):
                                                                        "acquisition_method_components",
                                                                        PreferencesButtonHandler(document_controller))
 
+        def find_component_configuration(component_type: str) -> Schema.Entity:
+            components_key = "acquisition_device_components"
+            component_id = "acquisition_device_component_" + component_type
+
+            # make a map from each component id to the associated component.
+            component_map: typing.Dict[str, Schema.Entity] = dict()
+
+            for component_entity_ in typing.cast(typing.Sequence[Schema.Entity], acquisition_configuration._get_array_items(components_key)):
+                component_map[component_entity_.entity_type.entity_id] = component_entity_
+
+            component_entity = typing.cast(typing.Optional[Schema.Entity], component_map.get(component_id))
+            if not component_entity:
+                entity_type = Schema.get_entity_type(component_id)
+                component_entity = entity_type.create() if entity_type else None
+                if component_entity:
+                    acquisition_configuration._append_item(components_key, component_entity)
+
+            assert component_entity
+            return component_entity
+
         # create components for the scan, synchronized scan, and camera controls
         device_component_handlers = [
-            ScanAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences),
-            SynchronizedScanAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences),
-            CameraAcquisitionDeviceComponentHandler(acquisition_configuration, acquisition_preferences)
+            ScanAcquisitionDeviceComponentHandler(find_component_configuration("scan"), acquisition_preferences),
+            SynchronizedScanAcquisitionDeviceComponentHandler(find_component_configuration("synchronized_scan"), acquisition_preferences),
+            CameraAcquisitionDeviceComponentHandler(find_component_configuration("camera"), acquisition_preferences)
         ]
 
         # create a list of handlers to be returned from create_handler. this is an experimental system for components.
