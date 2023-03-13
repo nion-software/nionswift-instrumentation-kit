@@ -54,7 +54,7 @@ class ApplicationDataInMemory:
 
 
 def make_camera_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
-    return AcquisitionPanel.build_camera_device_data_stream(test_context.camera_hardware_source)
+    return AcquisitionPanel.build_camera_device_data_stream(test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
 
 
 def make_scan_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
@@ -65,7 +65,7 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context) 
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
-    return AcquisitionPanel.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source)
+    return AcquisitionPanel.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
 
 
 def make_sequence_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
