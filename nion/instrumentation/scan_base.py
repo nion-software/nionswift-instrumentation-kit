@@ -1145,6 +1145,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
 
+        # fired when the current frame parameters change
+        self.current_frame_parameters_changed_event = Event.Event()
+
         self.__channel_states_lock = threading.RLock()
         self.__channel_states: typing.List[ChannelState] = list()
         self.__pending_channel_states: typing.Optional[typing.List[ChannelState]] = None
@@ -1721,6 +1724,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__device.set_frame_parameters(device_frame_parameters)
             self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
+        self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
         return copy.copy(self.__frame_parameters)

@@ -1172,7 +1172,7 @@ class PartialData:
 class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     """Define the camera hardware source protocol.
 
-     This protocol is not intended to be implemented outside of the instrumentation kit.
+     This protocol is not intended to be implemented outside the instrumentation kit.
 
      The public methods are intended to be stable as much as possible. When
      """
@@ -1226,7 +1226,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def selected_profile_index(self) -> int: raise NotImplementedError()
 
-    # private. do not use outside of instrumentation-kit.
+    # private. do not use outside instrumentation-kit.
 
     @property
     def modes(self) -> typing.Sequence[str]: raise NotImplementedError()
@@ -1243,7 +1243,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     profile_changed_event: Event.Event
     frame_parameters_changed_event: Event.Event
-    current_frame_parameters_changed_event: Event.Event
     log_messages_event: Event.Event
 
 
@@ -1325,6 +1324,8 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         # define deprecated events. both are used in camera control panel. frame_parameter_changed_event used in scan acquisition.
         self.profile_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
+
+        # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
 
         self.__profile_changed_event_listener = self.__camera_settings.profile_changed_event.listen(self.profile_changed_event.fire)
@@ -1930,8 +1931,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.profile_changed_event = Event.Event()
 
         # frame_parameters_changed_event is used in scan acquisition. it is fired when the frame parameters change.
-        self.current_frame_parameters_changed_event = Event.Event()
         self.frame_parameters_changed_event = Event.Event()
+
+        # fired when the current frame parameters change
+        self.current_frame_parameters_changed_event = Event.Event()
 
         self.__profile_changed_event_listener = self.__camera_settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__camera_settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)

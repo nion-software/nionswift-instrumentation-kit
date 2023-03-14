@@ -334,8 +334,8 @@ class HardwareSourceManager(metaclass=Utility.Singleton):
         for f in self.aliases_updated:
             f()
 
-    def make_delegate_hardware_source(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> DelegateHardwareSource:
-        return DelegateHardwareSource(delegate, hardware_source_id, hardware_source_name)
+    def make_delegate_hardware_source(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> HardwareSource:
+        raise NotImplementedError()
 
     def register_document_model(self, document_model: DocumentModelInterface) -> HardwareSourceBridge:
         return HardwareSourceBridge(document_model)
@@ -848,6 +848,7 @@ class HardwareSource(typing.Protocol):
     def stop_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
+    def get_current_frame_parameters(self) -> FrameParameters: ...
     def set_current_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
 
     # properties
@@ -889,6 +890,7 @@ class HardwareSource(typing.Protocol):
     data_channel_start_event: Event.Event
     data_channel_stop_event: Event.Event
     data_channel_state_changed_event: Event.Event
+    current_frame_parameters_changed_event: Event.Event
 
     def add_data_channel(self, channel_id: typing.Optional[str] = None, name: typing.Optional[str] = None, *, variant: typing.Optional[str] = None, is_context: bool = False) -> None: ...
     def add_channel_processor(self, channel_index: int, processor: SumProcessor) -> None: ...
@@ -1497,6 +1499,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     # some dummy methods to pass type checking. the hardware source needs to be refactored.
 
+    def get_current_frame_parameters(self) -> FrameParameters:
+        raise NotImplementedError()
+
     def set_current_frame_parameters(self, frame_parameters: FrameParameters) -> None:
         pass
 
@@ -1563,25 +1568,6 @@ class DelegateAcquisitionTask(AcquisitionTask):
     def _stop_acquisition(self) -> None:
         self.__delegate.stop_acquisition()
         super()._stop_acquisition()
-
-
-# used for Facade backwards compatibility
-class DelegateHardwareSource(ConcreteHardwareSource):
-
-    def __init__(self, delegate: DelegateAcquisitionTaskProtocol, hardware_source_id: str, hardware_source_name: str) -> None:
-        super().__init__(hardware_source_id, hardware_source_name)
-        self.__delegate = delegate
-        self.features["is_video"] = True
-        self.add_data_channel()
-
-    def _create_acquisition_view_task(self) -> DelegateAcquisitionTask:
-        return DelegateAcquisitionTask(self.__delegate, self.hardware_source_id, self.display_name)
-
-    def set_record_frame_parameters(self, frame_parameters: FrameParameters) -> None:
-        raise NotImplementedError()
-
-    def get_record_frame_parameters(self) -> FrameParameters:
-        raise NotImplementedError()
 
 
 class SumProcessor(Observable.Observable):

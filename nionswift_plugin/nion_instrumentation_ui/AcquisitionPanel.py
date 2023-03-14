@@ -1150,6 +1150,76 @@ class ScanSpecifierValueStream(Stream.ValueStream[stem_controller.ScanSpecifier]
             self.send_value(scan_specifier)
 
 
+class DeviceSettingsModel(Observable.Observable):
+    """A base model of the device settings and related values of a hardware source stream.
+
+    Listens to the hardware_source_stream for changes. And then listens to the current hardware source
+    for parameter changes.
+    """
+    def __init__(self, configuration: Schema.Entity, device_id_key: str, filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]]) -> None:
+        super().__init__()
+        # the device hardware source choice model.
+        self.__hardware_source_choice_model = HardwareSourceChoiceModel(configuration, device_id_key, filter, force_enabled=True)
+        self.__hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__hardware_source_choice_model.hardware_source_choice)
+        self.__hardware_source_stream.add_ref()  # separate so hardware_source_stream has correct type
+
+        # use weak_partial to avoid self reference and facilitate no-close.
+        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(weak_partial(DeviceSettingsModel.__hardware_source_stream_changed, self))
+        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+
+        hardware_source_stream = self.__hardware_source_stream
+
+        def finalize(hardware_source_choice_model: HardwareSourceChoiceModel) -> None:
+            hardware_source_stream.remove_ref()
+            hardware_source_choice_model.close()
+
+        weakref.finalize(self, functools.partial(finalize, self.__hardware_source_choice_model))
+
+    def _finish_init(self) -> None:
+        self.__hardware_source_stream_changed(self.hardware_source)
+
+    def __hardware_source_stream_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        # when the hardware source choice changes, update the frame parameters listener. close the old one.
+        if self.__frame_parameters_changed_listener:
+            self.__frame_parameters_changed_listener.close()
+            self.__frame_parameters_changed_listener = None
+        if hardware_source and hardware_source.features.get("is_camera"):
+            # reconfigure listener. use weak_partial to avoid self reference and facilitate no-close.
+            self.__frame_parameters_changed_listener = hardware_source.current_frame_parameters_changed_event.listen(
+                weak_partial(DeviceSettingsModel.__frame_parameters_changed, self, hardware_source))
+            self._hardware_source_changed()
+            self._update_settings(hardware_source)
+
+    def _hardware_source_changed(self) -> None:
+        # subclass should override to handle hardware source change.
+        # subclass should not call.
+        pass
+
+    def _update_settings(self, hardware_source: HardwareSource.HardwareSource) -> None:
+        # subclass should override to handle settings change, but no hardware source change.
+        # subclass can call if a configuration value changes.
+        pass
+
+    def __frame_parameters_changed(self, hardware_source: HardwareSource.HardwareSource, frame_parameters: HardwareSource.FrameParameters) -> None:
+        self._update_settings(hardware_source)
+
+    @property
+    def hardware_source(self) -> typing.Optional[HardwareSource.HardwareSource]:
+        return self.__hardware_source_stream.value
+
+    @property
+    def hardware_source_choice(self) -> HardwareSourceChoice.HardwareSourceChoice:
+        return self.__hardware_source_choice_model.hardware_source_choice
+
+    @property
+    def hardware_source_choice_model(self) -> HardwareSourceChoiceModel:
+        return self.__hardware_source_choice_model
+
+    @property
+    def hardware_source_choice_stream(self) -> HardwareSourceChoice.HardwareSourceChoiceStream:
+        return self.__hardware_source_stream
+
+
 exposure_units = {0: "s", -1: "s", -2: "s", -3: "ms", -4: "ms", -5: "ms", -6: "us", -7: "us", -8: "us", -9: "ns", -10: "ns", -11: "ns"}
 exposure_format = {0: ".1", -1: ".1", -2: ".2", -3: ".1", -4: ".1", -5: ".2", -6: ".1", -7: ".1", -8: ".2", -9: ".1", -10: ".1", -11: ".2"}
 
@@ -1158,7 +1228,7 @@ def make_exposure_str(exposure: float, exposure_precision: int) -> str:
     return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
 
 
-class CameraSettingsModel(Observable.Observable):
+class CameraSettingsModel(DeviceSettingsModel):
     """A model of the camera exposure and related values of a hardware source stream.
 
     Listens to the hardware_source_stream for changes. And then listens to the current hardware source
@@ -1169,15 +1239,14 @@ class CameraSettingsModel(Observable.Observable):
     channel_index is the selected index. It is a read/write observable property.
     """
     def __init__(self, configuration: Schema.Entity) -> None:
-        super().__init__()
-        # the camera hardware source choice model.
-        self.__hardware_source_choice_model = HardwareSourceChoiceModel(configuration, "camera_device_id", lambda hardware_source: hardware_source.features.get("is_camera", False), force_enabled=True)
-        self.__hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__hardware_source_choice_model.hardware_source_choice)
-        self.__hardware_source_stream.add_ref()  # separate so hardware_source_stream has correct type
+        super().__init__(configuration, "camera_device_id", lambda hardware_source: hardware_source.features.get("is_camera", False))
+
         # the camera exposure model is a property model made by observing camera_exposure in the configuration.
         self.__camera_config_exposure_model = Model.PropertyChangedPropertyModel[float](configuration, "camera_exposure")
+
         # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
         self.__camera_hardware_source_channel_model = Model.PropertyChangedPropertyModel[str](configuration, "camera_channel_id")
+
         # internal values
         self.__exposure_time = 0.0
         self.__exposure_precision = 0
@@ -1187,60 +1256,45 @@ class CameraSettingsModel(Observable.Observable):
         self.__channel_descriptions: typing.List[HardwareSourceChannelDescription] = list()
 
         # use weak_partial to avoid self reference and facilitate no-close.
-        self.__hardware_source_stream_listener = self.__hardware_source_stream.value_stream.listen(weak_partial(CameraSettingsModel.__hardware_source_stream_changed, self))
         self.__exposure_changed_listener = self.__camera_config_exposure_model.property_changed_event.listen(weak_partial(CameraSettingsModel.__handle_exposure_changed, self))
-        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
 
-        hardware_source_stream = self.__hardware_source_stream
-        hardware_source = hardware_source_stream.value
-        assert hardware_source
+        self._finish_init()
 
-        self.__hardware_source_stream_changed(hardware_source)
         self.__handle_exposure_changed("value")
         self.__update_channel_descriptions()
 
-        def finalize(hardware_source_choice_model: HardwareSourceChoiceModel) -> None:
-            hardware_source_stream.remove_ref()
-            hardware_source_choice_model.close()
-
-        weakref.finalize(self, functools.partial(finalize, self.__hardware_source_choice_model))
-
     def __handle_exposure_changed(self, property: str) -> None:
         if property == "value":
-            camera_hardware_source = typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.__hardware_source_stream.value)
-            if camera_hardware_source:
-                self.__notify(camera_hardware_source)
+            if self.hardware_source:
+                self._update_settings(self.hardware_source)
 
-    def __hardware_source_stream_changed(self, hardware_source: HardwareSource.HardwareSource) -> None:
-        # when the hardware source choice changes, update the frame parameters listener. close the old one.
-        if self.__frame_parameters_changed_listener:
-            self.__frame_parameters_changed_listener.close()
-            self.__frame_parameters_changed_listener = None
-        if hardware_source and hardware_source.features.get("is_camera"):
-            camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-            self.__notify(camera_hardware_source)
-            # reconfigure listener. use weak_partial to avoid self reference and facilitate no-close.
-            self.__frame_parameters_changed_listener = camera_hardware_source.current_frame_parameters_changed_event.listen(
-                weak_partial(CameraSettingsModel.__frame_parameters_changed, self, camera_hardware_source))
-            self.__update_channel_descriptions()
+    @property
+    def camera_frame_parameters(self) -> typing.Optional[camera_base.CameraFrameParameters]:
+        camera_hardware_source = self.camera_hardware_source
+        if camera_hardware_source:
+            camera_frame_parameters = camera_hardware_source.validate_frame_parameters(camera_base.CameraFrameParameters(dict()))
+            camera_frame_parameters.exposure = self.__camera_config_exposure_model.value or camera_hardware_source.get_current_frame_parameters().exposure
+            return camera_frame_parameters
+        return None
 
-    def __notify(self, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
-        # notify
-        frame_parameters = camera_hardware_source.get_current_frame_parameters()
-        has_exposure = self.__camera_config_exposure_model.value is not None
-        self.__exposure_time = (self.__camera_config_exposure_model.value if has_exposure else frame_parameters.exposure) or 0.0
-        self.__exposure_precision = camera_hardware_source.exposure_precision
-        self.__exposure_str = make_exposure_str(self.__exposure_time, self.__exposure_precision) if has_exposure else None
-        self.__exposure_placeholder_str = make_exposure_str(frame_parameters.exposure, self.__exposure_precision)
-        self.__exposure_units_str = exposure_units[self.__exposure_precision]
-        self.notify_property_changed("exposure_time")
-        self.notify_property_changed("exposure_precision")
-        self.notify_property_changed("exposure_str")
-        self.notify_property_changed("exposure_placeholder_str")
-        self.notify_property_changed("exposure_units_str")
+    def _hardware_source_changed(self) -> None:
+        self.__update_channel_descriptions()
 
-    def __frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters) -> None:
-        self.__notify(camera_hardware_source)
+    def _update_settings(self, hardware_source: HardwareSource.HardwareSource) -> None:
+        camera_hardware_source = self.camera_hardware_source
+        if camera_hardware_source:
+            frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            has_exposure = self.__camera_config_exposure_model.value is not None
+            self.__exposure_time = (self.__camera_config_exposure_model.value if has_exposure else frame_parameters.exposure) or 0.0
+            self.__exposure_precision = camera_hardware_source.exposure_precision
+            self.__exposure_str = make_exposure_str(self.__exposure_time, self.__exposure_precision) if has_exposure else None
+            self.__exposure_placeholder_str = make_exposure_str(frame_parameters.exposure, self.__exposure_precision)
+            self.__exposure_units_str = exposure_units[self.__exposure_precision]
+            self.notify_property_changed("exposure_time")
+            self.notify_property_changed("exposure_precision")
+            self.notify_property_changed("exposure_str")
+            self.notify_property_changed("exposure_placeholder_str")
+            self.notify_property_changed("exposure_units_str")
 
     @property
     def channel_descriptions(self) -> typing.List[HardwareSourceChannelDescription]:
@@ -1322,32 +1376,11 @@ class CameraSettingsModel(Observable.Observable):
 
     @property
     def camera_hardware_source(self) -> typing.Optional[camera_base.CameraHardwareSource]:
-        return typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.__hardware_source_stream.value)
-
-    @property
-    def camera_frame_parameters(self) -> typing.Optional[camera_base.CameraFrameParameters]:
-        camera_hardware_source = self.camera_hardware_source
-        if camera_hardware_source:
-            camera_frame_parameters = camera_hardware_source.validate_frame_parameters(camera_base.CameraFrameParameters(dict()))
-            camera_frame_parameters.exposure = self.__camera_config_exposure_model.value or camera_hardware_source.get_current_frame_parameters().exposure
-            return camera_frame_parameters
-        return None
+        return typing.cast(typing.Optional[camera_base.CameraHardwareSource], self.hardware_source)
 
     @property
     def camera_channel(self) -> typing.Optional[str]:
         return self.__camera_hardware_source_channel_model.value
-
-    @property
-    def hardware_source_choice(self) -> HardwareSourceChoice.HardwareSourceChoice:
-        return self.__hardware_source_choice_model.hardware_source_choice
-
-    @property
-    def hardware_source_choice_model(self) -> HardwareSourceChoiceModel:
-        return self.__hardware_source_choice_model
-
-    @property
-    def hardware_source_choice_stream(self) -> HardwareSourceChoice.HardwareSourceChoiceStream:
-        return self.__hardware_source_stream
 
 
 class CameraDetailsHandler(Declarative.Handler):

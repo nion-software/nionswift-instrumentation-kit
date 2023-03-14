@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # standard libraries
-import abc
 import json
 import os
 import pathlib
@@ -11,12 +10,12 @@ import typing
 # None
 
 # third party libraries
-import numpy
 import numpy.typing
 
 # local libraries
 from nion.instrumentation import HardwareSource
 from nion.swift.model import ImportExportManager
+from nion.utils import Event
 from nion.utils import ListModel
 from nion.utils import Registry
 from nion.utils import StructuredModel
@@ -96,6 +95,7 @@ class VideoHardwareSource(HardwareSource.ConcreteHardwareSource):
         self.add_data_channel()
         self.__camera = camera
         self.__acquisition_task = None
+        self.current_frame_parameters_changed_event = Event.Event()
 
     def close(self) -> None:
         super().close()
