@@ -941,16 +941,8 @@ Registry.register_component(TableauAcquisitionMethodComponentHandler, {"acquisit
 Registry.register_component(MultipleAcquisitionMethodComponentHandler, {"acquisition-method-component-factory"})
 
 
-class HardwareSourceChoiceHandler(Declarative.Handler):
-    """A declarative component handler for a hardware source choice.
-
-    Includes a combo box to configure the hardware source. The combo box is hidden if there is only one choice and
-    the hardware source is not forced to be enabled.
-
-    hardware_source_display_names is a read-only list of strings. It is an observable property.
-    """
-
-    def __init__(self, configuration: Schema.Entity, device_id_key: str, filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]] = None, *, title: typing.Optional[str] = None, force_enabled: bool = False) -> None:
+class HardwareSourceChoiceModel(Observable.Observable):
+    def __init__(self, configuration: Schema.Entity, device_id_key: str, filter: typing.Optional[typing.Callable[[HardwareSource.HardwareSource], bool]] = None, *, force_enabled: bool = False) -> None:
         super().__init__()
 
         # the hardware source choice model is a property model made by observing the device_id_key in the configuration.
@@ -967,23 +959,7 @@ class HardwareSourceChoiceHandler(Declarative.Handler):
             handler.notify_property_changed("hardware_source_display_names")
 
         # use weak_partial to avoid self reference and facilitate no-close.
-        self.__listener = self.hardware_source_choice.hardware_sources_model.property_changed_event.listen(
-            weak_partial(property_changed, self))
-
-        u = Declarative.DeclarativeUI()
-        if title:
-            self.ui_view = u.create_row(
-                u.create_label(text=title),
-                u.create_combo_box(items_ref="@binding(hardware_source_display_names)", current_index="@binding(hardware_source_choice.hardware_source_index_model.value)"),
-                u.create_stretch(),
-                spacing=8,
-                visible="@binding(ui_enabled_model.value)"
-            )
-        else:
-            self.ui_view = u.create_row(
-                u.create_combo_box(items_ref="@binding(hardware_source_display_names)", current_index="@binding(hardware_source_choice.hardware_source_index_model.value)"),
-                visible="@binding(ui_enabled_model.value)"
-            )
+        self.__listener = self.__hardware_source_choice.hardware_sources_model.property_changed_event.listen(weak_partial(property_changed, self))
 
     def close(self) -> None:
         self.__listener.close()
@@ -994,7 +970,6 @@ class HardwareSourceChoiceHandler(Declarative.Handler):
         self.__hardware_source_choice = typing.cast(typing.Any, None)
         self.__hardware_source_choice_model.close()
         self.__hardware_source_choice_model = typing.cast(typing.Any, None)
-        super().close()
 
     @property
     def hardware_source_choice(self) -> HardwareSourceChoice.HardwareSourceChoice:
@@ -1007,6 +982,40 @@ class HardwareSourceChoiceHandler(Declarative.Handler):
     @property
     def hardware_source_display_names(self) -> typing.List[str]:
         return [hardware_source.display_name if hardware_source else _("None") for hardware_source in self.hardware_source_choice.hardware_sources]
+
+
+class HardwareSourceChoiceHandler(Declarative.Handler):
+    """A declarative component handler for a hardware source choice.
+
+    Includes a combo box to configure the hardware source. The combo box is hidden if there is only one choice and
+    the hardware source is not forced to be enabled.
+
+    hardware_source_display_names is a read-only list of strings. It is an observable property.
+    """
+
+    def __init__(self, hardware_choice_model: HardwareSourceChoiceModel, *, title: typing.Optional[str] = None) -> None:
+        super().__init__()
+
+        self._hardware_choice_model = hardware_choice_model
+
+        u = Declarative.DeclarativeUI()
+        if title:
+            self.ui_view = u.create_row(
+                u.create_label(text=title),
+                u.create_combo_box(items_ref="@binding(_hardware_choice_model.hardware_source_display_names)", current_index="@binding(_hardware_choice_model.hardware_source_choice.hardware_source_index_model.value)"),
+                u.create_stretch(),
+                spacing=8,
+                visible="@binding(_hardware_choice_model.ui_enabled_model.value)"
+            )
+        else:
+            self.ui_view = u.create_row(
+                u.create_combo_box(items_ref="@binding(_hardware_choice_model.hardware_source_display_names)", current_index="@binding(_hardware_choice_model.hardware_source_choice.hardware_source_index_model.value)"),
+                visible="@binding(_hardware_choice_model.ui_enabled_model.value)"
+            )
+
+    def close(self) -> None:
+        self._hardware_choice_model = typing.cast(typing.Any, None)
+        super().close()
 
 
 @dataclasses.dataclass
@@ -1159,9 +1168,11 @@ class CameraSettingsModel(Observable.Observable):
     channel_descriptions is a list of channel descriptions. It is a read-only observable property.
     channel_index is the selected index. It is a read/write observable property.
     """
-    def __init__(self, hardware_source_stream: Stream.AbstractStream[HardwareSource.HardwareSource], configuration: Schema.Entity) -> None:
+    def __init__(self, configuration: Schema.Entity) -> None:
         super().__init__()
-        self.__hardware_source_stream = hardware_source_stream.add_ref()
+        # the camera hardware source choice model.
+        self.__hardware_source_choice_model = HardwareSourceChoiceModel(configuration, "camera_device_id", lambda hardware_source: hardware_source.features.get("is_camera", False), force_enabled=True)
+        self.__hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__hardware_source_choice_model.hardware_source_choice).add_ref()
         # the camera exposure model is a property model made by observing camera_exposure in the configuration.
         self.__camera_config_exposure_model = Model.PropertyChangedPropertyModel[float](configuration, "camera_exposure")
         # the camera hardware source channel model is a property model made by observing the camera_channel_id in the configuration.
@@ -1179,6 +1190,7 @@ class CameraSettingsModel(Observable.Observable):
         self.__exposure_changed_listener = self.__camera_config_exposure_model.property_changed_event.listen(weak_partial(CameraSettingsModel.__handle_exposure_changed, self))
         self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
 
+        hardware_source_stream = self.__hardware_source_stream
         hardware_source = hardware_source_stream.value
         assert hardware_source
 
@@ -1186,10 +1198,11 @@ class CameraSettingsModel(Observable.Observable):
         self.__handle_exposure_changed("value")
         self.__update_channel_descriptions()
 
-        def finalize() -> None:
+        def finalize(hardware_source_choice_model: HardwareSourceChoiceModel) -> None:
             hardware_source_stream.remove_ref()
+            hardware_source_choice_model.close()
 
-        weakref.finalize(self, finalize)
+        weakref.finalize(self, functools.partial(finalize, self.__hardware_source_choice_model))
 
     def __handle_exposure_changed(self, property: str) -> None:
         if property == "value":
@@ -1323,6 +1336,14 @@ class CameraSettingsModel(Observable.Observable):
     def camera_channel(self) -> typing.Optional[str]:
         return self.__camera_hardware_source_channel_model.value
 
+    @property
+    def hardware_source_choice(self) -> HardwareSourceChoice.HardwareSourceChoice:
+        return self.__hardware_source_choice_model.hardware_source_choice
+
+    @property
+    def hardware_source_choice_model(self) -> HardwareSourceChoiceModel:
+        return self.__hardware_source_choice_model
+
 
 class CameraDetailsHandler(Declarative.Handler):
     """A declarative component handler for a row describing a camera device.
@@ -1449,25 +1470,18 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
         super().__init__(SynchronizedScanAcquisitionDeviceComponentHandler.display_name)
 
-        # the camera hardware source handler is a declarative component handler that facilitates a combo box.
-        self.__camera_hardware_source_choice_handler = HardwareSourceChoiceHandler(
-            configuration,
-            "camera_device_id",
-            lambda hardware_source: hardware_source.features.get("is_camera", False),
-            force_enabled=True)
-
         # the camera settings represent the settings for the camera. in addition to handling the model updates,
         # it can provide the current camera_hardware_source and camera_frame_parameters.
-        self._camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
-            self.__camera_hardware_source_choice_handler.hardware_source_choice), configuration)
+        self._camera_settings_model = CameraSettingsModel(configuration)
+
+        # the camera hardware source handler is a declarative component handler that facilitates a combo box.
+        self.__camera_hardware_source_choice_handler = HardwareSourceChoiceHandler(self._camera_settings_model.hardware_source_choice_model)
 
         # the scan hardware source handler is a declarative component handler that facilitates a combo box.
-        self.__scan_hardware_source_choice_handler = HardwareSourceChoiceHandler(
-            configuration,
-            "scan_device_id",
-            lambda hardware_source: hardware_source.features.get("is_scanning", False),
-            title=_("Scan Detector"),
-            force_enabled=True)
+        self.__scan_hardware_source_choice_model = HardwareSourceChoiceModel(configuration, "scan_device_id",
+                                                                             lambda hardware_source: hardware_source.features.get("is_scanning", False),
+                                                                             force_enabled=True)
+        self.__scan_hardware_source_choice_handler = HardwareSourceChoiceHandler(self.__scan_hardware_source_choice_model, title=_("Scan Detector"))
 
         # the scan width model is a property model made by observing the scan_width property in the configuration.
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
@@ -1476,8 +1490,8 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # a description of the upcoming scan. it also supplies a scan_context_valid flag which can be used to enable
         # the acquire button in the UI.
         self.__scan_context_description_value_stream = ScanSpecifierValueStream(
-            HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice_handler.hardware_source_choice),
-            HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_handler.hardware_source_choice),
+            HardwareSourceChoice.HardwareSourceChoiceStream(self._camera_settings_model.hardware_source_choice),
+            HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice),
             self.scan_width,
             asyncio.get_event_loop_policy().get_event_loop()).add_ref()
 
@@ -1560,6 +1574,8 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         self.scan_width.close()
         self.scan_width = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_handler = typing.cast(typing.Any, None)
+        self.__scan_hardware_source_choice_model.close()
+        self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         self.__camera_hardware_source_choice_handler = typing.cast(typing.Any, None)
         self._camera_settings_model = typing.cast(typing.Any, None)
         super().close()
@@ -1581,7 +1597,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         camera_channel = self._camera_settings_model.camera_channel
         assert camera_hardware_source
         assert camera_frame_parameters
-        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_handler.hardware_source)
+        scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_model.hardware_source)
         scan_context_description = self.__scan_context_description_value_stream.value
         assert scan_context_description
         return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, camera_frame_parameters, camera_channel)
@@ -1657,17 +1673,12 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
         self.__configuration = configuration
 
-        # the camera hardware source handler is a declarative component handler that facilitates a combo box.
-        self.__camera_hardware_source_choice_handler = HardwareSourceChoiceHandler(
-            configuration,
-            "camera_device_id",
-            lambda hardware_source: hardware_source.features.get("is_camera", False),
-            force_enabled=True)
-
         # the camera settings represent the settings for the camera. in addition to handling the model updates,
         # it can provide the current camera_hardware_source and camera_frame_parameters.
-        self._camera_settings_model = CameraSettingsModel(HardwareSourceChoice.HardwareSourceChoiceStream(
-            self.__camera_hardware_source_choice_handler.hardware_source_choice), configuration)
+        self._camera_settings_model = CameraSettingsModel(configuration)
+
+        # the camera hardware source handler is a declarative component handler that facilitates a combo box.
+        self.__camera_hardware_source_choice_handler = HardwareSourceChoiceHandler(self._camera_settings_model.hardware_source_choice_model)
 
         # a camera is always valid.
         self.acquire_valid_value_stream = Stream.ConstantStream(True)
@@ -1778,12 +1789,10 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         super().__init__(ScanAcquisitionDeviceComponentHandler.display_name)
 
         # the scan hardware source handler is a declarative component handler that facilitates a combo box.
-        self.__scan_hardware_source_choice_handler = HardwareSourceChoiceHandler(
-            configuration,
-            "scan_device_id",
-            lambda hardware_source: hardware_source.features.get("is_scanning", False),
-            title=_("Scan Detector"),
-            force_enabled=True)
+        self.__scan_hardware_source_choice_model = HardwareSourceChoiceModel(configuration, "scan_device_id",
+                                                                             lambda hardware_source: hardware_source.features.get("is_scanning", False),
+                                                                             force_enabled=True)
+        self.__scan_hardware_source_choice_handler = HardwareSourceChoiceHandler(self.__scan_hardware_source_choice_model, title=_("Scan Detector"))
 
         # the scan is always valid.
         self.acquire_valid_value_stream = Stream.ConstantStream(True)
@@ -1797,6 +1806,8 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
 
     def close(self) -> None:
         self.__scan_hardware_source_choice_handler = typing.cast(typing.Any, None)
+        self.__scan_hardware_source_choice_model.close()
+        self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
@@ -1809,7 +1820,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
         # first get the scan hardware source.
-        scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice_handler.hardware_source)
+        scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice_model.hardware_source)
         assert scan_hardware_source is not None
 
         return build_scan_device_data_stream(scan_hardware_source)
