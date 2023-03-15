@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+0.21.2 (UNRELEASED)
+-------------------
+- Fix #31. Scan recorder allows limited-only-by-memory frame count on scan devices.
+
 0.21.1 (2023-02-28)
 -------------------
 - Fix #151. Properly calibrate subscan/line-scan during synchronized acquisition.

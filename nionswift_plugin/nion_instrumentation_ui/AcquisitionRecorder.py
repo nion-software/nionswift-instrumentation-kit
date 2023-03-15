@@ -113,6 +113,7 @@ class Controller:
 
         if do_acquire:
             print("AR: start playing")
+            hardware_source.set_buffer_size(frame_count)
             hardware_source.start_playing()
             print("AR: wait for acquire")
             await event_loop.run_in_executor(None, exec_acquire)
@@ -143,6 +144,9 @@ class Controller:
                 import traceback
                 traceback.print_exc()
                 success_ref[0] = False
+            finally:
+                hardware_source.set_buffer_size(100)
+                hardware_source.clear_buffer()
 
         if success_ref[0]:
             print("AR: stop playing")
@@ -309,7 +313,7 @@ class PanelDelegate:
 
         self.__scan_hardware_changed_event_listener = self.__scan_hardware_source_choice.hardware_source_changed_event.listen(scan_hardware_source_changed)
 
-        typing.cast(UserInterfaceModule.LineEditWidget, count_line_edit._widget).bind_text(Binding.PropertyBinding(self.__controller.frame_count_model, "value", converter=Converter.IntegerToStringConverter(), validator=Validator.IntegerRangeValidator(1, 100)))
+        typing.cast(UserInterfaceModule.LineEditWidget, count_line_edit._widget).bind_text(Binding.PropertyBinding(self.__controller.frame_count_model, "value", converter=Converter.IntegerToStringConverter(), validator=Validator.IntegerRangeValidator(1, 10000000)))
 
         self.__state_changed_listener = self.__controller.state.property_changed_event.listen(state_property_changed)
 

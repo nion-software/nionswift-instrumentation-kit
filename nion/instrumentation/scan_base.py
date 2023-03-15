@@ -606,6 +606,11 @@ class ScanDevice(typing.Protocol):
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
+    def set_buffer_size(self, buffer_size: int) -> None: pass
+    def get_buffer_size(self) -> int: return 100
+    def get_buffer_count(self) -> int: return 0
+    def clear_buffer(self) -> None: pass
+    def pop_buffer(self, count: int) -> None: pass
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
@@ -774,6 +779,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
+    def set_buffer_size(self, buffer_size: int) -> None: ...
+    def get_buffer_size(self) -> int: ...
+    def get_buffer_count(self) -> int: ...
+    def clear_buffer(self) -> None: ...
+    def pop_buffer(self, count: int) -> None: ...
 
     def get_enabled_context_data_channels(self) -> typing.Sequence[HardwareSource.DataChannel]:
         # return the enabled data channels functioning as scan contexts.
@@ -1916,6 +1926,28 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if callable(getattr(self.__device, "calculate_flyback_pixels", None)):
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
+
+    def set_buffer_size(self, buffer_size: int) -> None:
+        if callable(getattr(self.__device, "set_buffer_size", None)):
+            self.__device.set_buffer_size(buffer_size)
+
+    def get_buffer_size(self) -> int:
+        if callable(getattr(self.__device, "get_buffer_size", None)):
+            return self.__device.get_buffer_size()
+        return 100
+
+    def get_buffer_count(self) -> int:
+        if callable(getattr(self.__device, "get_buffer_count", None)):
+            return self.__device.get_buffer_count()
+        return 0
+
+    def clear_buffer(self) -> None:
+        if callable(getattr(self.__device, "clear_buffer", None)):
+            self.__device.clear_buffer()
+
+    def pop_buffer(self, count: int) -> None:
+        if callable(getattr(self.__device, "pop_buffer", None)):
+            self.__device.pop_buffer(count)
 
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # subclasses will override _set_probe_position
