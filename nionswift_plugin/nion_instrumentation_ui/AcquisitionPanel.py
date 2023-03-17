@@ -1988,6 +1988,8 @@ class AcquisitionState:
         self.is_error = False
 
     def _start(self, framed_data_stream: Acquisition.FramedDataStream) -> None:
+        self.device_state = framed_data_stream.prepare_device_state()
+        time.sleep(0.5)
         self._acquisition = Acquisition.Acquisition(framed_data_stream)
         self.is_error = False
 
@@ -1995,6 +1997,7 @@ class AcquisitionState:
         assert self._acquisition
         self._acquisition.close()
         self._acquisition = None
+        self.device_state.restore()
 
     @property
     def _acquisition_ex(self) -> Acquisition.Acquisition:

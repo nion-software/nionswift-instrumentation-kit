@@ -148,6 +148,10 @@ class ScanAcquisitionController:
         if drift_tracker:
             self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, drift_tracker, event_loop)
 
+        # save playing state
+        is_scan_playing = scan_hardware_source.is_playing
+        is_camera_playing = camera_hardware_source.is_playing
+
         def finish_grab_async() -> None:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
@@ -157,6 +161,11 @@ class ScanAcquisitionController:
             if self.__scan_drift_logger:
                 self.__scan_drift_logger.close()
                 self.__scan_drift_logger = None
+            # restart playing state
+            if is_scan_playing:
+                scan_hardware_source.start_playing()
+            if is_camera_playing:
+                camera_hardware_source.start_playing()
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 

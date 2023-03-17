@@ -858,6 +858,37 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((4, 4), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
+    def test_scan_acquisition_controller_restarts_view(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            try:
+                # start the hardware sources playing
+                scan_hardware_source.start_playing(sync_timeout=3.0)
+                camera_hardware_source.start_playing(sync_timeout=3.0)
+                # acquire a scan
+                scan_specifier = ScanAcquisition.ScanSpecifier()
+                scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+                scan_specifier.size = 4, 4
+                scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                        Facade.DocumentWindow(document_controller),
+                                                                                        Facade.HardwareSource(scan_hardware_source),
+                                                                                        Facade.HardwareSource(camera_hardware_source),
+                                                                                        scan_specifier)
+                scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
+                scan_acquisition_controller._wait()
+                document_controller.periodic()
+                # ensure hardware sources are still playing
+                self.assertTrue(scan_hardware_source.is_playing)
+                self.assertTrue(camera_hardware_source.is_playing)
+            finally:
+                # stop the hardware sources
+                camera_hardware_source.stop_playing(sync_timeout=3.0)
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+
     def slow_test_scan_acquisition_controller_eels(self):
         # tests case where camera data arrives in partial chunks.
         with self.__test_context(is_eels=True) as test_context:

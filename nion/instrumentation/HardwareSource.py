@@ -1238,7 +1238,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self._view_task_updated(None)
         if sync_timeout is not None:
             start = time.time()
-            while self.is_playing:
+            while self.is_playing or self.is_task_running('view') or self.is_task_running('record'):
                 time.sleep(0.01)  # 10 msec
                 assert time.time() - start < float(sync_timeout)
 

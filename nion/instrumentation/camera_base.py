@@ -6,6 +6,7 @@ import asyncio
 import copy
 import dataclasses
 import datetime
+import functools
 import gettext
 import json
 import logging
@@ -2689,6 +2690,15 @@ class CameraFrameDataStream(Acquisition.DataStream):
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
         data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
+
+    def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
+        if self.__camera_hardware_source.is_playing:
+            def restart_camera(camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters) -> None:
+                camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+                camera_hardware_source.start_playing()
+
+            self.__camera_hardware_source.abort_playing(sync_timeout=60.0)
+            device_state.add_state("restart_camera", functools.partial(restart_camera, self.__camera_hardware_source, self.__camera_hardware_source.get_current_frame_parameters()))
 
     @property
     def progress(self) -> float:

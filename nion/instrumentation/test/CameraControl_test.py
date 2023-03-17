@@ -1184,10 +1184,11 @@ class TestCameraControlClass(unittest.TestCase):
                 last_progress_time = time.time()
             time.sleep(0.05)
         self.assertFalse(acquisition_state.is_error)
-        self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
-        for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
-            self.assertEqual(expected_dimension[0], data_item.data_shape)
-            self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
+        if expected_dimensions:
+            self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
+            for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
+                self.assertEqual(expected_dimension[0], data_item.data_shape)
+                self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
 
     def test_acquisition_panel_acquisition(self):
         tc = [
@@ -1238,6 +1239,29 @@ class TestCameraControlClass(unittest.TestCase):
                             amr.data_stream.remove_ref()
                     finally:
                         adr.data_stream.remove_ref()
+
+    def test_acquisition_panel_acquisition_restarts_view(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            adr = make_synchronized_device(test_context)
+            try:
+                amr = make_sequence_acquisition_method(adr)
+                try:
+                    # start hardware sources playing
+                    test_context.scan_hardware_source.start_playing(sync_timeout=3.0)
+                    test_context.camera_hardware_source.start_playing(sync_timeout=3.0)
+                    # run the acquisition procedure
+                    self.__test_acq(document_controller, adr, amr, [])
+                    # confirm the acquisition is still running
+                    self.assertTrue(test_context.scan_hardware_source.is_playing)
+                    self.assertTrue(test_context.camera_hardware_source.is_playing)
+                finally:
+                    amr.data_stream.remove_ref()
+                    # stop the hardware sources
+                    test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
+                    test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
+            finally:
+                adr.data_stream.remove_ref()
 
     def test_exposure_string(self):
         t = (

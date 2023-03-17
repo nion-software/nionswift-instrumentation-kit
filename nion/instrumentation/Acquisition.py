@@ -400,6 +400,19 @@ def _handle_data_available(data_stream: DataStream, fn: typing.Callable[[DataStr
         exceptions.append(e)
 
 
+class DeviceState:
+    def __init__(self) -> None:
+        self.__state_unprepare_fns: typing.Dict[str, typing.Callable[[], None]] = dict()
+
+    def add_state(self, state_id: str, state_unprepare_fn: typing.Callable[[], None]) -> None:
+        if state_id not in self.__state_unprepare_fns:
+            self.__state_unprepare_fns[state_id] = state_unprepare_fn
+
+    def restore(self) -> None:
+        for state_unprepare_fn in reversed(self.__state_unprepare_fns.values()):
+            state_unprepare_fn()
+
+
 class DataStream(ReferenceCounting.ReferenceCounted):
     """Provide a stream of data chunks.
 
@@ -461,6 +474,16 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
         Should only be called with a channel return by channels property."""
         return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
+
+    def prepare_device_state(self) -> DeviceState:
+        """Prepares the device state (a dict of entries to restore state)."""
+        device_state = DeviceState()
+        self._prepare_device_state(device_state)
+        return device_state
+
+    def _prepare_device_state(self, device_state: DeviceState) -> None:
+        for data_stream in self.data_streams:
+            data_stream._prepare_device_state(device_state)
 
     @property
     def is_finished(self) -> bool:
