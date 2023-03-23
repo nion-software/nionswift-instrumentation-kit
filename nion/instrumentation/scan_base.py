@@ -606,11 +606,11 @@ class ScanDevice(typing.Protocol):
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
-    def set_buffer_size(self, buffer_size: int) -> None: pass
+    def set_buffer_size(self, buffer_size: int) -> None: return
     def get_buffer_size(self) -> int: return 100
     def get_buffer_count(self) -> int: return 0
-    def clear_buffer(self) -> None: pass
-    def pop_buffer(self, count: int) -> None: pass
+    def clear_buffer(self) -> None: return
+    def pop_buffer(self, count: int) -> None: return
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
