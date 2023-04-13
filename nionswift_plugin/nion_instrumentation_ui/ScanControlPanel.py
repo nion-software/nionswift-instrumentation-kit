@@ -458,7 +458,7 @@ class ScanControlStateController:
 
     # must be called on ui thread
     def handle_settings_button_clicked(self, api_broker: typing.Any) -> None:
-        self.__scan_hardware_source.open_configuration_interface(api_broker)
+        self.__scan_hardware_source.scan_device.open_configuration_interface(api_broker)
 
     # must be called on ui thread
     def handle_shift_click(self, hardware_source_id: str, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> bool:
