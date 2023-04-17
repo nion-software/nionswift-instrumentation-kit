@@ -19,6 +19,7 @@ from nion.instrumentation.test import HardwareSource_test
 from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift import Facade
+from nion.swift.model import ApplicationData
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
@@ -356,6 +357,26 @@ class TestCameraControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 3)
             self.assertEqual(len(document_model.data_items[2].dimensional_shape), 1)
+
+    def test_capturing_during_view_captures_session(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            state_controller = self.__create_state_controller(test_context)
+            ApplicationData.get_session_metadata_model().microscopist = "Ned Flanders"
+            hardware_source.start_playing()
+            try:
+                hardware_source.get_next_xdatas_to_finish(5)
+                document_controller.periodic()
+                self.assertEqual(len(document_model.data_items), 2)
+                state_controller.use_processed_data = False
+                state_controller.handle_capture_clicked()
+                hardware_source.get_next_xdatas_to_finish(5)
+            finally:
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
+            document_controller.periodic()
+            self.assertEqual("Ned Flanders", document_model.data_items[2].session_metadata["microscopist"])
 
     def test_ability_to_start_playing_with_custom_parameters(self):
         with self.__test_context() as test_context:

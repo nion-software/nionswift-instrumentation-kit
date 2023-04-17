@@ -22,6 +22,7 @@ from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
 from nion.swift import Workspace
+from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
@@ -317,6 +318,7 @@ class CameraControlStateController:
                         display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                         display_name = display_name if display_name else _("Capture")
                         data_item.title = display_name
+                        data_item.session_metadata = ApplicationData.get_session_metadata_dict()
                         self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
 

@@ -607,6 +607,29 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 4)
 
+    def test_capturing_during_view_captures_session(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_state_controller = self.__create_state_controller(test_context)
+            ApplicationData.get_session_metadata_model().microscopist = "Ned Flanders"
+            scan_hardware_source.set_channel_enabled(1, True)
+            scan_hardware_source.start_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            self.assertEqual(len(document_model.data_items), 2)
+
+            def display_new_data_item(data_item):
+                document_model.append_data_item(data_item)
+
+            scan_state_controller.on_display_new_data_item = display_new_data_item
+            scan_state_controller.handle_capture_clicked()
+            scan_hardware_source.stop_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            self.assertEqual("Ned Flanders", document_model.data_items[3].session_metadata["microscopist"])
+
     def test_ability_to_start_playing_with_custom_parameters(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
