@@ -2328,11 +2328,13 @@ def make_synchronized_scan_data_stream(
     combined_data_stream = Acquisition.CombinedDataStream([scan_like_data_stream, processed_camera_data_stream])
     section_height = section_height or scan_size.height
     section_count = (scan_size.height + section_height - 1) // section_height
+    # create a stream for each section of the acquisition.
     collectors: typing.List[Acquisition.CollectedDataStream] = list()
     for section in range(section_count):
         start = section * section_height
         stop = min(start + section_height, scan_size.height)
         collectors.append(Acquisition.CollectedDataStream(combined_data_stream, (stop - start, scan_size.width), get_scan_calibrations(scan_frame_parameters)))
+    # stack the sections together
     collector: Acquisition.DataStream = Acquisition.StackedDataStream(collectors)
     if not old_move_axis and camera_frame_parameters.processing == "sum_masked":
         active_masks = camera_frame_parameters.active_masks

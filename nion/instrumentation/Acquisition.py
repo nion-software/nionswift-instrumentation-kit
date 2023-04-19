@@ -283,6 +283,26 @@ def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typin
 class DataStreamEventArgs:
     """Data stream event arguments.
 
+    The purpose of the data stream event arguments is to provide a way to pass data from a lower-level data stream,
+    such as a camera, to a higher-level data stream, such as a stream to collate the camera data into a larger data
+    structure like a sequence of images. The data stream event arguments must also be able to describe the channel of
+    the data, the description of the layout of the data (data metadata), the data itself, and the state of the stream.
+
+    For flexibility, data can be provided as multiple instances of the described data or as just a slice of the data.
+
+    For instance, if the natural unit of the lower-level stream is a frame and multiple frames can be sent at once,
+    the data can be described as a frame and the count property can be set. The data array is expected to have an
+    extra dimension representing the count. The source slice must be provided to specify the slice of the data to be
+    used. The source slice allows lower-level streams to fill a large array incrementally and only send part of the
+    array for a given data stream event. However, lower-level streams can also send a new array for each data stream
+    event.
+
+    On the other hand, if the natural unit of the lower-level stream is a single frame sent incrementally,
+    the count property can be set to None, and the source slice can be set to a partial slice of the frame.
+
+    Finally, the state property indicates whether the lower-level stream has completed sending the data for which it
+    was prepared and started, which is useful for the higher-level stream to know when to start processing the data.
+
     The `data_stream` property should be passed in from the data stream caller.
 
     The `channel` property should be set to something unique to allow for collecting multiple
@@ -1019,7 +1039,10 @@ class CombinedDataStream(DataStream):
 class StackedDataStream(DataStream):
     """Acquire multiple streams and stack the results.
 
-    Each stream can produce multiple channels but the channels must match between streams.
+    For instance, if stream A produces 10 frames of 8x8 and stream B produces 20 of 8x8 frames, the resulting stacked
+    stream of A + B will produce a new stream of the shape 30x8x8.
+
+    Each stream can produce multiple channels but the channels must match shape/type between streams.
     """
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
@@ -1032,14 +1055,21 @@ class StackedDataStream(DataStream):
         self.__channels = self.__data_streams[0].channels
         self.__sequence_count = 0
         self.__sequence_index = 0
-        # confirm that the contained data streams are sensible (same shape except for height, same dtype, same descriptor)
+        self.__height = 0
+
+        # check that the data streams have the same shape (except for height), the same dtype, and the same data
+        # descriptor.
         for channel in self.__channels:
+            height = 0
             data_metadata = self.__data_streams[0].get_info(channel).data_metadata
             for data_stream in self.__data_streams:
                 data_stream_data_metadata = data_stream.get_info(channel).data_metadata
                 assert data_metadata.data_shape[1:] == data_stream_data_metadata.data_shape[1:]
                 assert data_metadata.data_dtype == data_stream_data_metadata.data_dtype
                 assert data_metadata.data_descriptor == data_stream_data_metadata.data_descriptor
+                height += data_stream_data_metadata.data_shape[0]
+            assert self.__height == 0 or self.__height == height
+            self.__height = height
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -1135,14 +1165,13 @@ class StackedDataStream(DataStream):
             self.__data_streams[self.__current_index].finish_stream()
 
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        state = DataStreamStateEnum.COMPLETE if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams) else DataStreamStateEnum.PARTIAL
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams):
+            state = DataStreamStateEnum.COMPLETE
+        else:
+            state = DataStreamStateEnum.PARTIAL
         # compute height as a sum from contained data streams and configure a new data_metadata
         data_metadata = copy.deepcopy(data_stream_event.data_metadata)
-        height = 0
-        for data_stream in self.__data_streams:
-            data_stream_data_metadata = data_stream.get_info(data_stream_event.channel).data_metadata
-            height += data_stream_data_metadata.data_shape[0]
-        data_metadata.data_shape_and_dtype = ((height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
+        data_metadata.data_shape_and_dtype = ((self.__height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
         # create the data stream event with the overridden data_metadata and state.
         data_stream_event = DataStreamEventArgs(
             data_stream_event.data_stream,
@@ -2311,7 +2340,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
         last_progress = 0.0
         last_progress_time = time.time()
         while not data_stream.is_finished and not data_stream.is_aborted:
-            # progress checking is for tests and self consistency
+            # progress checking is for tests and self-consistency
             pre_progress = data_stream.progress
             data_stream.send_next()
             post_progress = data_stream.progress
