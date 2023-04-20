@@ -2157,7 +2157,7 @@ class ScanFrameDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return tuple(Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(c)) for c in self.__enabled_channels)
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__scan_hardware_source.abort_playing(sync_timeout=5.0)
         # update the center_nm of scan parameters by adding the accumulated value from drift to the original value.
         # NOTE: this fails if we independently move the center_nm, at which point the original would have to be
@@ -2252,12 +2252,12 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__camera_hardware_source = camera_hardware_source
         self.__stem_controller = scan_hardware_source.stem_controller
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source,
                                                          camera=self.__camera_hardware_source)
         self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
         self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
-        super()._prepare_stream(stream_args, **kwargs)
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _finish_stream(self) -> None:
         super()._finish_stream()

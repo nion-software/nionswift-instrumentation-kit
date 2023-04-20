@@ -1190,7 +1190,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def acquire_synchronized_end(self) -> None: ...
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None: ...
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]: ...
-    def acquire_sequence_prepare(self, n: int) -> None: ...
+    def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None: ...
     def acquire_sequence(self, n: int) -> typing.Sequence[ImportExportManager.DataElementType]: ...
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData: ...
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData: ...
@@ -1516,7 +1516,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             self.__camera.set_frame_parameters(frame_parameters)
             acquire_synchronized_prepare(data_shape, **kwargs)
         else:
-            self.acquire_sequence_prepare(int(numpy.product(data_shape)))  # type: ignore
+            self.acquire_sequence_prepare(int(numpy.product(data_shape)), **kwargs)  # type: ignore
 
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
         acquire_synchronized = getattr(self.__camera, "acquire_synchronized", None)
@@ -1530,12 +1530,12 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         else:
             return self.acquire_sequence(int(numpy.product(data_shape)))  # type: ignore
 
-    def acquire_sequence_prepare(self, n: int) -> None:
+    def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None:
         frame_parameters = self.get_current_frame_parameters()
         self.__camera.set_frame_parameters(frame_parameters)
         acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
         if callable(acquire_sequence_prepare):
-            acquire_sequence_prepare(n)
+            acquire_sequence_prepare(n, **kwargs)
 
     def __acquire_sequence_fallback(self, n: int, frame_parameters: CameraFrameParameters) -> typing.Optional[ImportExportManager.DataElementType]:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
@@ -2216,12 +2216,12 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_counts_per_electron(self) -> typing.Optional[float]:
         return self.__get_camera_calibrator().get_counts_per_electron()
 
-    def acquire_sequence_prepare(self, n: int) -> None:
+    def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None:
         # added this because it turns out it is needed - sequence/sync prepare needs to go before
         # the scan is started.
         acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
         if callable(acquire_sequence_prepare):
-            acquire_sequence_prepare(self.get_current_frame_parameters(), n)
+            acquire_sequence_prepare(self.get_current_frame_parameters(), n, **kwargs)
 
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
@@ -2449,7 +2449,7 @@ class CameraDeviceStreamPartialData:
 class CameraDeviceStreamInterface(typing.Protocol):
     """An interface to a camera device to help implementation in a data stream."""
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int: ...
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> int: ...
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None: ...
 
@@ -2475,7 +2475,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int:
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> int:
         camera_frame_parameters = self.__camera_frame_parameters
         # clear the processing parameters in the original camera frame parameters.
         # processing will be configured based on the operator kwarg instead.
@@ -2502,7 +2502,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
-        self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape)
+        self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape, index_stack=index_stack)
         return numpy.product(collection_shape, dtype=numpy.uint64)  # type: ignore
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -2573,7 +2573,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__partial_data_info = typing.cast(PartialData, None)
         self.__slice: typing.List[slice] = list()
 
-    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> int:
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> int:
         camera_frame_parameters = self.__camera_frame_parameters
         # clear the processing parameters in the original camera frame parameters.
         # processing will be configured based on the operator kwarg instead.
@@ -2599,7 +2599,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         # save original current camera frame parameters. these will be restored in finish stream.
         self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        self.__camera_hardware_source.acquire_sequence_prepare(stream_args.sequence_count)
+        self.__camera_hardware_source.acquire_sequence_prepare(stream_args.sequence_count, index_stack=index_stack)
         return stream_args.sequence_count
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
@@ -2704,13 +2704,13 @@ class CameraFrameDataStream(Acquisition.DataStream):
             return self.__progress
         return super().progress
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):
             self.__camera_hardware_source.abort_playing(sync_timeout=5.0)
         else:
             assert self.__camera_device_stream_interface
             self.__start = time.perf_counter()
-            self.__total_count = self.__camera_device_stream_interface.prepare_stream(stream_args, **kwargs)
+            self.__total_count = self.__camera_device_stream_interface.prepare_stream(stream_args, index_stack, **kwargs)
             self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
             while len(self.__camera_sequence_overheads) > 4:
                 self.__camera_sequence_overheads.pop(0)

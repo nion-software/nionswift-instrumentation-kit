@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import enum
 import time
 import typing
@@ -371,6 +372,16 @@ class DataStreamEventArgs:
         self.reset_frame = False
 
 
+@dataclasses.dataclass
+class IndexDescription:
+    """Describe an index within a shape."""
+    index: ShapeType
+    shape: ShapeType
+
+
+IndexDescriptionList = typing.List[IndexDescription]
+
+
 class DataStreamArgs:
     def __init__(self, shape: ShapeType, max_count: typing.Optional[int] = None) -> None:
         self.__shape = shape
@@ -552,15 +563,23 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """Used for testing. Send next data. Subclasses can override as required."""
         pass
 
-    def prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         """Prepare stream. Top level prepare_stream is called before start_stream.
 
         The prepare function allows streams to perform any preparations before any other
         stream has started.
-        """
-        self._prepare_stream(stream_args, **kwargs)
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+        The `index_stack` is a list of index descriptions, updated by any enclosing collection data streams. Each
+        index description is an index and a shape. Elements in the index description list are changed during
+        acquisition, i.e. they are mutable. The index stack can be used to determine whether a particular stream will
+        be called repeatedly during acquisition. For example, a sequence of spectrum images may show an index stack
+        like `((2,), (4,)), ((0,0), (512, 512))` meaning that it is the second of four 512x512 scans. Due to the way
+        sequences of synchronized camera acquisitions are implemented, the last index may never be updated during the
+        512x512 acquisition.
+        """
+        self._prepare_stream(stream_args, index_stack, **kwargs)
+
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         """Prepare a sequence of acquisitions.
 
         Subclasses can override to pass along to contained data streams.
@@ -672,6 +691,8 @@ class CollectedDataStream(DataStream):
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         assert len(shape) in (1, 2)
+        self.__index_stack: IndexDescriptionList = list()
+        self.__index = 0
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         # sub-slice indexes track the destination of the next data within the current slice.
@@ -743,6 +764,10 @@ class CollectedDataStream(DataStream):
         assert self.__data_stream_started
         self.__data_stream.send_next()
 
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
+        self.__index_stack = list(index_stack) + [IndexDescription(better_unravel_index(0, self.__collection_shape), self.__collection_shape)]
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
+
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
@@ -759,7 +784,8 @@ class CollectedDataStream(DataStream):
             self.__data_stream_started = False
         self.__indexes.clear()
         self.__all_channels_need_start = False
-        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_shape))
+        self.__index_stack[-1].index = better_unravel_index(0, self.__collection_shape)
+        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_shape), self.__index_stack)
         self.__data_stream.start_stream(DataStreamArgs(self.__collection_shape))
         self.__data_stream_started = True
 
@@ -928,6 +954,7 @@ class CollectedDataStream(DataStream):
         # whether all channels are in the 'needs_start' state.
         needs_starts = {channel: self.__indexes.get(channel, 0) == collection_count for channel in self.channels}
         self.__all_channels_need_start = all(needs_starts.get(channel, False) for channel in self.input_channels)
+        self.__index_stack[-1].index = better_unravel_index(min(self.__indexes.get(channel, 0) for channel in self.channels), self.__collection_shape)
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -1002,9 +1029,9 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         for data_stream in self.__data_streams:
-            data_stream.prepare_stream(stream_args)
+            data_stream.prepare_stream(stream_args, index_stack)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert not self.__data_available_event_listeners
@@ -1050,7 +1077,7 @@ class StackedDataStream(DataStream):
         self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(list())
-        self.__current_index = 0
+        self.__current_index = 0  # data stream index
         assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
         self.__channels = self.__data_streams[0].channels
         self.__sequence_count = 0
@@ -1120,10 +1147,11 @@ class StackedDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__current_index = 0
         self.__stream_args = DataStreamArgs((1,))
-        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+        self.__index_stack = list(index_stack)
+        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
         self.__sequence_count = stream_args.sequence_count
         self.__sequence_index = 0
 
@@ -1152,7 +1180,7 @@ class StackedDataStream(DataStream):
                     self.__current_index = 0
                     self.__sequence_index += 1
                 if self.__current_index < len(self.__data_streams):
-                    self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+                    self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
                     self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
                     self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                     self.__data_streams[self.__current_index].start_stream(self.__stream_args)
@@ -1243,11 +1271,11 @@ class SequentialDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__current_index = 0
         self.__stream_args = DataStreamArgs((1,))
-        # self.__stream_args = copy.deepcopy(stream_args)
-        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+        self.__index_stack = list(index_stack)
+        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
         self.__sequence_count = stream_args.sequence_count
         self.__sequence_index = 0
 
@@ -1275,7 +1303,7 @@ class SequentialDataStream(DataStream):
                 self.__current_index = 0
                 self.__sequence_index += 1
             if self.__current_index < len(self.__data_streams):
-                self.__data_streams[self.__current_index].prepare_stream(self.__stream_args)
+                self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
                 self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, SequentialDataStream.__data_available))
                 self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                 self.__data_streams[self.__current_index].start_stream(self.__stream_args)
@@ -1737,9 +1765,9 @@ class FramedDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__operator.reset()
-        self.__data_stream.prepare_stream(stream_args, operator=self.__operator)
+        self.__data_stream.prepare_stream(stream_args, index_stack, operator=self.__operator)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert not self.__data_available_event_listener
@@ -2064,8 +2092,8 @@ class ContainerDataStream(DataStream):
     def _send_next(self) -> None:
         self.__data_stream.send_next()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
-        self.__data_stream.prepare_stream(stream_args, **kwargs)
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
+        self.__data_stream.prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert not self.__data_available_event_listener
@@ -2126,9 +2154,9 @@ class ActionDataStream(ContainerDataStream):
         self.__channel_count = len(self.channels)
         self.__complete_channel_count = 0
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         stream_args.max_count = 1
-        super()._prepare_stream(stream_args, **kwargs)
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__shape = stream_args.shape
@@ -2216,7 +2244,7 @@ class MonitorDataStream(DataStream):
     def _send_next(self) -> None:
         pass
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         pass
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
@@ -2254,9 +2282,9 @@ class AccumulatedDataStream(ContainerDataStream):
         self.__data_channel = typing.cast(typing.Any, None)
         super().about_to_delete()
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__data_channel.clear_data()
-        super()._prepare_stream(stream_args, **kwargs)
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__dest_indexes = dict()
@@ -2333,7 +2361,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     Progress must be made once per 60s or else an exception is thrown.
     """
     TIMEOUT = 60.0
-    data_stream.prepare_stream(DataStreamArgs((1,)))
+    data_stream.prepare_stream(DataStreamArgs((1,)), [])
     data_stream.start_stream(DataStreamArgs((1,)))
     try:
         start = time.time()

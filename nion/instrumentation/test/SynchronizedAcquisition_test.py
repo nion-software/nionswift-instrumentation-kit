@@ -44,7 +44,7 @@ class ScanMover(Acquisition.ContainerDataStream):
         self.__drift = drift
         self.__skip = True  # skip adjusting the stage the first time through
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         # adjust the stage for testing.
         if not self.__skip:
             stem_controller = self.__scan_hardware_source.stem_controller
@@ -54,7 +54,7 @@ class ScanMover(Acquisition.ContainerDataStream):
             stem_controller.SetValDeltaAndConfirm("CSH.y", self.__drift.height, 1.0, 1000)
         self.__skip = False
         # call this last so that we move the stage before measuring drift.
-        super()._prepare_stream(stream_args, **kwargs)
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
 
 
 class ScanMoverFunctor(Acquisition.DataStreamFunctor):
@@ -156,11 +156,11 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     self.__scan_hardware_source = scan_hardware_source
                     self.__i = 0
 
-                def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+                def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
                     self.__i += 1
                     if self.__i == 2:
                         self.__scan_hardware_source.grab_synchronized_abort()
-                    super()._prepare_stream(stream_args, **kwargs)
+                    super()._prepare_stream(stream_args, index_stack, **kwargs)
 
             class TestAbortBehaviorFunctor(Acquisition.DataStreamFunctor):
                 def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource) -> None:

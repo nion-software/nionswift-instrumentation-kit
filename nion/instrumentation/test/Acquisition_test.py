@@ -41,7 +41,7 @@ class ScanDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return self.__channels
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs) -> None:
         self.prepare_count += 1
 
     @property
@@ -175,7 +175,7 @@ class MultiFrameDataStream(Acquisition.DataStream):
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype)), 0.1)
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs) -> None:
         if self.__do_processing:
             operator = typing.cast(Acquisition.DataStreamOperator, kwargs.get("operator", Acquisition.NullDataStreamOperator()))
             operator.apply()

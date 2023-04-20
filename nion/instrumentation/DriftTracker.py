@@ -335,14 +335,14 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
         super().__init__(data_stream)
         self.__drift_correction_behavior = drift_correction_behavior
 
-    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, **kwargs: typing.Any) -> None:
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         # during preparation for this section of the scan, let the drift correction behavior capture
         # the drift region and submit it to the drift tracker. the super prepare stream will then call
         # prepare stream of the scan, which can use the drift tracker to adjust the center_nm frame
         # parameter.
         self.__drift_correction_behavior.prepare_section()
         # call this last so that we measure drift before preparing the scan section (which will utilize the measured drift).
-        super()._prepare_stream(stream_args, **kwargs)
+        super()._prepare_stream(stream_args, index_stack, **kwargs)
 
 
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
