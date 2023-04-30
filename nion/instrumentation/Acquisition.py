@@ -1130,7 +1130,7 @@ class StackedDataStream(DataStream):
             assert data_metadata.data_shape[1:] == data_stream_data_metadata.data_shape[1:]
             assert data_metadata.data_dtype == data_stream_data_metadata.data_dtype
             assert data_metadata.data_descriptor == data_stream_data_metadata.data_descriptor
-        data_metadata.data_shape_and_dtype = ((height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
+        data_metadata._set_data_shape_and_dtype(((height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype)))
         return DataStreamInfo(data_metadata, duration)
 
     @property
@@ -1199,7 +1199,7 @@ class StackedDataStream(DataStream):
             state = DataStreamStateEnum.PARTIAL
         # compute height as a sum from contained data streams and configure a new data_metadata
         data_metadata = copy.deepcopy(data_stream_event.data_metadata)
-        data_metadata.data_shape_and_dtype = ((self.__height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype))
+        data_metadata._set_data_shape_and_dtype(((self.__height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype)))
         # create the data stream event with the overridden data_metadata and state.
         data_stream_event = DataStreamEventArgs(
             data_stream_event.data_stream,
