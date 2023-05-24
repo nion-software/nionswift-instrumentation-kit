@@ -1456,6 +1456,9 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
         section_height = scan_context_description.drift_interval_lines
     enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
 
+    # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+    magnification_device_controller = MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
     # build the synchronized data stream. this will also automatically include scan-channel drift correction.
     synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
         scan_hardware_source=scan_hardware_source,
@@ -1467,7 +1470,9 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
         scan_count=scan_count,
         include_raw=True,
         include_summed=False,
-        enable_drift_tracker=enable_drift_tracker
+        enable_drift_tracker=enable_drift_tracker,
+        fov_nm_model=magnification_device_controller.fov_nm_model,
+        rotation_model=magnification_device_controller.rotation_model
     )
 
     # construct the channel names.
@@ -1485,7 +1490,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHa
     device_map: typing.Dict[str, DeviceController] = dict()
     device_map["stem"] = STEMDeviceController()
     device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
-    device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+    device_map["magnification"] = magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
     return AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), channel_names, drift_tracker, device_map)
@@ -1769,9 +1774,12 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     scan_base.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
                                            scan_hardware_source.scan_device)
 
+    # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+    magnification_device_controller = MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
     # build the scan frame data stream.
     scan_id = uuid.uuid4()
-    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker)
+    scan_data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker, fov_nm_model=magnification_device_controller.fov_nm_model, rotation_model=magnification_device_controller.rotation_model)
 
     # potentially break the scan into multiple sections; this is an unused capability currently.
     scan_size = scan_data_stream.scan_size
@@ -1793,7 +1801,7 @@ def build_scan_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSo
     # construct the device map for this acquisition device.
     device_map: typing.Dict[str, DeviceController] = dict()
     device_map["stem"] = STEMDeviceController()
-    device_map["magnification"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+    device_map["magnification"] = magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
     return AcquisitionDeviceResult(collector.add_ref(), channel_names, None, device_map)
@@ -2349,6 +2357,7 @@ class AcquisitionPanel(Panel.Panel):
             self.widget = document_controller.ui.create_column_widget()
 
 
+# device controller facilitates setting of global state during acquisition.
 class DeviceController(abc.ABC):
     @abc.abstractmethod
     def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]: ...
@@ -2429,16 +2438,18 @@ class CameraDeviceController(DeviceController):
             self.camera_frame_parameters.exposure_ms = values[0]
 
 
-class ScanDeviceController(DeviceController):
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
-        self.scan_hardware_source = scan_hardware_source
-        self.scan_frame_parameters = scan_frame_parameters
+class MagnificationDeviceController(DeviceController):
+    def __init__(self, fov_nm: float, rotation: float) -> None:
+        self.fov_nm_model = Model.PropertyModel(fov_nm)
+        self.rotation_model = Model.PropertyModel(rotation)
 
     def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]:
         control_description = control_customization.control_description
         assert control_description
         if control_customization.control_id == "field_of_view":
-            return [self.scan_frame_parameters.fov_nm]
+            return [self.fov_nm_model.value or 100.0]
+        if control_customization.control_id == "rotation":
+            return [self.rotation_model.value or 0.0]
         raise ValueError()
 
     def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
@@ -2448,7 +2459,29 @@ class ScanDeviceController(DeviceController):
         control_description = control_customization.control_description
         assert control_description
         if control_customization.control_id == "field_of_view":
-            self.scan_frame_parameters.fov_nm = values[0]
+            self.fov_nm_model.value = values[0]
+        elif control_customization.control_id == "rotation":
+            self.rotation_model.value = values[0]
+
+
+class ScanDeviceController(DeviceController):
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters):
+        self.scan_hardware_source = scan_hardware_source
+        self.scan_frame_parameters = scan_frame_parameters
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[stem_controller.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        # no values supported at this time.
+        raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
+
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[stem_controller.AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        # no values supported at this time.
 
 
 class AcquisitionPreferencePanel:

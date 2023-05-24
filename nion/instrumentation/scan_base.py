@@ -35,6 +35,7 @@ from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Model
 from nion.utils import Process
 from nion.utils import Registry
 
@@ -2055,11 +2056,21 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
 
 class ScanFrameDataStream(Acquisition.DataStream):
+    """A data stream that provides frames from a scan.
+
+    The scan is defined by a ScanFrameParameters object and a ScanHardwareSource object.
+
+    The fov_nm and rotation models allow the magnification to be controlled by envelopes like 1D ramp.
+    """
     def __init__(self, scan_hardware_source: ScanHardwareSource,
                  scan_frame_parameters: ScanFrameParameters, scan_id: uuid.UUID,
                  drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None,
                  camera_exposure_ms: typing.Optional[float] = None,
-                 camera_data_stream: typing.Optional[camera_base.CameraFrameDataStream] = None):
+                 camera_data_stream: typing.Optional[camera_base.CameraFrameDataStream] = None,
+                 *,
+                 fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
+                 rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
+                 ) -> None:
         super().__init__()
         scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
         self.__scan_hardware_source = scan_hardware_source
@@ -2071,6 +2082,8 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
         self.__enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
+        self.__fov_nm_model = fov_nm_model
+        self.__rotation_model = rotation_model
         scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
@@ -2189,6 +2202,10 @@ class ScanFrameDataStream(Acquisition.DataStream):
             self.__buffers.clear()
             self.__sent_rows.clear()
             self.__available_rows.clear()
+        if self.__fov_nm_model and self.__fov_nm_model.value is not None:
+            section_frame_parameters.fov_nm = self.__fov_nm_model.value
+        if self.__rotation_model and self.__rotation_model.value is not None:
+            section_frame_parameters.rotation_rad = self.__rotation_model.value
         acquisition_parameters = HardwareSource.AcquisitionParameters(section_frame_parameters, acquisition_task_parameters)
         self.__record_task = HardwareSource.RecordTask(self.__scan_hardware_source, acquisition_parameters)
 
@@ -2279,6 +2296,8 @@ def make_synchronized_scan_data_stream(
         include_raw: bool = True,
         include_summed: bool = False,
         enable_drift_tracker: bool = False,
+        fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
+        rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
         old_move_axis: bool = False) -> Acquisition.DataStream:
 
     # there are two separate drift corrector possibilities:
@@ -2320,7 +2339,7 @@ def make_synchronized_scan_data_stream(
         else:
             operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
-    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream)
+    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream, fov_nm_model=fov_nm_model, rotation_model=rotation_model)
     scan_size = scan_data_stream.scan_size
     scan_like_data_stream: Acquisition.DataStream = scan_data_stream
     if scan_data_stream_functor:

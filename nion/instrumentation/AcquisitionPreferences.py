@@ -3,6 +3,7 @@ from __future__ import annotations
 # system imports
 import copy
 import gettext
+import math
 import pathlib
 import typing
 
@@ -77,6 +78,7 @@ acquisition_controls = [
     ControlDescription("control2_mm", _("Control 2D 1E-3"), "stem", "ControlName", "2d", (0, 0), 1, "mm", 0.05, "tv"),
     ControlDescription("control2_m", _("Control 2D"), "stem", "ControlName", "2d", (0, 0), 1, "m", 0.05, "tv"),
     ControlDescription("field_of_view", _("FoV"), "magnification", "fov_nm", "1d", 100E-9, 1E9, "nm", 0.00, None),
+    ControlDescription("rotation", _("Rotation"), "magnification", "rotation", "1d", 0.0, (math.pi * 2) / 360.0, "", 0.00, None),
     ControlDescription("energy_offset", _("Energy Offset"), "stem", "EELS_MagneticShift_Offset", "1d", 0, 1, "eV", 0.05, None),
     ControlDescription("stage_position", _("Stage Position"), "stem", "stage_position_m", "2d", (0, 0), 1, "nm", 0.00, "tv"),
     ControlDescription("exposure", _("Exposure"), "camera", "exposure_ms", "1d", 100E-3, 1E3, "ms", 0.00, None),
