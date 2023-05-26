@@ -1310,29 +1310,20 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return None
 
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo:
-        scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
-            scan_param_height = subscan_pixel_size.height
-            scan_param_width = subscan_pixel_size.width
-            if scan_param_height * scan_param_width > scan_max_area:
-                scan_param_height = scan_max_area // scan_param_width
+            scan_size = get_limited_scan_shape(subscan_pixel_size)
             fractional_size = scan_frame_parameters.subscan_fractional_size
             fractional_center = scan_frame_parameters.subscan_fractional_center
             assert fractional_size and fractional_center
             fractional_area = Geometry.FloatRect.from_center_and_size(fractional_center, fractional_size)
             is_subscan = True
         else:
-            scan_param_height = scan_frame_parameters.pixel_size.height
-            scan_param_width = scan_frame_parameters.pixel_size.width
-            if scan_param_height * scan_param_width > scan_max_area:
-                scan_param_height = scan_max_area // scan_param_width
+            scan_size = get_limited_scan_shape(scan_frame_parameters.pixel_size)
             fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
             is_subscan = False
 
         camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.binning))
-
-        scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
 
         camera_readout_size_squeezed: typing.Tuple[int, ...]
         if camera_frame_parameters.processing == "sum_project":
@@ -2055,6 +2046,15 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return CameraFacade()
 
 
+def get_limited_scan_shape(scan_size: Geometry.IntSize) -> Geometry.IntSize:
+    SCAN_MAX_AREA = 16384 * 16384
+    if scan_size.height * scan_size.width > SCAN_MAX_AREA:
+        scan_size_width = math.floor(math.sqrt(SCAN_MAX_AREA * scan_size.aspect_ratio))
+        scan_size_height = int(scan_size_width // scan_size.aspect_ratio)
+        return Geometry.IntSize(scan_size_height, scan_size_width)
+    return scan_size
+
+
 class ScanFrameDataStream(Acquisition.DataStream):
     """A data stream that provides frames from a scan.
 
@@ -2084,26 +2084,19 @@ class ScanFrameDataStream(Acquisition.DataStream):
         self.__enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
         self.__fov_nm_model = fov_nm_model
         self.__rotation_model = rotation_model
-        scan_max_area = 2048 * 2048
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
         if subscan_pixel_size:
-            scan_param_height = subscan_pixel_size.height
-            scan_param_width = subscan_pixel_size.width
-            if scan_param_height * scan_param_width > scan_max_area:
-                scan_param_height = scan_max_area // scan_param_width
+            scan_size = get_limited_scan_shape(subscan_pixel_size)
             fractional_size = scan_frame_parameters.subscan_fractional_size
             fractional_center = scan_frame_parameters.subscan_fractional_center
             assert fractional_size and fractional_center
             self.__fractional_area = Geometry.FloatRect.from_center_and_size(fractional_center, fractional_size)
             is_subscan = True
         else:
-            scan_param_height = scan_frame_parameters.pixel_size.height
-            scan_param_width = scan_frame_parameters.pixel_size.width
-            if scan_param_height * scan_param_width > scan_max_area:
-                scan_param_height = scan_max_area // scan_param_width
+            scan_size = get_limited_scan_shape(scan_frame_parameters.pixel_size)
             self.__fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
             is_subscan = False
-        self.__scan_size = Geometry.IntSize(h=scan_param_height, w=scan_param_width)
+        self.__scan_size = scan_size
         if is_subscan:
             self.__scan_frame_parameters.subscan_pixel_size = self.__scan_size
         else:
