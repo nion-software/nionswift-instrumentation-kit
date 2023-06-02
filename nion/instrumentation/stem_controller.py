@@ -873,13 +873,12 @@ class DisplayItemListModel(Observable.Observable):
                  document_model: DocumentModel.DocumentModel,
                  call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None],
                  item_key: str,
-                 predicate: typing.Callable[[DisplayItem.DisplayItem], bool],
-                 change_event: typing.Optional[Event.Event] = None):
+                 stem_controller: STEMController):
         super().__init__()
         self.__document_model = document_model
         self.__call_soon_threadsafe = call_soon_threadsafe
         self.__item_key = item_key
-        self.__predicate = predicate
+        self.__stem_controller = stem_controller
         self.__items : typing.List[DisplayItem.DisplayItem] = list()
 
         self.__item_inserted_listener = document_model.item_inserted_event.listen(self.__item_inserted)
@@ -888,7 +887,7 @@ class DisplayItemListModel(Observable.Observable):
         for index, display_item in enumerate(document_model.display_items):
             self.__item_inserted("display_items", display_item, index)
 
-        self.__change_event_listener = change_event.listen(self.refilter) if change_event else None
+        self.__change_event_listener = stem_controller.scan_context_data_items_changed_event.listen(self.refilter) if stem_controller.scan_context_data_items_changed_event else None
 
         # special handling when document closes
         def unlisten() -> None:
@@ -911,8 +910,19 @@ class DisplayItemListModel(Observable.Observable):
         self.__call_soon_threadsafe = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
+    def __get_scan_context_display_items(self) -> typing.Set[DisplayItem.DisplayItem]:
+        display_items: typing.Set[DisplayItem.DisplayItem] = set()
+        scan_hardware_source = self.__stem_controller.scan_controller
+        if scan_hardware_source:
+            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in scan_hardware_source.get_enabled_channel_indexes()]
+            for data_channel_id in data_channel_ids:
+                data_item_channel_reference = self.__document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, data_channel_id)
+                if data_item_channel_reference and data_item_channel_reference.display_item:
+                    display_items.add(data_item_channel_reference.display_item)
+        return display_items
+
     def __item_inserted(self, key: str, display_item: DisplayItem.DisplayItem, index: int) -> None:
-        if key == "display_items" and not display_item in self.__items and self.__predicate(display_item):
+        if key == "display_items" and not display_item in self.__items and display_item in self.__get_scan_context_display_items():
             index = len(self.__items)
             self.__items.append(display_item)
             self.notify_insert_item(self.__item_key, display_item, index)
@@ -933,20 +943,17 @@ class DisplayItemListModel(Observable.Observable):
         raise AttributeError()
 
     def __refilter(self) -> None:
-        self.item_set = set(self.__items)
-        for display_item in self.__document_model.display_items:
-            if self.__predicate(display_item):
-                # insert item if not already inserted
-                if not display_item in self.__items:
-                    index = len(self.__items)
-                    self.__items.append(display_item)
-                    self.notify_insert_item(self.__item_key, display_item, index)
-            else:
-                # remove item if in list
-                if display_item in self.__items:
-                    index = self.__items.index(display_item)
-                    self.__items.pop(index)
-                    self.notify_remove_item(self.__item_key, display_item, index)
+        display_items = self.__get_scan_context_display_items()
+        for display_item in display_items:
+            if not display_item in self.__items:
+                index = len(self.__items)
+                self.__items.append(display_item)
+                self.notify_insert_item(self.__item_key, display_item, index)
+        for display_item in self.__items:
+            if not display_item in display_items:
+                index = self.__items.index(display_item)
+                self.__items.pop(index)
+                self.notify_remove_item(self.__item_key, display_item, index)
 
     def refilter(self) -> None:
         if threading.current_thread() == threading.main_thread():
@@ -955,27 +962,16 @@ class DisplayItemListModel(Observable.Observable):
             self.__call_soon_threadsafe(self.__refilter)
 
     def clean(self, graphic_id: str) -> None:
-        display_items = self.__document_model.display_items
-        for display_item in display_items:
-            if self.__predicate(display_item):
+        display_items = self.__get_scan_context_display_items()
+        for display_item in self.__document_model.display_items:
+            if display_item in display_items:
                 for graphic in display_item.graphics:
                     if graphic.graphic_id == graphic_id:
                         display_item.remove_graphic(graphic).close()
 
 
 def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None]) -> DisplayItemListModel:
-    def is_scan_context_display_item(display_item: DisplayItem.DisplayItem) -> bool:
-        # acts as a filter for the display item list model.
-        scan_hardware_source = stem_controller.scan_controller
-        if scan_hardware_source:
-            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in scan_hardware_source.get_enabled_channel_indexes()]
-            for data_channel_id in data_channel_ids:
-                data_item_channel_reference = document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, data_channel_id)
-                if data_item_channel_reference and data_item_channel_reference.display_item == display_item:
-                    return True
-        return False
-
-    return DisplayItemListModel(document_model, call_soon_threadsafe, "display_items", is_scan_context_display_item, stem_controller.scan_context_data_items_changed_event)
+    return DisplayItemListModel(document_model, call_soon_threadsafe, "display_items", stem_controller)
 
 
 class EventLoopMonitor:
