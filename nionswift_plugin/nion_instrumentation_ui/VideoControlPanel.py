@@ -7,6 +7,7 @@ import asyncio
 import copy
 import functools
 import gettext
+import threading
 import typing
 
 from nion.instrumentation import HardwareSource
@@ -175,6 +176,26 @@ class VideoSourceStateController:
         self.acquisition_state_model.value = data_channel_event_args.data_channel_state
 
 
+class ThreadHelper:
+    def __init__(self, event_loop: asyncio.AbstractEventLoop) -> None:
+        self.__event_loop = event_loop
+        self.__pending_calls: typing.Dict[str, asyncio.Handle] = dict()
+
+    def close(self) -> None:
+        for handle in self.__pending_calls.values():
+            handle.cancel()
+        self.__pending_calls = dict()
+
+    def call_on_main_thread(self, key: str, func: typing.Callable[[], None]) -> None:
+        if threading.current_thread() != threading.main_thread():
+            handle = self.__pending_calls.pop(key, None)
+            if handle:
+                handle.cancel()
+            self.__pending_calls[key] = self.__event_loop.call_soon_threadsafe(func)
+        else:
+            func()
+
+
 class VideoDisplayPanelController:
     """
         Represents a controller for the content of an image panel.
@@ -187,6 +208,8 @@ class VideoDisplayPanelController:
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
         assert isinstance(hardware_source, video_base.VideoHardwareSource)
         self.type = VideoDisplayPanelController.type
+
+        self.__thread_helper = ThreadHelper(display_panel.document_controller.event_loop)
 
         self.__hardware_source_id = hardware_source_id
 
@@ -234,14 +257,13 @@ class VideoDisplayPanelController:
             abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def acquisition_state_changed(key: str) -> None:
-            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
-            # and add it to the window event loop.
-            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
                 acquisition_state = acquisition_state or "stopped"
                 status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-            self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value))
+            self.__thread_helper.call_on_main_thread("acquisition_state_changed", functools.partial(update_acquisition_state_label, self.__state_controller.acquisition_state_model.value))
 
         def display_new_data_item(data_item: DataItem.DataItem) -> None:
             result_display_panel = display_panel.document_controller.next_result_display_panel()
@@ -266,6 +288,8 @@ class VideoDisplayPanelController:
         acquisition_state_changed("value")
 
     def close(self) -> None:
+        self.__thread_helper.close()
+        self.__thread_helper = typing.cast(typing.Any, None)
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
         self.__state_controller.close()

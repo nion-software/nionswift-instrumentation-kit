@@ -585,28 +585,24 @@ def make_exposure_str(exposure: float, exposure_precision: int) -> str:
     return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
 
 
-class TaskHelper:
-    def __init__(self) -> None:
-        self.__pending_task_lock = threading.RLock()
-        self.__pending_task: typing.Optional[asyncio.Task[None]] = None
+class ThreadHelper:
+    def __init__(self, event_loop: asyncio.AbstractEventLoop) -> None:
+        self.__event_loop = event_loop
+        self.__pending_calls: typing.Dict[str, asyncio.Handle] = dict()
 
     def close(self) -> None:
-        with self.__pending_task_lock:
-            if self.__pending_task:
-                self.__pending_task.cancel()
-                self.__pending_task = None
+        for handle in self.__pending_calls.values():
+            handle.cancel()
+        self.__pending_calls = dict()
 
-    def register_task(self, task: asyncio.Task[None]) -> None:
-        with self.__pending_task_lock:
-            if self.__pending_task:
-                self.__pending_task.cancel()
-                self.__pending_task = None
-            self.__pending_task = task
-
-            def clear_pending(t: asyncio.Task[None]) -> None:
-                self.__pending_task = task
-
-            task.add_done_callback(clear_pending)
+    def call_on_main_thread(self, key: str, func: typing.Callable[[], None]) -> None:
+        if threading.current_thread() != threading.main_thread():
+            handle = self.__pending_calls.pop(key, None)
+            if handle:
+                handle.cancel()
+            self.__pending_calls[key] = self.__event_loop.call_soon_threadsafe(func)
+        else:
+            func()
 
 
 class CameraControlWidget(Widgets.CompositeWidgetBase):
@@ -615,7 +611,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
 
-        self.__acquisition_state_changed_task = TaskHelper()
+        self.__thread_helper = ThreadHelper(document_controller.event_loop)
 
         self.document_controller = document_controller
 
@@ -860,13 +856,12 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             abort_button.enabled = enabled
 
         def acquisition_state_changed(key: str) -> None:
-            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
-            # and add it to the window event loop.
-            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
                 acquisition_state = acquisition_state or "stopped"
                 play_state_label.text = map_channel_state_to_text[acquisition_state]
 
-            self.__acquisition_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value)))
+            self.__thread_helper.call_on_main_thread("acquisition_state_changed", functools.partial(update_acquisition_state_label, self.__state_controller.acquisition_state_model.value))
 
         def camera_current_changed(camera_current: typing.Optional[float]) -> None:
             if camera_current:
@@ -906,6 +901,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         super().periodic()
 
     def close(self) -> None:
+        self.__thread_helper.close()
+        self.__thread_helper = typing.cast(typing.Any, None)
         self.__configuration_dialog_close_listener = None
         self.__key_pressed_event_listener.close()
         self.__key_pressed_event_listener = typing.cast(typing.Any, None)
@@ -918,7 +915,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_task.close()
         super().close()
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
@@ -1025,7 +1021,7 @@ class CameraDisplayPanelController:
         camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
         self.type = CameraDisplayPanelController.type
 
-        self.__acquisition_state_changed_task = TaskHelper()
+        self.__thread_helper = ThreadHelper(display_panel.document_controller.event_loop)
 
         self.__hardware_source_id = hardware_source_id
 
@@ -1095,14 +1091,13 @@ class CameraDisplayPanelController:
                 abort_button_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
         def acquisition_state_changed(key: str) -> None:
-            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
-            # and add it to the window event loop.
-            async def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            def update_acquisition_state_label(acquisition_state: typing.Optional[str]) -> None:
                 acquisition_state = acquisition_state or "stopped"
                 status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
-            self.__acquisition_state_changed_task.register_task(self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(self.__state_controller.acquisition_state_model.value)))
+            self.__thread_helper.call_on_main_thread("acquisition_state_changed", functools.partial(update_acquisition_state_label, self.__state_controller.acquisition_state_model.value))
 
         def display_name_changed(display_name: str) -> None:
             self.__display_name = display_name
@@ -1167,12 +1162,13 @@ class CameraDisplayPanelController:
         show_processed_checkbox_changed(checkstate)
 
     def close(self) -> None:
+        self.__thread_helper.close()
+        self.__thread_helper = typing.cast(typing.Any, None)
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
         self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_task.close()
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id

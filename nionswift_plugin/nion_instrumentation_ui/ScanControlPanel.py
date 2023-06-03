@@ -1028,28 +1028,24 @@ class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
             drawing_context.stroke()
 
 
-class TaskHelper:
-    def __init__(self) -> None:
-        self.__pending_task_lock = threading.RLock()
-        self.__pending_task: typing.Optional[asyncio.Task[None]] = None
+class ThreadHelper:
+    def __init__(self, event_loop: asyncio.AbstractEventLoop) -> None:
+        self.__event_loop = event_loop
+        self.__pending_calls: typing.Dict[str, asyncio.Handle] = dict()
 
     def close(self) -> None:
-        with self.__pending_task_lock:
-            if self.__pending_task:
-                self.__pending_task.cancel()
-                self.__pending_task = None
+        for handle in self.__pending_calls.values():
+            handle.cancel()
+        self.__pending_calls = dict()
 
-    def register_task(self, task: asyncio.Task[None]) -> None:
-        with self.__pending_task_lock:
-            if self.__pending_task:
-                self.__pending_task.cancel()
-                self.__pending_task = None
-            self.__pending_task = task
-
-            def clear_pending(t: asyncio.Task[None]) -> None:
-                self.__pending_task = task
-
-            task.add_done_callback(clear_pending)
+    def call_on_main_thread(self, key: str, func: typing.Callable[[], None]) -> None:
+        if threading.current_thread() != threading.main_thread():
+            handle = self.__pending_calls.pop(key, None)
+            if handle:
+                handle.cancel()
+            self.__pending_calls[key] = self.__event_loop.call_soon_threadsafe(func)
+        else:
+            func()
 
 
 class ScanControlWidget(Widgets.CompositeWidgetBase):
@@ -1066,9 +1062,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
 
-        self.__acquisition_state_changed_task = TaskHelper()
-        self.__subscan_state_changed_task = TaskHelper()
-        self.__drift_state_changed_task = TaskHelper()
+        self.__thread_helper = ThreadHelper(document_controller.event_loop)
 
         self.document_controller = document_controller
 
@@ -1467,9 +1461,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             record_abort_button.enabled = enabled
 
         def acquisition_state_changed(key: str) -> None:
-            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
-            # and add it to the window event loop.
-            async def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
                 acquisition_state: typing.Optional[str] = None
                 for acquisition_state in acquisition_states.values():
                     if acquisition_state != "stopped":
@@ -1478,7 +1471,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
                 play_state_label.text = map_channel_state_to_text[acquisition_state]
 
             acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
-            self.__acquisition_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states)))
+            self.__thread_helper.call_on_main_thread("acquisition_state_changed", functools.partial(update_acquisition_state_label, acquisition_states))
 
         def probe_state_changed(probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
             map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
@@ -1529,7 +1522,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             channel_enabled_check_box_widget.on_checked_changed = checked_changed
             thumbnail_column.add(channel_enabled_check_box_widget)
 
-        async def update_subscan_state(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
+        def update_subscan_state(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
             for channel_index in range(scan_controller.channel_count):
                 is_subscan_channel = subscan_state == stem_controller.SubscanState.ENABLED or line_scan_state == stem_controller.LineScanState.ENABLED
                 channel_state_changed(channel_index, self.__state_controller.get_channel_enabled(channel_index), is_subscan_channel)
@@ -1539,10 +1532,10 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             line_scan_checkbox.checked = line_scan_state == stem_controller.LineScanState.ENABLED
 
         def subscan_state_changed(subscan_state: stem_controller.SubscanState, line_scan_state: stem_controller.LineScanState) -> None:
-            # handle subscan state changes from the low level
-            self.__subscan_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_subscan_state(subscan_state, line_scan_state)))
+            # this may be called on a thread. ensure it runs on the main thread.
+            self.__thread_helper.call_on_main_thread("subscan_state_changed", functools.partial(update_subscan_state, subscan_state, line_scan_state))
 
-        async def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
+        def update_drift_state(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
             enabled = subscan_state != stem_controller.SubscanState.INVALID
             drift_checkbox.enabled = enabled
             drift_settings_value.enabled = enabled
@@ -1552,7 +1545,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             drift_settings_unit.current_item = drift_settings.interval_units
 
         def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
-            self.__drift_state_changed_task.register_task(self.document_controller.event_loop.create_task(update_drift_state(drift_channel_id, drift_region, drift_settings, subscan_state)))
+            # this may be called on a thread. ensure it runs on the main thread.
+            self.__thread_helper.call_on_main_thread("drift_state_changed", functools.partial(update_drift_state, drift_channel_id, drift_region, drift_settings, subscan_state))
 
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
@@ -1581,6 +1575,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         acquisition_state_changed("value")
 
     def close(self) -> None:
+        self.__thread_helper.close()
+        self.__thread_helper = typing.cast(typing.Any, None)
         self.__key_pressed_event_listener.close()
         self.__key_pressed_event_listener = typing.cast(typing.Any, None)
         self.__key_released_event_listener.close()
@@ -1593,9 +1589,6 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_task.close()
-        self.__subscan_state_changed_task.close()
-        self.__drift_state_changed_task.close()
         super().close()
 
     def periodic(self) -> None:
@@ -1679,7 +1672,7 @@ class ScanDisplayPanelController:
         assert isinstance(hardware_source, scan_base.ScanHardwareSource)
         self.type = ScanDisplayPanelController.type
 
-        self.__acquisition_state_changed_task = TaskHelper()
+        self.__thread_helper = ThreadHelper(display_panel.document_controller.event_loop)
 
         self.__hardware_source_id = hardware_source_id
         self.__data_channel_id = data_channel_id
@@ -1788,15 +1781,14 @@ class ScanDisplayPanelController:
             update_abort_button()
 
         def acquisition_state_changed(key: str) -> None:
-            # this may be called on a thread. create an async method (guaranteed to run on the main thread)
-            # and add it to the window event loop.
-            async def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            def update_acquisition_state_label(acquisition_states: typing.Mapping[str, typing.Optional[str]]) -> None:
                 acquisition_state = acquisition_states.get(self.__data_channel_id, None) or "stopped"
                 status_text_canvas_item.text = map_channel_state_to_text[acquisition_state]
                 status_text_canvas_item.size_to_content(display_panel.image_panel_get_font_metrics)
 
             acquisition_states = self.__state_controller.acquisition_state_model.value or dict()
-            self.__acquisition_state_changed_task.register_task(self.__display_panel.document_controller.event_loop.create_task(update_acquisition_state_label(acquisition_states)))
+            self.__thread_helper.call_on_main_thread("acquisition_state_changed", functools.partial(update_acquisition_state_label, acquisition_states))
 
         def data_channel_state_changed(data_channel_index: int, data_channel_id: str, channel_name: str, enabled: bool) -> None:
             if data_channel_id == self.__data_channel_id:
@@ -1855,12 +1847,13 @@ class ScanDisplayPanelController:
         increase_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_increase_pmt_clicked, self.__channel_index)
 
     def close(self) -> None:
+        self.__thread_helper.close()
+        self.__thread_helper = typing.cast(typing.Any, None)
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
         self.__display_panel = typing.cast(typing.Any, None)
         self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
-        self.__acquisition_state_changed_task.close()
 
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
