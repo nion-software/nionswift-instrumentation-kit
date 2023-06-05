@@ -1108,15 +1108,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str] = None) -> None:
         super().__init__(device.scan_device_id, device.scan_device_name)
 
-        # configure the event loop object
-        logger = logging.getLogger()
-        old_level = logger.level
-        logger.setLevel(logging.INFO)
-        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
-        logger.setLevel(old_level)
-
         self.__settings = settings
-        self.__settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
+        self.__settings.initialize(configuration_location=configuration_location, event_loop=asyncio.get_event_loop())
 
         self.__current_frame_parameters_changed_event_listener = self.__settings.current_frame_parameters_changed_event.listen(self.__set_current_frame_parameters)
         self.__record_frame_parameters_changed_event_listener = self.__settings.record_frame_parameters_changed_event.listen(self.__set_record_frame_parameters)
@@ -1200,8 +1193,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.acquisition_state_changed_event = Event.Event()
 
     def close(self) -> None:
-        Process.close_event_loop(self.__event_loop)
-        self.__event_loop = typing.cast(asyncio.AbstractEventLoop, None)
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
         self.close_thread()
@@ -1242,8 +1233,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__device = typing.cast(ScanDevice, None)
 
     def periodic(self) -> None:
-        self.__event_loop.stop()
-        self.__event_loop.run_forever()
         self.__handle_executing_task_queue()
 
     @property

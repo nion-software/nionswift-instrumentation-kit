@@ -1251,15 +1251,8 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
-        # configure the event loop object
-        logger = logging.getLogger()
-        old_level = logger.level
-        logger.setLevel(logging.INFO)
-        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
-        logger.setLevel(old_level)
-
         self.__camera_settings = camera_settings
-        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
+        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=asyncio.get_event_loop())
 
         self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
@@ -1345,8 +1338,6 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
 
     def close(self) -> None:
-        Process.close_event_loop(self.__event_loop)
-        self.__event_loop = typing.cast(asyncio.AbstractEventLoop, None)
         self.__periodic_logger_fn = None
         super().close()
         if self.__settings_changed_event_listener:
@@ -1368,8 +1359,6 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__camera = typing.cast(typing.Any, None)
 
     def periodic(self) -> None:
-        self.__event_loop.stop()
-        self.__event_loop.run_forever()
         self.__handle_log_messages_event()
 
     def __get_instrument_controller(self) -> InstrumentController:
@@ -1855,15 +1844,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice3, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
         super().__init__(typing.cast(typing.Any, camera).camera_id, typing.cast(typing.Any, camera).camera_name)
 
-        # configure the event loop object
-        logger = logging.getLogger()
-        old_level = logger.level
-        logger.setLevel(logging.INFO)
-        self.__event_loop = asyncio.new_event_loop()  # outputs a debugger message!
-        logger.setLevel(old_level)
-
         self.__camera_settings = camera_settings
-        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=self.__event_loop)
+        self.__camera_settings.initialize(configuration_location=configuration_location, event_loop=asyncio.get_event_loop())
 
         self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
@@ -1963,8 +1945,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__periodic_logger_fn = periodic_logger_fn if callable(periodic_logger_fn) else None
 
     def close(self) -> None:
-        Process.close_event_loop(self.__event_loop)
-        self.__event_loop = typing.cast(asyncio.AbstractEventLoop, None)
         self.__periodic_logger_fn = None
         super().close()
         if self.__settings_changed_event_listener:
@@ -1984,8 +1964,6 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__camera = typing.cast(typing.Any, None)
 
     def periodic(self) -> None:
-        self.__event_loop.stop()
-        self.__event_loop.run_forever()
         self.__handle_log_messages_event()
 
     def __get_instrument_controller(self) -> InstrumentController:
