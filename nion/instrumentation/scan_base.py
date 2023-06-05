@@ -947,6 +947,10 @@ ScanDataChannelDelegateProtocol = HardwareSource.DataChannelDelegateProtocol
 ScanDataChannelSpecifier = HardwareSource.DataChannelSpecifier
 
 
+class OpenConfigurationDialogCallable(typing.Protocol):
+      def __call__(self, api_broker: typing.Any, **kwargs: typing.Any) -> None: ...
+
+
 class ScanSettings(ScanSettingsProtocol):
     """A concrete implementation of ScanSettingsProtocol.
 
@@ -955,6 +959,9 @@ class ScanSettings(ScanSettingsProtocol):
 
     If your scan module subclasses ScanFrameParameters, provide a frame_parameters_factory function to construct
     your subclass from a dictionary.
+
+    If you want to use a custom configuration dialog, provide an open_configuration_dialog_fn callable that takes
+    an api_broker. The callable should return None.
     """
 
     def __init__(self,
@@ -962,7 +969,7 @@ class ScanSettings(ScanSettingsProtocol):
                  frame_parameters_factory: ScanFrameParametersFactory,
                  current_settings_index: int = 0,
                  record_settings_index: int = 0,
-                 open_configuration_dialog_fn: typing.Optional[typing.Callable[[], None]] = None) -> None:
+                 open_configuration_dialog_fn: typing.Optional[OpenConfigurationDialogCallable] = None) -> None:
         assert len(scan_modes) > 0
 
         # these events must be defined
@@ -1093,7 +1100,7 @@ class ScanSettings(ScanSettingsProtocol):
 
     def open_configuration_interface(self, api_broker: typing.Any) -> None:
         if callable(self.__open_configuration_dialog_fn):
-            self.__open_configuration_dialog_fn()
+            self.__open_configuration_dialog_fn(api_broker)
 
 
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
