@@ -85,79 +85,80 @@ class Controller:
         frame_count = self.frame_count_model.value or 0
         was_playing = hardware_source.is_playing
 
-        success_ref = [True]
-
         xdata_group_list: typing.List[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]] = list()
 
-        def exec_acquire() -> None:
+        def exec_acquire() -> typing.Tuple[bool, int]:
             # this will execute in a thread; the enclosing async routine will continue when it finishes
             try:
                 start_time = time.time()
                 max_wait_time = max(hardware_source.get_current_frame_time() * 1.5, 3)
                 while not hardware_source.is_playing:
                     if time.time() - start_time > max_wait_time:
-                        success_ref[0] = False
-                        return
+                        return False, 0
                     time.sleep(0.01)
                 hardware_source.get_next_xdatas_to_start(max_wait_time * 2)  # wait for frame + next frame
                 for i in range(frame_count):
                     self.progress_model.value = int(100 * i / frame_count)
                     if self.cancel_event.is_set():
-                        success_ref[0] = False
-                        break
+                        return False, max(i - 1, 0)
                     hardware_source.get_next_xdatas_to_finish(max_wait_time * 2)
+                return True, frame_count
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                success_ref[0] = False
+            return False, 0
 
         if do_acquire:
             print("AR: start playing")
             hardware_source.set_buffer_size(frame_count)
             hardware_source.start_playing()
             print("AR: wait for acquire")
-            await event_loop.run_in_executor(None, exec_acquire)
+            success, actual_count = await event_loop.run_in_executor(None, exec_acquire)
             print("AR: acquire finished")
+        else:
+            success = True
+            actual_count = frame_count
 
-        def exec_grab() -> None:
+        def exec_grab(actual_count: int) -> bool:
             # this will execute in a thread; the enclosing async routine will continue when it finishes
             try:
                 start_time = time.time()
                 max_wait_time = max(hardware_source.get_current_frame_time() * 1.5, 3)
                 while hardware_source.is_playing:
                     if time.time() - start_time > max_wait_time:
-                        success_ref[0] = False
-                        return
+                        return False
                     time.sleep(0.01)
-                data_element_groups = hardware_source.get_buffer_data(-frame_count, frame_count)
+                data_element_groups = hardware_source.get_buffer_data(-actual_count, actual_count)
                 for data_element_group in data_element_groups:
                     if self.cancel_event.is_set():
-                        success_ref[0] = False
-                        break
+                        return False
                     xdata_group = list()
                     for data_element in data_element_group:
                         xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
                         xdata_group.append(xdata)
                     xdata_group_list.append(xdata_group)
                 self.progress_model.value = 100
+                return True
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                success_ref[0] = False
+                return False
             finally:
                 hardware_source.set_buffer_size(100)
                 hardware_source.clear_buffer()
 
-        if success_ref[0]:
-            print("AR: stop playing")
-            hardware_source.stop_playing()
+        print("AR: stop playing")
+        hardware_source.stop_playing()
+
+        if actual_count > 0:
             print("AR: grabbing data")
-            await event_loop.run_in_executor(None, exec_grab)
+            self.cancel_event.clear()
+            success = await event_loop.run_in_executor(None, exec_grab, actual_count)
             print("AR: grab finished")
 
         xdata_group = None
 
-        if success_ref[0]:
+        if success:
             if len(xdata_group_list) > 1:
                 print("AR: making xdata")
                 valid_count = 0
@@ -243,7 +244,7 @@ class PanelDelegate:
         count_line_edit = ui.create_line_edit_widget()
         grab_button = ui.create_push_button_widget(_("Grab Previous"))
         record_button = ui.create_push_button_widget(_("Record Next"))
-        cancel_button = ui.create_push_button_widget(_("Cancel"))
+        cancel_button = ui.create_push_button_widget(_("Stop"))
         progress_bar = ui._ui.create_progress_bar_widget(properties={"height": 18, "min-width": 200})
         progress_bar.minimum = 0
         progress_bar.maximum = 100
