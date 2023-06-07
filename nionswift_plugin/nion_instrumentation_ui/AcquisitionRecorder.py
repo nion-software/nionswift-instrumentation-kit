@@ -97,7 +97,7 @@ class Controller:
                         return False, 0
                     time.sleep(0.01)
                 hardware_source.get_next_xdatas_to_start(max_wait_time * 2)  # wait for frame + next frame
-                for i in range(frame_count):
+                while (i := hardware_source.get_buffer_count()) < frame_count:
                     self.progress_model.value = int(100 * i / frame_count)
                     if self.cancel_event.is_set():
                         return False, max(i - 1, 0)
