@@ -185,7 +185,7 @@ def get_slice_shape(slices: SliceType, shape: ShapeType) -> ShapeType:
 
 
 def expand_shape(shape: ShapeType) -> int:
-    return int(numpy.product(shape, dtype=numpy.int64))
+    return int(numpy.prod(shape, dtype=numpy.int64))
 
 
 def get_slice_rect(slices: SliceType, shape: ShapeType) -> Geometry.IntRect:

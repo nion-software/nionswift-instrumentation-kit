@@ -1505,7 +1505,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             self.__camera.set_frame_parameters(frame_parameters)
             acquire_synchronized_prepare(data_shape, **kwargs)
         else:
-            self.acquire_sequence_prepare(int(numpy.product(data_shape)), **kwargs)  # type: ignore
+            self.acquire_sequence_prepare(int(numpy.prod(data_shape)), **kwargs)  # type: ignore
 
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
         acquire_synchronized = getattr(self.__camera, "acquire_synchronized", None)
@@ -1517,7 +1517,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 return [data_element]
             return []
         else:
-            return self.acquire_sequence(int(numpy.product(data_shape)))  # type: ignore
+            return self.acquire_sequence(int(numpy.prod(data_shape)))  # type: ignore
 
     def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None:
         frame_parameters = self.get_current_frame_parameters()
@@ -2481,7 +2481,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape, index_stack=index_stack)
-        return numpy.product(collection_shape, dtype=numpy.uint64)  # type: ignore
+        return numpy.prod(collection_shape, dtype=numpy.uint64)  # type: ignore
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
@@ -2697,7 +2697,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         if stream_args.max_count == 1 or stream_args.shape == (1,):
             acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
             self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
-            self.__record_count = numpy.product(stream_args.shape, dtype=numpy.uint64)  # type: ignore
+            self.__record_count = numpy.prod(stream_args.shape, dtype=numpy.uint64)  # type: ignore
         else:
             assert self.__camera_device_stream_interface
             self.__last_index = 0
@@ -2771,7 +2771,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
                     # data_count is the total for the data provided by the child data stream. some data streams will
                     # provide a slice into a chunk of data representing the entire stream; whereas others will provide
                     # smaller chunks.
-                    data_count = numpy.product(xdata.navigation_dimension_shape, dtype=numpy.int64)
+                    data_count = numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64)
                     data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
                     source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
                     data_stream_event = Acquisition.DataStreamEventArgs(self,
