@@ -522,10 +522,13 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 1d controls are presented.
+        def filter_1d_control_customizations(control_customization: AcquisitionPreferences.ControlCustomization) -> bool:
+            return control_customization.control_description is not None and (str(control_customization.control_description.control_type) == "1d")
+
         self._control_combo_box_handler = ComboBoxHandler(preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "1d"),
+                                                          ListModel.PredicateFilter(filter_1d_control_customizations),
                                                           operator.attrgetter("control_id"),
                                                           self.__selection_storage_model)
         u = Declarative.DeclarativeUI()
@@ -688,10 +691,13 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 2d controls are presented.
+        def filter_2d_control_customizations(control_customization: AcquisitionPreferences.ControlCustomization) -> bool:
+            return control_customization.control_description is not None and (str(control_customization.control_description.control_type) == "2d")
+
         self._control_combo_box_handler = ComboBoxHandler(preferences,
                                                           "control_customizations",
                                                           operator.attrgetter("name"),
-                                                          ListModel.PredicateFilter(lambda x: str(x.control_description.control_type) == "2d"),
+                                                          ListModel.PredicateFilter(filter_2d_control_customizations),
                                                           operator.attrgetter("control_id"),
                                                           self.__selection_storage_model)
         # the axis storage model is a property model made by observing the axis_id in the configuration.
