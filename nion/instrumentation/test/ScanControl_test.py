@@ -1402,7 +1402,7 @@ class TestScanControlClass(unittest.TestCase):
                 scan_context_before = copy.deepcopy(stem_controller_.scan_context)
                 frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
                 setattr(frame_parameters_0, param_name, param_value)
-                scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+                scan_hardware_source.set_current_frame_parameters(frame_parameters_0)
                 scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 scan_hardware_source.stop_playing(sync_timeout=3.0)
                 scan_context_after = copy.deepcopy(stem_controller_.scan_context)

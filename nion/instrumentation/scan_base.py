@@ -972,6 +972,10 @@ class ScanSettings(ScanSettingsProtocol):
                  open_configuration_dialog_fn: typing.Optional[OpenConfigurationDialogCallable] = None) -> None:
         assert len(scan_modes) > 0
 
+        # ensure frame parameters are valid profiles
+        for scan_mode in scan_modes:
+            scan_mode.frame_parameters.center_nm = Geometry.FloatPoint()
+
         # these events must be defined
         self.current_frame_parameters_changed_event = Event.Event()
         self.record_frame_parameters_changed_event = Event.Event()
@@ -1044,6 +1048,7 @@ class ScanSettings(ScanSettingsProtocol):
         """
         assert 0 <= settings_index < len(self.__scan_modes)
         frame_parameters = copy.copy(frame_parameters)
+        assert frame_parameters.center_nm == Geometry.FloatPoint()
         self.__scan_modes[settings_index].frame_parameters = frame_parameters
         # self.settings_changed_event.fire(self.__save_settings())
         self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
