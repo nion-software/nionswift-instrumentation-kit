@@ -188,6 +188,24 @@ class TestScanControlClass(unittest.TestCase):
 
     # End of standard acquisition tests.
 
+    def test_start_playing_with_frame_parameters(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            # ensure frame parameters can be passed as an object
+            frame_parameters.size = Geometry.IntSize(16, 16)
+            scan_hardware_source.start_playing(frame_parameters=frame_parameters, sync_timeout=3.0)
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(Geometry.IntSize(16, 16), document_controller.document_model.data_items[-1].data_shape)
+            # ensure frame parameters can be passed as a dictionary
+            frame_parameters.size = Geometry.IntSize(12, 12)
+            scan_hardware_source.start_playing(frame_parameters=frame_parameters.as_dict(), sync_timeout=3.0)
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(Geometry.IntSize(12, 12), document_controller.document_model.data_items[-1].data_shape)
+
     def test_record_followed_by_view_updates_display(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
