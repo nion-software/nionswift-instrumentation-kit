@@ -36,7 +36,6 @@ from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
-from nion.utils import Process
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
@@ -632,11 +631,9 @@ class ScanDevice(typing.Protocol):
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
-    def set_buffer_size(self, buffer_size: int) -> None: return
-    def get_buffer_size(self) -> int: return 100
-    def get_buffer_count(self) -> int: return 0
-    def clear_buffer(self) -> None: return
-    def pop_buffer(self, count: int) -> None: return
+    def set_sequence_buffer_size(self, buffer_size: int) -> None: return
+    def get_sequence_buffer_count(self) -> int: return 0
+    def pop_sequence_buffer_data(self) -> typing.List[typing.Dict[str, typing.Any]]: return list()
 
     # default implementation
     def wait_for_frame(self, frame_number: int) -> None:
@@ -683,6 +680,22 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def record_immediate(self, frame_parameters: ScanFrameParameters,
                          enabled_channels: typing.Optional[typing.Sequence[int]] = None,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
+
+    # sequence mode. the sequence mode allocates a buffer of a given size and then allows the caller to pop the data
+    # from the buffer as it is acquired. the buffer count returns the current count of items in the buffer. popping the
+    # data removes it from the buffer and reduces the buffer count.
+
+    def prepare_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None: ...
+
+    def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None: ...
+
+    def finish_sequence_mode(self) -> None: ...
+
+    def abort_sequence_mode(self) -> None: ...
+
+    def get_sequence_buffer_count(self) -> int: ...
+
+    def pop_sequence_buffer_data(self, scan_id: uuid.UUID) -> typing.Mapping[Acquisition.Channel, DataAndMetadata.DataAndMetadata]: ...
 
     # used in Facade
 
@@ -797,14 +810,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int: ...
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
-    def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
+
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
-    def set_buffer_size(self, buffer_size: int) -> None: ...
-    def get_buffer_size(self) -> int: ...
-    def get_buffer_count(self) -> int: ...
-    def clear_buffer(self) -> None: ...
-    def pop_buffer(self, count: int) -> None: ...
+
     def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]: ...
 
     record_index: int
@@ -1692,6 +1701,32 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             assert time.time() - start < float(sync_timeout)
         return xdatas
 
+    def prepare_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
+        self.abort_playing(sync_timeout=5.0)
+        self.set_sequence_buffer_size(count)
+
+    def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
+        assert not self.__device.is_scanning
+        self.set_current_frame_parameters(scan_frame_parameters)
+        self.start_playing()
+
+    def finish_sequence_mode(self) -> None:
+        self.set_sequence_buffer_size(0)
+
+    def abort_sequence_mode(self) -> None:
+        self.abort_playing(sync_timeout=5.0)
+
+    def get_sequence_buffer_count(self) -> int:
+        return self.__device.get_sequence_buffer_count()
+
+    def pop_sequence_buffer_data(self, scan_id: uuid.UUID) -> typing.Mapping[Acquisition.Channel, DataAndMetadata.DataAndMetadata]:
+        data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), scan_id)
+        xdata_group = dict()
+        for channel_index, data_element in enumerate(data_element_group):
+            channel = Acquisition.Channel(self.hardware_source_id, str(channel_index))
+            xdata_group[channel] = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
+        return xdata_group
+
     def set_frame_parameters(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
         self.__settings.set_frame_parameters(profile_index, frame_parameters)
 
@@ -1858,6 +1893,43 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         return self.calculate_frame_time(scan_frame_parameters)
 
+    def __get_data_element_group_with_metadata(self, data_element_group: typing.List[typing.Dict[str, typing.Any]], scan_id: uuid.UUID) -> typing.List[typing.Dict[str, typing.Any]]:
+        enabled_channel_states = list()
+        for channel_index in range(self.channel_count):
+            channel_state = self.get_channel_state(channel_index)
+            if channel_state.enabled:
+                enabled_channel_states.append(channel_state)
+
+        new_data_element_group = list()
+
+        for channel_index, (_data_element, channel_state) in enumerate(zip(data_element_group, enabled_channel_states)):
+            channel_name = channel_state.name
+            channel_id = channel_state.channel_id
+            channel_variant = "subscan" if self.subscan_enabled else None
+            _data = _data_element["data"]
+            _scan_properties = _data_element["properties"]
+
+            # create the 'data_element' in the format that must be returned from this method
+            # '_data_element' is the format returned from the Device.
+            data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
+            instrument_metadata: typing.Dict[str, typing.Any] = dict()
+            update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
+            if instrument_metadata:
+                data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
+            update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
+            # the spatial calibrations from the incoming data override the calculated calibrations.
+            # also, the calculated calibrations are only valid for 2D incoming data.
+            if "spatial_calibrations" in _data_element:
+                data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
+            else:
+                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
+            update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
+            update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
+            data_element["data"] = _data
+            new_data_element_group.append(data_element)
+
+        return new_data_element_group
+
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]:
         """Get recently acquired (buffered) data.
 
@@ -1870,48 +1942,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         """
         if hasattr(self.__device, "get_buffer_data"):
             buffer_data = self.__device.get_buffer_data(start, count)
-
-            enabled_channel_states = list()
-            for channel_index in range(self.channel_count):
-                channel_state = self.get_channel_state(channel_index)
-                if channel_state.enabled:
-                    enabled_channel_states.append(channel_state)
-
             scan_id = uuid.uuid4()
-
-            data_element_groups = list()
-
-            for data_element_group in buffer_data:
-                new_data_element_group = list()
-                for channel_index, (_data_element, channel_state) in enumerate(zip(data_element_group, enabled_channel_states)):
-                    channel_name = channel_state.name
-                    channel_id = channel_state.channel_id
-                    channel_variant = "subscan" if self.subscan_enabled else None
-                    _data = _data_element["data"]
-                    _scan_properties = _data_element["properties"]
-
-                    # create the 'data_element' in the format that must be returned from this method
-                    # '_data_element' is the format returned from the Device.
-                    data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
-                    instrument_metadata: typing.Dict[str, typing.Any] = dict()
-                    update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
-                    if instrument_metadata:
-                        data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
-                    update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
-                    # the spatial calibrations from the incoming data override the calculated calibrations.
-                    # also, the calculated calibrations are only valid for 2D incoming data.
-                    if "spatial_calibrations" in _data_element:
-                        data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
-                    else:
-                        update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
-                    update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
-                    update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
-                    data_element["data"] = _data
-                    new_data_element_group.append(data_element)
-                data_element_groups.append(new_data_element_group)
-
-            return data_element_groups
-
+            return [self.__get_data_element_group_with_metadata(data_element_group, scan_id) for data_element_group in buffer_data]
         return list()
 
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None:
@@ -1927,27 +1959,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             return self.__device.calculate_flyback_pixels(frame_parameters)
         return getattr(self.__device, "flyback_pixels", 0)
 
-    def set_buffer_size(self, buffer_size: int) -> None:
-        if callable(getattr(self.__device, "set_buffer_size", None)):
-            self.__device.set_buffer_size(buffer_size)
-
-    def get_buffer_size(self) -> int:
-        if callable(getattr(self.__device, "get_buffer_size", None)):
-            return self.__device.get_buffer_size()
-        return 100
-
-    def get_buffer_count(self) -> int:
-        if callable(getattr(self.__device, "get_buffer_count", None)):
-            return self.__device.get_buffer_count()
-        return 0
-
-    def clear_buffer(self) -> None:
-        if callable(getattr(self.__device, "clear_buffer", None)):
-            self.__device.clear_buffer()
-
-    def pop_buffer(self, count: int) -> None:
-        if callable(getattr(self.__device, "pop_buffer", None)):
-            self.__device.pop_buffer(count)
+    def set_sequence_buffer_size(self, buffer_size: int) -> None:
+        self.__device.set_sequence_buffer_size(buffer_size)
 
     def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]:
         if self.data_channel_delegate:
@@ -2058,8 +2071,107 @@ def get_limited_scan_shape(scan_size: Geometry.IntSize) -> Geometry.IntSize:
         return Geometry.IntSize(scan_size_height, scan_size_width)
     return scan_size
 
+class ScanFrameSequenceDataStream(Acquisition.DataStream):
+    def __init__(self,
+                 scan_hardware_source: ScanHardwareSource,
+                 scan_frame_parameters: ScanFrameParameters,
+                 scan_id: uuid.UUID,
+                 count: int) -> None:
+        super().__init__()
+        scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = scan_frame_parameters
+        self.__scan_id = scan_id
+        self.__count = count
+        self.__sent_count = 0
+        self.__is_aborted = False
+        self.__data_metadata: typing.Optional[DataAndMetadata.DataMetadata] = None
+        self.__enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
+        self.__channels = tuple(Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(c)) for c in self.__enabled_channels)
+        subscan_pixel_size = scan_frame_parameters.subscan_pixel_size
+        if subscan_pixel_size:
+            scan_size = get_limited_scan_shape(subscan_pixel_size)
+            fractional_size = scan_frame_parameters.subscan_fractional_size
+            fractional_center = scan_frame_parameters.subscan_fractional_center
+            assert fractional_size and fractional_center
+            self.__fractional_area = Geometry.FloatRect.from_center_and_size(fractional_center, fractional_size)
+            is_subscan = True
+        else:
+            scan_size = get_limited_scan_shape(scan_frame_parameters.pixel_size)
+            self.__fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
+            is_subscan = False
+        self.__scan_size = scan_size
+        if is_subscan:
+            self.__scan_frame_parameters.subscan_pixel_size = self.__scan_size
+        else:
+            self.__scan_frame_parameters.pixel_size = self.__scan_size
 
-class ScanFrameDataStream(Acquisition.DataStream):
+    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+        data_shape = tuple(self.__scan_frame_parameters.size)
+        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
+        return Acquisition.DataStreamInfo(data_metadata, 3.0)
+
+    def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
+        was_playing = self.__scan_hardware_source.is_playing
+        def unprepare(scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            if was_playing:
+                scan_hardware_source.start_playing()
+            else:
+                scan_hardware_source.stop_playing()
+
+        self.__scan_hardware_source.abort_playing(sync_timeout=60.0)
+        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source, self.__scan_hardware_source.get_current_frame_parameters()))
+
+    @property
+    def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
+        return self.__channels
+
+    def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
+        self.__scan_hardware_source.prepare_sequence_mode(self.__scan_frame_parameters, self.__count)
+        self.__sent_count = 0
+        self.__is_aborted = False
+        self.__data_metadata = None
+
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        self.__scan_hardware_source.start_sequence_mode(self.__scan_frame_parameters, self.__count)
+
+    def _finish_stream(self) -> None:
+        self.__scan_hardware_source.finish_sequence_mode()
+
+    def _abort_stream(self) -> None:
+        self.__is_aborted = True
+        self.__scan_hardware_source.abort_sequence_mode()
+
+    @property
+    def _progress(self) -> float:
+        return self.__sent_count / self.__count
+
+    def _send_next(self) -> None:
+        while self.__scan_hardware_source.get_sequence_buffer_count() > 0 and self.__sent_count < self.__count and not self.__is_aborted:
+            buffer_data = self.__scan_hardware_source.pop_sequence_buffer_data(self.__scan_id)
+            self.__sent_count += 1
+
+            for channel, xdata in buffer_data.items():
+                data_channel_data = xdata.data
+                # establish "the data metadata" based on the first frame
+                if not self.__data_metadata:
+                    self.__data_metadata = xdata.data_metadata
+                data_metadata = self.__data_metadata
+                data = data_channel_data.reshape((1,) + tuple(xdata.datum_dimension_shape))
+                source_slice = (slice(0, 1),) + (slice(None),) * len(xdata.datum_dimension_shape)
+                state = Acquisition.DataStreamStateEnum.COMPLETE  # always complete since sending full frame chunks
+                data_stream_event = Acquisition.DataStreamEventArgs(self,
+                                                                    channel,
+                                                                    data_metadata,
+                                                                    data,
+                                                                    1,
+                                                                    source_slice,
+                                                                    state)
+                self.fire_data_available(data_stream_event)
+
+
+class ScanDataStream(Acquisition.DataStream):
     """A data stream that provides frames from a scan.
 
     The scan is defined by a ScanFrameParameters object and a ScanHardwareSource object.
@@ -2258,6 +2370,53 @@ class ScanFrameDataStream(Acquisition.DataStream):
                             self.__sent_rows[channel] = available_rows
 
 
+class ScanFrameDataStream(Acquisition.StackedDataStream):
+    def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
+        self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+        self.__scan_id = uuid.uuid4()
+
+        # configure the scan uuid and scan frame parameters.
+        scan_id = self.__scan_id
+        scan_frame_parameters = self.__scan_frame_parameters
+        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
+
+        # gather the scan metadata.
+        scan_metadata: typing.Dict[str, typing.Any] = dict()
+        update_scan_metadata(scan_metadata, scan_hardware_source.hardware_source_id,
+                             scan_hardware_source.display_name, scan_frame_parameters, None, dict())
+
+        instrument_metadata: typing.Dict[str, typing.Any] = dict()
+        update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
+                                     scan_hardware_source.scan_device)
+
+        # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+        magnification_device_controller = stem_controller_module.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
+        # build the scan frame data stream.
+        scan_data_stream = ScanDataStream(scan_hardware_source, scan_frame_parameters, scan_id,
+                                          scan_hardware_source.drift_tracker,
+                                          fov_nm_model=magnification_device_controller.fov_nm_model,
+                                          rotation_model=magnification_device_controller.rotation_model)
+
+        # potentially break the scan into multiple sections; this is an unused capability currently.
+        scan_size = scan_data_stream.scan_size
+        section_height = scan_size.height
+        section_count = (scan_size.height + section_height - 1) // section_height
+        collectors: typing.List[Acquisition.CollectedDataStream] = list()
+        for section in range(section_count):
+            start = section * section_height
+            stop = min(start + section_height, scan_size.height)
+            collectors.append(Acquisition.CollectedDataStream(scan_data_stream, (stop - start, scan_size.width), get_scan_calibrations(scan_frame_parameters)))
+
+        super().__init__(collectors)
+        self.magnification_device_controller = magnification_device_controller
+
+    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
+        assert len(self.data_streams) == 1
+        return Acquisition.SequenceDataStream(ScanFrameSequenceDataStream(self.__scan_hardware_source, self.__scan_frame_parameters, self.__scan_id, length), length)
+
+
 class SynchronizedDataStream(Acquisition.ContainerDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
                  camera_hardware_source: camera_base.CameraHardwareSource):
@@ -2314,7 +2473,7 @@ def make_synchronized_scan_data_stream(
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
                                   "instrument": copy.deepcopy(instrument_metadata)}
     # calculate the flyback pixels by using the scan device. this is fragile because the exposure
-    # for a particular section gets calculated here and in ScanFrameDataStream.prepare. if they
+    # for a particular section gets calculated here and in ScanDataStream.prepare. if they
     # don't match, the total pixel count for the camera will not match the scan pixels.
     scan_paramaters_copy = copy.deepcopy(scan_frame_parameters)
     scan_hardware_source.scan_device.prepare_synchronized_scan(scan_paramaters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
@@ -2336,7 +2495,9 @@ def make_synchronized_scan_data_stream(
         else:
             operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
-    scan_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters, scan_id, scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream, fov_nm_model=fov_nm_model, rotation_model=rotation_model)
+    scan_data_stream = ScanDataStream(scan_hardware_source, scan_frame_parameters, scan_id,
+                                      scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream,
+                                      fov_nm_model=fov_nm_model, rotation_model=rotation_model)
     scan_size = scan_data_stream.scan_size
     scan_like_data_stream: Acquisition.DataStream = scan_data_stream
     if scan_data_stream_functor:

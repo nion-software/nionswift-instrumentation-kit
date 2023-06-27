@@ -5,6 +5,7 @@ import gettext
 import threading
 import time
 import typing
+import uuid
 
 # third part imports
 import numpy
@@ -96,12 +97,11 @@ class Controller:
                     if time.time() - start_time > max_wait_time:
                         return False, 0
                     time.sleep(0.01)
-                hardware_source.get_next_xdatas_to_start(max_wait_time * 2)  # wait for frame + next frame
-                while (i := hardware_source.get_buffer_count()) < frame_count:
-                    self.progress_model.value = int(100 * i / frame_count)
+                while (i := hardware_source.get_sequence_buffer_count()) < frame_count:
+                    time.sleep(0.2)
+                    self.progress_model.value = min(100, int(100 * i / frame_count))
                     if self.cancel_event.is_set():
                         return False, max(i - 1, 0)
-                    hardware_source.get_next_xdatas_to_finish(max_wait_time * 2)
                 return True, frame_count
             except Exception as e:
                 import traceback
@@ -110,10 +110,13 @@ class Controller:
 
         if do_acquire:
             print("AR: start playing")
-            hardware_source.set_buffer_size(frame_count)
-            hardware_source.start_playing()
+            hardware_source.prepare_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
+            hardware_source.start_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             print("AR: wait for acquire")
             success, actual_count = await event_loop.run_in_executor(None, exec_acquire)
+            if not was_playing:
+                print("AR: restopping")
+                hardware_source.stop_playing()
             print("AR: acquire finished")
         else:
             success = True
@@ -122,21 +125,11 @@ class Controller:
         def exec_grab(actual_count: int) -> bool:
             # this will execute in a thread; the enclosing async routine will continue when it finishes
             try:
-                start_time = time.time()
-                max_wait_time = max(hardware_source.get_current_frame_time() * 1.5, 3)
-                while hardware_source.is_playing:
-                    if time.time() - start_time > max_wait_time:
-                        return False
-                    time.sleep(0.01)
-                data_element_groups = hardware_source.get_buffer_data(-actual_count, actual_count)
-                for data_element_group in data_element_groups:
+                scan_id = uuid.uuid4()
+                for _ in range(actual_count):
                     if self.cancel_event.is_set():
                         return False
-                    xdata_group = list()
-                    for data_element in data_element_group:
-                        xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
-                        xdata_group.append(xdata)
-                    xdata_group_list.append(xdata_group)
+                    xdata_group_list.append(list(hardware_source.pop_sequence_buffer_data(scan_id).values()))
                 self.progress_model.value = 100
                 return True
             except Exception as e:
@@ -144,17 +137,13 @@ class Controller:
                 traceback.print_exc()
                 return False
             finally:
-                hardware_source.set_buffer_size(100)
-                hardware_source.clear_buffer()
-
-        print("AR: stop playing")
-        hardware_source.stop_playing()
+                hardware_source.finish_sequence_mode()
 
         if actual_count > 0:
             print("AR: grabbing data")
             self.cancel_event.clear()
             success = await event_loop.run_in_executor(None, exec_grab, actual_count)
-            print("AR: grab finished")
+            print(f"AR: grab finished {'success' if success else 'failure'}")
 
         xdata_group = None
 

@@ -10,6 +10,7 @@ import functools
 import gettext
 import math
 import threading
+import time
 import typing
 import uuid
 
@@ -18,12 +19,14 @@ import uuid
 
 # local libraries
 from nion.data import Calibration
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
 from nion.utils import Registry
@@ -1528,6 +1531,91 @@ class ScanContextController:
         drift_view = self.__m.get(instrument, dict()).pop("drift_view")
         if drift_view:
             drift_view.close()
+
+
+# device controller facilitates setting of global state during acquisition.
+class DeviceController(abc.ABC):
+    @abc.abstractmethod
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[AxisType] = None) -> typing.Sequence[float]: ...
+
+    @abc.abstractmethod
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None: ...
+
+    @abc.abstractmethod
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None: ...
+
+
+class STEMDeviceController(DeviceController):
+    # NOTE: the STEM device controller treats all values as delta's from starting control value
+    # This was decided in discussion with Nion engineers.
+
+    def __init__(self) -> None:
+        stem_controller_component = Registry.get_component('stem_controller')
+        assert stem_controller_component
+        self.stem_controller = typing.cast(STEMController, stem_controller_component)
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_description.control_type == "1d":
+            return [self.stem_controller.GetVal(control_customization.device_control_id)]
+        elif control_description.control_type == "2d":
+            assert axis is not None
+            return self.stem_controller.GetVal2D(control_customization.device_control_id, axis=axis).as_tuple()
+        raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_description.control_type == "1d":
+            self.stem_controller.SetValAndConfirm(control_customization.device_control_id, original_values[0] + values[0], 1.0, 5000)
+            time.sleep(control_customization.delay)
+        elif control_description.control_type == "2d":
+            assert axis is not None
+            self.stem_controller.SetVal2DAndConfirm(control_customization.device_control_id,
+                                                    Geometry.FloatPoint(y=original_values[0], x=original_values[1]) + Geometry.FloatPoint(y=values[0], x=values[1]),
+                                                    1.0, 5000,
+                                                    axis=axis)
+            time.sleep(control_customization.delay)
+
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_description.control_type == "1d":
+            self.stem_controller.SetValAndConfirm(control_customization.device_control_id, values[0], 1.0, 5000)
+            time.sleep(control_customization.delay)
+        elif control_description.control_type == "2d":
+            assert axis is not None
+            self.stem_controller.SetVal2DAndConfirm(control_customization.device_control_id,
+                                                    Geometry.FloatPoint(y=values[0], x=values[1]), 1.0, 5000,
+                                                    axis=axis)
+            time.sleep(control_customization.delay)
+
+
+class MagnificationDeviceController(DeviceController):
+    def __init__(self, fov_nm: float, rotation: float) -> None:
+        self.fov_nm_model = Model.PropertyModel(fov_nm)
+        self.rotation_model = Model.PropertyModel(rotation)
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "field_of_view":
+            return [self.fov_nm_model.value or 100.0]
+        if control_customization.control_id == "rotation":
+            return [self.rotation_model.value or 0.0]
+        raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
+
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "field_of_view":
+            self.fov_nm_model.value = values[0]
+        elif control_customization.control_id == "rotation":
+            self.rotation_model.value = values[0]
 
 
 # the plan is to migrate away from the hardware manager as a registration system.

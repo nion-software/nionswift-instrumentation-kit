@@ -2354,7 +2354,7 @@ class AccumulatedDataStream(ContainerDataStream):
 
 
 def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
-    """Perform an acquire.
+    """Perform an acquire. This is the main acquisition loop. It runs on a thread.
 
     Performs consistency checks on progress and data.
 
