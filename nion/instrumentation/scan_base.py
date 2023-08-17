@@ -1699,6 +1699,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         while not record_task.is_finished:
             time.sleep(0.01)  # 10 msec
             assert time.time() - start < float(sync_timeout)
+        # since we check for 'is_recording' at beginning, wait for that to clear also.
+        start = time.time()
+        while self.is_recording:
+            time.sleep(0.01)  # 10 msec
+            assert time.time() - start < float(sync_timeout)
         return xdatas
 
     def prepare_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
