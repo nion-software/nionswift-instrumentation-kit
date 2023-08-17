@@ -454,6 +454,10 @@ class AcquisitionTask:
             self._suspend_acquisition()
 
     @property
+    def is_started(self) -> bool:
+        return self.__started
+
+    @property
     def is_finished(self) -> bool:
         return self.__finished
 
@@ -835,6 +839,26 @@ class AcquisitionParameters:
     acquisition_task_parameters: AcquisitionTaskParameters
 
 
+class RecordingTask(typing.Protocol):
+
+    @property
+    def is_started(self) -> bool:
+        raise NotImplementedError()
+
+    @property
+    def is_finished(self) -> bool:
+        raise NotImplementedError()
+
+    def wait_started(self, *, timeout: typing.Optional[float] = None) -> None:
+        raise NotImplementedError()
+
+    def wait_finished(self, *, timeout: typing.Optional[float] = None) -> None:
+        raise NotImplementedError()
+
+    def grab_xdatas(self, *, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        raise NotImplementedError()
+
+
 class HardwareSource(typing.Protocol):
 
     # methods
@@ -843,7 +867,7 @@ class HardwareSource(typing.Protocol):
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None: ...
     def abort_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
     def stop_playing(self, *, sync_timeout: typing.Optional[float] = None) -> None: ...
-    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> None: ...
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> RecordingTask: ...
     def abort_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
     def stop_recording(self, sync_timeout: typing.Optional[float] = None) -> None: ...
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
@@ -1358,33 +1382,84 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 time.sleep(0.01)  # 10 msec
                 assert time.time() - start < float(sync_timeout)
 
-    # return whether acquisition is running
+    # return whether acquisition is running. this is an approximate state and should not be used for synchronization
+    # requiring a high degree of accuracy. instead, use the task itself to watch is_started and is_finished.
     @property
     def is_recording(self) -> bool:
         return self.is_task_running('record')
 
     # call this to start acquisition
     # thread safe
-    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> None:
-        if not self.is_recording:
-            # pass kwargs for acquisition_task_parameters until things are cleaned up universally
-            record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters, **kwargs)
-            old_finished_callback_fn = record_task.finished_callback_fn
+    def start_recording(self, sync_timeout: typing.Optional[float] = None, finished_callback_fn: typing.Optional[_FinishedCallbackType] = None, *, frame_parameters: typing.Optional[FrameParameters] = None, **kwargs: typing.Any) -> RecordingTask:
+        assert not self.is_recording
 
-            def finished(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
-                if callable(old_finished_callback_fn):
-                    old_finished_callback_fn(data_promises)
-                if callable(finished_callback_fn):
-                    finished_callback_fn(data_promises)
+        # pass kwargs for acquisition_task_parameters until things are cleaned up universally
+        record_task = self._create_acquisition_record_task(frame_parameters=frame_parameters, **kwargs)
+        old_finished_callback_fn = record_task.finished_callback_fn
 
-            record_task.finished_callback_fn = finished
-            self._record_task_updated(record_task)
-            self.start_task('record', record_task)
+        # support receiving the data
+        new_data_event = threading.Event()
+        new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+
+        def finished(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
+            new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
+            new_data_event.set()
+            if callable(old_finished_callback_fn):
+                old_finished_callback_fn(data_promises)
+            if callable(finished_callback_fn):
+                finished_callback_fn(data_promises)
+
+        record_task.finished_callback_fn = finished
+        self._record_task_updated(record_task)
+
+        self.start_task('record', record_task)
         if sync_timeout is not None:
             start = time.time()
-            while not self.is_recording:
+            while not record_task.is_started:
                 time.sleep(0.01)  # 10 msec
                 assert time.time() - start < float(sync_timeout)
+
+        class RecordingTaskImpl(RecordingTask):
+            def __init__(self, hardware_source: HardwareSource, record_task: AcquisitionTask, new_data_event: threading.Event, new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
+                self.__record_task = record_task
+                self.__hardware_source = hardware_source
+                self.__new_data_event = new_data_event
+                self.__new_xdatas = new_xdatas
+
+            @property
+            def is_started(self) -> bool:
+                return self.__record_task.is_started
+
+            @property
+            def is_finished(self) -> bool:
+                return self.__record_task.is_finished
+
+            def wait_started(self, *, timeout: typing.Optional[float] = None) -> None:
+                start = time.time()
+                while not self.is_started:
+                    time.sleep(0.01)
+                    if timeout is not None:
+                        assert time.time() - start < float(timeout)
+
+            def wait_finished(self, *, timeout: typing.Optional[float] = None) -> None:
+                start = time.time()
+                while not self.is_finished:
+                    time.sleep(0.01)  # 10 msec
+                    if timeout is not None:
+                        assert time.time() - start < float(timeout)
+
+            def grab_xdatas(self, *, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+                def abort() -> None:
+                    self.__new_data_event.set()
+
+                with contextlib.closing(self.__hardware_source.abort_event.listen(abort)):
+                    # wait for the current frame to finish
+                    if not new_data_event.wait(timeout):
+                        raise Exception("Could not start data_source " + str(self.__hardware_source.hardware_source_id))
+
+                return self.__new_xdatas
+
+        return RecordingTaskImpl(self, record_task, new_data_event, new_xdatas)
 
     # call this to stop acquisition immediately
     # not thread safe
@@ -1663,10 +1738,11 @@ class RecordTask:
         def record_thread() -> None:
             self.__hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
             # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
-            self.__hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
+            recording_task = self.__hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
+            recording_task.wait_started(timeout=5.0)
             self.__recording_started.set()
-            self.__data_and_metadata_list = self.__hardware_source.get_next_xdatas_to_finish()
-            self.__hardware_source.stop_recording(sync_timeout=3.0)
+            self.__data_and_metadata_list = recording_task.grab_xdatas()
+            self.__hardware_source.stop_recording(sync_timeout=5.0)
 
         self.__thread = threading.Thread(target=record_thread)
         self.__thread.start()

@@ -4,6 +4,7 @@ Changelog (nionswift-instrumentation)
 0.21.2 (UNRELEASED)
 -------------------
 - Fix #31. Scan recorder allows limited-only-by-memory frame count on scan devices.
+- Fix #160. Introduce RecordingTask to allow synchronization of recording with other tasks.
 
 0.21.1 (2023-02-28)
 -------------------

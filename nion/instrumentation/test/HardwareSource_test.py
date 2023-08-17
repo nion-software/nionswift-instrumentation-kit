@@ -312,11 +312,12 @@ def _test_record_only_acquires_one_item(testcase, hardware_source, document_cont
     # the definition is that the 'view' image is always acquired; there should only
     # be a single new 'record' image though. the 'record' image should not have a
     # category of 'temporary'; the 'view' image should.
-    hardware_source.start_recording()
+    recording_task = hardware_source.start_recording()
     try:
+        recording_task.wait_started(timeout=3.0)
+        testcase.assertTrue(recording_task.is_started)
         testcase.assertFalse(hardware_source.is_playing)
-        testcase.assertTrue(hardware_source.is_recording)
-        hardware_source.get_next_xdatas_to_finish(timeout=3.0)
+        recording_task.grab_xdatas(timeout=3.0)
     finally:
         hardware_source.abort_recording(sync_timeout=3.0)
     testcase.assertFalse(hardware_source.is_playing)

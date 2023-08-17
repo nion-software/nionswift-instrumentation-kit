@@ -1689,14 +1689,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self._record_task_updated(record_task)
         self.start_task('record', record_task)
         # loop will break on finished or error (not recording). maybe a race condition?
-        while self.is_recording:
+        while not record_task.is_finished:
             if finished_event.wait(0.01):  # 10 msec
                 break
         # self.stop_task('record')
         self._record_task_updated(None)
         sync_timeout = sync_timeout or 3.0
         start = time.time()
-        while self.is_recording:
+        while not record_task.is_finished:
             time.sleep(0.01)  # 10 msec
             assert time.time() - start < float(sync_timeout)
         return xdatas

@@ -218,9 +218,9 @@ class TestCameraControlClass(unittest.TestCase):
                 frame_parameters = hardware_source.get_frame_parameters(2)
                 frame_parameters.binning = binning
                 hardware_source.set_record_frame_parameters(frame_parameters)
-                hardware_source.start_recording(sync_timeout=3.0)
+                recording_task = hardware_source.start_recording(sync_timeout=3.0)
                 try:
-                    results = hardware_source.get_next_xdatas_to_finish()
+                    results = recording_task.grab_xdatas()
                     self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions(binning))
                 finally:
                     hardware_source.stop_recording(sync_timeout=3.0)
@@ -906,16 +906,11 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
             self.assertFalse(hardware_source.is_recording)  # we know this works
             self.assertFalse(hardware_source_facade.is_recording)
-            hardware_source_facade.start_recording()
-            time.sleep(self.exposure * 0.5)
-            self.assertTrue(hardware_source.is_recording)  # we know this works
-            self.assertTrue(hardware_source_facade.is_recording)
-            start_time = time.time()
-            while hardware_source.is_recording:
-                time.sleep(self.exposure * 0.1)
-                self.assertTrue(time.time() - start_time < TIMEOUT)
-            self.assertFalse(hardware_source.is_recording)  # we know this works
-            self.assertFalse(hardware_source_facade.is_recording)
+            record_task = hardware_source_facade.start_recording()
+            record_task.wait_started(timeout=TIMEOUT)
+            self.assertTrue(record_task.is_started)
+            record_task.wait_finished(timeout=TIMEOUT)
+            self.assertTrue(record_task.is_finished)
 
     def test_facade_abort_record(self):
         with self.__test_context() as test_context:
@@ -925,18 +920,11 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertFalse(hardware_source.is_recording)  # we know this works
             self.assertFalse(hardware_source_facade.is_recording)
             # hardware_source.stages_per_frame = 5
-            hardware_source_facade.start_recording()
-            time.sleep(self.exposure * 0.1)
-            self.assertTrue(hardware_source.is_recording)  # we know this works
-            self.assertTrue(hardware_source_facade.is_recording)
+            record_task = hardware_source_facade.start_recording()
+            record_task.wait_started(timeout=TIMEOUT)
             hardware_source_facade.abort_recording()
-            start_time = time.time()
-            while hardware_source.is_recording:
-                time.sleep(self.exposure * 0.01)
-                self.assertTrue(time.time() - start_time < TIMEOUT)
+            record_task.wait_finished(timeout=TIMEOUT)
             # TODO: figure out a way to test whether abort actually aborts or just stops
-            self.assertFalse(hardware_source.is_recording)  # we know this works
-            self.assertFalse(hardware_source_facade.is_recording)
 
     def test_facade_abort_record_and_return_data(self):
         with self.__test_context() as test_context:
@@ -1152,7 +1140,6 @@ class TestCameraControlClass(unittest.TestCase):
                                               amr.channel_names,
                                               adr.drift_tracker)
 
-        start = time.time()
         last_progress_time = time.time()
         last_progress = progress_value_model.value
         while is_acquiring_model.value:
