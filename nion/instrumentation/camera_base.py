@@ -3183,6 +3183,16 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     return Acquisition.AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), channel_names, None, device_map)
 
 
+class CameraAcquisitionDevice:
+    def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_channel: typing.Optional[str]) -> None:
+        self.__camera_hardware_source = camera_hardware_source
+        self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_channel = camera_channel
+
+    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+        return build_camera_device_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel)
+
+
 _component_registered_listener = None
 _component_unregistered_listener = None
 

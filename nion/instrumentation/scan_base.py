@@ -2593,6 +2593,14 @@ def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource) -> A
     return Acquisition.AcquisitionDeviceResult(scan_frame_data_stream.add_ref(), channel_names, None, device_map)
 
 
+class ScanAcquisitionDevice:
+    def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
+        self.__scan_hardware_source = scan_hardware_source
+
+    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+        return build_scan_device_data_stream(self.__scan_hardware_source)
+
+
 def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> Acquisition.AcquisitionDeviceResult:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
@@ -2669,6 +2677,18 @@ def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSour
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
     return Acquisition.AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), channel_names, drift_tracker, device_map)
+
+
+class SynchronizedScanAcquisitionDevice:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], scan_context_description: STEMController.ScanSpecifier) -> None:
+        self.__scan_hardware_source = scan_hardware_source
+        self.__camera_hardware_source = camera_hardware_source
+        self.__camera_frame_parameters = camera_frame_parameters
+        self.__camera_channel = camera_channel
+        self.__scan_context_description = scan_context_description
+
+    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+        return build_synchronized_device_data_stream(self.__scan_hardware_source, self.__scan_context_description, self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel)
 
 
 class InstrumentController(abc.ABC):
