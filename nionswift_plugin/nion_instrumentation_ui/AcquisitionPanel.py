@@ -1421,12 +1421,12 @@ class CameraDetailsHandler(Declarative.Handler):
         super().close()
 
 
-def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
+def build_synchronized_device_data_stream(scan_hardware_source: scan_base.ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
     # first get the camera hardware source and the camera channel description.
-    if channel in hardware_source_channel_descriptions:
-        camera_channel_description = hardware_source_channel_descriptions[channel]
+    if camera_channel in hardware_source_channel_descriptions:
+        camera_channel_description = hardware_source_channel_descriptions[camera_channel]
     else:
         camera_channel_description = hardware_source_channel_descriptions["image"]
     assert camera_hardware_source is not None
@@ -1643,12 +1643,12 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         return build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, camera_frame_parameters, camera_channel)
 
 
-def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
+def build_camera_device_data_stream(camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> AcquisitionDeviceResult:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
     # first get the camera hardware source and the camera channel description.
-    if channel in hardware_source_channel_descriptions:
-        camera_channel_description = hardware_source_channel_descriptions[channel]
+    if camera_channel in hardware_source_channel_descriptions:
+        camera_channel_description = hardware_source_channel_descriptions[camera_channel]
     else:
         camera_channel_description = hardware_source_channel_descriptions["image"]
     assert camera_hardware_source is not None
@@ -2298,7 +2298,7 @@ class AcquisitionController(Declarative.Handler):
                              title_base: str,
                              channel_names: typing.Dict[Acquisition.Channel, str],
                              drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
-        """Perform acquisition of of the data stream."""
+        """Perform acquisition of the data stream."""
         _acquire_data_stream(data_stream,
                              self.document_controller,
                              self.__acquisition_state,
