@@ -1923,6 +1923,25 @@ class TestScanControlClass(unittest.TestCase):
             # test dict is writeable to json
             json.dumps(frame_parameters.as_dict())
 
+    def test_scan_immediate(self) -> None:
+        with self.__test_context() as test_context:
+            hardware_source = test_context.scan_hardware_source
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.pixel_size = Geometry.IntSize(256, 256)
+            frame_parameters.pixel_time_us = 16.0
+            frame_parameters.center_nm = Geometry.FloatPoint()
+            frame_parameters.ac_line_sync = False
+            frame_parameters.fov_nm = 1.0
+            frame_parameters.subscan_pixel_size = None
+            frame_parameters.subscan_fractional_size = None
+            frame_parameters.subscan_fractional_center = None
+            frame_parameters.channel_override = "miniscan"  # ensure it doesn't get sent to a display
+            # set the following superscan-specific parameters using the general set_parameter function.
+            frame_parameters.set_parameter("ac_frame_sync", True)
+            frame_parameters.set_parameter("external_clock_mode", 0)
+            frame_parameters.set_parameter("external_scan_mode", 0)
+            hardware_source.scan_immediate(frame_parameters)
+
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded
     # stem values are recorded
