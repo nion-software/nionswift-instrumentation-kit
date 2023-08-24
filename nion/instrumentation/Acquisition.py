@@ -2695,6 +2695,63 @@ def wrap_acquisition_device_data_stream_for_multi(data_stream: DataStream, devic
     return AcquisitionMethodResult(sequential_data_stream.add_ref(), _("Multiple"), channel_names)
 
 
+class AcquisitionDeviceLike(typing.Protocol):
+    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult: ...
+
+
+class AcquisitionMethodLike(typing.Protocol):
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult: ...
+
+
+class BasicAcquisitionMethod(AcquisitionMethodLike):
+    def __init__(self) -> None:
+        pass
+
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
+        adr = device.build_acquisition_device_data_stream()
+        return wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
+
+
+class SequenceAcquisitionMethod(AcquisitionMethodLike):
+    def __init__(self, count: int) -> None:
+        self.__count = count
+
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
+        adr = device.build_acquisition_device_data_stream()
+        return wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, self.__count, adr.channel_names)
+
+
+class SeriesAcquisitionMethod(AcquisitionMethodLike):
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values_range: ControlValuesRange) -> None:
+        self.__control_customization = control_customization
+        self.__control_values_ranges = control_values_range
+
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
+        adr = device.build_acquisition_device_data_stream()
+        return wrap_acquisition_device_data_stream_for_series(adr.data_stream, self.__control_customization, self.__control_values_ranges, adr.device_map, adr.channel_names)
+
+
+class TableAcquisitionMethod(AcquisitionMethodLike):
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, axis_id: typing.Optional[str], x_control_values_range: ControlValuesRange, y_control_values_range: ControlValuesRange) -> None:
+        self.__control_customization = control_customization
+        self.__axis_id = axis_id
+        self.__x_control_values_ranges = x_control_values_range
+        self.__y_control_values_ranges = y_control_values_range
+
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
+        adr = device.build_acquisition_device_data_stream()
+        return wrap_acquisition_device_data_stream_for_tableau(adr.data_stream, self.__control_customization, self.__axis_id, self.__x_control_values_ranges, self.__y_control_values_ranges, adr.device_map, adr.channel_names)
+
+
+class MultiAcquisitionMethod(AcquisitionMethodLike):
+    def __init__(self, sections: typing.Sequence[_MultiSectionLike]) -> None:
+        self.__sections = sections
+
+    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
+        adr = device.build_acquisition_device_data_stream()
+        return wrap_acquisition_device_data_stream_for_multi(adr.data_stream, adr.device_map, adr.channel_names, self.__sections)
+
+
 @dataclasses.dataclass
 class AcquisitionDeviceResult:
     """Define result values for acquisition device component build function.
