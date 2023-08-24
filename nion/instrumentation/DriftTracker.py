@@ -36,10 +36,9 @@ _ = gettext.gettext
 class DriftLogger:
     """Drift logger to update the drift log with ongoing drift measurements."""
 
-    def __init__(self, document_model: DocumentModel.DocumentModel, drift_tracker: DriftTracker, event_loop: asyncio.AbstractEventLoop):
+    def __init__(self, document_model: DocumentModel.DocumentModel, drift_tracker: DriftTracker):
         self.__document_model = document_model
         self.__drift_tracker = drift_tracker
-        self.__event_loop = event_loop
         self.__data_item = next(iter(data_item for data_item in document_model.data_items if data_item.title == "Drift Log"), None)
         self.__drift_changed_event_listener = drift_tracker.drift_changed_event.listen(self.__drift_changed)
 
@@ -77,7 +76,7 @@ class DriftLogger:
     def __drift_changed(self, offset_nm: Geometry.FloatSize, elapsed_time: float) -> None:
         drift_data_frame = self.__drift_tracker.drift_data_frame
         delta_nm_data: numpy.typing.NDArray[typing.Any] = numpy.vstack([drift_data_frame[0], drift_data_frame[1], numpy.hypot(drift_data_frame[0], drift_data_frame[1])])
-        self.__event_loop.call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, delta_nm_data))
+        asyncio.get_running_loop().call_soon_threadsafe(functools.partial(self.__update_drift_log_data_item, delta_nm_data))
 
 
 class DriftTracker:

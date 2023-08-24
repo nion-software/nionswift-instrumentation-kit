@@ -111,6 +111,7 @@ import asyncio
 import copy
 import dataclasses
 import enum
+import functools
 import gettext
 import time
 import typing
@@ -125,6 +126,7 @@ from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import stem_controller as STEMController
 from nion.utils import Event
 from nion.utils import Geometry
+from nion.utils import Model
 from nion.utils import ReferenceCounting
 from nion.utils.ReferenceCounting import weak_partial
 
@@ -2491,9 +2493,9 @@ class ControlValuesRange:
     step: float
 
 
-def wrap_acquisition_device_data_stream(data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
+def wrap_acquisition_device_data_stream(data_stream: DataStream, title_base: str, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
     # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
-    return AcquisitionMethodResult(data_stream.add_ref(), str(), channel_names)
+    return AcquisitionMethodResult(data_stream.add_ref(), title_base, channel_names)
 
 
 def wrap_acquisition_device_data_stream_for_sequence(data_stream: DataStream, count: int, channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
@@ -2700,24 +2702,25 @@ class AcquisitionDeviceLike(typing.Protocol):
 
 
 class AcquisitionMethodLike(typing.Protocol):
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult: ...
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult: ...
+
+    # def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
+    #     return Acquisition.wrap_acquisition_device_data_stream(data_stream, device_map, channel_names)
 
 
 class BasicAcquisitionMethod(AcquisitionMethodLike):
-    def __init__(self) -> None:
-        pass
+    def __init__(self, title_base: typing.Optional[str] = None) -> None:
+        self.__title_base = title_base or str()
 
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
-        adr = device.build_acquisition_device_data_stream()
-        return wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
+        return wrap_acquisition_device_data_stream(adr.data_stream, self.__title_base, adr.device_map, adr.channel_names)
 
 
 class SequenceAcquisitionMethod(AcquisitionMethodLike):
     def __init__(self, count: int) -> None:
         self.__count = count
 
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
-        adr = device.build_acquisition_device_data_stream()
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         return wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, self.__count, adr.channel_names)
 
 
@@ -2726,8 +2729,7 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
         self.__control_customization = control_customization
         self.__control_values_ranges = control_values_range
 
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
-        adr = device.build_acquisition_device_data_stream()
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         return wrap_acquisition_device_data_stream_for_series(adr.data_stream, self.__control_customization, self.__control_values_ranges, adr.device_map, adr.channel_names)
 
 
@@ -2738,17 +2740,15 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
         self.__x_control_values_ranges = x_control_values_range
         self.__y_control_values_ranges = y_control_values_range
 
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
-        adr = device.build_acquisition_device_data_stream()
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         return wrap_acquisition_device_data_stream_for_tableau(adr.data_stream, self.__control_customization, self.__axis_id, self.__x_control_values_ranges, self.__y_control_values_ranges, adr.device_map, adr.channel_names)
 
 
-class MultiAcquisitionMethod(AcquisitionMethodLike):
+class MultipleAcquisitionMethod(AcquisitionMethodLike):
     def __init__(self, sections: typing.Sequence[_MultiSectionLike]) -> None:
         self.__sections = sections
 
-    def wrap_acquisition_device_data_stream(self, device: AcquisitionDeviceLike) -> AcquisitionMethodResult:
-        adr = device.build_acquisition_device_data_stream()
+    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         return wrap_acquisition_device_data_stream_for_multi(adr.data_stream, adr.device_map, adr.channel_names, self.__sections)
 
 
@@ -2792,6 +2792,126 @@ hardware_source_channel_descriptions = {
     "eels_image": HardwareSourceChannelDescription("eels_image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
     "image": HardwareSourceChannelDescription("image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
 }
+
+
+class AcquisitionState:
+    def __init__(self) -> None:
+        self._acquisition: typing.Optional[Acquisition] = None
+        self.is_error = False
+
+    def _start(self, framed_data_stream: FramedDataStream) -> None:
+        self.device_state = framed_data_stream.prepare_device_state()
+        time.sleep(0.5)
+        self._acquisition = Acquisition(framed_data_stream)
+        self.is_error = False
+
+    def _end(self) -> None:
+        assert self._acquisition
+        self._acquisition.close()
+        self._acquisition = None
+        self.device_state.restore()
+
+    @property
+    def _acquisition_ex(self) -> Acquisition:
+        assert self._acquisition
+        return self._acquisition
+
+    @property
+    def is_active(self) -> bool:
+        return self._acquisition is not None
+
+    def abort_acquire(self) -> None:
+        if self._acquisition:
+            self._acquisition.abort_acquire()
+
+
+class DataChannelProviderLike(typing.Protocol):
+    def get_data_channel(self, title_base: str, channel_names: typing.Dict[Channel, str], **kwargs: typing.Any) -> DataChannel: ...
+
+
+class DriftLoggerProviderLike(typing.Protocol):
+    def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger: ...
+
+
+def _acquire_data_stream(data_stream: DataStream,
+                         data_channel: DataChannel,
+                         acquisition_state: AcquisitionState,
+                         progress_value_model: Model.PropertyModel[int],
+                         is_acquiring_model: Model.PropertyModel[bool],
+                         scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
+                         event_loop: asyncio.AbstractEventLoop) -> None:
+    """Perform acquisition of the data stream."""
+
+    framed_data_stream = FramedDataStream(data_stream, data_channel=data_channel).add_ref()
+
+    # create the acquisition state/controller object based on the data item data channel data stream.
+    acquisition_state._start(framed_data_stream)
+
+    # define a method that gets called when the async acquisition method finished. this closes the various
+    # objects and updates the UI as 'complete'.
+    def finish_grab_async(framed_data_stream: FramedDataStream,
+                          acquisition_state: AcquisitionState,
+                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
+                          progress_task: typing.Optional[asyncio.Task[None]],
+                          progress_value_model: Model.PropertyModel[int],
+                          is_acquiring_model: Model.PropertyModel[bool]) -> None:
+        acquisition_state._end()
+        acquisition_state.is_error = framed_data_stream.is_error
+        framed_data_stream.remove_ref()
+        if scan_drift_logger:
+            scan_drift_logger.close()
+        is_acquiring_model.value = False
+        if progress_task:
+            progress_task.cancel()
+        progress_value_model.value = 100
+
+    # manage the 'is_acquiring' state.
+    is_acquiring_model.value = True
+
+    # define a task to update progress every 250ms.
+    async def update_progress(acquisition: Acquisition, progress_value_model: Model.PropertyModel[int]) -> None:
+        while True:
+            try:
+                progress = acquisition.progress
+                progress_value_model.value = int(100 * progress)
+                await asyncio.sleep(0.25)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                raise
+
+    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
+
+    # start async acquire.
+    acquisition_state._acquisition_ex.acquire_async(event_loop=event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
+
+
+def start_acquire(acquisition_device: AcquisitionDeviceLike,
+                  acquisition_method: AcquisitionMethodLike,
+                  acquisition_state: AcquisitionState,
+                  data_channel_provider: DataChannelProviderLike,
+                  drift_logger_provider: DriftLoggerProviderLike,
+                  progress_value_model: Model.PropertyModel[int],
+                  is_acquiring_model: Model.PropertyModel[bool],
+                  event_loop: asyncio.AbstractEventLoop) -> None:
+    build_result = acquisition_device.build_acquisition_device_data_stream()
+    try:
+        apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+        try:
+            scan_drift_logger = drift_logger_provider.get_drift_logger(build_result.drift_tracker) if build_result.drift_tracker else None
+
+            _acquire_data_stream(apply_result.data_stream,
+                                 data_channel_provider.get_data_channel(apply_result.title_base, apply_result.channel_names),
+                                 acquisition_state,
+                                 progress_value_model,
+                                 is_acquiring_model,
+                                 scan_drift_logger,
+                                 event_loop)
+
+        finally:
+            apply_result.data_stream.remove_ref()
+    finally:
+        build_result.data_stream.remove_ref()
 
 
 """

@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import functools
 import json
 import random
 import time
@@ -14,6 +15,8 @@ from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
+from nion.instrumentation import DataChannel
+from nion.instrumentation import DriftTracker
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
@@ -22,6 +25,7 @@ from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
+from nion.swift.model import DataItem
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
@@ -56,56 +60,42 @@ class ApplicationDataInMemory:
         self.d = dict(d)
 
 
-def make_camera_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
-    return camera_base.build_camera_device_data_stream(test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
+def make_camera_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceLike:
+    return camera_base.CameraAcquisitionDevice(test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0), None)
 
 
-def make_scan_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
-    return scan_base.build_scan_device_data_stream(test_context.scan_hardware_source)
+def make_scan_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceLike:
+    return scan_base.ScanAcquisitionDevice(test_context.scan_hardware_source)
 
 
-def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
+def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceLike:
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
-    return scan_base.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
+    return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0), None, scan_context_description)
 
 
-def make_sequence_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
-    return Acquisition.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names)
+def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
+    return Acquisition.SequenceAcquisitionMethod(4)
 
 
-def make_series_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
+def make_series_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
     control_customization._set_field_value("control_id", "defocus")
     control_customization.device_control_id = "C10"
     control_customization.delay = 0
     control_values_range = Acquisition.ControlValuesRange(4, 500e-9, 5e-9)
-    return Acquisition.wrap_acquisition_device_data_stream_for_series(
-        adr.data_stream,
-        control_customization,
-        control_values_range,
-        adr.device_map,
-        adr.channel_names
-    )
+    return Acquisition.SeriesAcquisitionMethod(control_customization, control_values_range)
 
 
-def make_tableau_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
+def make_tableau_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
     control_customization._set_field_value("control_id", "stage_position")
     control_customization.device_control_id = "stage_position_m"
     control_customization.delay = 0
     x_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
     y_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
-    return Acquisition.wrap_acquisition_device_data_stream_for_tableau(
-        adr.data_stream,
-        control_customization,
-        "tv",
-        x_control_values_range,
-        y_control_values_range,
-        adr.device_map,
-        adr.channel_names
-    )
+    return Acquisition.TableAcquisitionMethod(control_customization, "tv", x_control_values_range, y_control_values_range)
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -1110,37 +1100,53 @@ class TestCameraControlClass(unittest.TestCase):
                 with contextlib.closing(h):
                     h2 = AcquisitionPanel.SequenceAcquisitionMethodComponentHandler(c2, acquisition_preferences)
                     with contextlib.closing(h2):
-                        adr = h.build_acquisition_device_data_stream()
-                        try:
-                            amr = h2.wrap_acquisition_device_data_stream(adr.data_stream, adr.device_map, adr.channel_names)
-                            try:
-                                ac._acquire_data_stream(amr.data_stream, amr.title_base, amr.channel_names, adr.drift_tracker)
-                                start_time = time.time()
-                                while ac.is_acquiring_model.value:
-                                    document_controller.periodic()
-                                    time.sleep(0.1)
-                                    self.assertTrue(time.time() - start_time < TIMEOUT)
-                                self.assertFalse(ac.is_error)
-                            finally:
-                                amr.data_stream.remove_ref()
-                        finally:
-                            adr.data_stream.remove_ref()
-            # only one data item will be create: the sequence. the view data item does not exist since acquiring
+                        ac.start_acquisition(h, h2)
+                        start_time = time.time()
+                        while ac.is_acquiring_model.value:
+                            document_controller.periodic()
+                            time.sleep(0.1)
+                            self.assertTrue(time.time() - start_time < TIMEOUT)
+                        self.assertFalse(ac.is_error)
+            # only one data item will be created: the sequence. the view data item does not exist since acquiring
             # a sequence will use the special sequence acquisition of the camera device.
             self.assertEqual(1, len(document_controller.document_model.data_items))
 
-    def __test_acq(self, document_controller: DocumentController.DocumentController, adr: Acquisition.AcquisitionDeviceResult, amr: Acquisition.AcquisitionMethodResult, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
-        acquisition_state = AcquisitionPanel.AcquisitionState()
+    def __test_acq(self, document_controller: DocumentController.DocumentController, acquisition_device: Acquisition.AcquisitionDeviceLike, acquisition_method: Acquisition.AcquisitionMethodLike, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
+
+        class DataChannelAndDriftLoggerProvider(Acquisition.DataChannelProviderLike, Acquisition.DriftLoggerProviderLike):
+            def __init__(self, document_controller: DocumentController.DocumentController) -> None:
+                self.__document_controller = document_controller
+
+            def get_data_channel(self, title_base: str, channel_names: typing.Dict[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
+                # create a data item data channel for converting data streams to data items, using partial updates and
+                # minimizing extra copies where possible.
+
+                # define a callback method to display the data item.
+                def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
+                    Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
+
+                data_item_data_channel = DataChannel.DataItemDataChannel(self.__document_controller.document_model, title_base, channel_names)
+                data_item_data_channel.on_display_data_item = functools.partial(display_data_item, self.__document_controller)
+
+                return data_item_data_channel
+
+            def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger:
+                # configure the scan drift logger if required. the drift tracker here is only enabled if using the
+                # scan hardware source drift tracker.
+                return DriftTracker.DriftLogger(self.__document_controller.document_model, drift_tracker)
+
+        acquisition_state = Acquisition.AcquisitionState()
         progress_value_model = Model.PropertyModel[int](0)
         is_acquiring_model = Model.PropertyModel[bool](False)
-        AcquisitionPanel._acquire_data_stream(amr.data_stream,
-                                              document_controller,
-                                              acquisition_state,
-                                              progress_value_model,
-                                              is_acquiring_model,
-                                              amr.title_base,
-                                              amr.channel_names,
-                                              adr.drift_tracker)
+        provider = DataChannelAndDriftLoggerProvider(document_controller)
+        Acquisition.start_acquire(acquisition_device,
+                                  acquisition_method,
+                                  acquisition_state,
+                                  provider,
+                                  provider,
+                                  progress_value_model,
+                                  is_acquiring_model,
+                                  document_controller.event_loop)
 
         last_progress_time = time.time()
         last_progress = progress_value_model.value
@@ -1196,42 +1202,29 @@ class TestCameraControlClass(unittest.TestCase):
             #                                                             ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
             #                                                             ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))]),
         ]
-        for adr_fn, amr_fn, expected_count in tc:
-            with self.subTest(adr_fn=adr_fn, amr_fn=amr_fn, expected_count=expected_count):
+        for acquisition_device_fn, acquisition_method_fn, expected_count in tc:
+            with self.subTest(acquisition_device_fn=acquisition_device_fn, acquisition_method_fn=acquisition_method_fn, expected_count=expected_count):
                 with self.__test_context() as test_context:
-                    document_controller = test_context.document_controller
-                    adr = adr_fn(test_context)
-                    try:
-                        amr = amr_fn(adr)
-                        try:
-                            self.__test_acq(document_controller, adr, amr, expected_count)
-                        finally:
-                            amr.data_stream.remove_ref()
-                    finally:
-                        adr.data_stream.remove_ref()
+                    self.__test_acq(test_context.document_controller, acquisition_device_fn(test_context), acquisition_method_fn(), expected_count)
 
     def test_acquisition_panel_acquisition_restarts_view(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
-            adr = make_synchronized_device(test_context)
+            acquisition_device = make_synchronized_device(test_context)
+            acquisition_method = make_sequence_acquisition_method()
             try:
-                amr = make_sequence_acquisition_method(adr)
-                try:
-                    # start hardware sources playing
-                    test_context.scan_hardware_source.start_playing(sync_timeout=3.0)
-                    test_context.camera_hardware_source.start_playing(sync_timeout=3.0)
-                    # run the acquisition procedure
-                    self.__test_acq(document_controller, adr, amr, [])
-                    # confirm the acquisition is still running
-                    self.assertTrue(test_context.scan_hardware_source.is_playing)
-                    self.assertTrue(test_context.camera_hardware_source.is_playing)
-                finally:
-                    amr.data_stream.remove_ref()
-                    # stop the hardware sources
-                    test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
-                    test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
+                # start hardware sources playing
+                test_context.scan_hardware_source.start_playing(sync_timeout=3.0)
+                test_context.camera_hardware_source.start_playing(sync_timeout=3.0)
+                # run the acquisition procedure
+                self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
+                # confirm the acquisition is still running
+                self.assertTrue(test_context.scan_hardware_source.is_playing)
+                self.assertTrue(test_context.camera_hardware_source.is_playing)
             finally:
-                adr.data_stream.remove_ref()
+                # stop the hardware sources
+                test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
+                test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
 
     def test_exposure_string(self):
         t = (

@@ -21,14 +21,10 @@ import math
 import operator
 import pathlib
 import pkgutil
-import time
 import typing
-import uuid
 import weakref
 
 # local libraries
-from nion.data import Calibration
-from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
@@ -43,6 +39,7 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
+from nion.swift.model import DocumentModel
 from nion.swift.model import Schema
 from nion.ui import Application
 from nion.ui import CanvasItem
@@ -51,7 +48,6 @@ from nion.ui import PreferencesDialog
 from nion.ui import UserInterface as UserInterfaceModule
 from nion.utils import Converter
 from nion.utils import Event
-from nion.utils import Geometry
 from nion.utils import ListModel
 from nion.utils import Model
 from nion.utils import Observable
@@ -288,19 +284,11 @@ class ComponentComboBoxHandler(Declarative.Handler):
         return self._combo_box_handler.current_item
 
 
-# for external backwards compatibility. deprecated.
-AcquisitionMethodResult = Acquisition.AcquisitionMethodResult
-AcquisitionDeviceResult = Acquisition.AcquisitionDeviceResult
-ControlValuesRange = Acquisition.ControlValuesRange
-wrap_acquisition_device_data_stream_for_tableau = Acquisition.wrap_acquisition_device_data_stream_for_tableau
-build_scan_device_data_stream = scan_base.build_scan_device_data_stream
-
-
 class AcquisitionMethodComponentHandler(ComponentHandler):
     """Define methods for acquisition method components."""
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
-        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
+        # build the device.
         raise NotImplementedError()
 
 
@@ -319,8 +307,8 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
             spacing=8
         )
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
-        return Acquisition.wrap_acquisition_device_data_stream(data_stream, device_map, channel_names)
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
+        return Acquisition.BasicAcquisitionMethod()
 
 
 class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -348,9 +336,9 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
             spacing=8
         )
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         length = max(1, self.configuration.count) if self.configuration.count else 1
-        return Acquisition.wrap_acquisition_device_data_stream_for_sequence(data_stream, length, channel_names)
+        return Acquisition.SequenceAcquisitionMethod(length)
 
 
 class SeriesControlHandler(Declarative.Handler):
@@ -499,7 +487,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             return self.__control_handlers[control_id]
         return None
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
         # start by getting the selected control customization from the UI.
         item = self._control_combo_box_handler.selected_item_value_stream.value
@@ -508,17 +496,11 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             # get the associated control handler that was created in create_handler and used within the stack
             # of control handlers declarative components.
             control_handler = self.__control_handlers.get(control_customization.control_id)
-            if control_handler and data_stream:
+            if control_handler:
                 # get the control values range from the control handler.
                 control_values_range = control_handler.get_control_values_range()
-                return Acquisition.wrap_acquisition_device_data_stream_for_series(
-                    data_stream,
-                    control_customization,
-                    control_values_range,
-                    device_map,
-                    channel_names
-                )
-        return Acquisition.AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
+                return Acquisition.SeriesAcquisitionMethod(control_customization, control_values_range)
+        return Acquisition.BasicAcquisitionMethod(_("Series"))
 
 
 class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -631,8 +613,8 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
             return self.__x_control_handlers[control_id]
         return None
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
-        # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
+        # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
         # start by getting the selected control customization from the UI.
         item = self._control_combo_box_handler.selected_item_value_stream.value
         if item:
@@ -641,17 +623,13 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
             # of control handlers declarative components.
             x_control_handler = self.__x_control_handlers.get(control_customization.control_id)
             y_control_handler = self.__y_control_handlers.get(control_customization.control_id)
-            if x_control_handler and y_control_handler and data_stream:
+            if x_control_handler and y_control_handler:
                 # get the axis and control values ranges from the control handlers.
                 axis_id = self.__axis_storage_model.value
                 y_control_values_range = y_control_handler.get_control_values_range()
                 x_control_values_range = x_control_handler.get_control_values_range()
-                return Acquisition.wrap_acquisition_device_data_stream_for_tableau(data_stream, control_customization,
-                                                                                   axis_id,
-                                                                                   x_control_values_range,
-                                                                                   y_control_values_range,
-                                                                                   device_map, channel_names)
-        return Acquisition.AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
+                return Acquisition.TableAcquisitionMethod(control_customization, axis_id, y_control_values_range, x_control_values_range)
+        return Acquisition.BasicAcquisitionMethod(_("Tableau"))
 
 
 class MultiAcquireEntryHandler(Declarative.Handler):
@@ -727,8 +705,10 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         # handle remove section request. always removes the last section.
         self.configuration._remove_item("sections", self.configuration._get_array_item("sections", -1))
 
-    def wrap_acquisition_device_data_stream(self, data_stream: Acquisition.DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Acquisition.Channel, str]) -> Acquisition.AcquisitionMethodResult:
-        return Acquisition.wrap_acquisition_device_data_stream_for_multi(data_stream, device_map, channel_names, self.configuration.sections)
+    def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
+        # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
+        # start by getting the selected control customization from the UI.
+        return Acquisition.MultipleAcquisitionMethod(self.configuration.sections)
 
 
 # register each component as an acquisition method component factory.
@@ -822,8 +802,8 @@ class AcquisitionDeviceComponentHandler(ComponentHandler):
 
     acquire_valid_value_stream: Stream.AbstractStream[bool]
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
-        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+    def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
+        # build the device.
         raise NotImplementedError()
 
 
@@ -1305,7 +1285,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             return CameraDetailsHandler(self._camera_settings_model)
         return None
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+    def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         camera_hardware_source = self._camera_settings_model.camera_hardware_source
         camera_frame_parameters = self._camera_settings_model.camera_frame_parameters
@@ -1315,7 +1295,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_model.hardware_source)
         scan_context_description = self.__scan_context_description_value_stream.value
         assert scan_context_description
-        return scan_base.build_synchronized_device_data_stream(scan_hardware_source, scan_context_description, camera_hardware_source, camera_frame_parameters, camera_channel)
+        return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source, camera_hardware_source, camera_frame_parameters, camera_channel, scan_context_description)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1368,7 +1348,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
             return CameraDetailsHandler(self._camera_settings_model)
         return None
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+    def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
         # grab the camera hardware source and frame parameters
@@ -1378,7 +1358,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         assert camera_hardware_source
         assert camera_frame_parameters
 
-        return camera_base.build_camera_device_data_stream(camera_hardware_source, camera_frame_parameters, camera_channel)
+        return camera_base.CameraAcquisitionDevice(camera_hardware_source, camera_frame_parameters, camera_channel)
 
 
 class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1422,14 +1402,14 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
             return HardwareSourceChoiceHandler(self.__scan_hardware_source_choice_model, title=_("Scan Detector"))
         return None
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
+    def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
         # first get the scan hardware source.
         scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice_model.hardware_source)
         assert scan_hardware_source is not None
 
-        return scan_base.build_scan_device_data_stream(scan_hardware_source)
+        return scan_base.ScanAcquisitionDevice(scan_hardware_source)
 
 
 # register each component as an acquisition device component factory.
@@ -1581,104 +1561,6 @@ class PreferencesButtonHandler(Declarative.Handler):
         self.document_controller.open_preferences()
 
 
-class AcquisitionState:
-    def __init__(self) -> None:
-        self._acquisition: typing.Optional[Acquisition.Acquisition] = None
-        self.is_error = False
-
-    def _start(self, framed_data_stream: Acquisition.FramedDataStream) -> None:
-        self.device_state = framed_data_stream.prepare_device_state()
-        time.sleep(0.5)
-        self._acquisition = Acquisition.Acquisition(framed_data_stream)
-        self.is_error = False
-
-    def _end(self) -> None:
-        assert self._acquisition
-        self._acquisition.close()
-        self._acquisition = None
-        self.device_state.restore()
-
-    @property
-    def _acquisition_ex(self) -> Acquisition.Acquisition:
-        assert self._acquisition
-        return self._acquisition
-
-    @property
-    def is_active(self) -> bool:
-        return self._acquisition is not None
-
-    def abort_acquire(self) -> None:
-        if self._acquisition:
-            self._acquisition.abort_acquire()
-
-
-def _acquire_data_stream(data_stream: Acquisition.DataStream,
-                         document_controller: DocumentController.DocumentController,
-                         acquisition_state: AcquisitionState,
-                         progress_value_model: Model.PropertyModel[int],
-                         is_acquiring_model: Model.PropertyModel[bool],
-                         title_base: str,
-                         channel_names: typing.Dict[Acquisition.Channel, str],
-                         drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
-    """Perform acquisition of the data stream."""
-
-    # define a callback method to display the data item.
-    def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
-        Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
-
-    # create a data item data channel for converting data streams to data items, using partial updates and
-    # minimizing extra copies where possible.
-    data_item_data_channel = DataChannel.DataItemDataChannel(document_controller.document_model, title_base, channel_names)
-    data_item_data_channel.on_display_data_item = weak_partial(display_data_item, document_controller)
-    framed_data_stream = Acquisition.FramedDataStream(data_stream, data_channel=data_item_data_channel).add_ref()
-
-    # create the acquisition state/controller object based on the data item data channel data stream.
-    acquisition_state._start(framed_data_stream)
-
-    # configure the scan drift logger if required. the drift tracker here is only enabled if using the
-    # scan hardware source drift tracker.
-    scan_drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker,
-                                                 document_controller.event_loop) if drift_tracker else None
-
-    # define a method that gets called when the async acquisition method finished. this closes the various
-    # objects and updates the UI as 'complete'.
-    def finish_grab_async(framed_data_stream: Acquisition.FramedDataStream,
-                          acquisition_state: AcquisitionState,
-                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
-                          progress_task: typing.Optional[asyncio.Task[None]],
-                          progress_value_model: Model.PropertyModel[int],
-                          is_acquiring_model: Model.PropertyModel[bool]) -> None:
-        acquisition_state._end()
-        acquisition_state.is_error = framed_data_stream.is_error
-        framed_data_stream.remove_ref()
-        if scan_drift_logger:
-            scan_drift_logger.close()
-        is_acquiring_model.value = False
-        if progress_task:
-            progress_task.cancel()
-        progress_value_model.value = 100
-
-    # manage the 'is_acquiring' state.
-    is_acquiring_model.value = True
-
-    # define a task to update progress every 250ms.
-    async def update_progress(acquisition: Acquisition.Acquisition, progress_value_model: Model.PropertyModel[int]) -> None:
-        while True:
-            try:
-                progress = acquisition.progress
-                progress_value_model.value = int(100 * progress)
-                await asyncio.sleep(0.25)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                raise
-
-    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
-
-    # start async acquire.
-    acquisition_state._acquisition_ex.acquire_async(event_loop=document_controller.event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
-
-
 T = typing.TypeVar('T')
 
 
@@ -1824,7 +1706,7 @@ class AcquisitionController(Declarative.Handler):
 
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
-        self.__acquisition_state = AcquisitionState()
+        self.__acquisition_state = Acquisition.AcquisitionState()
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1879,35 +1761,54 @@ class AcquisitionController(Declarative.Handler):
         if self.__acquisition_state.is_active:
             self.__acquisition_state.abort_acquire()
         else:
-            # starting acquisition means building the device data stream using the acquisition device component and
-            # then wrapping the device data stream using the acquisition method component.
             device_component = self.__device_component_stream.value
             assert device_component
-            build_result = device_component.build_acquisition_device_data_stream()
-            try:
-                apply_result = self.__acquisition_method_component.current_item.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map, build_result.channel_names)
-                try:
-                    # call the _acquire_data_stream_method to carry out the acquisition.
-                    self._acquire_data_stream(apply_result.data_stream, apply_result.title_base, apply_result.channel_names, build_result.drift_tracker)
-                finally:
-                    apply_result.data_stream.remove_ref()
-            finally:
-                build_result.data_stream.remove_ref()
 
-    def _acquire_data_stream(self,
-                             data_stream: Acquisition.DataStream,
-                             title_base: str,
-                             channel_names: typing.Dict[Acquisition.Channel, str],
-                             drift_tracker: typing.Optional[DriftTracker.DriftTracker]) -> None:
-        """Perform acquisition of the data stream."""
-        _acquire_data_stream(data_stream,
-                             self.document_controller,
-                             self.__acquisition_state,
-                             self.progress_value_model,
-                             self.is_acquiring_model,
-                             title_base,
-                             channel_names,
-                             drift_tracker)
+            method_component = self.__acquisition_method_component.current_item
+            assert method_component
+
+            self.start_acquisition(device_component, method_component)
+
+    def start_acquisition(self, device_component: AcquisitionDeviceComponentHandler, method_component: AcquisitionMethodComponentHandler) -> None:
+
+        # starting acquisition means building the device data stream using the acquisition device component and
+        # then wrapping the device data stream using the acquisition method component.
+
+        class DataChannelProvider(Acquisition.DataChannelProviderLike):
+            def __init__(self, document_controller: DocumentController.DocumentController) -> None:
+                self.__document_controller = document_controller
+
+            def get_data_channel(self, title_base: str, channel_names: typing.Dict[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
+                # create a data item data channel for converting data streams to data items, using partial updates and
+                # minimizing extra copies where possible.
+
+                # define a callback method to display the data item.
+                def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
+                    Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
+
+                data_item_data_channel = DataChannel.DataItemDataChannel(self.__document_controller.document_model, title_base, channel_names)
+                data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller)
+
+                return data_item_data_channel
+
+        class DriftLoggerProvider(Acquisition.DriftLoggerProviderLike):
+            def __init__(self, document_model: DocumentModel.DocumentModel) -> None:
+                self.__document_model = document_model
+
+            def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger:
+                # configure the scan drift logger if required. the drift tracker here is only enabled if using the
+                # scan hardware source drift tracker.
+                return DriftTracker.DriftLogger(self.__document_model, drift_tracker)
+
+        Acquisition.start_acquire(device_component.build_acquisition_device(),
+                                  method_component.build_acquisition_method(),
+                                  self.__acquisition_state,
+                                  DataChannelProvider(self.document_controller),
+                                  DriftLoggerProvider(self.document_controller.document_model),
+                                  self.progress_value_model,
+                                  self.is_acquiring_model,
+                                  self.document_controller.event_loop)
+
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.

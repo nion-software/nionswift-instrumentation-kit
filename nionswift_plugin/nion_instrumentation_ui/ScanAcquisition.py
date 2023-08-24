@@ -137,7 +137,7 @@ class ScanAcquisitionController:
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker:
-            self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, drift_tracker, event_loop)
+            self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, drift_tracker)
 
         # save playing state
         is_scan_playing = scan_hardware_source.is_playing
