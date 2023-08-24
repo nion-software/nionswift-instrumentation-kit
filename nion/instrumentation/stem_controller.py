@@ -20,7 +20,6 @@ import uuid
 # local libraries
 from nion.data import Calibration
 from nion.instrumentation import AcquisitionPreferences
-from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.swift.model import DocumentModel
 from nion.swift.model import Graphics
@@ -35,6 +34,7 @@ if typing.TYPE_CHECKING:
     from nion.swift.model import DisplayItem
     from nion.instrumentation import camera_base
     from nion.instrumentation import scan_base
+    from nion.instrumentation import DriftTracker
 
 _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
 
@@ -409,8 +409,7 @@ class STEMController(Observable.Observable):
     def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
         if self.__drift_tracker:
             return self.__drift_tracker
-        return typing.cast(typing.Optional[DriftTracker.DriftTracker],
-                           Registry.get_component("drift_tracker"))
+        return typing.cast(typing.Optional["DriftTracker.DriftTracker"], Registry.get_component("drift_tracker"))
 
     # end configuration methods
 
@@ -1616,6 +1615,26 @@ class MagnificationDeviceController(DeviceController):
             self.fov_nm_model.value = values[0]
         elif control_customization.control_id == "rotation":
             self.rotation_model.value = values[0]
+
+
+class _InstrumentPropertiesControllerLike(typing.Protocol):
+    def apply_metadata_groups(self, properties: typing.MutableMapping[str, typing.Any], metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: ...
+
+
+def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: _InstrumentPropertiesControllerLike, device: typing.Optional[typing.Any]) -> None:
+    if instrument_controller:
+        # give the instrument controller opportunity to add properties
+        get_autostem_properties_fn = getattr(instrument_controller, "get_autostem_properties", None)
+        if callable(get_autostem_properties_fn):
+            try:
+                autostem_properties = get_autostem_properties_fn()
+                stem_properties.update(autostem_properties)
+            except Exception as e:
+                pass
+        # give the instrument controller opportunity to update metadata groups specified by the camera
+        acquisition_metatdata_groups = getattr(device, "acquisition_metatdata_groups", None)
+        if acquisition_metatdata_groups:
+            instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
 
 
 # the plan is to migrate away from the hardware manager as a registration system.

@@ -27,10 +27,11 @@ import uuid
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
-from nion.instrumentation import stem_controller as stem_controller_module
+from nion.instrumentation import stem_controller as STEMController
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.utils import Event
@@ -432,7 +433,7 @@ class ScanAcquisitionTaskParameters(HardwareSource.AcquisitionTaskParameters):
 
 class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, scan_hardware_source: ScanHardwareSource,
+    def __init__(self, stem_controller_: STEMController.STEMController, scan_hardware_source: ScanHardwareSource,
                  device: ScanDevice, hardware_source_id: str, is_continuous: bool, frame_parameters: ScanFrameParameters,
                  acquisition_task_parameters: typing.Optional[ScanAcquisitionTaskParameters], channel_ids: typing.Sequence[str],
                  display_name: str) -> None:
@@ -563,7 +564,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             # '_data_element' is the format returned from the Device.
             data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
             instrument_metadata: typing.Dict[str, typing.Any] = dict()
-            update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
+            STEMController.update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
             if instrument_metadata:
                 data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
             update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
@@ -627,7 +628,7 @@ class ScanDevice(typing.Protocol):
     def stop(self) -> None: ...
     def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[ImportExportManager.DataElementType], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], typing.Optional[int], int]: ...
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
-    def set_scan_context_probe_position(self, scan_context: stem_controller_module.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
+    def set_scan_context_probe_position(self, scan_context: STEMController.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
@@ -714,13 +715,13 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def scan_settings(self) -> ScanSettingsProtocol: raise NotImplementedError()
 
     @property
-    def stem_controller(self) -> stem_controller_module.STEMController: raise NotImplementedError()
+    def stem_controller(self) -> STEMController.STEMController: raise NotImplementedError()
 
     @property
     def channel_count(self) -> int: raise NotImplementedError()
 
     @property
-    def scan_context(self) -> stem_controller_module.ScanContext: raise NotImplementedError()
+    def scan_context(self) -> STEMController.ScanContext: raise NotImplementedError()
 
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]: raise NotImplementedError()
@@ -732,7 +733,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def probe_state(self) -> str: raise NotImplementedError()
 
     @property
-    def subscan_state(self) -> stem_controller_module.SubscanState: raise NotImplementedError()
+    def subscan_state(self) -> STEMController.SubscanState: raise NotImplementedError()
 
     @property
     def subscan_enabled(self) -> bool: raise NotImplementedError()
@@ -747,7 +748,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None: ...
 
     @property
-    def line_scan_state(self) -> stem_controller_module.LineScanState: raise NotImplementedError()
+    def line_scan_state(self) -> STEMController.LineScanState: raise NotImplementedError()
 
     @property
     def line_scan_enabled(self) -> bool: raise NotImplementedError()
@@ -777,10 +778,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def drift_rotation(self, value: float) -> None: ...
 
     @property
-    def drift_settings(self) -> stem_controller_module.DriftCorrectionSettings: raise NotImplementedError()
+    def drift_settings(self) -> STEMController.DriftCorrectionSettings: raise NotImplementedError()
 
     @drift_settings.setter
-    def drift_settings(self, value: stem_controller_module.DriftCorrectionSettings) -> None: ...
+    def drift_settings(self, value: STEMController.DriftCorrectionSettings) -> None: ...
 
     @property
     def drift_enabled(self) -> bool: raise NotImplementedError()
@@ -1119,7 +1120,7 @@ class ScanSettings(ScanSettingsProtocol):
 
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
 
-    def __init__(self, stem_controller_: stem_controller_module.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str] = None) -> None:
+    def __init__(self, stem_controller_: STEMController.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str] = None) -> None:
         super().__init__(device.scan_device_id, device.scan_device_name)
 
         self.__settings = settings
@@ -1270,7 +1271,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 traceback.print_stack()
 
     @property
-    def scan_context(self) -> stem_controller_module.ScanContext:
+    def scan_context(self) -> STEMController.ScanContext:
         return self.__stem_controller.scan_context
 
     @property
@@ -1278,7 +1279,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__settings
 
     @property
-    def stem_controller(self) -> stem_controller_module.STEMController:
+    def stem_controller(self) -> STEMController.STEMController:
         return self.__stem_controller
 
     @property
@@ -1361,7 +1362,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, copy.copy(scan_frame_parameters), None, dict())
 
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
+        STEMController.update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
 
         return GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
                                     camera_readout_size_squeezed, scan_calibrations, data_calibrations,
@@ -1431,19 +1432,19 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return xdata_group_list
 
     @property
-    def subscan_state(self) -> stem_controller_module.SubscanState:
+    def subscan_state(self) -> STEMController.SubscanState:
         return self.__stem_controller.subscan_state
 
     @property
     def subscan_enabled(self) -> bool:
-        return self.__stem_controller.subscan_state == stem_controller_module.SubscanState.ENABLED
+        return self.__stem_controller.subscan_state == STEMController.SubscanState.ENABLED
 
     @subscan_enabled.setter
     def subscan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.subscan_state = stem_controller_module.SubscanState.ENABLED
+            self.__stem_controller.subscan_state = STEMController.SubscanState.ENABLED
         else:
-            self.__stem_controller.subscan_state = stem_controller_module.SubscanState.DISABLED
+            self.__stem_controller.subscan_state = STEMController.SubscanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
@@ -1463,19 +1464,19 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.subscan_rotation = value
 
     @property
-    def line_scan_state(self) -> stem_controller_module.LineScanState:
+    def line_scan_state(self) -> STEMController.LineScanState:
         return self.__stem_controller.line_scan_state
 
     @property
     def line_scan_enabled(self) -> bool:
-        return self.__stem_controller.line_scan_state == stem_controller_module.LineScanState.ENABLED
+        return self.__stem_controller.line_scan_state == STEMController.LineScanState.ENABLED
 
     @line_scan_enabled.setter
     def line_scan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.line_scan_state = stem_controller_module.LineScanState.ENABLED
+            self.__stem_controller.line_scan_state = STEMController.LineScanState.ENABLED
         else:
-            self.__stem_controller.line_scan_state = stem_controller_module.LineScanState.DISABLED
+            self.__stem_controller.line_scan_state = STEMController.LineScanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
@@ -1533,7 +1534,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
             # if subscan enabled, ensure there is a subscan region
-            if self.__stem_controller.subscan_state == stem_controller_module.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
+            if self.__stem_controller.subscan_state == STEMController.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
                 self.__stem_controller.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
                 self.__stem_controller.subscan_rotation = 0.0
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
@@ -1553,7 +1554,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __line_scan_state_changed(self, name: str) -> None:
         if name == "line_scan_state":
             # if line scan enabled, ensure there is a line scan region
-            if self.__stem_controller.line_scan_state == stem_controller_module.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
+            if self.__stem_controller.line_scan_state == STEMController.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
                 self.__stem_controller.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters)
@@ -1595,11 +1596,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller.drift_rotation = value
 
     @property
-    def drift_settings(self) -> stem_controller_module.DriftCorrectionSettings:
+    def drift_settings(self) -> STEMController.DriftCorrectionSettings:
         return self.__stem_controller.drift_settings
 
     @drift_settings.setter
-    def drift_settings(self, value: stem_controller_module.DriftCorrectionSettings) -> None:
+    def drift_settings(self, value: STEMController.DriftCorrectionSettings) -> None:
         self.__stem_controller.drift_settings = value
 
     @property
@@ -1623,12 +1624,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def calculate_drift_lines(self, width: int, frame_time: float) -> int:
         if self.drift_valid:
-            assert isinstance(self.drift_settings.interval_units, stem_controller_module.DriftIntervalUnit)
-            if self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.FRAME:
+            assert isinstance(self.drift_settings.interval_units, STEMController.DriftIntervalUnit)
+            if self.drift_settings.interval_units == STEMController.DriftIntervalUnit.FRAME:
                 lines = max(1, math.ceil(self.drift_settings.interval / width))
-            elif self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.TIME:
+            elif self.drift_settings.interval_units == STEMController.DriftIntervalUnit.TIME:
                 lines = max(1, math.ceil(self.drift_settings.interval / frame_time / width))
-            elif self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.LINE:
+            elif self.drift_settings.interval_units == STEMController.DriftIntervalUnit.LINE:
                 lines = self.drift_settings.interval
             else:  # drift per scans
                 lines = 0
@@ -1637,8 +1638,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def calculate_drift_scans(self) -> int:
         if self.drift_valid:
-            assert isinstance(self.drift_settings.interval_units, stem_controller_module.DriftIntervalUnit)
-            if self.drift_settings.interval_units == stem_controller_module.DriftIntervalUnit.SCAN:
+            assert isinstance(self.drift_settings.interval_units, STEMController.DriftIntervalUnit)
+            if self.drift_settings.interval_units == STEMController.DriftIntervalUnit.SCAN:
                 return max(0, int(self.drift_settings.interval))
         return 0
 
@@ -1918,7 +1919,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             # '_data_element' is the format returned from the Device.
             data_element: typing.Dict[str, typing.Any] = {"metadata": dict()}
             instrument_metadata: typing.Dict[str, typing.Any] = dict()
-            update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
+            STEMController.update_instrument_properties(instrument_metadata, self.__stem_controller, self.__device)
             if instrument_metadata:
                 data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
             update_data_channel_specifier(data_element, HardwareSource.DataChannelSpecifier(channel_id, channel_variant, channel_name))
@@ -2392,11 +2393,11 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
                              scan_hardware_source.display_name, scan_frame_parameters, None, dict())
 
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
-                                     scan_hardware_source.scan_device)
+        STEMController.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
+                                                    scan_hardware_source.scan_device)
 
         # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
-        magnification_device_controller = stem_controller_module.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+        magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
         # build the scan frame data stream.
         scan_data_stream = ScanDataStream(scan_hardware_source, scan_frame_parameters, scan_id,
@@ -2471,8 +2472,8 @@ def make_synchronized_scan_data_stream(
                          scan_frame_parameters, scan_id, dict())
 
     instrument_metadata: typing.Dict[str, typing.Any] = dict()
-    update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
-                                 scan_hardware_source.scan_device)
+    STEMController.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
+                                                scan_hardware_source.scan_device)
 
     camera_exposure_ms = camera_frame_parameters.exposure_ms
     additional_camera_metadata = {"scan": copy.deepcopy(scan_metadata),
@@ -2551,6 +2552,125 @@ def make_synchronized_scan_data_stream(
     return data_stream
 
 
+class ScanDeviceController(STEMController.DeviceController):
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters):
+        self.scan_hardware_source = scan_hardware_source
+        self.scan_frame_parameters = scan_frame_parameters
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[STEMController.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        # no values supported at this time.
+        raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[STEMController.AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
+
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[STEMController.AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        # no values supported at this time.
+
+
+def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource) -> Acquisition.AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+    scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source)
+
+    # construct the channel names.
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    for c in scan_hardware_source.get_enabled_channel_indexes():
+        channel_state = scan_hardware_source.get_channel_state(c)
+        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
+    device_map["stem"] = STEMController.STEMDeviceController()
+    device_map["magnification"] = scan_frame_data_stream.magnification_device_controller
+    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+
+    return Acquisition.AcquisitionDeviceResult(scan_frame_data_stream.add_ref(), channel_names, None, device_map)
+
+
+def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> Acquisition.AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+    # first get the camera hardware source and the camera channel description.
+    if camera_channel in Acquisition.hardware_source_channel_descriptions:
+        camera_channel_description = Acquisition.hardware_source_channel_descriptions[camera_channel]
+    else:
+        camera_channel_description = Acquisition.hardware_source_channel_descriptions["image"]
+    assert camera_hardware_source is not None
+    assert camera_channel_description is not None
+
+    assert scan_hardware_source is not None
+    assert scan_context_description is not None
+
+    # configure the camera hardware source processing. always use camera parameters at index 0.
+    if camera_channel_description.processing_id:
+        camera_frame_parameters.processing = camera_channel_description.processing_id
+    else:
+        camera_frame_parameters.processing = None
+
+    # configure the scan uuid and scan frame parameters.
+    scan_count = 1
+    scan_size = scan_context_description.scan_size
+    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+    scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
+
+    # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
+    # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
+    # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
+    # tracker is separate at the moment.
+    drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
+    section_height: typing.Optional[int] = None
+    drift_tracker = scan_hardware_source.drift_tracker
+    if drift_tracker and scan_context_description.drift_interval_lines > 0:
+        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
+        section_height = scan_context_description.drift_interval_lines
+    enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
+
+    # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+    magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
+    # build the synchronized data stream. this will also automatically include scan-channel drift correction.
+    synchronized_scan_data_stream = make_synchronized_scan_data_stream(
+        scan_hardware_source=scan_hardware_source,
+        scan_frame_parameters=scan_frame_parameters,
+        camera_hardware_source=camera_hardware_source,
+        camera_frame_parameters=camera_frame_parameters,
+        scan_data_stream_functor=drift_correction_functor,
+        section_height=section_height,
+        scan_count=scan_count,
+        include_raw=True,
+        include_summed=False,
+        enable_drift_tracker=enable_drift_tracker,
+        fov_nm_model=magnification_device_controller.fov_nm_model,
+        rotation_model=magnification_device_controller.rotation_model
+    )
+
+    # construct the channel names.
+    op = _("Synchronized")
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    for c in scan_hardware_source.get_enabled_channel_indexes():
+        channel_state = scan_hardware_source.get_channel_state(c)
+        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
+    channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
+
+    drift_tracker = scan_hardware_source.drift_tracker
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
+    device_map["stem"] = STEMController.STEMDeviceController()
+    device_map["camera"] = camera_base.CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+    device_map["magnification"] = magnification_device_controller
+    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+
+    return Acquisition.AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), channel_names, drift_tracker, device_map)
+
+
 class InstrumentController(abc.ABC):
 
     def apply_metadata_groups(self, properties: typing.MutableMapping[str, typing.Any], metatdata_groups: typing.Sequence[typing.Tuple[typing.Sequence[str], str]]) -> None: pass
@@ -2562,24 +2682,8 @@ class InstrumentController(abc.ABC):
     def handle_tilt_click(self, **kwargs: typing.Any) -> None: pass
 
 
-def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: stem_controller_module.STEMController, scan_device: typing.Optional[ScanDevice]) -> None:
-    if instrument_controller:
-        # give the instrument controller opportunity to add properties
-        get_autostem_properties_fn = getattr(instrument_controller, "get_autostem_properties", None)
-        if callable(get_autostem_properties_fn):
-            try:
-                autostem_properties = get_autostem_properties_fn()
-                stem_properties.update(autostem_properties)
-            except Exception as e:
-                pass
-        # give the instrument controller opportunity to update metadata groups specified by the camera
-        acquisition_metatdata_groups = getattr(scan_device, "acquisition_metatdata_groups", None)
-        if acquisition_metatdata_groups:
-            instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
-
-
-def find_stem_controller(stem_controller_id: typing.Optional[str]) -> typing.Optional[stem_controller_module.STEMController]:
-    stem_controller: typing.Optional[stem_controller_module.STEMController] = None
+def find_stem_controller(stem_controller_id: typing.Optional[str]) -> typing.Optional[STEMController.STEMController]:
+    stem_controller: typing.Optional[STEMController.STEMController] = None
     if not stem_controller and stem_controller_id:
         stem_controller = typing.cast(typing.Any, HardwareSource.HardwareSourceManager().get_instrument_by_id(stem_controller_id))
         if not stem_controller:
@@ -2601,13 +2705,13 @@ _component_unregistered_listener = None
 
 def run(configuration_location: pathlib.Path) -> None:
     def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-        stem_controller: typing.Optional[stem_controller_module.STEMController]
+        stem_controller: typing.Optional[STEMController.STEMController]
         if "scan_module" in component_types:
             scan_module = typing.cast(ScanModule, component)
             stem_controller = find_stem_controller(scan_module.stem_controller_id)
             if not stem_controller:
                 print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
-                stem_controller = stem_controller_module.STEMController()
+                stem_controller = STEMController.STEMController()
             scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
             if scan_module.data_channel_delegate:
                 scan_hardware_source.data_channel_delegate = scan_module.data_channel_delegate

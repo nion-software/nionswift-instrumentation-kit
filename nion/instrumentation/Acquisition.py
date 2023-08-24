@@ -111,18 +111,27 @@ import asyncio
 import copy
 import dataclasses
 import enum
+import gettext
 import time
 import typing
 import warnings
 
 import numpy
+
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
+from nion.instrumentation import AcquisitionPreferences
+from nion.instrumentation import stem_controller as STEMController
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import ReferenceCounting
 from nion.utils.ReferenceCounting import weak_partial
+
+if typing.TYPE_CHECKING:
+    from nion.instrumentation import DriftTracker
+
+_ = gettext.gettext
 
 ShapeType = typing.Sequence[int]
 SliceType = typing.Tuple[slice, ...]
@@ -2459,6 +2468,273 @@ class Acquisition:
     @property
     def is_error(self) -> bool:
         return self.__is_error
+
+
+@dataclasses.dataclass
+class AcquisitionMethodResult:
+    """Define result values for acquire handler apply function.
+
+    data_stream is the result data stream.
+    title_base is the base name for titles describing the acquire handler. may be empty, but not None.
+    channel_names is a mapping from each acquisition channel to a display name.
+    """
+    data_stream: DataStream
+    title_base: str
+    channel_names: typing.Dict[Channel, str]
+
+
+@dataclasses.dataclass
+class ControlValuesRange:
+    """Description of the range of values to apply to a control."""
+    count: int
+    start: float
+    step: float
+
+
+def wrap_acquisition_device_data_stream(data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
+    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    return AcquisitionMethodResult(data_stream.add_ref(), str(), channel_names)
+
+
+def wrap_acquisition_device_data_stream_for_sequence(data_stream: DataStream, count: int, channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
+    # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    if count > 1:
+        # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
+        # has the option of doing the processing itself and the operator will not be applied to the result. in
+        # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
+        # on the entire sequence. there is probably a better way to abstract this in the future.
+        if isinstance(data_stream, FramedDataStream) and isinstance(data_stream.operator, SumOperator):
+            return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count).add_ref(), _("Sequence"), channel_names)
+        else:
+            return AcquisitionMethodResult(data_stream.wrap_in_sequence(count).add_ref(), _("Sequence"), channel_names)
+    else:
+        return AcquisitionMethodResult(data_stream.add_ref(), _("Sequence"), channel_names)
+
+
+def wrap_acquisition_device_data_stream_for_series(data_stream: DataStream, control_customization: AcquisitionPreferences.ControlCustomization, control_values_range: ControlValuesRange, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
+    # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    # get the associated control handler that was created in create_handler and used within the stack
+    # of control handlers declarative components.
+    assert data_stream
+    if control_values_range.count > 1:
+        class ActionDelegate(ActionDataStreamDelegate):
+            def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                         device_map: typing.Mapping[str, STEMController.DeviceController], starts: typing.Sequence[float],
+                         steps: typing.Sequence[float]) -> None:
+                self.control_customization = control_customization
+                self.device_map = device_map
+                self.starts = starts
+                self.steps = steps
+                self.original_values: typing.Sequence[float] = list()
+
+            def start(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    self.original_values = device_controller.get_values(self.control_customization)
+
+            # define an action function to apply control values during acquisition
+            def perform(self, index: ShapeType) -> None:
+                # look up the device controller in the device_map using the device_id in the control description
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    # calculate the current value (in each dimension) and send the result to the
+                    # device controller. the device controller may be a camera, scan, or stem device
+                    # controller.
+                    values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                    device_controller.update_values(self.control_customization, self.original_values, values)
+
+            def finish(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    device_controller.set_values(self.control_customization, self.original_values)
+
+        # configure the action function and data stream using weak_partial to carefully control ref counts
+        action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step])
+        data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), control_values_range.count)
+    return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
+
+
+def wrap_acquisition_device_data_stream_for_tableau(data_stream: DataStream,
+                                                    control_customization: AcquisitionPreferences.ControlCustomization,
+                                                    axis_id: typing.Optional[str],
+                                                    x_control_values_range: ControlValuesRange,
+                                                    y_control_values_range: ControlValuesRange,
+                                                    device_map: typing.Mapping[str, STEMController.DeviceController],
+                                                    channel_names: typing.Dict[Channel, str]) -> AcquisitionMethodResult:
+    # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    assert data_stream
+    if x_control_values_range.count > 1 or y_control_values_range.count > 1:
+        class ActionDelegate(ActionDataStreamDelegate):
+            def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
+                         device_map: typing.Mapping[str, STEMController.DeviceController], starts: typing.Sequence[float],
+                         steps: typing.Sequence[float], axis_id: typing.Optional[str]) -> None:
+                self.control_customization = control_customization
+                self.device_map = device_map
+                self.starts = starts
+                self.steps = steps
+                self.axis_id = axis_id
+                self.original_values: typing.Sequence[float] = list()
+
+            def start(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    self.original_values = device_controller.get_values(self.control_customization, self.__resolve_axis())
+
+            # define an action function to apply control values during acquisition
+            def perform(self, index: ShapeType) -> None:
+                # look up the device controller in the device_map using the device_id in the control description
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    # calculate the current value (in each dimension) and send the result to the
+                    # device controller. the device controller may be a camera, scan, or stem device
+                    # controller.
+                    values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
+                    device_controller.update_values(self.control_customization, self.original_values, values, self.__resolve_axis())
+
+            def finish(self) -> None:
+                control_description = self.control_customization.control_description
+                assert control_description
+                device_controller = self.device_map.get(control_description.device_id)
+                if device_controller:
+                    device_controller.set_values(self.control_customization, self.original_values, self.__resolve_axis())
+
+            def __resolve_axis(self) -> STEMController.AxisType:
+                # resolve the axis for the 2d control
+                axis: STEMController.AxisType = ("x", "y")
+                for axis_description in typing.cast(STEMController.STEMDeviceController, self.device_map["stem"]).stem_controller.axis_descriptions:
+                    if self.axis_id == axis_description.axis_id:
+                        axis = axis_description.axis_type
+                return axis
+
+        # configure the action function and data stream using weak_partial to carefully control ref counts
+        action_delegate = ActionDelegate(control_customization, device_map, [y_control_values_range.start, x_control_values_range.start], [y_control_values_range.step, x_control_values_range.step], axis_id)
+        data_stream = CollectedDataStream(
+            ActionDataStream(data_stream, action_delegate),
+            (y_control_values_range.count, x_control_values_range.count),
+            (Calibration.Calibration(), Calibration.Calibration()))
+    return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
+
+
+class _MultiSectionLike(typing.Protocol):
+    offset: float
+    exposure: float
+    count: int
+
+
+def wrap_acquisition_device_data_stream_for_multi(data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController], channel_names: typing.Dict[Channel, str], sections: typing.Sequence[_MultiSectionLike]) -> AcquisitionMethodResult:
+    # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
+    assert AcquisitionPreferences.acquisition_preferences
+    # define a list of data streams that will be acquired sequentially.
+    data_streams: typing.List[DataStream] = list()
+    # create a map from control_id to the control customization.
+    control_customizations_map = {control_customization.control_id: control_customization for
+                                  control_customization in
+                                  AcquisitionPreferences.acquisition_preferences.control_customizations}
+    # grab the stem and camera device controllers from the device map.
+    stem_value_controller = device_map.get("stem")
+    camera_value_controller = device_map.get("camera")
+    # grab the control customizations and descriptions for energy offset and exposure
+    control_customization_energy_offset = control_customizations_map["energy_offset"]
+    control_customization_exposure = control_customizations_map["exposure"]
+    assert control_customization_energy_offset
+    assert control_customization_exposure
+    control_description_energy_offset = control_customization_energy_offset.control_description
+    control_description_exposure = control_customization_exposure.control_description
+    assert control_description_energy_offset
+    assert control_description_exposure
+    # for each section, build the data stream.
+    for multi_acquire_entry in sections:
+        class ActionDelegate(ActionDataStreamDelegate):
+            def __init__(self, offset_value: float, exposure_value: float) -> None:
+                self.offset_value = offset_value
+                self.exposure_value = exposure_value
+                self.original_energy_offset_values: typing.Sequence[float] = list()
+                self.original_exposure_values: typing.Sequence[float] = list()
+
+            def start(self) -> None:
+                if stem_value_controller:
+                    self.original_energy_offset_values = stem_value_controller.get_values(control_customization_energy_offset)
+                if camera_value_controller:
+                    self.original_exposure_values = camera_value_controller.get_values(control_customization_exposure)
+
+            # define an action function to apply control values during acquisition
+            def perform(self, index: ShapeType) -> None:
+                if stem_value_controller:
+                    stem_value_controller.set_values(control_customization_energy_offset, [self.offset_value])
+                if camera_value_controller:
+                    camera_value_controller.set_values(control_customization_exposure, [self.exposure_value])
+
+            def finish(self) -> None:
+                if stem_value_controller:
+                    stem_value_controller.set_values(control_customization_energy_offset, self.original_energy_offset_values)
+                if camera_value_controller:
+                    camera_value_controller.set_values(control_customization_exposure, self.original_exposure_values)
+
+        # configure the action function and data stream using weak_partial to carefully control ref counts
+        action_delegate = ActionDelegate(multi_acquire_entry.offset * control_description_energy_offset.multiplier,
+                                         multi_acquire_entry.exposure * control_description_exposure.multiplier)
+        data_streams.append(SequenceDataStream(ActionDataStream(data_stream, action_delegate), max(1, multi_acquire_entry.count)))
+
+    # create a sequential data stream from the section data streams.
+    sequential_data_stream = SequentialDataStream(data_streams)
+    # the sequential data stream will emit channels of the form n.sub-channel. add a name for each of those
+    # channels. do this by getting the name of the sub channel and constructing a new name for n.sub_channel
+    # for each index.
+    for channel in sequential_data_stream.channels:
+        channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}", channel_names[Channel(*channel.segments[1:])]))
+    return AcquisitionMethodResult(sequential_data_stream.add_ref(), _("Multiple"), channel_names)
+
+
+@dataclasses.dataclass
+class AcquisitionDeviceResult:
+    """Define result values for acquisition device component build function.
+
+    data_stream is the result data stream.
+    channel_names is a mapping from each acquisition channel to a display name.
+    drift_tracker is an optional drift tracker, if used.
+    device_map is a mapping from device_id to a DeviceController.
+    """
+    data_stream: DataStream
+    channel_names: typing.Dict[Channel, str]
+    drift_tracker: typing.Optional[DriftTracker.DriftTracker]
+    device_map: typing.Dict[str, STEMController.DeviceController]
+
+
+@dataclasses.dataclass
+class HardwareSourceChannelDescription:
+    """Describes a channel available on a camera.
+
+    channel_id is unique for this channel (for persistence).
+    processing_id is an optional processing identifier describing how to go from the native channel to this channel.
+    display_name is the display name for the channel. it is displayed in the UI combo box.
+    data_descriptor is the descriptor for the channel. it is used to provide downstream processing options.
+    """
+    channel_id: str
+    processing_id: typing.Optional[str]
+    display_name: str
+    data_descriptor: DataAndMetadata.DataDescriptor
+
+    def __str__(self) -> str:
+        return self.display_name
+
+
+# hardcoded list of channel descriptions. this list should be dynamically constructed from the devices eventually.
+hardware_source_channel_descriptions = {
+    "ronchigram": HardwareSourceChannelDescription("ronchigram", None, _("Ronchigram"), DataAndMetadata.DataDescriptor(False, 0, 2)),
+    "eels_spectrum": HardwareSourceChannelDescription("eels_spectrum", "sum_project", _("Spectra"), DataAndMetadata.DataDescriptor(False, 0, 1)),
+    "eels_image": HardwareSourceChannelDescription("eels_image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
+    "image": HardwareSourceChannelDescription("image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
+}
 
 
 """

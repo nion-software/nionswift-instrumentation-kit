@@ -11,8 +11,10 @@ import zlib
 import numpy
 
 from nion.data import DataAndMetadata
+from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
+from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
@@ -54,32 +56,32 @@ class ApplicationDataInMemory:
         self.d = dict(d)
 
 
-def make_camera_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
-    return AcquisitionPanel.build_camera_device_data_stream(test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
+def make_camera_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
+    return camera_base.build_camera_device_data_stream(test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
 
 
-def make_scan_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
-    return AcquisitionPanel.build_scan_device_data_stream(test_context.scan_hardware_source)
+def make_scan_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
+    return scan_base.build_scan_device_data_stream(test_context.scan_hardware_source)
 
 
-def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> AcquisitionPanel.AcquisitionDeviceResult:
+def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceResult:
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
-    return AcquisitionPanel.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
+    return scan_base.build_synchronized_device_data_stream(test_context.scan_hardware_source, scan_context_description, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0))
 
 
-def make_sequence_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
-    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names)
+def make_sequence_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
+    return Acquisition.wrap_acquisition_device_data_stream_for_sequence(adr.data_stream, 4, adr.channel_names)
 
 
-def make_series_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
+def make_series_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
     control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
     control_customization._set_field_value("control_id", "defocus")
     control_customization.device_control_id = "C10"
     control_customization.delay = 0
-    control_values_range = AcquisitionPanel.ControlValuesRange(4, 500e-9, 5e-9)
-    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_series(
+    control_values_range = Acquisition.ControlValuesRange(4, 500e-9, 5e-9)
+    return Acquisition.wrap_acquisition_device_data_stream_for_series(
         adr.data_stream,
         control_customization,
         control_values_range,
@@ -88,14 +90,14 @@ def make_series_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult
     )
 
 
-def make_tableau_acquisition_method(adr: AcquisitionPanel.AcquisitionDeviceResult) -> AcquisitionPanel.AcquisitionMethodResult:
+def make_tableau_acquisition_method(adr: Acquisition.AcquisitionDeviceResult) -> Acquisition.AcquisitionMethodResult:
     control_customization = AcquisitionPreferences.ControlCustomization(Schema.get_entity_type("control_customization"), None)
     control_customization._set_field_value("control_id", "stage_position")
     control_customization.device_control_id = "stage_position_m"
     control_customization.delay = 0
-    x_control_values_range = AcquisitionPanel.ControlValuesRange(3, -1e-9, 1e-9)
-    y_control_values_range = AcquisitionPanel.ControlValuesRange(3, -1e-9, 1e-9)
-    return AcquisitionPanel.wrap_acquisition_device_data_stream_for_tableau(
+    x_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
+    y_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
+    return Acquisition.wrap_acquisition_device_data_stream_for_tableau(
         adr.data_stream,
         control_customization,
         "tv",
@@ -1127,7 +1129,7 @@ class TestCameraControlClass(unittest.TestCase):
             # a sequence will use the special sequence acquisition of the camera device.
             self.assertEqual(1, len(document_controller.document_model.data_items))
 
-    def __test_acq(self, document_controller: DocumentController.DocumentController, adr: AcquisitionPanel.AcquisitionDeviceResult, amr: AcquisitionPanel.AcquisitionMethodResult, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
+    def __test_acq(self, document_controller: DocumentController.DocumentController, adr: Acquisition.AcquisitionDeviceResult, amr: Acquisition.AcquisitionMethodResult, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
         acquisition_state = AcquisitionPanel.AcquisitionState()
         progress_value_model = Model.PropertyModel[int](0)
         is_acquiring_model = Model.PropertyModel[bool](False)

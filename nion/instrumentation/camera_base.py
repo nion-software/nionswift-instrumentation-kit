@@ -29,7 +29,9 @@ from nion.data import Calibration
 from nion.data import Core
 from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
+from nion.instrumentation import stem_controller as STEMController
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.swift.model import Graphics
@@ -1370,8 +1372,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             self.__instrument_controller = Registry.get_component("stem_controller")
         if not self.__instrument_controller:
             print(f"Instrument Controller ({self.__instrument_controller_id}) for ({self.hardware_source_id}) not found. Using proxy.")
-            from nion.instrumentation import stem_controller
-            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, stem_controller.STEMController())
+            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, STEMController.STEMController())
         return self.__instrument_controller
 
     def __handle_log_messages_event(self) -> None:
@@ -1634,7 +1635,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         self.__update_intensity_calibration(data_element, instrument_controller, self.__camera)
-        update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
+        STEMController.update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
         update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
 
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
@@ -1650,7 +1651,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__update_spatial_calibrations(data_element, instrument_controller, self.__camera, self.__camera_category, data.shape, frame_parameters.binning, frame_parameters.binning)
         self.__update_intensity_calibration(data_element, instrument_controller, self.__camera)
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
-        update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
+        STEMController.update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
         if instrument_metadata:
             data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
         update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
@@ -1660,7 +1661,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return data_element
 
     def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
-        update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
+        STEMController.update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
         update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
@@ -1975,8 +1976,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
             self.__instrument_controller = Registry.get_component("stem_controller")
         if not self.__instrument_controller:
             print(f"Instrument Controller ({self.__instrument_controller_id}) for ({self.hardware_source_id}) not found. Using proxy.")
-            from nion.instrumentation import stem_controller
-            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, stem_controller.STEMController())
+            self.__instrument_controller = self.__instrument_controller or typing.cast(InstrumentController, STEMController.STEMController())
         return self.__instrument_controller
 
     def __get_camera_calibrator(self) -> CameraCalibrator:
@@ -2139,7 +2139,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         acquisition_data.apply_signal_calibrations([Calibration.Calibration()] + list(camera_calibrations))
         acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
         acquisition_data.counts_per_electron = self.get_counts_per_electron()
-        update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
+        STEMController.update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
         update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
 
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
@@ -2163,7 +2163,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         instrument_metadata: typing.Dict[str, typing.Any] = dict()
         instrument_controller = self.__instrument_controller
         assert instrument_controller
-        update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
+        STEMController.update_instrument_properties(instrument_metadata, instrument_controller, self.__camera)
         if instrument_metadata:
             data_element["metadata"].setdefault("instrument", dict()).update(instrument_metadata)
         update_camera_properties(data_element["metadata"]["hardware_source"], frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
@@ -2173,7 +2173,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return data_element
 
     def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
-        update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
+        STEMController.update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
         update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
@@ -2935,21 +2935,6 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         return None
 
 
-def update_instrument_properties(stem_properties: typing.MutableMapping[str, typing.Any], instrument_controller: InstrumentController, camera: CameraDevice) -> None:
-    if instrument_controller:
-        # give the instrument controller opportunity to add properties
-        if callable(getattr(instrument_controller, "get_autostem_properties", None)):
-            try:
-                autostem_properties = instrument_controller.get_autostem_properties()
-                stem_properties.update(autostem_properties)
-            except Exception as e:
-                pass
-        # give the instrument controller opportunity to update metadata groups specified by the camera
-        if hasattr(camera, "acquisition_metatdata_groups"):
-            acquisition_metatdata_groups = getattr(camera, "acquisition_metatdata_groups")
-            instrument_controller.apply_metadata_groups(stem_properties, acquisition_metatdata_groups)
-
-
 def update_camera_properties(properties: typing.MutableMapping[str, typing.Any],
                              frame_parameters: CameraFrameParameters, hardware_source_id: str, display_name: str,
                              signal_type: typing.Optional[str] = None) -> None:
@@ -3076,7 +3061,7 @@ def make_sequence_data_stream(
     instrument_controller = typing.cast(InstrumentController, Registry.get_component("stem_controller"))
 
     instrument_metadata: typing.Dict[str, typing.Any] = dict()
-    update_instrument_properties(instrument_metadata, instrument_controller, camera_hardware_source.camera)
+    STEMController.update_instrument_properties(instrument_metadata, instrument_controller, camera_hardware_source.camera)
 
     additional_camera_metadata = {"instrument": copy.deepcopy(instrument_metadata)}
     camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
@@ -3121,6 +3106,81 @@ def make_sequence_data_stream(
         data_stream = sequence
     # return the top level stream
     return data_stream
+
+
+class CameraDeviceController(STEMController.DeviceController):
+    def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters):
+        self.camera_hardware_source = camera_hardware_source
+        self.camera_frame_parameters = camera_frame_parameters
+
+    def get_values(self, control_customization: AcquisitionPreferences.ControlCustomization, axis: typing.Optional[STEMController.AxisType] = None) -> typing.Sequence[float]:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "exposure":
+            return [self.camera_frame_parameters.exposure_ms]
+        raise ValueError()
+
+    def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[STEMController.AxisType] = None) -> None:
+        self.set_values(control_customization, values, axis)
+
+    def set_values(self, control_customization: AcquisitionPreferences.ControlCustomization, values: typing.Sequence[float], axis: typing.Optional[STEMController.AxisType] = None) -> None:
+        control_description = control_customization.control_description
+        assert control_description
+        if control_customization.control_id == "exposure":
+            self.camera_frame_parameters.exposure_ms = values[0]
+
+
+def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> Acquisition.AcquisitionDeviceResult:
+    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+
+    # first get the camera hardware source and the camera channel description.
+    if camera_channel in Acquisition.hardware_source_channel_descriptions:
+        camera_channel_description = Acquisition.hardware_source_channel_descriptions[camera_channel]
+    else:
+        camera_channel_description = Acquisition.hardware_source_channel_descriptions["image"]
+    assert camera_hardware_source is not None
+    assert camera_channel_description is not None
+
+    # configure the camera hardware source processing. always use camera parameters at index 0.
+    if camera_channel_description.processing_id:
+        camera_frame_parameters.processing = camera_channel_description.processing_id
+    else:
+        camera_frame_parameters.processing = None
+
+    # gather the instrument metadata
+    instrument_metadata: typing.Dict[str, typing.Any] = dict()
+    stem_controller = Registry.get_component('stem_controller')
+    assert stem_controller
+    STEMController.update_instrument_properties(instrument_metadata, stem_controller, None)
+
+    # construct the camera frame data stream. add processing.
+    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
+    processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
+    if camera_frame_parameters.processing == "sum_project":
+        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                    operator=Acquisition.SumOperator(axis=0))
+    elif camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks:
+            operator = Acquisition.StackedDataStreamOperator(
+                [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                        operator=operator)
+        else:
+            operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+            processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
+                                                                        operator=operator)
+
+    # construct the channel names.
+    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+    channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
+
+    # construct the device map for this acquisition device.
+    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
+    device_map["stem"] = STEMController.STEMDeviceController()
+    device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+
+    return Acquisition.AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), channel_names, None, device_map)
 
 
 _component_registered_listener = None
