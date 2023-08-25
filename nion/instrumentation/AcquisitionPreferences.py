@@ -22,7 +22,7 @@ class ControlDescription(Observable.Observable):
     # control_id is an identifier for this control, may include periods and dashes
     # display_name is control name as displayed in the UI
     # device_id is the device identifier; a specific device or general, i.e. "stem", "camera", or "scan"
-    # device_control_name control name on the device. may be case sensitive, depending on device
+    # device_control_name control name on the device. may be case-sensitive, depending on device
     # control_type is "1d", "2d", or "bool"
     # default_value is initial value
     # multiplier is conversion from intrinsic control unit to SI

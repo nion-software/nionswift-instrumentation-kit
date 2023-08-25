@@ -2375,7 +2375,6 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     data_stream.prepare_stream(DataStreamArgs((1,)), [])
     data_stream.start_stream(DataStreamArgs((1,)))
     try:
-        start = time.time()
         last_progress = 0.0
         last_progress_time = time.time()
         while not data_stream.is_finished and not data_stream.is_aborted:
@@ -2883,7 +2882,13 @@ def _acquire_data_stream(data_stream: DataStream,
     progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
 
     # start async acquire.
-    acquisition_state._acquisition_ex.acquire_async(event_loop=event_loop, on_completion=functools.partial(finish_grab_async, framed_data_stream, acquisition_state, scan_drift_logger, progress_task, progress_value_model, is_acquiring_model))
+    acquisition_state._acquisition_ex.acquire_async(event_loop=event_loop,
+                                                    on_completion=functools.partial(finish_grab_async,
+                                                                                    framed_data_stream,
+                                                                                    acquisition_state,
+                                                                                    scan_drift_logger, progress_task,
+                                                                                    progress_value_model,
+                                                                                    is_acquiring_model))
 
 
 def start_acquire(acquisition_device: AcquisitionDeviceLike,
@@ -2908,6 +2913,22 @@ def start_acquire(acquisition_device: AcquisitionDeviceLike,
                                  scan_drift_logger,
                                  event_loop)
 
+        finally:
+            apply_result.data_stream.remove_ref()
+    finally:
+        build_result.data_stream.remove_ref()
+
+
+def acquire_immediate(acquisition_device: AcquisitionDeviceLike,
+                      acquisition_method: AcquisitionMethodLike) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
+    build_result = acquisition_device.build_acquisition_device_data_stream()
+    try:
+        apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+        try:
+            framed_data_stream = FramedDataStream(apply_result.data_stream)
+            with framed_data_stream.ref():
+                acquire(framed_data_stream)
+                return {channel: framed_data_stream.get_data(channel) for channel in framed_data_stream.channels}
         finally:
             apply_result.data_stream.remove_ref()
     finally:

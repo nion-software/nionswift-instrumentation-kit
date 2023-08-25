@@ -696,7 +696,7 @@ class MultiAcquireController:
             self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'single spectrum'})
             if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
                 self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
-                # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
+                # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisition
                 # we still want to go back to the initial value of the control, so we "back up" the zero point here
                 self.zeros['x_start'] = self.zeros['x']
             start_frame_parameters = camera.get_current_frame_parameters()
@@ -838,7 +838,7 @@ class MultiAcquireController:
         self.abort_event.clear()
         if not callable(self.__active_settings['x_shifter']) and self.__active_settings['x_shifter']:
             self.zeros['x'] = self.stem_controller.GetVal(self.__active_settings['x_shifter'])
-            # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisiton
+            # When we shift each spectrum, we change our zero posiiton after each frame. But at the end of the acquisition
             # we still want to go back to the initial value of the control, so we "back up" the zero point here
             self.zeros['x_start'] = self.zeros['x']
         self.acquisition_state_changed_event.fire({'message': 'start', 'description': 'spectrum image'})
@@ -850,7 +850,7 @@ class MultiAcquireController:
                     self.shift_x(parameters['offset_x'])
                 acquisition_handler = get_acquisition_handler_fn(self.__active_spectrum_parameters, parameters['index'], self.__active_settings)
                 acquisition_handler.abort_event = self.abort_event
-                # Set scan frame parameters as attribute so that acquistion time for progress bar will be calculated correctly
+                # Set scan frame parameters as attribute so that acquisition time for progress bar will be calculated correctly
                 self.scan_parameters = acquisition_handler.scan_frame_parameters
                 acquisition_handler.run(parameters['frames'])
                 # If we shift each slice we need to save the current state after each sequence

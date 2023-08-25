@@ -1111,6 +1111,12 @@ class TestCameraControlClass(unittest.TestCase):
             # a sequence will use the special sequence acquisition of the camera device.
             self.assertEqual(1, len(document_controller.document_model.data_items))
 
+    def test_immediate_sequence_acquisition(self):
+        with self.__test_context() as test_context:
+            acquisition_device = make_scan_device(test_context)
+            acquisition_method = make_sequence_acquisition_method()
+            self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(acquisition_device, acquisition_method).values())[0].data_shape)
+
     def __test_acq(self, document_controller: DocumentController.DocumentController, acquisition_device: Acquisition.AcquisitionDeviceLike, acquisition_method: Acquisition.AcquisitionMethodLike, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
 
         class DataChannelAndDriftLoggerProvider(Acquisition.DataChannelProviderLike, Acquisition.DriftLoggerProviderLike):
