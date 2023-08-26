@@ -2489,14 +2489,6 @@ class AcquisitionMethodResult:
     channel_names: typing.Dict[Channel, str]
 
 
-@dataclasses.dataclass
-class ControlValuesRange:
-    """Description of the range of values to apply to a control."""
-    count: int
-    start: float
-    step: float
-
-
 class _MultiSectionLike(typing.Protocol):
     offset: float
     exposure: float
@@ -2591,70 +2583,60 @@ class ValueControllersActionValueController(ActionValueControllerLike):
 
 
 class SeriesAcquisitionMethod(AcquisitionMethodLike):
-    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values_range: ControlValuesRange) -> None:
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, control_values: numpy.typing.NDArray[typing.Any]) -> None:
+        assert control_values.ndim == 2
+        assert control_values.shape[-1] == 1
         self.__control_customization = control_customization
-        self.__control_values_ranges = control_values_range
+        self.__control_values = control_values
 
     def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         data_stream = adr.data_stream
         control_customization = self.__control_customization
-        control_values_range = self.__control_values_ranges
         device_map = adr.device_map
         channel_names = adr.channel_names
         # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
         # get the associated control handler that was created in create_handler and used within the stack
         # of control handlers declarative components.
         assert data_stream
-        if control_values_range.count > 1:
-            control_description = control_customization.control_description
-            assert control_description
-            device_controller = device_map.get(control_description.device_id)
-            if device_controller:
-                # configure the action function and data stream using weak_partial to carefully control ref counts
-                values = numpy.stack([
-                    numpy.fromfunction(lambda x: control_values_range.start + control_values_range.step * x, (control_values_range.count,))
-                ], axis=-1)
-                value_controller = ControlCustomizationValueController(device_controller, control_customization, values, None)
-                action_delegate = ValueControllersActionValueController([value_controller])
-                data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), control_values_range.count)
+        control_description = control_customization.control_description
+        assert control_description
+        device_controller = device_map.get(control_description.device_id)
+        if device_controller:
+            # configure the action function and data stream using weak_partial to carefully control ref counts
+            value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, None)
+            action_delegate = ValueControllersActionValueController([value_controller])
+            data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), self.__control_values.shape[0])
         return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
 
 
 class TableAcquisitionMethod(AcquisitionMethodLike):
-    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, axis_id: typing.Optional[str], x_control_values_range: ControlValuesRange, y_control_values_range: ControlValuesRange) -> None:
+    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization, axis_id: typing.Optional[str], control_values: numpy.typing.NDArray[typing.Any]) -> None:
+        assert control_values.ndim == 3
+        assert control_values.shape[-1] == 2
         self.__control_customization = control_customization
         self.__axis_id = axis_id
-        self.__x_control_values_ranges = x_control_values_range
-        self.__y_control_values_ranges = y_control_values_range
+        self.__control_values = control_values
 
     def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
         data_stream = adr.data_stream
         control_customization = self.__control_customization
         axis_id = self.__axis_id
-        x_control_values_range = self.__x_control_values_ranges
-        y_control_values_range = self.__y_control_values_ranges
         device_map = adr.device_map
         channel_names = adr.channel_names
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
         assert data_stream
-        if x_control_values_range.count > 1 or y_control_values_range.count > 1:
-            control_description = control_customization.control_description
-            assert control_description
-            device_controller = device_map.get(control_description.device_id)
-            if device_controller:
-                # configure the action function and data stream using weak_partial to carefully control ref counts
-                axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
-                shape = (y_control_values_range.count, x_control_values_range.count)
-                values = numpy.stack([
-                    numpy.fromfunction(lambda y, x: y_control_values_range.start + y_control_values_range.step * y, shape),
-                    numpy.fromfunction(lambda y, x: x_control_values_range.start + x_control_values_range.step * x, shape)
-                ], axis=-1)
-                value_controller = ControlCustomizationValueController(device_controller, control_customization, values, axis)
-                action_delegate = ValueControllersActionValueController([value_controller])
-                data_stream = CollectedDataStream(
-                    ActionDataStream(data_stream, action_delegate),
-                    shape,
-                    (Calibration.Calibration(), Calibration.Calibration()))
+        control_description = control_customization.control_description
+        assert control_description
+        device_controller = device_map.get(control_description.device_id)
+        if device_controller:
+            # configure the action function and data stream using weak_partial to carefully control ref counts
+            axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
+            value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, axis)
+            action_delegate = ValueControllersActionValueController([value_controller])
+            data_stream = CollectedDataStream(
+                ActionDataStream(data_stream, action_delegate),
+                self.__control_values.shape[0:2],
+                (Calibration.Calibration(), Calibration.Calibration()))
         return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
 
 

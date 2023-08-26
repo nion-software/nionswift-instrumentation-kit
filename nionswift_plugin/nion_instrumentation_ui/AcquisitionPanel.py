@@ -24,6 +24,8 @@ import pkgutil
 import typing
 import weakref
 
+import numpy.typing
+
 # local libraries
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
@@ -374,14 +376,14 @@ class SeriesControlHandler(Declarative.Handler):
         row_items.append(u.create_stretch())
         self.ui_view = u.create_row(*row_items, spacing=8)
 
-    def get_control_values_range(self) -> Acquisition.ControlValuesRange:
-        """Return control info (count, start, step)."""
+    def get_control_values(self) -> numpy.typing.NDArray[typing.Any]:
         control_description = self.__control_customization.control_description
         assert control_description
         count = max(1, self.control_values.count) if self.control_values.count else 1
         start = (self.control_values.start_value or 0)
         step = (self.control_values.step_value or 0)
-        return Acquisition.ControlValuesRange(count, start * control_description.multiplier, step * control_description.multiplier)
+        multiplier = control_description.multiplier
+        return numpy.stack([numpy.fromfunction(lambda x: (start + step * x) * multiplier, (count,))], axis=-1)
 
 
 def get_control_values(configuration: Schema.Entity, control_values_list_key: str, control_customization: AcquisitionPreferences.ControlCustomization, value_index: typing.Optional[int] = None) -> Schema.Entity:
@@ -498,8 +500,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             control_handler = self.__control_handlers.get(control_customization.control_id)
             if control_handler:
                 # get the control values range from the control handler.
-                control_values_range = control_handler.get_control_values_range()
-                return Acquisition.SeriesAcquisitionMethod(control_customization, control_values_range)
+                return Acquisition.SeriesAcquisitionMethod(control_customization, control_handler.get_control_values())
         return Acquisition.BasicAcquisitionMethod(_("Series"))
 
 
@@ -626,9 +627,10 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
             if x_control_handler and y_control_handler:
                 # get the axis and control values ranges from the control handlers.
                 axis_id = self.__axis_storage_model.value
-                y_control_values_range = y_control_handler.get_control_values_range()
-                x_control_values_range = x_control_handler.get_control_values_range()
-                return Acquisition.TableAcquisitionMethod(control_customization, axis_id, y_control_values_range, x_control_values_range)
+                y_control_values = y_control_handler.get_control_values()
+                x_control_values = x_control_handler.get_control_values()
+                control_values = numpy.stack(numpy.meshgrid(y_control_values, x_control_values, indexing='ij'), axis=-1)
+                return Acquisition.TableAcquisitionMethod(control_customization, axis_id, control_values)
         return Acquisition.BasicAcquisitionMethod(_("Tableau"))
 
 

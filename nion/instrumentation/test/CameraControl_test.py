@@ -84,8 +84,8 @@ def make_series_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     control_customization._set_field_value("control_id", "defocus")
     control_customization.device_control_id = "C10"
     control_customization.delay = 0
-    control_values_range = Acquisition.ControlValuesRange(4, 500e-9, 5e-9)
-    return Acquisition.SeriesAcquisitionMethod(control_customization, control_values_range)
+    control_values = numpy.stack([numpy.fromfunction(lambda x: 500e-9 + 5e-9 * x, (4,))], axis=-1)
+    return Acquisition.SeriesAcquisitionMethod(control_customization, control_values)
 
 
 def make_tableau_acquisition_method() -> Acquisition.AcquisitionMethodLike:
@@ -93,9 +93,12 @@ def make_tableau_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     control_customization._set_field_value("control_id", "stage_position")
     control_customization.device_control_id = "stage_position_m"
     control_customization.delay = 0
-    x_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
-    y_control_values_range = Acquisition.ControlValuesRange(3, -1e-9, 1e-9)
-    return Acquisition.TableAcquisitionMethod(control_customization, "tv", x_control_values_range, y_control_values_range)
+    shape: typing.Final = (3, 3)
+    control_values = numpy.stack([
+        numpy.fromfunction(lambda y, x: -1e-9 + 1e-9 * y, shape),
+        numpy.fromfunction(lambda y, x: -1e-9 + 1e-9 * x, shape)
+    ], axis=-1)
+    return Acquisition.TableAcquisitionMethod(control_customization, "tv", control_values)
 
 
 class TestCameraControlClass(unittest.TestCase):
