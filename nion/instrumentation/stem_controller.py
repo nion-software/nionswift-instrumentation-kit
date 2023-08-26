@@ -661,6 +661,17 @@ class STEMController(Observable.Observable):
     def axis_descriptions(self) -> typing.Sequence[AxisDescription]:
         return list()
 
+    def resolve_axis(self, axis_id: typing.Optional[str]) -> typing.Optional[AxisType]:
+        """Return an AxisType from an axis_id."""
+        if axis_id is None:
+            return None
+        # resolve the axis for the 2d control
+        axis: AxisType = ("x", "y")
+        for axis_description in self.axis_descriptions:
+            if axis_id == axis_description.axis_id:
+                axis = axis_description.axis_type
+        return axis
+
     def get_reference_setting_index(self, settings_control: str) -> typing.Optional[int]:
         """
         Queries the instrument for the reference setting number of a settings control.
