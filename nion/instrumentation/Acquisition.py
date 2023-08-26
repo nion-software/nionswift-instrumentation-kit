@@ -2127,37 +2127,41 @@ class ContainerDataStream(DataStream):
         self.fire_data_available(data_stream_event)
 
 
-class ActionDataStreamDelegate:
+class ActionValueControllerLike(typing.Protocol):
     """A delegate to perform the action.
 
     Subclasses can override start, perform, and finish.
     """
-    def start(self) -> None:
-        pass
 
-    def perform(self, c: ShapeType) -> None:
-        pass
+    # start the value control procedure; save any values that need to be restored later.
+    def start(self, **kwargs: typing.Any) -> None:
+        return
 
-    def finish(self) -> None:
-        pass
+    # perform the control with the given index.
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+        return
+
+    # finish the procedure; restore any values that need to be restored.
+    def finish(self, **kwargs: typing.Any) -> None:
+        return
 
 
-class ActionDataStreamFnDelegate(ActionDataStreamDelegate):
+class ActionDataStreamFnDelegate(ActionValueControllerLike):
     def __init__(self, fn: typing.Callable[[ShapeType], None]) -> None:
         self.__fn = fn
 
-    def perform(self, c: ShapeType) -> None:
-        return self.__fn(c)
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+        return self.__fn(index)
 
 
-def make_action_data_stream_delegate(fn: typing.Callable[[typing.Sequence[int]], None]) -> ActionDataStreamDelegate:
+def make_action_data_stream_delegate(fn: typing.Callable[[typing.Sequence[int]], None]) -> ActionValueControllerLike:
     return ActionDataStreamFnDelegate(fn)
 
 
 class ActionDataStream(ContainerDataStream):
     """Action data stream. Runs action on each complete frame, passing coordinates."""
 
-    def __init__(self, data_stream: DataStream, delegate: ActionDataStreamDelegate) -> None:
+    def __init__(self, data_stream: DataStream, delegate: ActionValueControllerLike) -> None:
         super().__init__(data_stream)
         self.__delegate = delegate
         self.__shape = typing.cast(ShapeType, (0,))
@@ -2538,53 +2542,51 @@ class SequenceAcquisitionMethod(AcquisitionMethodLike):
             return AcquisitionMethodResult(data_stream.add_ref(), _("Sequence"), channel_names)
 
 
-class ActionDelegate(ActionDataStreamDelegate):
-    def __init__(self, control_customization: AcquisitionPreferences.ControlCustomization,
-                 device_map: typing.Mapping[str, STEMController.DeviceController], starts: typing.Sequence[float],
-                 steps: typing.Sequence[float], axis_id: typing.Optional[str]) -> None:
-        self.control_customization = control_customization
-        self.device_map = device_map
-        self.starts = starts
-        self.steps = steps
-        self.axis_id = axis_id
-        self.original_values: typing.Sequence[float] = list()
+class ControlCustomizationValueController(ActionValueControllerLike):
+    def __init__(self,
+                 device_controller: STEMController.DeviceController,
+                 control_customization: AcquisitionPreferences.ControlCustomization,
+                 starts: typing.Sequence[float],
+                 steps: typing.Sequence[float],
+                 axis: typing.Optional[STEMController.AxisType]) -> None:
+        self.__device_controller = device_controller
+        self.__control_customization = control_customization
+        self.__starts = starts
+        self.__steps = steps
+        self.__axis = axis
+        self.__original_values: typing.Sequence[float] = list()
 
-    def start(self) -> None:
-        control_description = self.control_customization.control_description
-        assert control_description
-        device_controller = self.device_map.get(control_description.device_id)
-        if device_controller:
-            self.original_values = device_controller.get_values(self.control_customization, self.__resolve_axis())
+    def start(self, **kwargs: typing.Any) -> None:
+        self.__original_values = self.__device_controller.get_values(self.__control_customization, self.__axis)
 
     # define an action function to apply control values during acquisition
-    def perform(self, index: ShapeType) -> None:
-        # look up the device controller in the device_map using the device_id in the control description
-        control_description = self.control_customization.control_description
-        assert control_description
-        device_controller = self.device_map.get(control_description.device_id)
-        if device_controller:
-            # calculate the current value (in each dimension) and send the result to the
-            # device controller. the device controller may be a camera, scan, or stem device
-            # controller.
-            values = [start + step * i for start, step, i in zip(self.starts, self.steps, index)]
-            device_controller.update_values(self.control_customization, self.original_values, values, self.__resolve_axis())
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+        # calculate the current value (in each dimension) and send the result to the
+        # device controller. the device controller may be a camera, scan, or stem device
+        # controller.
+        values = [start + step * i for start, step, i in zip(self.__starts, self.__steps, index)]
+        self.__device_controller.update_values(self.__control_customization, self.__original_values, values, self.__axis)
 
-    def finish(self) -> None:
-        control_description = self.control_customization.control_description
-        assert control_description
-        device_controller = self.device_map.get(control_description.device_id)
-        if device_controller:
-            device_controller.set_values(self.control_customization, self.original_values, self.__resolve_axis())
+    def finish(self, **kwargs: typing.Any) -> None:
+        self.__device_controller.set_values(self.__control_customization, self.__original_values, self.__axis)
 
-    def __resolve_axis(self) -> typing.Optional[STEMController.AxisType]:
-        if self.axis_id is None:
-            return None
-        # resolve the axis for the 2d control
-        axis: STEMController.AxisType = ("x", "y")
-        for axis_description in typing.cast(STEMController.STEMDeviceController, self.device_map["stem"]).stem_controller.axis_descriptions:
-            if self.axis_id == axis_description.axis_id:
-                axis = axis_description.axis_type
-        return axis
+
+class ValueControllersActionValueController(ActionValueControllerLike):
+    def __init__(self, value_controllers: typing.Sequence[ActionValueControllerLike]) -> None:
+        self.__value_controllers = list(value_controllers)
+
+    def start(self, **kwargs: typing.Any) -> None:
+        for value_controller in self.__value_controllers:
+            value_controller.start()
+
+    # define an action function to apply control values during acquisition
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+        for value_controller in self.__value_controllers:
+            value_controller.perform(index)
+
+    def finish(self, **kwargs: typing.Any) -> None:
+        for value_controller in self.__value_controllers:
+            value_controller.finish()
 
 
 class SeriesAcquisitionMethod(AcquisitionMethodLike):
@@ -2603,9 +2605,14 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
         # of control handlers declarative components.
         assert data_stream
         if control_values_range.count > 1:
-            # configure the action function and data stream using weak_partial to carefully control ref counts
-            action_delegate = ActionDelegate(control_customization, device_map, [control_values_range.start], [control_values_range.step], None)
-            data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), control_values_range.count)
+            control_description = control_customization.control_description
+            assert control_description
+            device_controller = device_map.get(control_description.device_id)
+            if device_controller:
+                # configure the action function and data stream using weak_partial to carefully control ref counts
+                value_controller = ControlCustomizationValueController(device_controller, control_customization, [control_values_range.start], [control_values_range.step], None)
+                action_delegate = ValueControllersActionValueController([value_controller])
+                data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), control_values_range.count)
         return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
 
 
@@ -2627,12 +2634,22 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
         assert data_stream
         if x_control_values_range.count > 1 or y_control_values_range.count > 1:
-            # configure the action function and data stream using weak_partial to carefully control ref counts
-            action_delegate = ActionDelegate(control_customization, device_map, [y_control_values_range.start, x_control_values_range.start], [y_control_values_range.step, x_control_values_range.step], axis_id)
-            data_stream = CollectedDataStream(
-                ActionDataStream(data_stream, action_delegate),
-                (y_control_values_range.count, x_control_values_range.count),
-                (Calibration.Calibration(), Calibration.Calibration()))
+            control_description = control_customization.control_description
+            assert control_description
+            device_controller = device_map.get(control_description.device_id)
+            if device_controller:
+                # configure the action function and data stream using weak_partial to carefully control ref counts
+                axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
+                value_controller = ControlCustomizationValueController(device_controller, control_customization,
+                                                                       [y_control_values_range.start,
+                                                                        x_control_values_range.start],
+                                                                       [y_control_values_range.step,
+                                                                        x_control_values_range.step], axis)
+                action_delegate = ValueControllersActionValueController([value_controller])
+                data_stream = CollectedDataStream(
+                    ActionDataStream(data_stream, action_delegate),
+                    (y_control_values_range.count, x_control_values_range.count),
+                    (Calibration.Calibration(), Calibration.Calibration()))
         return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
 
 
@@ -2667,36 +2684,17 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
         assert control_description_exposure
         # for each section, build the data stream.
         for multi_acquire_entry in sections:
-            class ActionDelegate(ActionDataStreamDelegate):
-                def __init__(self, offset_value: float, exposure_value: float) -> None:
-                    self.offset_value = offset_value
-                    self.exposure_value = exposure_value
-                    self.original_energy_offset_values: typing.Sequence[float] = list()
-                    self.original_exposure_values: typing.Sequence[float] = list()
-
-                def start(self) -> None:
-                    if stem_value_controller:
-                        self.original_energy_offset_values = stem_value_controller.get_values(control_customization_energy_offset)
-                    if camera_value_controller:
-                        self.original_exposure_values = camera_value_controller.get_values(control_customization_exposure)
-
-                # define an action function to apply control values during acquisition
-                def perform(self, index: ShapeType) -> None:
-                    if stem_value_controller:
-                        stem_value_controller.set_values(control_customization_energy_offset, [self.offset_value])
-                    if camera_value_controller:
-                        camera_value_controller.set_values(control_customization_exposure, [self.exposure_value])
-
-                def finish(self) -> None:
-                    if stem_value_controller:
-                        stem_value_controller.set_values(control_customization_energy_offset, self.original_energy_offset_values)
-                    if camera_value_controller:
-                        camera_value_controller.set_values(control_customization_exposure, self.original_exposure_values)
-
-            # configure the action function and data stream using weak_partial to carefully control ref counts
-            action_delegate = ActionDelegate(multi_acquire_entry.offset * control_description_energy_offset.multiplier,
-                                             multi_acquire_entry.exposure * control_description_exposure.multiplier)
-            data_streams.append(SequenceDataStream(ActionDataStream(data_stream, action_delegate), max(1, multi_acquire_entry.count)))
+            value_controllers: typing.List[ActionValueControllerLike] = list()
+            if stem_value_controller:
+                value_controllers.append(
+                    ControlCustomizationValueController(stem_value_controller, control_customization_energy_offset, [
+                        multi_acquire_entry.offset * control_description_energy_offset.multiplier], [0.0], None))
+            if camera_value_controller:
+                value_controllers.append(
+                    ControlCustomizationValueController(camera_value_controller, control_customization_energy_offset, [
+                        multi_acquire_entry.exposure * control_description_exposure.multiplier], [0.0], None))
+            data_streams.append(SequenceDataStream(ActionDataStream(data_stream, ValueControllersActionValueController(value_controllers)),
+                                                   max(1, multi_acquire_entry.count)))
 
         # create a sequential data stream from the section data streams.
         sequential_data_stream = SequentialDataStream(data_streams)

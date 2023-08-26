@@ -781,21 +781,21 @@ class TestAcquisitionClass(unittest.TestCase):
         channel = Acquisition.Channel("0")
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), channel)
 
-        class Action(Acquisition.ActionDataStreamDelegate):
+        class Action(Acquisition.ActionValueControllerLike):
             def __init__(self) -> None:
                 self._s = 0
                 self._p = 0
                 self._f = 0
 
-            def start(self) -> None:
+            def start(self, **kwargs: typing.Any) -> None:
                 self._s += 1
 
-            def perform(self, c: Acquisition.ShapeType) -> None:
+            def perform(self, index: Acquisition.ShapeType, **kwargs: typing.Any) -> None:
                 assert self._s == 1
                 assert self._f == 0
                 self._p += 1
 
-            def finish(self) -> None:
+            def finish(self, **kwargs: typing.Any) -> None:
                 self._f += 1
 
         action = Action()
