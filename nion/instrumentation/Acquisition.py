@@ -2547,13 +2547,11 @@ class ControlCustomizationValueController(ActionValueControllerLike):
     def __init__(self,
                  device_controller: STEMController.DeviceController,
                  control_customization: AcquisitionPreferences.ControlCustomization,
-                 starts: typing.Sequence[float],
-                 steps: typing.Sequence[float],
+                 values: numpy.typing.NDArray[typing.Any],
                  axis: typing.Optional[STEMController.AxisType]) -> None:
         self.__device_controller = device_controller
         self.__control_customization = control_customization
-        self.__starts = starts
-        self.__steps = steps
+        self.__values = values
         self.__axis = axis
         self.__original_values: typing.Sequence[float] = list()
 
@@ -2565,8 +2563,10 @@ class ControlCustomizationValueController(ActionValueControllerLike):
         # calculate the current value (in each dimension) and send the result to the
         # device controller. the device controller may be a camera, scan, or stem device
         # controller.
-        values = [start + step * i for start, step, i in zip(self.__starts, self.__steps, index)]
-        self.__device_controller.update_values(self.__control_customization, self.__original_values, values, self.__axis)
+        self.__device_controller.update_values(self.__control_customization,
+                                               self.__original_values,
+                                               typing.cast(typing.Sequence[float], self.__values[index]),
+                                               self.__axis)
 
     def finish(self, **kwargs: typing.Any) -> None:
         self.__device_controller.set_values(self.__control_customization, self.__original_values, self.__axis)
@@ -2611,7 +2611,10 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
             device_controller = device_map.get(control_description.device_id)
             if device_controller:
                 # configure the action function and data stream using weak_partial to carefully control ref counts
-                value_controller = ControlCustomizationValueController(device_controller, control_customization, [control_values_range.start], [control_values_range.step], None)
+                values = numpy.stack([
+                    numpy.fromfunction(lambda x: control_values_range.start + control_values_range.step * x, (control_values_range.count,))
+                ], axis=-1)
+                value_controller = ControlCustomizationValueController(device_controller, control_customization, values, None)
                 action_delegate = ValueControllersActionValueController([value_controller])
                 data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), control_values_range.count)
         return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
@@ -2641,15 +2644,16 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
             if device_controller:
                 # configure the action function and data stream using weak_partial to carefully control ref counts
                 axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
-                value_controller = ControlCustomizationValueController(device_controller, control_customization,
-                                                                       [y_control_values_range.start,
-                                                                        x_control_values_range.start],
-                                                                       [y_control_values_range.step,
-                                                                        x_control_values_range.step], axis)
+                shape = (y_control_values_range.count, x_control_values_range.count)
+                values = numpy.stack([
+                    numpy.fromfunction(lambda y, x: y_control_values_range.start + y_control_values_range.step * y, shape),
+                    numpy.fromfunction(lambda y, x: x_control_values_range.start + x_control_values_range.step * x, shape)
+                ], axis=-1)
+                value_controller = ControlCustomizationValueController(device_controller, control_customization, values, axis)
                 action_delegate = ValueControllersActionValueController([value_controller])
                 data_stream = CollectedDataStream(
                     ActionDataStream(data_stream, action_delegate),
-                    (y_control_values_range.count, x_control_values_range.count),
+                    shape,
                     (Calibration.Calibration(), Calibration.Calibration()))
         return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
 
@@ -2687,13 +2691,13 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
         for multi_acquire_entry in sections:
             value_controllers: typing.List[ActionValueControllerLike] = list()
             if stem_value_controller:
+                values = numpy.array([[multi_acquire_entry.offset * control_description_energy_offset.multiplier]])
                 value_controllers.append(
-                    ControlCustomizationValueController(stem_value_controller, control_customization_energy_offset, [
-                        multi_acquire_entry.offset * control_description_energy_offset.multiplier], [0.0], None))
+                    ControlCustomizationValueController(stem_value_controller, control_customization_energy_offset, values, None))
             if camera_value_controller:
+                values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]])
                 value_controllers.append(
-                    ControlCustomizationValueController(camera_value_controller, control_customization_energy_offset, [
-                        multi_acquire_entry.exposure * control_description_exposure.multiplier], [0.0], None))
+                    ControlCustomizationValueController(camera_value_controller, control_customization_energy_offset, values, None))
             data_streams.append(SequenceDataStream(ActionDataStream(data_stream, ValueControllersActionValueController(value_controllers)),
                                                    max(1, multi_acquire_entry.count)))
 
