@@ -1793,23 +1793,24 @@ class AcquisitionController(Declarative.Handler):
 
                 return data_item_data_channel
 
-        class DriftLoggerProvider(Acquisition.DriftLoggerProviderLike):
-            def __init__(self, document_model: DocumentModel.DocumentModel) -> None:
-                self.__document_model = document_model
-
-            def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger:
-                # configure the scan drift logger if required. the drift tracker here is only enabled if using the
-                # scan hardware source drift tracker.
-                return DriftTracker.DriftLogger(self.__document_model, drift_tracker)
-
-        Acquisition.start_acquire(device_component.build_acquisition_device(),
-                                  method_component.build_acquisition_method(),
-                                  self.__acquisition_state,
-                                  DataChannelProvider(self.document_controller),
-                                  DriftLoggerProvider(self.document_controller.document_model),
-                                  self.progress_value_model,
-                                  self.is_acquiring_model,
-                                  self.document_controller.event_loop)
+        build_result = device_component.build_acquisition_device().build_acquisition_device_data_stream()
+        try:
+            apply_result = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(build_result)
+            try:
+                drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
+                Acquisition.start_acquire(apply_result.data_stream,
+                                          apply_result.title_base,
+                                          apply_result.channel_names,
+                                          self.__acquisition_state,
+                                          DataChannelProvider(self.document_controller),
+                                          drift_logger,
+                                          self.progress_value_model,
+                                          self.is_acquiring_model,
+                                          self.document_controller.event_loop)
+            finally:
+                apply_result.data_stream.remove_ref()
+        finally:
+            build_result.data_stream.remove_ref()
 
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:

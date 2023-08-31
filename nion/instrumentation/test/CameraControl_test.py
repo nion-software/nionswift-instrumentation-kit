@@ -1118,11 +1118,19 @@ class TestCameraControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             acquisition_device = make_scan_device(test_context)
             acquisition_method = make_sequence_acquisition_method()
-            self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(acquisition_device, acquisition_method).values())[0].data_shape)
+            build_result = acquisition_device.build_acquisition_device_data_stream()
+            try:
+                apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+                try:
+                    self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(apply_result.data_stream).values())[0].data_shape)
+                finally:
+                    apply_result.data_stream.remove_ref()
+            finally:
+                build_result.data_stream.remove_ref()
 
     def __test_acq(self, document_controller: DocumentController.DocumentController, acquisition_device: Acquisition.AcquisitionDeviceLike, acquisition_method: Acquisition.AcquisitionMethodLike, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
 
-        class DataChannelAndDriftLoggerProvider(Acquisition.DataChannelProviderLike, Acquisition.DriftLoggerProviderLike):
+        class DataChannelProvider(Acquisition.DataChannelProviderLike):
             def __init__(self, document_controller: DocumentController.DocumentController) -> None:
                 self.__document_controller = document_controller
 
@@ -1139,23 +1147,28 @@ class TestCameraControlClass(unittest.TestCase):
 
                 return data_item_data_channel
 
-            def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger:
-                # configure the scan drift logger if required. the drift tracker here is only enabled if using the
-                # scan hardware source drift tracker.
-                return DriftTracker.DriftLogger(self.__document_controller.document_model, drift_tracker)
-
         acquisition_state = Acquisition.AcquisitionState()
         progress_value_model = Model.PropertyModel[int](0)
         is_acquiring_model = Model.PropertyModel[bool](False)
-        provider = DataChannelAndDriftLoggerProvider(document_controller)
-        Acquisition.start_acquire(acquisition_device,
-                                  acquisition_method,
-                                  acquisition_state,
-                                  provider,
-                                  provider,
-                                  progress_value_model,
-                                  is_acquiring_model,
-                                  document_controller.event_loop)
+        data_channel_provider = DataChannelProvider(document_controller)
+        build_result = acquisition_device.build_acquisition_device_data_stream()
+        try:
+            apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+            try:
+                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
+                Acquisition.start_acquire(apply_result.data_stream,
+                                          apply_result.title_base,
+                                          apply_result.channel_names,
+                                          acquisition_state,
+                                          data_channel_provider,
+                                          drift_logger,
+                                          progress_value_model,
+                                          is_acquiring_model,
+                                          document_controller.event_loop)
+            finally:
+                apply_result.data_stream.remove_ref()
+        finally:
+            build_result.data_stream.remove_ref()
 
         last_progress_time = time.time()
         last_progress = progress_value_model.value

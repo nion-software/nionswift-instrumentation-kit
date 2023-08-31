@@ -2396,7 +2396,7 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
         STEMController.update_instrument_properties(instrument_metadata, scan_hardware_source.stem_controller,
                                                     scan_hardware_source.scan_device)
 
-        # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+        # build the magnification device controller, here until this is fully separated and available as part of the STEM controller
         magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
         # build the scan frame data stream.

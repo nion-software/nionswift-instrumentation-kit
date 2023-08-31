@@ -2770,10 +2770,6 @@ class DataChannelProviderLike(typing.Protocol):
     def get_data_channel(self, title_base: str, channel_names: typing.Dict[Channel, str], **kwargs: typing.Any) -> DataChannel: ...
 
 
-class DriftLoggerProviderLike(typing.Protocol):
-    def get_drift_logger(self, drift_tracker: DriftTracker.DriftTracker, **kwargs: typing.Any) -> DriftTracker.DriftLogger: ...
-
-
 def _acquire_data_stream(data_stream: DataStream,
                          data_channel: DataChannel,
                          acquisition_state: AcquisitionState,
@@ -2833,48 +2829,32 @@ def _acquire_data_stream(data_stream: DataStream,
                                                                                     is_acquiring_model))
 
 
-def start_acquire(acquisition_device: AcquisitionDeviceLike,
-                  acquisition_method: AcquisitionMethodLike,
+def start_acquire(data_stream: DataStream,
+                  title_base: str,
+                  channel_names: typing.Dict[Channel, str],
                   acquisition_state: AcquisitionState,
                   data_channel_provider: DataChannelProviderLike,
-                  drift_logger_provider: DriftLoggerProviderLike,
+                  drift_logger: typing.Optional[DriftTracker.DriftLogger],
                   progress_value_model: Model.PropertyModel[int],
                   is_acquiring_model: Model.PropertyModel[bool],
                   event_loop: asyncio.AbstractEventLoop) -> None:
-    build_result = acquisition_device.build_acquisition_device_data_stream()
-    try:
-        apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
-        try:
-            scan_drift_logger = drift_logger_provider.get_drift_logger(build_result.drift_tracker) if build_result.drift_tracker else None
-
-            _acquire_data_stream(apply_result.data_stream,
-                                 data_channel_provider.get_data_channel(apply_result.title_base, apply_result.channel_names),
-                                 acquisition_state,
-                                 progress_value_model,
-                                 is_acquiring_model,
-                                 scan_drift_logger,
-                                 event_loop)
-
-        finally:
-            apply_result.data_stream.remove_ref()
-    finally:
-        build_result.data_stream.remove_ref()
+    with data_stream.ref():
+        _acquire_data_stream(data_stream,
+                             data_channel_provider.get_data_channel(title_base, channel_names),
+                             acquisition_state,
+                             progress_value_model,
+                             is_acquiring_model,
+                             drift_logger,
+                             event_loop)
 
 
-def acquire_immediate(acquisition_device: AcquisitionDeviceLike,
-                      acquisition_method: AcquisitionMethodLike) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
-    build_result = acquisition_device.build_acquisition_device_data_stream()
-    try:
-        apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
-        try:
-            framed_data_stream = FramedDataStream(apply_result.data_stream)
-            with framed_data_stream.ref():
-                acquire(framed_data_stream)
-                return {channel: framed_data_stream.get_data(channel) for channel in framed_data_stream.channels}
-        finally:
-            apply_result.data_stream.remove_ref()
-    finally:
-        build_result.data_stream.remove_ref()
+
+def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
+    with data_stream.ref():
+        framed_data_stream = FramedDataStream(data_stream)
+        with framed_data_stream.ref():
+            acquire(framed_data_stream)
+            return {channel: framed_data_stream.get_data(channel) for channel in framed_data_stream.channels}
 
 
 """
