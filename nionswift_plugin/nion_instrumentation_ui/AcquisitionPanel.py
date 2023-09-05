@@ -1793,11 +1793,17 @@ class AcquisitionController(Declarative.Handler):
 
                 return data_item_data_channel
 
-        build_result = device_component.build_acquisition_device().build_acquisition_device_data_stream()
-        try:
-            data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
+        stem_device_controller = STEMController.STEMDeviceController()
+
+        device_map: typing.Dict[str, STEMController.DeviceController] = dict()
+        device_map["stem"] = stem_device_controller
+
+        device_data_stream = device_component.build_acquisition_device().build_acquisition_device_data_stream(device_map)
+        with device_data_stream.ref():
+            data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(device_data_stream, device_map)
             with data_stream.ref():
-                drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
+                drift_tracker = stem_device_controller.stem_controller.drift_tracker
+                drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker) if drift_tracker else None
                 Acquisition.start_acquire(data_stream,
                                           data_stream.title or _("Acquire"),
                                           data_stream.channel_names,
@@ -1807,8 +1813,6 @@ class AcquisitionController(Declarative.Handler):
                                           self.progress_value_model,
                                           self.is_acquiring_model,
                                           self.document_controller.event_loop)
-        finally:
-            build_result.data_stream.remove_ref()
 
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:

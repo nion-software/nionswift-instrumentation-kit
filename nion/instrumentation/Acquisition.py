@@ -2486,7 +2486,7 @@ class _MultiSectionLike(typing.Protocol):
 
 
 class AcquisitionDeviceLike(typing.Protocol):
-    def build_acquisition_device_data_stream(self) -> AcquisitionDeviceResult: ...
+    def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> DataStream: ...
 
 
 class AcquisitionMethodLike(typing.Protocol):
@@ -2683,20 +2683,6 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
         sequential_data_stream.channel_names = channel_names
         sequential_data_stream.title = _("Multiple")
         return sequential_data_stream
-
-
-@dataclasses.dataclass
-class AcquisitionDeviceResult:
-    """Define result values for acquisition device component build function.
-
-    data_stream is the result data stream.
-    channel_names is a mapping from each acquisition channel to a display name.
-    drift_tracker is an optional drift tracker, if used.
-    device_map is a mapping from device_id to a DeviceController.
-    """
-    data_stream: DataStream
-    drift_tracker: typing.Optional[DriftTracker.DriftTracker]
-    device_map: typing.Dict[str, STEMController.DeviceController]
 
 
 @dataclasses.dataclass

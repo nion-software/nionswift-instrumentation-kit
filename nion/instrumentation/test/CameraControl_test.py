@@ -1118,13 +1118,14 @@ class TestCameraControlClass(unittest.TestCase):
         with self.__test_context() as test_context:
             acquisition_device = make_scan_device(test_context)
             acquisition_method = make_sequence_acquisition_method()
-            build_result = acquisition_device.build_acquisition_device_data_stream()
-            try:
-                data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
+            stem_device_controller = stem_controller.STEMDeviceController()
+            device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
+            device_map["stem"] = stem_device_controller
+            device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
+            with device_data_stream.ref():
+                data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
                 with data_stream.ref():
                     self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
-            finally:
-                build_result.data_stream.remove_ref()
 
     def __test_acq(self, document_controller: DocumentController.DocumentController, acquisition_device: Acquisition.AcquisitionDeviceLike, acquisition_method: Acquisition.AcquisitionMethodLike, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
 
@@ -1149,11 +1150,15 @@ class TestCameraControlClass(unittest.TestCase):
         progress_value_model = Model.PropertyModel[int](0)
         is_acquiring_model = Model.PropertyModel[bool](False)
         data_channel_provider = DataChannelProvider(document_controller)
-        build_result = acquisition_device.build_acquisition_device_data_stream()
-        try:
-            data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
+        stem_device_controller = stem_controller.STEMDeviceController()
+        device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
+        device_map["stem"] = stem_device_controller
+        device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
+        with device_data_stream.ref():
+            data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
             with data_stream.ref():
-                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
+                drift_tracker = stem_device_controller.stem_controller.drift_tracker
+                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker) if drift_tracker else None
                 Acquisition.start_acquire(data_stream,
                                           data_stream.title or str(),
                                           data_stream.channel_names,
@@ -1163,8 +1168,6 @@ class TestCameraControlClass(unittest.TestCase):
                                           progress_value_model,
                                           is_acquiring_model,
                                           document_controller.event_loop)
-        finally:
-            build_result.data_stream.remove_ref()
 
         last_progress_time = time.time()
         last_progress = progress_value_model.value

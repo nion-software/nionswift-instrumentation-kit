@@ -3130,7 +3130,7 @@ class CameraDeviceController(STEMController.DeviceController):
             self.camera_frame_parameters.exposure_ms = values[0]
 
 
-def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> Acquisition.AcquisitionDeviceResult:
+def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_channel: typing.Optional[str], device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
     # first get the camera hardware source and the camera channel description.
@@ -3176,13 +3176,11 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
 
     # construct the device map for this acquisition device.
-    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
-    device_map["stem"] = STEMController.STEMDeviceController()
     device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
 
     processed_camera_data_stream.channel_names = channel_names
 
-    return Acquisition.AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), None, device_map)
+    return processed_camera_data_stream
 
 
 class CameraAcquisitionDevice:
@@ -3191,8 +3189,8 @@ class CameraAcquisitionDevice:
         self.__camera_frame_parameters = camera_frame_parameters
         self.__camera_channel = camera_channel
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
-        return build_camera_device_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel)
+    def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
+        return build_camera_device_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel, device_map)
 
 
 _component_registered_listener = None

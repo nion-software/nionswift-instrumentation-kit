@@ -2572,7 +2572,7 @@ class ScanDeviceController(STEMController.DeviceController):
         # no values supported at this time.
 
 
-def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource) -> Acquisition.AcquisitionDeviceResult:
+def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
     scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
     scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source)
@@ -2585,25 +2585,23 @@ def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource) -> A
         channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
 
     # construct the device map for this acquisition device.
-    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
-    device_map["stem"] = STEMController.STEMDeviceController()
     device_map["magnification"] = scan_frame_data_stream.magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
     scan_frame_data_stream.channel_names = channel_names
 
-    return Acquisition.AcquisitionDeviceResult(scan_frame_data_stream.add_ref(), None, device_map)
+    return scan_frame_data_stream
 
 
 class ScanAcquisitionDevice:
     def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
         self.__scan_hardware_source = scan_hardware_source
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
-        return build_scan_device_data_stream(self.__scan_hardware_source)
+    def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
+        return build_scan_device_data_stream(self.__scan_hardware_source, device_map)
 
 
-def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str] = None) -> Acquisition.AcquisitionDeviceResult:
+def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
     # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
     # first get the camera hardware source and the camera channel description.
@@ -2669,18 +2667,14 @@ def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSour
         channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
     channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
 
-    drift_tracker = scan_hardware_source.drift_tracker
-
     # construct the device map for this acquisition device.
-    device_map: typing.Dict[str, STEMController.DeviceController] = dict()
-    device_map["stem"] = STEMController.STEMDeviceController()
     device_map["camera"] = camera_base.CameraDeviceController(camera_hardware_source, camera_frame_parameters)
     device_map["magnification"] = magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
     synchronized_scan_data_stream.channel_names = channel_names
 
-    return Acquisition.AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), drift_tracker, device_map)
+    return synchronized_scan_data_stream
 
 
 class SynchronizedScanAcquisitionDevice:
@@ -2691,8 +2685,8 @@ class SynchronizedScanAcquisitionDevice:
         self.__camera_channel = camera_channel
         self.__scan_context_description = scan_context_description
 
-    def build_acquisition_device_data_stream(self) -> Acquisition.AcquisitionDeviceResult:
-        return build_synchronized_device_data_stream(self.__scan_hardware_source, self.__scan_context_description, self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel)
+    def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
+        return build_synchronized_device_data_stream(self.__scan_hardware_source, self.__scan_context_description, self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel, device_map)
 
 
 class InstrumentController(abc.ABC):
