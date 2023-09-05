@@ -1796,7 +1796,7 @@ class AcquisitionController(Declarative.Handler):
         build_result = device_component.build_acquisition_device().build_acquisition_device_data_stream()
         try:
             data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
-            try:
+            with data_stream.ref():
                 drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
                 Acquisition.start_acquire(data_stream,
                                           data_stream.title or _("Acquire"),
@@ -1807,8 +1807,6 @@ class AcquisitionController(Declarative.Handler):
                                           self.progress_value_model,
                                           self.is_acquiring_model,
                                           self.document_controller.event_loop)
-            finally:
-                data_stream.remove_ref()
         finally:
             build_result.data_stream.remove_ref()
 

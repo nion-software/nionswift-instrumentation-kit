@@ -2499,7 +2499,7 @@ class BasicAcquisitionMethod(AcquisitionMethodLike):
 
     def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
         device_data_stream.title = self.__title_base
-        return device_data_stream.add_ref()
+        return device_data_stream
 
 
 class SequenceAcquisitionMethod(AcquisitionMethodLike):
@@ -2518,15 +2518,15 @@ class SequenceAcquisitionMethod(AcquisitionMethodLike):
                 sequence_data_stream = device_data_stream.data_stream.wrap_in_sequence(count)
                 sequence_data_stream.channel_names = device_data_stream.channel_names
                 sequence_data_stream.title = _("Sequence")
-                return sequence_data_stream.add_ref()
+                return sequence_data_stream
             else:
                 sequence_data_stream = device_data_stream.wrap_in_sequence(count)
                 sequence_data_stream.channel_names = device_data_stream.channel_names
                 sequence_data_stream.title = _("Sequence")
-                return sequence_data_stream.add_ref()
+                return sequence_data_stream
         else:
             device_data_stream.title = _("Sequence")
-            return device_data_stream.add_ref()
+            return device_data_stream
 
 
 class ControlCustomizationValueController(ActionValueControllerLike):
@@ -2598,7 +2598,7 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
             device_data_stream = SequenceDataStream(ActionDataStream(device_data_stream, action_delegate), self.__control_values.shape[0])
             device_data_stream.channel_names = device_data_stream.channel_names
             device_data_stream.title = _("Series")
-        return device_data_stream.add_ref()
+        return device_data_stream
 
 
 class TableAcquisitionMethod(AcquisitionMethodLike):
@@ -2627,7 +2627,7 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
                 (Calibration.Calibration(), Calibration.Calibration()))
             device_data_stream.channel_names = device_data_stream.channel_names
             device_data_stream.title = _("Tableau")
-        return device_data_stream.add_ref()
+        return device_data_stream
 
 
 class MultipleAcquisitionMethod(AcquisitionMethodLike):
@@ -2682,7 +2682,7 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
             channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}", channel_names[Channel(*channel.segments[1:])]))
         sequential_data_stream.channel_names = channel_names
         sequential_data_stream.title = _("Multiple")
-        return sequential_data_stream.add_ref()
+        return sequential_data_stream
 
 
 @dataclasses.dataclass

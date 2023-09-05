@@ -1121,10 +1121,8 @@ class TestCameraControlClass(unittest.TestCase):
             build_result = acquisition_device.build_acquisition_device_data_stream()
             try:
                 data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
-                try:
+                with data_stream.ref():
                     self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
-                finally:
-                    data_stream.remove_ref()
             finally:
                 build_result.data_stream.remove_ref()
 
@@ -1154,7 +1152,7 @@ class TestCameraControlClass(unittest.TestCase):
         build_result = acquisition_device.build_acquisition_device_data_stream()
         try:
             data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
-            try:
+            with data_stream.ref():
                 drift_logger = DriftTracker.DriftLogger(document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
                 Acquisition.start_acquire(data_stream,
                                           data_stream.title or str(),
@@ -1165,8 +1163,6 @@ class TestCameraControlClass(unittest.TestCase):
                                           progress_value_model,
                                           is_acquiring_model,
                                           document_controller.event_loop)
-            finally:
-                data_stream.remove_ref()
         finally:
             build_result.data_stream.remove_ref()
 
