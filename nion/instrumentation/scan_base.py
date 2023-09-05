@@ -2590,7 +2590,9 @@ def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource) -> A
     device_map["magnification"] = scan_frame_data_stream.magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-    return Acquisition.AcquisitionDeviceResult(scan_frame_data_stream.add_ref(), channel_names, None, device_map)
+    scan_frame_data_stream.channel_names = channel_names
+
+    return Acquisition.AcquisitionDeviceResult(scan_frame_data_stream.add_ref(), None, device_map)
 
 
 class ScanAcquisitionDevice:
@@ -2676,7 +2678,9 @@ def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSour
     device_map["magnification"] = magnification_device_controller
     device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-    return Acquisition.AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), channel_names, drift_tracker, device_map)
+    synchronized_scan_data_stream.channel_names = channel_names
+
+    return Acquisition.AcquisitionDeviceResult(synchronized_scan_data_stream.add_ref(), drift_tracker, device_map)
 
 
 class SynchronizedScanAcquisitionDevice:

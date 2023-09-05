@@ -1120,11 +1120,11 @@ class TestCameraControlClass(unittest.TestCase):
             acquisition_method = make_sequence_acquisition_method()
             build_result = acquisition_device.build_acquisition_device_data_stream()
             try:
-                apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+                data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
                 try:
-                    self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(apply_result.data_stream).values())[0].data_shape)
+                    self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
                 finally:
-                    apply_result.data_stream.remove_ref()
+                    data_stream.remove_ref()
             finally:
                 build_result.data_stream.remove_ref()
 
@@ -1134,7 +1134,7 @@ class TestCameraControlClass(unittest.TestCase):
             def __init__(self, document_controller: DocumentController.DocumentController) -> None:
                 self.__document_controller = document_controller
 
-            def get_data_channel(self, title_base: str, channel_names: typing.Dict[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
+            def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
                 # create a data item data channel for converting data streams to data items, using partial updates and
                 # minimizing extra copies where possible.
 
@@ -1153,12 +1153,12 @@ class TestCameraControlClass(unittest.TestCase):
         data_channel_provider = DataChannelProvider(document_controller)
         build_result = acquisition_device.build_acquisition_device_data_stream()
         try:
-            apply_result = acquisition_method.wrap_acquisition_device_data_stream(build_result)
+            data_stream = acquisition_method.wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
             try:
                 drift_logger = DriftTracker.DriftLogger(document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
-                Acquisition.start_acquire(apply_result.data_stream,
-                                          apply_result.title_base,
-                                          apply_result.channel_names,
+                Acquisition.start_acquire(data_stream,
+                                          data_stream.title or str(),
+                                          data_stream.channel_names,
                                           acquisition_state,
                                           data_channel_provider,
                                           drift_logger,
@@ -1166,7 +1166,7 @@ class TestCameraControlClass(unittest.TestCase):
                                           is_acquiring_model,
                                           document_controller.event_loop)
             finally:
-                apply_result.data_stream.remove_ref()
+                data_stream.remove_ref()
         finally:
             build_result.data_stream.remove_ref()
 

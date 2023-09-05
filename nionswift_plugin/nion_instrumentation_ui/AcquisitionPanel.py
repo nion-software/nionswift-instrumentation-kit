@@ -1780,7 +1780,7 @@ class AcquisitionController(Declarative.Handler):
             def __init__(self, document_controller: DocumentController.DocumentController) -> None:
                 self.__document_controller = document_controller
 
-            def get_data_channel(self, title_base: str, channel_names: typing.Dict[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
+            def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
                 # create a data item data channel for converting data streams to data items, using partial updates and
                 # minimizing extra copies where possible.
 
@@ -1795,12 +1795,12 @@ class AcquisitionController(Declarative.Handler):
 
         build_result = device_component.build_acquisition_device().build_acquisition_device_data_stream()
         try:
-            apply_result = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(build_result)
+            data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(build_result.data_stream, build_result.device_map)
             try:
                 drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, build_result.drift_tracker) if build_result.drift_tracker else None
-                Acquisition.start_acquire(apply_result.data_stream,
-                                          apply_result.title_base,
-                                          apply_result.channel_names,
+                Acquisition.start_acquire(data_stream,
+                                          data_stream.title or _("Acquire"),
+                                          data_stream.channel_names,
                                           self.__acquisition_state,
                                           DataChannelProvider(self.document_controller),
                                           drift_logger,
@@ -1808,7 +1808,7 @@ class AcquisitionController(Declarative.Handler):
                                           self.is_acquiring_model,
                                           self.document_controller.event_loop)
             finally:
-                apply_result.data_stream.remove_ref()
+                data_stream.remove_ref()
         finally:
             build_result.data_stream.remove_ref()
 

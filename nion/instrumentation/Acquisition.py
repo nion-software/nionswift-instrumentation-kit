@@ -490,6 +490,9 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.__sequence_indexes: typing.Dict[Channel, int] = dict()
         self.is_aborted = False
         self.is_error = False
+        # optional advisory fields
+        self.channel_names: typing.Mapping[Channel, str] = dict()
+        self.title: typing.Optional[str] = None
 
     def add_ref(self) -> DataStream:
         super().add_ref()
@@ -2476,19 +2479,6 @@ class Acquisition:
         return self.__is_error
 
 
-@dataclasses.dataclass
-class AcquisitionMethodResult:
-    """Define result values for acquire handler apply function.
-
-    data_stream is the result data stream.
-    title_base is the base name for titles describing the acquire handler. may be empty, but not None.
-    channel_names is a mapping from each acquisition channel to a display name.
-    """
-    data_stream: DataStream
-    title_base: str
-    channel_names: typing.Dict[Channel, str]
-
-
 class _MultiSectionLike(typing.Protocol):
     offset: float
     exposure: float
@@ -2500,39 +2490,43 @@ class AcquisitionDeviceLike(typing.Protocol):
 
 
 class AcquisitionMethodLike(typing.Protocol):
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult: ...
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream: ...
 
 
 class BasicAcquisitionMethod(AcquisitionMethodLike):
     def __init__(self, title_base: typing.Optional[str] = None) -> None:
         self.__title_base = title_base or str()
 
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
-        return AcquisitionMethodResult(adr.data_stream.add_ref(), self.__title_base, adr.channel_names)
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
+        device_data_stream.title = self.__title_base
+        return device_data_stream.add_ref()
 
 
 class SequenceAcquisitionMethod(AcquisitionMethodLike):
     def __init__(self, count: int) -> None:
         self.__count = count
 
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
-        data_stream = adr.data_stream
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
         count = self.__count
-        channel_names = adr.channel_names
         # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
         if count > 1:
             # special case for framed-data-stream with sum operator; in the frame-by-frame case, the camera device
             # has the option of doing the processing itself and the operator will not be applied to the result. in
             # this case, the framed-data-stream-with-sum-operator is wrapped so that the processing can be performed
             # on the entire sequence. there is probably a better way to abstract this in the future.
-            if isinstance(data_stream, FramedDataStream) and isinstance(data_stream.operator, SumOperator):
-                return AcquisitionMethodResult(data_stream.data_stream.wrap_in_sequence(count).add_ref(), _("Sequence"),
-                                               channel_names)
+            if isinstance(device_data_stream, FramedDataStream) and isinstance(device_data_stream.operator, SumOperator):
+                sequence_data_stream = device_data_stream.data_stream.wrap_in_sequence(count)
+                sequence_data_stream.channel_names = device_data_stream.channel_names
+                sequence_data_stream.title = _("Sequence")
+                return sequence_data_stream.add_ref()
             else:
-                return AcquisitionMethodResult(data_stream.wrap_in_sequence(count).add_ref(), _("Sequence"),
-                                               channel_names)
+                sequence_data_stream = device_data_stream.wrap_in_sequence(count)
+                sequence_data_stream.channel_names = device_data_stream.channel_names
+                sequence_data_stream.title = _("Sequence")
+                return sequence_data_stream.add_ref()
         else:
-            return AcquisitionMethodResult(data_stream.add_ref(), _("Sequence"), channel_names)
+            device_data_stream.title = _("Sequence")
+            return device_data_stream.add_ref()
 
 
 class ControlCustomizationValueController(ActionValueControllerLike):
@@ -2589,15 +2583,11 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
         self.__control_customization = control_customization
         self.__control_values = control_values
 
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
-        data_stream = adr.data_stream
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
         control_customization = self.__control_customization
-        device_map = adr.device_map
-        channel_names = adr.channel_names
         # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
         # get the associated control handler that was created in create_handler and used within the stack
         # of control handlers declarative components.
-        assert data_stream
         control_description = control_customization.control_description
         assert control_description
         device_controller = device_map.get(control_description.device_id)
@@ -2605,8 +2595,10 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
             # configure the action function and data stream using weak_partial to carefully control ref counts
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, None)
             action_delegate = ValueControllersActionValueController([value_controller])
-            data_stream = SequenceDataStream(ActionDataStream(data_stream, action_delegate), self.__control_values.shape[0])
-        return AcquisitionMethodResult(data_stream.add_ref(), _("Series"), channel_names)
+            device_data_stream = SequenceDataStream(ActionDataStream(device_data_stream, action_delegate), self.__control_values.shape[0])
+            device_data_stream.channel_names = device_data_stream.channel_names
+            device_data_stream.title = _("Series")
+        return device_data_stream.add_ref()
 
 
 class TableAcquisitionMethod(AcquisitionMethodLike):
@@ -2617,14 +2609,10 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
         self.__axis_id = axis_id
         self.__control_values = control_values
 
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
-        data_stream = adr.data_stream
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
         control_customization = self.__control_customization
         axis_id = self.__axis_id
-        device_map = adr.device_map
-        channel_names = adr.channel_names
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
-        assert data_stream
         control_description = control_customization.control_description
         assert control_description
         device_controller = device_map.get(control_description.device_id)
@@ -2633,21 +2621,20 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
             axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, axis)
             action_delegate = ValueControllersActionValueController([value_controller])
-            data_stream = CollectedDataStream(
-                ActionDataStream(data_stream, action_delegate),
+            device_data_stream = CollectedDataStream(
+                ActionDataStream(device_data_stream, action_delegate),
                 self.__control_values.shape[0:2],
                 (Calibration.Calibration(), Calibration.Calibration()))
-        return AcquisitionMethodResult(data_stream.add_ref(), _("Tableau"), channel_names)
+            device_data_stream.channel_names = device_data_stream.channel_names
+            device_data_stream.title = _("Tableau")
+        return device_data_stream.add_ref()
 
 
 class MultipleAcquisitionMethod(AcquisitionMethodLike):
     def __init__(self, sections: typing.Sequence[_MultiSectionLike]) -> None:
         self.__sections = sections
 
-    def wrap_acquisition_device_data_stream(self, adr: AcquisitionDeviceResult) -> AcquisitionMethodResult:
-        data_stream = adr.data_stream
-        device_map = adr.device_map
-        channel_names = adr.channel_names
+    def wrap_acquisition_device_data_stream(self, device_data_stream: DataStream, device_map: typing.Mapping[str, STEMController.DeviceController]) -> DataStream:
         sections = self.__sections
         # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
         assert AcquisitionPreferences.acquisition_preferences
@@ -2680,17 +2667,22 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
                 values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]])
                 value_controllers.append(
                     ControlCustomizationValueController(camera_value_controller, control_customization_energy_offset, values, None))
-            data_streams.append(SequenceDataStream(ActionDataStream(data_stream, ValueControllersActionValueController(value_controllers)),
-                                                   max(1, multi_acquire_entry.count)))
+            sequence_data_stream = SequenceDataStream(
+                ActionDataStream(device_data_stream, ValueControllersActionValueController(value_controllers)),
+                max(1, multi_acquire_entry.count))
+            data_streams.append(sequence_data_stream)
 
         # create a sequential data stream from the section data streams.
         sequential_data_stream = SequentialDataStream(data_streams)
         # the sequential data stream will emit channels of the form n.sub-channel. add a name for each of those
         # channels. do this by getting the name of the sub channel and constructing a new name for n.sub_channel
         # for each index.
+        channel_names = dict(device_data_stream.channel_names)
         for channel in sequential_data_stream.channels:
             channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}", channel_names[Channel(*channel.segments[1:])]))
-        return AcquisitionMethodResult(sequential_data_stream.add_ref(), _("Multiple"), channel_names)
+        sequential_data_stream.channel_names = channel_names
+        sequential_data_stream.title = _("Multiple")
+        return sequential_data_stream.add_ref()
 
 
 @dataclasses.dataclass
@@ -2703,7 +2695,6 @@ class AcquisitionDeviceResult:
     device_map is a mapping from device_id to a DeviceController.
     """
     data_stream: DataStream
-    channel_names: typing.Dict[Channel, str]
     drift_tracker: typing.Optional[DriftTracker.DriftTracker]
     device_map: typing.Dict[str, STEMController.DeviceController]
 
@@ -2767,7 +2758,7 @@ class AcquisitionState:
 
 
 class DataChannelProviderLike(typing.Protocol):
-    def get_data_channel(self, title_base: str, channel_names: typing.Dict[Channel, str], **kwargs: typing.Any) -> DataChannel: ...
+    def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Channel, str], **kwargs: typing.Any) -> DataChannel: ...
 
 
 def _acquire_data_stream(data_stream: DataStream,
@@ -2831,7 +2822,7 @@ def _acquire_data_stream(data_stream: DataStream,
 
 def start_acquire(data_stream: DataStream,
                   title_base: str,
-                  channel_names: typing.Dict[Channel, str],
+                  channel_names: typing.Mapping[Channel, str],
                   acquisition_state: AcquisitionState,
                   data_channel_provider: DataChannelProviderLike,
                   drift_logger: typing.Optional[DriftTracker.DriftLogger],

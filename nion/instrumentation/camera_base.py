@@ -3180,7 +3180,9 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     device_map["stem"] = STEMController.STEMDeviceController()
     device_map["camera"] = CameraDeviceController(camera_hardware_source, camera_frame_parameters)
 
-    return Acquisition.AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), channel_names, None, device_map)
+    processed_camera_data_stream.channel_names = channel_names
+
+    return Acquisition.AcquisitionDeviceResult(processed_camera_data_stream.add_ref(), None, device_map)
 
 
 class CameraAcquisitionDevice:
