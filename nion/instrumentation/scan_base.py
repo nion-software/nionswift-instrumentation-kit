@@ -2572,109 +2572,32 @@ class ScanDeviceController(STEMController.DeviceController):
         # no values supported at this time.
 
 
-def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
-    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
-    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-    scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source)
-
-    # construct the channel names.
-    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-    for c in scan_hardware_source.get_enabled_channel_indexes():
-        channel_state = scan_hardware_source.get_channel_state(c)
-        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
-        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
-
-    # construct the device map for this acquisition device.
-    device_map["magnification"] = scan_frame_data_stream.magnification_device_controller
-    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-
-    scan_frame_data_stream.channel_names = channel_names
-
-    return scan_frame_data_stream
-
-
 class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
-    def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: typing.Optional[ScanFrameParameters] = None) -> None:
         self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = scan_frame_parameters if scan_frame_parameters else scan_hardware_source.get_current_frame_parameters()
 
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
-        return build_scan_device_data_stream(self.__scan_hardware_source, device_map)
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+        scan_hardware_source = self.__scan_hardware_source
+        scan_frame_parameters = self.__scan_frame_parameters
 
+        scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source)
 
-def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSource, scan_context_description: STEMController.ScanSpecifier, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
-    # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+        # construct the channel names.
+        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+        for c in scan_hardware_source.get_enabled_channel_indexes():
+            channel_state = scan_hardware_source.get_channel_state(c)
+            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
 
-    # first get the camera hardware source and the camera channel description.
-    if camera_channel in Acquisition.hardware_source_channel_descriptions:
-        camera_channel_description = Acquisition.hardware_source_channel_descriptions[camera_channel]
-    else:
-        camera_channel_description = Acquisition.hardware_source_channel_descriptions["image"]
-    assert camera_hardware_source is not None
-    assert camera_channel_description is not None
+        # construct the device map for this acquisition device.
+        device_map["magnification"] = scan_frame_data_stream.magnification_device_controller
+        device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
 
-    assert scan_hardware_source is not None
-    assert scan_context_description is not None
+        scan_frame_data_stream.channel_names = channel_names
 
-    # configure the camera hardware source processing. always use camera parameters at index 0.
-    if camera_channel_description.processing_id:
-        camera_frame_parameters.processing = camera_channel_description.processing_id
-    else:
-        camera_frame_parameters.processing = None
-
-    # configure the scan uuid and scan frame parameters.
-    scan_count = 1
-    scan_size = scan_context_description.scan_size
-    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-    scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
-
-    # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
-    # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
-    # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
-    # tracker is separate at the moment.
-    drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
-    section_height: typing.Optional[int] = None
-    drift_tracker = scan_hardware_source.drift_tracker
-    if drift_tracker and scan_context_description.drift_interval_lines > 0:
-        drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
-        section_height = scan_context_description.drift_interval_lines
-    enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
-
-    # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
-    magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
-
-    # build the synchronized data stream. this will also automatically include scan-channel drift correction.
-    synchronized_scan_data_stream = make_synchronized_scan_data_stream(
-        scan_hardware_source=scan_hardware_source,
-        scan_frame_parameters=scan_frame_parameters,
-        camera_hardware_source=camera_hardware_source,
-        camera_frame_parameters=camera_frame_parameters,
-        scan_data_stream_functor=drift_correction_functor,
-        section_height=section_height,
-        scan_count=scan_count,
-        include_raw=True,
-        include_summed=False,
-        enable_drift_tracker=enable_drift_tracker,
-        fov_nm_model=magnification_device_controller.fov_nm_model,
-        rotation_model=magnification_device_controller.rotation_model
-    )
-
-    # construct the channel names.
-    op = _("Synchronized")
-    channel_names: typing.Dict[Acquisition.Channel, str] = dict()
-    for c in scan_hardware_source.get_enabled_channel_indexes():
-        channel_state = scan_hardware_source.get_channel_state(c)
-        channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
-        channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
-    channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
-
-    # construct the device map for this acquisition device.
-    device_map["camera"] = camera_base.CameraDeviceController(camera_hardware_source, camera_frame_parameters)
-    device_map["magnification"] = magnification_device_controller
-    device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
-
-    synchronized_scan_data_stream.channel_names = channel_names
-
-    return synchronized_scan_data_stream
+        return scan_frame_data_stream
 
 
 class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
@@ -2686,7 +2609,84 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         self.__scan_context_description = scan_context_description
 
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
-        return build_synchronized_device_data_stream(self.__scan_hardware_source, self.__scan_context_description, self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel, device_map)
+        # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
+        scan_hardware_source = self.__scan_hardware_source
+        scan_context_description = self.__scan_context_description
+        camera_hardware_source = self.__camera_hardware_source
+        camera_frame_parameters = self.__camera_frame_parameters
+        camera_channel = self.__camera_channel
+
+        # first get the camera hardware source and the camera channel description.
+        if camera_channel in Acquisition.hardware_source_channel_descriptions:
+            camera_channel_description = Acquisition.hardware_source_channel_descriptions[camera_channel]
+        else:
+            camera_channel_description = Acquisition.hardware_source_channel_descriptions["image"]
+        assert camera_hardware_source is not None
+        assert camera_channel_description is not None
+
+        assert scan_hardware_source is not None
+        assert scan_context_description is not None
+
+        # configure the camera hardware source processing. always use camera parameters at index 0.
+        if camera_channel_description.processing_id:
+            camera_frame_parameters.processing = camera_channel_description.processing_id
+        else:
+            camera_frame_parameters.processing = None
+
+        # configure the scan uuid and scan frame parameters.
+        scan_count = 1
+        scan_size = scan_context_description.scan_size
+        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
+
+        # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
+        # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
+        # hardware source directly, which watches the first channel for drift in sequences of scans. the drift
+        # tracker is separate at the moment.
+        drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
+        section_height: typing.Optional[int] = None
+        drift_tracker = scan_hardware_source.drift_tracker
+        if drift_tracker and scan_context_description.drift_interval_lines > 0:
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
+            section_height = scan_context_description.drift_interval_lines
+        enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
+
+        # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+        magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
+        # build the synchronized data stream. this will also automatically include scan-channel drift correction.
+        synchronized_scan_data_stream = make_synchronized_scan_data_stream(
+            scan_hardware_source=scan_hardware_source,
+            scan_frame_parameters=scan_frame_parameters,
+            camera_hardware_source=camera_hardware_source,
+            camera_frame_parameters=camera_frame_parameters,
+            scan_data_stream_functor=drift_correction_functor,
+            section_height=section_height,
+            scan_count=scan_count,
+            include_raw=True,
+            include_summed=False,
+            enable_drift_tracker=enable_drift_tracker,
+            fov_nm_model=magnification_device_controller.fov_nm_model,
+            rotation_model=magnification_device_controller.rotation_model
+        )
+
+        # construct the channel names.
+        op = _("Synchronized")
+        channel_names: typing.Dict[Acquisition.Channel, str] = dict()
+        for c in scan_hardware_source.get_enabled_channel_indexes():
+            channel_state = scan_hardware_source.get_channel_state(c)
+            channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
+            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = f"{op} {channel_state.name}"
+        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = f"{op} {camera_hardware_source.get_signal_name(camera_frame_parameters)}"
+
+        # construct the device map for this acquisition device.
+        device_map["camera"] = camera_base.CameraDeviceController(camera_hardware_source, camera_frame_parameters)
+        device_map["magnification"] = magnification_device_controller
+        device_map["scan"] = ScanDeviceController(scan_hardware_source, scan_frame_parameters)
+
+        synchronized_scan_data_stream.channel_names = channel_names
+
+        return synchronized_scan_data_stream
 
 
 class InstrumentController(abc.ABC):
