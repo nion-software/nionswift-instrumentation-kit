@@ -2593,7 +2593,7 @@ def build_scan_device_data_stream(scan_hardware_source: ScanHardwareSource, devi
     return scan_frame_data_stream
 
 
-class ScanAcquisitionDevice:
+class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
     def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
         self.__scan_hardware_source = scan_hardware_source
 
@@ -2677,7 +2677,7 @@ def build_synchronized_device_data_stream(scan_hardware_source: ScanHardwareSour
     return synchronized_scan_data_stream
 
 
-class SynchronizedScanAcquisitionDevice:
+class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
     def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], scan_context_description: STEMController.ScanSpecifier) -> None:
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source

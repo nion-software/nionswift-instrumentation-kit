@@ -3183,7 +3183,7 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     return processed_camera_data_stream
 
 
-class CameraAcquisitionDevice:
+class CameraAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_channel: typing.Optional[str]) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
