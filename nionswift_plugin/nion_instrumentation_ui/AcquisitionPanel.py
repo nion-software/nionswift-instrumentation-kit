@@ -1297,7 +1297,9 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_model.hardware_source)
         scan_context_description = self.__scan_context_description_value_stream.value
         assert scan_context_description
-        return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source, camera_hardware_source, camera_frame_parameters, camera_channel, scan_context_description)
+        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+        return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source, scan_frame_parameters, camera_hardware_source, camera_frame_parameters, camera_channel, scan_context_description)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1411,7 +1413,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice_model.hardware_source)
         assert scan_hardware_source is not None
 
-        return scan_base.ScanAcquisitionDevice(scan_hardware_source)
+        return scan_base.ScanAcquisitionDevice(scan_hardware_source, scan_hardware_source.get_current_frame_parameters())
 
 
 # register each component as an acquisition device component factory.

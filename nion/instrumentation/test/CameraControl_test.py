@@ -65,15 +65,16 @@ def make_camera_device(test_context: AcquisitionTestContext.test_context) -> Acq
 
 
 def make_scan_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceLike:
-    return scan_base.ScanAcquisitionDevice(test_context.scan_hardware_source)
+    return scan_base.ScanAcquisitionDevice(test_context.scan_hardware_source, test_context.scan_hardware_source.get_current_frame_parameters())
 
 
 def make_synchronized_device(test_context: AcquisitionTestContext.test_context) -> Acquisition.AcquisitionDeviceLike:
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
-    return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0), None, scan_context_description)
-
+    scan_frame_parameters = test_context.scan_hardware_source.get_current_frame_parameters()
+    test_context.scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+    return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, scan_frame_parameters, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0), None, scan_context_description)
 
 def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     return Acquisition.SequenceAcquisitionMethod(4)

@@ -2377,9 +2377,9 @@ class ScanDataStream(Acquisition.DataStream):
 
 
 class ScanFrameDataStream(Acquisition.StackedDataStream):
-    def __init__(self, scan_hardware_source: ScanHardwareSource) -> None:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
         self.__scan_hardware_source = scan_hardware_source
-        self.__scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+        self.__scan_frame_parameters = scan_frame_parameters
         self.__scan_id = uuid.uuid4()
 
         # configure the scan uuid and scan frame parameters.
@@ -2573,16 +2573,16 @@ class ScanDeviceController(STEMController.DeviceController):
 
 
 class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
-    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: typing.Optional[ScanFrameParameters] = None) -> None:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
         self.__scan_hardware_source = scan_hardware_source
-        self.__scan_frame_parameters = scan_frame_parameters if scan_frame_parameters else scan_hardware_source.get_current_frame_parameters()
+        self.__scan_frame_parameters = scan_frame_parameters
 
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         scan_hardware_source = self.__scan_hardware_source
         scan_frame_parameters = self.__scan_frame_parameters
 
-        scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source)
+        scan_frame_data_stream = ScanFrameDataStream(scan_hardware_source, scan_frame_parameters)
 
         # construct the channel names.
         channel_names: typing.Dict[Acquisition.Channel, str] = dict()
@@ -2601,8 +2601,9 @@ class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
 
 
 class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
-    def __init__(self, scan_hardware_source: ScanHardwareSource, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], scan_context_description: STEMController.ScanSpecifier) -> None:
+    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], scan_context_description: STEMController.ScanSpecifier) -> None:
         self.__scan_hardware_source = scan_hardware_source
+        self.__scan_frame_parameters = scan_frame_parameters
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
         self.__camera_channel = camera_channel
@@ -2611,6 +2612,7 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         scan_hardware_source = self.__scan_hardware_source
+        scan_frame_parameters = self.__scan_frame_parameters
         scan_context_description = self.__scan_context_description
         camera_hardware_source = self.__camera_hardware_source
         camera_frame_parameters = self.__camera_frame_parameters
@@ -2635,9 +2637,6 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
 
         # configure the scan uuid and scan frame parameters.
         scan_count = 1
-        scan_size = scan_context_description.scan_size
-        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_size))
 
         # set up drift correction, if enabled in the scan control panel. this can be used for intra-scan drift
         # correction. the synchronized acquisition can also utilize the drift tracker associated with the scan
@@ -2651,7 +2650,7 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
             section_height = scan_context_description.drift_interval_lines
         enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
 
-        # build the magnificaiton device controller, here until this is fully separated and available as part of the STEM controller
+        # build the magnification device controller, here until this is fully separated and available as part of the STEM controller
         magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
         # build the synchronized data stream. this will also automatically include scan-channel drift correction.
