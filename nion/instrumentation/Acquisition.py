@@ -118,6 +118,7 @@ import typing
 import warnings
 
 import numpy
+import numpy.typing
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
@@ -128,6 +129,7 @@ from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import ReferenceCounting
+from nion.utils import Registry
 from nion.utils.ReferenceCounting import weak_partial
 
 if typing.TYPE_CHECKING:
@@ -2833,6 +2835,152 @@ def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAn
         with framed_data_stream.ref():
             acquire(framed_data_stream)
             return {channel: framed_data_stream.get_data(channel) for channel in framed_data_stream.channels}
+
+
+class LinearSpace:
+    # an object representing a linear space of values.
+    # may be moved to niondata eventually.
+
+    def __init__(self, start: float, stop: float, num: int) -> None:
+        self.start = start
+        self.stop = stop
+        self.num = num
+
+    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None) -> numpy.typing.NDArray[typing.Any]:
+        return numpy.linspace(self.start, self.stop, self.num, dtype=dtype)
+
+
+class MeshGrid:
+    # an object representing a mesh of y/x values.
+    # may be moved to niondata eventually.
+
+    def __init__(self, y_space: numpy.typing.ArrayLike, x_space: numpy.typing.ArrayLike) -> None:
+        self.y_space = y_space
+        self.x_space = x_space
+
+    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None) -> numpy.typing.NDArray[typing.Any]:
+        return numpy.stack(numpy.meshgrid(numpy.array(self.y_space), numpy.array(self.x_space), indexing='ij'), axis=-1)
+
+
+class AcquisitionProcedureFactoryInterface(typing.Protocol):
+
+    class Device(typing.Protocol): pass
+
+    class DeviceChannelSpecifier(typing.Protocol): pass
+
+    class ProcessingChannelLike(typing.Protocol): pass
+
+    class DeviceParametersLike(typing.Protocol): pass
+
+    class ProcedureStepLike(typing.Protocol): pass
+
+    class DeviceAcquisitionStep(ProcedureStepLike): pass
+
+    class MultiDeviceAcquisitionStep(ProcedureStepLike): pass
+
+    class ScanParameters(DeviceParametersLike): pass
+
+    class CameraParameters(DeviceParametersLike): pass
+
+    class DeviceAcquisitionParameters(typing.Protocol): pass
+
+    class ControlController(typing.Protocol): pass
+
+    class DeviceControlController(ControlController): pass
+
+    class CollectionStep(ProcedureStepLike): pass
+
+    class SequentialStep(ProcedureStepLike): pass
+
+    class AcquisitionProcedure(typing.Protocol): pass
+
+    class AcquisitionController(typing.Protocol):
+        def acquire_immediate(self) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]: ...
+
+    def create_device(self, device_type_id: str, *, device_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.Device: ...
+
+    def create_stem_device(self, *, device_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.Device: ...
+
+    def create_scan_device(self, *, device_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.Device: ...
+
+    def create_ronchigram_device(self, *, device_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.Device: ...
+
+    def create_eels_device(self, *, device_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.Device: ...
+
+    def create_device_channel_specifier(self, *,
+                                        channel_index: typing.Optional[int] = None,
+                                        channel_type_id: typing.Optional[str] = None,
+                                        channel_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.DeviceChannelSpecifier: ...
+
+    def create_scan_parameters(self, *,
+                               pixel_time_us: typing.Optional[float] = None,
+                               pixel_size: typing.Optional[Geometry.IntSize] = None,
+                               fov_nm: typing.Optional[float] = None,
+                               rotation_rad: typing.Optional[float] = None,
+                               center_nm: typing.Optional[Geometry.FloatPoint] = None,
+                               subscan_pixel_size: typing.Optional[Geometry.IntSize] = None,
+                               subscan_fractional_size: typing.Optional[Geometry.FloatSize] = None,
+                               subscan_fractional_center: typing.Optional[Geometry.FloatPoint] = None,
+                               subscan_rotation: typing.Optional[float] = None,
+                               ac_line_sync: typing.Optional[bool] = None,
+                               # flyback_time_us: typing.Optional[float] = None,
+                               # ac_frame_sync: typing.Optional[bool] = None,
+                               **kwargs: typing.Any,
+                               ) -> AcquisitionProcedureFactoryInterface.ScanParameters: ...
+
+    def create_camera_parameters(self, *,
+                                 exposure_ms: typing.Optional[float] = None,
+                                 binning: typing.Optional[int] = None,
+                                 **kwargs: typing.Any,
+                                 ) -> AcquisitionProcedureFactoryInterface.CameraParameters: ...
+
+    def create_device_acquisition_parameters(self, *,
+                                             device: AcquisitionProcedureFactoryInterface.Device,
+                                             device_parameters: typing.Optional[AcquisitionProcedureFactoryInterface.DeviceParametersLike] = None,
+                                             device_channels: typing.Optional[typing.Sequence[AcquisitionProcedureFactoryInterface.DeviceChannelSpecifier]] = None,
+                                             processing_channels: typing.Optional[typing.Sequence[AcquisitionProcedureFactoryInterface.ProcessingChannelLike]] = None
+                                             ) -> AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters: ...
+
+    def create_device_acquisition_step(self, *,
+                                       device_acquisition_parameters: AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters,
+                                       ) -> AcquisitionProcedureFactoryInterface.DeviceAcquisitionStep: ...
+
+    def create_multi_device_acquisition_step(self, *,
+                                             primary_device_acquisition_parameters: AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters,
+                                             secondary_device_acquisition_parameters: typing.Sequence[AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters]) -> AcquisitionProcedureFactoryInterface.MultiDeviceAcquisitionStep: ...
+
+    def create_device_controller(self, *,
+                                 device: AcquisitionProcedureFactoryInterface.Device,
+                                 control_id: str,
+                                 device_control_id: typing.Optional[str] = None,
+                                 values: typing.Optional[numpy.typing.ArrayLike] = None,
+                                 delay: typing.Optional[float] = None,
+                                 axis_id: typing.Optional[str] = None) -> AcquisitionProcedureFactoryInterface.DeviceControlController: ...
+
+    def create_collection_step(self, *,
+                               sub_step: AcquisitionProcedureFactoryInterface.ProcedureStepLike,
+                               control_controller: AcquisitionProcedureFactoryInterface.ControlController
+                               ) -> AcquisitionProcedureFactoryInterface.CollectionStep: ...
+
+    def create_sequential_step(self, *,
+                               sub_steps: typing.Sequence[AcquisitionProcedureFactoryInterface.ProcedureStepLike]
+                               ) -> AcquisitionProcedureFactoryInterface.SequentialStep: ...
+
+    def create_acquisition_procedure(self, *,
+                                     devices: typing.Sequence[AcquisitionProcedureFactoryInterface.Device],
+                                     steps: typing.Sequence[AcquisitionProcedureFactoryInterface.ProcedureStepLike]
+                                     ) -> AcquisitionProcedureFactoryInterface.AcquisitionProcedure: ...
+
+    def create_processing_channel(self, *,
+                                  processing_id: str,
+                                  processing_parameters: typing.Optional[typing.Mapping[str, typing.Any]] = None
+                                  ) -> AcquisitionProcedureFactoryInterface.ProcessingChannelLike: ...
+
+    def create_acquisition_controller(self, *, acquisition_procedure: AcquisitionProcedureFactoryInterface.AcquisitionProcedure) -> AcquisitionProcedureFactoryInterface.AcquisitionController: ...
+
+
+def acquisition_procedure_factory() -> AcquisitionProcedureFactoryInterface:
+    return typing.cast(AcquisitionProcedureFactoryInterface, Registry.get_component("acquisition_procedure_factory_interface"))
 
 
 """
