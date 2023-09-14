@@ -2577,6 +2577,14 @@ class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
 
+    @property
+    def _scan_hardware_source(self) -> ScanHardwareSource:
+        return self.__scan_hardware_source
+
+    @property
+    def _scan_frame_parameters(self) -> ScanFrameParameters:
+        return self.__scan_frame_parameters
+
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         scan_hardware_source = self.__scan_hardware_source
@@ -2601,7 +2609,13 @@ class ScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
 
 
 class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
-    def __init__(self, scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters, camera_hardware_source: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters, camera_channel: typing.Optional[str], scan_context_description: STEMController.ScanSpecifier) -> None:
+    def __init__(self,
+                 scan_hardware_source: ScanHardwareSource,
+                 scan_frame_parameters: ScanFrameParameters,
+                 camera_hardware_source: camera_base.CameraHardwareSource,
+                 camera_frame_parameters: camera_base.CameraFrameParameters,
+                 camera_channel: typing.Optional[str],
+                 scan_context_description: STEMController.ScanSpecifier) -> None:
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__camera_hardware_source = camera_hardware_source

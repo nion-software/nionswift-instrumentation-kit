@@ -3189,6 +3189,18 @@ class CameraAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         self.__camera_frame_parameters = camera_frame_parameters
         self.__camera_channel = camera_channel
 
+    @property
+    def _camera_hardware_source(self) -> CameraHardwareSource:
+        return self.__camera_hardware_source
+
+    @property
+    def _camera_frame_parameters(self) -> CameraFrameParameters:
+        return self.__camera_frame_parameters
+
+    @property
+    def _camera_channel(self) -> typing.Optional[str]:
+        return self.__camera_channel
+
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
         return build_camera_device_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, self.__camera_channel, device_map)
 
