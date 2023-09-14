@@ -41,6 +41,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         for ex in self.__exit_stack:
             ex.close()
         stem_controller.unregister_event_loop()
+        camera_type = self.camera_hardware_source.camera.camera_type
         self.camera_hardware_source.close()
         self.scan_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
@@ -49,8 +50,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         DriftTracker.stop()
         ScanDevice.stop()
         Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
-        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source"})
-        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"scan_hardware_source"})
+        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
+        Registry.unregister_component(self.camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})
         HardwareSource.HardwareSourceManager()._close_instruments()
         HardwareSource.stop()
         super().close()
@@ -95,6 +96,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters(
             {"exposure_ms": camera_exposure * 1000 * 2, "binning": 1}))
         camera_hardware_source.set_selected_profile_index(0)
+        Registry.register_component(camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_device.camera_type + "_camera_hardware_source"})  # allows stem controller to find camera controller
+        HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
         return camera_hardware_source
 
 
