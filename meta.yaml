@@ -1,9 +1,9 @@
 package:
   name: 'nionswift-instrumentation'
-  version: '0.21.1'
+  version: '22.0.0'
 
 source:
-  git_rev: 0.21.1
+  git_rev: 22.0.0
   git_url: https://github.com/nion-software/nionswift-instrumentation-kit.git
 
 build:
@@ -19,11 +19,11 @@ requirements:
     - setuptools
   run:
     - python >=3.9,!=3.9.7
-    - niondata >=0.14.0,<0.16.0
-    - nionswift >=0.16.0,<0.17.0
-    - nionui >=0.6.3,<0.7.0
-    - nionutils >=0.4.1,<0.5.0
-    - numpy >=1.21,<2.0
+    - niondata >=15.6.0,<16.0.0
+    - nionswift >=16.9.0,<17.0.0
+    - nionui >=7.0.0,<8.0.0
+    - nionutils >=0.4.8,<0.5.0
+    - numpy >=1.25,<2.0
 
 test:
   imports:

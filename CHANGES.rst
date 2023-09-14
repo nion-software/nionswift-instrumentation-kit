@@ -1,10 +1,21 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-0.21.2 (UNRELEASED)
+22.0.0 (2023-09-14)
 -------------------
-- Fix #31. Scan recorder allows limited-only-by-memory frame count on scan devices.
+- Fix issues with intermittent errors during synchronized acquisition.
+- Fix #13. Scan recorder allows limited-only-by-memory frame count on scan devices.
 - Fix #160. Introduce RecordingTask to allow synchronization of recording with other tasks.
+- Eliminate special crop region on summed camera acquisition (EELS). Crop region now determined by camera readout area.
+- Many improvements to improve ability to replace default scan device; work in progress.
+- Simplify acquisition panel slightly (radio button to select mode); work in progress.
+- Improvements to metadata handling during acquisition; work in progress.
+- Fix 1D ramp acquisition using FOV; add ability to control rotation, too.
+- Raise max scan size to 16384x16384 and correctly reduce it when required.
+- Performance improvements (latency and frame rate).
+- Performance improvements (scan recorder).
+- Add Python 3.11 support. Drop 3.8. This will be the last Python 3.9 release, too.
+- Fix some issues with subscan handling during synchronized acquisition.
 
 0.21.1 (2023-02-28)
 -------------------
