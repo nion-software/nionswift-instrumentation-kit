@@ -245,15 +245,15 @@ class ScanFrameParameters(ParametersBase):
         self.set_parameter("ac_line_sync", value)
 
     @property
-    def channel_indexes_enabled(self) -> typing.Optional[typing.Sequence[int]]:
-        maybe_channel_indexes_enabled = self.get_parameter("channel_indexes_enabled", list())
-        if maybe_channel_indexes_enabled is not None:
-            return typing.cast(typing.Sequence[int], maybe_channel_indexes_enabled)
+    def enabled_channel_indexes(self) -> typing.Optional[typing.Sequence[int]]:
+        maybe_enabled_channel_indexes = self.get_parameter("enabled_channel_indexes", None)
+        if maybe_enabled_channel_indexes is not None:
+            return typing.cast(typing.Sequence[int], maybe_enabled_channel_indexes)
         return None
 
-    @channel_indexes_enabled.setter
-    def channel_indexes_enabled(self, value: typing.Sequence[int]) -> None:
-        self.set_parameter("channel_indexes_enabled", list(value) if value is not None else None)
+    @enabled_channel_indexes.setter
+    def enabled_channel_indexes(self, value: typing.Sequence[int]) -> None:
+        self.set_parameter("enabled_channel_indexes", list(value) if value is not None else None)
 
     @property
     def channel_variant(self) -> typing.Optional[str]:
@@ -473,6 +473,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         if not super()._start_acquisition():
             return False
         self.__stem_controller._enter_scanning_state()
+        if self.__frame_parameters.enabled_channel_indexes is not None:
+            for index in range(self.__scan_hardware_source.channel_count):
+                self.__scan_hardware_source.set_channel_enabled(index, index in self.__frame_parameters.enabled_channel_indexes)
         if not any(self.__device.channels_enabled):
             return False
         self._resume_acquisition()
@@ -678,8 +681,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1) -> GrabSynchronizedResult: ...
 
-    def record_immediate(self, frame_parameters: ScanFrameParameters,
-                         enabled_channels: typing.Optional[typing.Sequence[int]] = None,
+    def record_immediate(self,
+                         frame_parameters: ScanFrameParameters,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
 
     # sequence mode. the sequence mode allocates a buffer of a given size and then allows the caller to pop the data
@@ -1668,16 +1671,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, acquisition_task_parameters, channel_ids, self.display_name)
 
-    def record_immediate(self, frame_parameters: ScanFrameParameters,
-                         enabled_channels: typing.Optional[typing.Sequence[int]] = None,
+    def record_immediate(self,
+                         frame_parameters: ScanFrameParameters,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         assert not self.is_recording
         frame_parameters = copy.deepcopy(frame_parameters)
         old_enabled_channels = self.get_enabled_channel_indexes()
         channel_states = [self.get_channel_state(i) for i in range(self.__device.channel_count)]
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
-        if enabled_channels is not None:
-            self.set_enabled_channels(enabled_channels)
         record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, None, channel_ids, self.display_name)
         finished_event = threading.Event()
         xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
@@ -2203,7 +2204,7 @@ class ScanDataStream(Acquisition.DataStream):
         self.__drift_tracker = drift_tracker
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
-        self.__enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
+        self.__enabled_channels = scan_frame_parameters.enabled_channel_indexes if scan_frame_parameters.enabled_channel_indexes is not None else scan_hardware_source.get_enabled_channel_indexes()
         self.__fov_nm_model = fov_nm_model
         self.__rotation_model = rotation_model
         subscan_pixel_size = scan_frame_parameters.subscan_pixel_size

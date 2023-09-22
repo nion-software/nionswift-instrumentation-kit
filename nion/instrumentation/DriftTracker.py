@@ -313,7 +313,8 @@ class DriftCorrectionBehavior:
                     delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_prediction else self.__drift_tracker.total_delta_nm
                     frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
                     # print(f"measure with center_nm {frame_parameters.center_nm}")
-                    xdatas = self.__scan_hardware_source.record_immediate(frame_parameters, [drift_channel_index])
+                    frame_parameters.enabled_channel_indexes = [drift_channel_index]
+                    xdatas = self.__scan_hardware_source.record_immediate(frame_parameters)
                     xdata0 = xdatas[0]
                     if xdata0:
                         self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)

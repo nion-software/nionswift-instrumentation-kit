@@ -1703,11 +1703,12 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters.subscan_pixel_size = Geometry.IntSize(128, 128)
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(0.5, 0.5)
             frame_parameters.subscan_fractional_center = Geometry.FloatPoint(0.5, 0.5)
-            xdata = scan_hardware_source.record_immediate(frame_parameters, [0])[0]
+            frame_parameters.enabled_channel_indexes = [0]
+            xdata = scan_hardware_source.record_immediate(frame_parameters)[0]
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
             frame_parameters.subscan_pixel_size = Geometry.IntSize(256, 256)
-            xdata = scan_hardware_source.record_immediate(frame_parameters, [0])[0]
+            xdata = scan_hardware_source.record_immediate(frame_parameters)[0]
             self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
 
