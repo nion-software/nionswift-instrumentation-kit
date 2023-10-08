@@ -35,9 +35,9 @@ from nion.instrumentation import stem_controller as STEMController
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.swift.model import Graphics
+from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
-from nion.utils import Process
 from nion.utils import Registry
 
 _NDArray = numpy.typing.NDArray[typing.Any]
@@ -932,7 +932,7 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         if self.__stop_after_acquire:
             self.__camera.stop_live()
         # camera data is always assumed to be full frame, otherwise deal with subarea 1d and 2d
-        return [self.__camera_hardware_source.make_live_data_element(cumulative_data, _data_element["properties"], _data_element.get("timestamp", datetime.datetime.utcnow()), frame_parameters, cumulative_frame_count)]
+        return [self.__camera_hardware_source.make_live_data_element(cumulative_data, _data_element["properties"], _data_element.get("timestamp", DateTime.utcnow()), frame_parameters, cumulative_frame_count)]
 
     def __activate_frame_parameters(self) -> None:
         self.__frame_parameters = self.frame_parameters

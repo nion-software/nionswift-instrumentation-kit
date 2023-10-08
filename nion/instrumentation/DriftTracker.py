@@ -19,6 +19,7 @@ from nion.data import xdata_1_0 as xd
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.swift.model import DataItem
+from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
@@ -158,7 +159,7 @@ class DriftTracker:
             # self.__first_xdata.timestamp is utc datetime, so just use 'fromtimestamp' to get utc POSIX timestamp
             return datetime.datetime.fromtimestamp(self.__first_xdata.timestamp.timestamp() + numpy.sum(self.__drift_data_frame[3]))
         else:
-            return datetime.datetime.utcnow()
+            return DateTime.utcnow()
 
     def get_drift_rate(self, *, n: typing.Optional[int] = None) -> Geometry.FloatSize:
         """Return the drift rate over the last n measurements."""
@@ -309,7 +310,7 @@ class DriftCorrectionBehavior:
                     frame_parameters.subscan_fractional_center = Geometry.FloatPoint(drift_region.center.y, drift_region.center.x)
                     frame_parameters.subscan_rotation = drift_rotation
                     # attempt to keep drift area in roughly the same position by adding in the accumulated correction.
-                    utc_time = utc_time or datetime.datetime.utcnow()
+                    utc_time = utc_time or DateTime.utcnow()
                     delta_nm = self.__drift_tracker.predict_drift(utc_time) if self.__use_prediction else self.__drift_tracker.total_delta_nm
                     frame_parameters.center_nm = frame_parameters.center_nm - delta_nm
                     # print(f"measure with center_nm {frame_parameters.center_nm}")

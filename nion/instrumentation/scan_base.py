@@ -34,6 +34,7 @@ from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller as STEMController
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
+from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
@@ -2293,7 +2294,7 @@ class ScanDataStream(Acquisition.DataStream):
         # updated and the accumulated would have to be reset.
         if self.__drift_tracker:
             camera_sequence_overhead = self.__camera_data_stream.camera_sequence_overhead if self.__camera_data_stream else 0.0
-            delta_nm = self.__drift_tracker.predict_drift(datetime.datetime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
+            delta_nm = self.__drift_tracker.predict_drift(DateTime.utcnow() + datetime.timedelta(seconds=camera_sequence_overhead))
             # print(f"predicted {delta_nm}")
             self.__scan_frame_parameters.center_nm = self.__scan_frame_parameters_center_nm - delta_nm
         # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
