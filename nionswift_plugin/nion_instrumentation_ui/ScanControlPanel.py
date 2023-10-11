@@ -402,7 +402,8 @@ class ScanControlStateController:
             if self.is_playing:
                 self.__scan_hardware_source.stop_playing()
             else:
-                self.__scan_hardware_source.start_playing()
+                frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+                self.__scan_hardware_source.start_playing(frame_parameters=frame_parameters)
 
     # must be called on ui thread
     def handle_abort_clicked(self) -> None:
