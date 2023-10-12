@@ -2188,15 +2188,16 @@ class ActionDataStream(ContainerDataStream):
     def __check_action(self) -> None:
         if not self.is_finished and not self.is_aborted:
             if self.__complete_channel_count == self.__channel_count:
-                assert self.__index < numpy.prod(self.__shape, dtype=numpy.uint64)
-                c = better_unravel_index(self.__index, self.__shape)
-                self.__delegate.perform(c)
-                self.__index += 1
-                self.__complete_channel_count = 0
+                # only proceed if all channels have completed the frame and index is in range.
+                if self.__index < numpy.prod(self.__shape, dtype=numpy.uint64):
+                    c = better_unravel_index(self.__index, self.__shape)
+                    self.__delegate.perform(c)
+                    self.__index += 1
+                    self.__complete_channel_count = 0
 
     def _advance_stream(self) -> None:
-        super()._advance_stream()
         self.__check_action()
+        super()._advance_stream()
 
     def _finish_stream(self) -> None:
         self.__delegate.finish()
