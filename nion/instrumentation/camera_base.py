@@ -2726,6 +2726,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def _send_next(self) -> None:
         if self.__record_task:
+            # use send_next to send the data acquiring a sequence of single frames
             if self.__record_task.is_finished:
                 # data metadata describes the data being sent from this stream: shape, data type, and descriptor
                 data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
@@ -2736,9 +2737,15 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 xdata = xdatas[0] if xdatas else None
                 data = xdata.data if xdata else None
                 assert data is not None
-                data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None,
-                                                                    source_data_slice, state)
+                data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None, source_data_slice, state)
                 self.fire_data_available(data_stream_event)
+
+    def _advance_stream(self) -> None:
+        if self.__record_task:
+            # use advance_stream to start the next frame when acquiring a sequence of single frames
+            # this ensures that actions can take place (which occur in advance stream) after sending the data but
+            # before starting the next frame.
+            if self.__record_task.is_finished:
                 self.__record_count -= 1
                 if self.__record_count > 0:
                     acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
