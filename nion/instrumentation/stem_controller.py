@@ -29,6 +29,7 @@ from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
 from nion.utils import Registry
+from nion.utils import Stream
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DisplayItem
@@ -620,6 +621,17 @@ class STEMController(Observable.Observable):
     def get_control_state(self, name: str) -> typing.Optional[str]:
         value_exists, value = self.TryGetVal(name)
         return "unknown" if value_exists else None
+
+    def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]:
+        """Return a stream of values for the given control.
+
+        Example snippet::
+
+            stream = stem_controller.get_control_value_stream("C10")
+            listener = stream.listen(lambda value: print(value))
+
+        """
+        raise NotImplementedError()
 
     def get_property(self, name: str) -> typing.Any:
         if name in ("probe_position", "probe_state"):
