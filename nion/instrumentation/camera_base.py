@@ -2498,10 +2498,6 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.acquire_sequence_cancel()
 
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
-        # if no partial data, there is no next data. this avoids a race condition during testing; not sure
-        # if it applied to real acquisition without further testing.
-        if not self.__partial_data_info:
-            return None
         valid_rows = self.__partial_data_info.valid_rows
         width = self.__slice[1].stop - self.__slice[1].start
         valid_count = self.__partial_data_info.valid_count if self.__partial_data_info.valid_count is not None else valid_rows * (width + self.__flyback_pixels)
@@ -2598,10 +2594,6 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.acquire_sequence_cancel()
 
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
-        # if no partial data, there is no next data. this avoids a race condition during testing; not sure
-        # if it applied to real acquisition without further testing.
-        if not self.__partial_data_info:
-            return None
         valid_count = self.__partial_data_info.valid_count
         assert valid_count is not None
         if valid_count > 0:
@@ -2747,17 +2739,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 assert data is not None
                 data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None, source_data_slice, state)
                 self.fire_data_available(data_stream_event)
-
-    def _advance_stream(self) -> None:
-        if self.__record_task:
-            # use advance_stream to start the next frame when acquiring a sequence of single frames
-            # this ensures that actions can take place (which occur in advance stream) after sending the data but
-            # before starting the next frame.
-            if self.__record_task.is_finished:
-                self.__record_count -= 1
-                if self.__record_count > 0:
-                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
-                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
         else:
             assert self.__camera_device_stream_interface
             partial_data = self.__camera_device_stream_interface.get_next_data()
@@ -2801,6 +2782,17 @@ class CameraFrameDataStream(Acquisition.DataStream):
                     self.__progress = valid_index / self.__total_count
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
+
+    def _advance_stream(self) -> None:
+        if self.__record_task:
+            # use advance_stream to start the next frame when acquiring a sequence of single frames
+            # this ensures that actions can take place (which occur in advance stream) after sending the data but
+            # before starting the next frame.
+            if self.__record_task.is_finished:
+                self.__record_count -= 1
+                if self.__record_count > 0:
+                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
+                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
 
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
         return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
