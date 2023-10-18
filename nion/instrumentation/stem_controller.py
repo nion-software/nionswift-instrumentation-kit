@@ -626,10 +626,10 @@ class STEMController(Observable.Observable):
     def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]:
         """Return a stream of values for the given control.
 
-        Example snippet::
+        Example snippet (outputs to Output window, not script)::
 
             stream = stem_controller.get_control_value_stream("C10")
-            listener = stream.listen(lambda value: print(value))
+            listener = stream.value_stream.listen(lambda value: print(value))
 
         """
         raise NotImplementedError()
