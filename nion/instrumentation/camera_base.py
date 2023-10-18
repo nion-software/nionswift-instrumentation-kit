@@ -2498,6 +2498,10 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.acquire_sequence_cancel()
 
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
+        # if no partial data, there is no next data. this avoids a race condition during testing; not sure
+        # if it applied to real acquisition without further testing.
+        if not self.__partial_data_info:
+            return None
         valid_rows = self.__partial_data_info.valid_rows
         width = self.__slice[1].stop - self.__slice[1].start
         valid_count = self.__partial_data_info.valid_count if self.__partial_data_info.valid_count is not None else valid_rows * (width + self.__flyback_pixels)
@@ -2594,6 +2598,10 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         self.__camera_hardware_source.acquire_sequence_cancel()
 
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
+        # if no partial data, there is no next data. this avoids a race condition during testing; not sure
+        # if it applied to real acquisition without further testing.
+        if not self.__partial_data_info:
+            return None
         valid_count = self.__partial_data_info.valid_count
         assert valid_count is not None
         if valid_count > 0:
