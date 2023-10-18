@@ -8,6 +8,7 @@ import dataclasses
 import enum
 import functools
 import gettext
+import logging
 import math
 import threading
 import time
@@ -1695,6 +1696,22 @@ component_unregistered_listener = Registry.listen_component_unregistered_event(c
 
 for component in Registry.get_components_by_type("stem_controller"):
     component_registered(component, {"stem_controller"})
+
+
+@dataclasses.dataclass
+class ConsoleStartupInfo:
+    console_startup_id: str
+    console_startup_lines: typing.Sequence[str]
+    console_startup_help: typing.Optional[typing.Sequence[str]]
+
+
+class ConsoleStartupComponent:
+    def get_console_startup_info(self, logger: logging.Logger) -> ConsoleStartupInfo:
+        logger.info("STEM Controller Console Startup (stem_controller)")
+        return ConsoleStartupInfo("stem_controller", ["stem_controller = Registry.get_component('stem_controller')"], None)
+
+
+Registry.register_component(ConsoleStartupComponent(), {"console-startup"})
 
 
 def register_event_loop(event_loop: asyncio.AbstractEventLoop) -> None:
