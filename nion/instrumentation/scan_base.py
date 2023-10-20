@@ -1529,12 +1529,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_center = None
             frame_parameters.subscan_rotation = 0.0
 
-    def apply_subscan(self, frame_parameters: ScanFrameParameters) -> None:
-        if frame_parameters.subscan_fractional_size and frame_parameters.subscan_fractional_center:
-            pass  # let the parameters speak for themselves
-        else:
-            self.__apply_subscan_parameters(frame_parameters)
-
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
             # if subscan enabled, ensure there is a subscan region
