@@ -1,6 +1,15 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+22.1.0 (2023-10-23)
+-------------------
+- Add console startup component to define stem_controller.
+- Fix #161. Ensures proper scan after low level changes.
+- Allow enabled channels to be set with frame parameters.
+- Fix issue where acquisition control being set past last index.
+- Begin work on new acquisition API (work in progress).
+- Python 3.12 compatibility.
+
 22.0.0 (2023-09-14)
 -------------------
 - Fix issues with intermittent errors during synchronized acquisition.
