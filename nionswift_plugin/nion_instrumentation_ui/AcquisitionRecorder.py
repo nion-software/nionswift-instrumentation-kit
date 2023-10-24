@@ -99,7 +99,6 @@ class Controller:
                     time.sleep(0.01)
                 while (i := hardware_source.get_sequence_buffer_count()) < frame_count:
                     time.sleep(0.2)
-                    self.progress_model.value = min(100, int(100 * i / frame_count))
                     if self.cancel_event.is_set():
                         return False, max(i - 1, 0)
                 return True, frame_count
@@ -109,7 +108,7 @@ class Controller:
             return False, 0
 
         if do_acquire:
-            print("AR: start playing")
+            print(f"AR: start playing {time.time()}")
             hardware_source.prepare_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             hardware_source.start_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             print("AR: wait for acquire")
@@ -126,9 +125,10 @@ class Controller:
             # this will execute in a thread; the enclosing async routine will continue when it finishes
             try:
                 scan_id = uuid.uuid4()
-                for _ in range(actual_count):
+                for i in range(actual_count):
                     if self.cancel_event.is_set():
                         return False
+                    self.progress_model.value = min(100, int(i / actual_count * 100))
                     xdata_group_list.append(list(hardware_source.pop_sequence_buffer_data(scan_id).values()))
                 self.progress_model.value = 100
                 return True
@@ -197,7 +197,7 @@ class Controller:
             hardware_source.start_playing()
         self.state.value = "idle"
         self.progress_model.value = 0
-        print("AR: done")
+        print(f"AR: done {time.time()}")
 
     def cancel(self) -> None:
         self.cancel_event.set()
