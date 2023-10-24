@@ -2381,7 +2381,6 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
         # configure the scan uuid and scan frame parameters.
         scan_id = self.__scan_id
         scan_frame_parameters = self.__scan_frame_parameters
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
 
         # gather the scan metadata.
         scan_metadata: typing.Dict[str, typing.Any] = dict()

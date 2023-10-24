@@ -33,6 +33,48 @@ class TestAcquisitionClass(unittest.TestCase):
         self.assertEqual((3, 2, 2), values.shape)
         self.assertTrue(numpy.array_equal(numpy.array([[[-1.0, -1.5], [-1.0, 1.5]], [[0.0, -1.5], [0.0, 1.5]], [[1.0, -1.5], [1.0, 1.5]]], dtype=float), values))
 
+    def test_single_scan_with_valid_scan_context(self) -> None:
+        with self.__test_context() as test_context:
+            test_context.scan_hardware_source.scan_context.fov_nm = 100.0
+            test_context.scan_hardware_source.scan_context.size = Geometry.IntSize(100, 100)
+            test_context.scan_hardware_source.scan_context.rotation_rad = 0.0
+            test_context.scan_hardware_source.scan_context.center_nm = Geometry.IntPoint(0, 0)
+
+            acquisition_factory = Acquisition.acquisition_procedure_factory()
+
+            pixel_size: typing.Final = Geometry.IntSize(200, 200)
+
+            scan_device =  acquisition_factory.create_scan_device()
+            scan_parameters = acquisition_factory.create_scan_parameters(
+                pixel_time_us=1.0,
+                pixel_size=pixel_size,
+                fov_nm=100,
+                rotation_rad=0.0
+            )
+
+            device_acquisition_parameters = acquisition_factory.create_device_acquisition_parameters(device=scan_device, device_parameters=scan_parameters, device_channels=(acquisition_factory.create_device_channel_specifier(channel_index=0),))
+
+            scan_acquisition_step = acquisition_factory.create_device_acquisition_step(device_acquisition_parameters=device_acquisition_parameters)
+
+            # define the acquisition procedure using the acquisition step.
+            acquisition_procedure = acquisition_factory.create_acquisition_procedure(
+                devices=[scan_device],
+                steps=(scan_acquisition_step,))
+
+            # import pprint
+            # import dataclasses
+            # pprint.pprint(dataclasses.asdict(acquisition_procedure))
+
+            # create an acquisition controller. this is the object that will perform the acquisition.
+            acquisition_controller = acquisition_factory.create_acquisition_controller(acquisition_procedure=acquisition_procedure)
+
+            # then perform the immediate acquisition.
+            acquisition_data = acquisition_controller.acquire_immediate()
+
+            # check the results.
+            self.assertEqual(1, len(acquisition_data))
+            self.assertEqual((pixel_size.height, pixel_size.width), list(acquisition_data.values())[0].data_shape)
+
     def test_series_of_ronchigrams(self) -> None:
         with self.__test_context() as test_context:
             acquisition_factory = Acquisition.acquisition_procedure_factory()
