@@ -1159,7 +1159,7 @@ class TestCameraControlClass(unittest.TestCase):
             data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
             with data_stream.ref():
                 drift_tracker = stem_device_controller.stem_controller.drift_tracker
-                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker) if drift_tracker else None
+                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
                 Acquisition.start_acquire(data_stream,
                                           data_stream.title or str(),
                                           data_stream.channel_names,
