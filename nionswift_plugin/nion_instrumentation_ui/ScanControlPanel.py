@@ -1297,23 +1297,29 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         line_scan_checkbox.on_checked_changed = self.__state_controller.handle_line_scan_enabled
 
         drift_checkbox = ui.create_check_box_widget(_("Drift Correct Every"))
-        drift_checkbox.on_checked_changed = self.__state_controller.handle_drift_enabled
-
         drift_settings_value = ui.create_line_edit_widget(properties={"width": 44, "stylesheet": "qproperty-alignment: AlignRight"})
         drift_settings_unit = ui.create_combo_box_widget([_("Scan Lines"), _("Scan Frames")])
 
+        def get_drift_settings() -> stem_controller.DriftCorrectionSettings:
+            drift_settings = stem_controller.DriftCorrectionSettings()
+            drift_settings.interval = (Converter.IntegerToStringConverter().convert_back(drift_settings_value.text) or 0) if drift_settings_value else 0
+            drift_settings.interval_units = stem_controller.DriftIntervalUnit(drift_settings_unit.current_index + 2 if drift_settings_unit.current_index else stem_controller.DriftIntervalUnit.LINE)
+            return drift_settings
+
+        def handle_drift_enabled(enabled: bool) -> None:
+            if enabled:
+                scan_controller.drift_settings = get_drift_settings()
+                self.__state_controller.handle_drift_enabled(enabled)
+
         def drift_value_edited(text: str) -> None:
-            drift_settings = copy.copy(scan_controller.drift_settings)
-            drift_settings.interval = Converter.IntegerToStringConverter().convert_back(text) or 0
-            scan_controller.drift_settings = drift_settings
+            scan_controller.drift_settings = get_drift_settings()
             drift_settings_value.request_refocus()
 
         def drift_unit_changed(index: typing.Optional[int]) -> None:
             if index is not None:
-                drift_settings = copy.copy(scan_controller.drift_settings)
-                drift_settings.interval_units = stem_controller.DriftIntervalUnit(index + 2)
-                scan_controller.drift_settings = drift_settings
+                scan_controller.drift_settings = get_drift_settings()
 
+        drift_checkbox.on_checked_changed = handle_drift_enabled
         drift_settings_value.on_editing_finished = drift_value_edited
         drift_settings_unit.on_current_index_changed = drift_unit_changed
 

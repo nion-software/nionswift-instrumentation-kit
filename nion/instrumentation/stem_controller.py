@@ -63,16 +63,30 @@ class LineScanState(enum.Enum):
 
 
 class DriftIntervalUnit(enum.IntEnum):
-    FRAME = 0
-    TIME = 1
-    LINE = 2
-    SCAN = 3
+    FRAME = 0  # each frame of SI (single pixel)
+    TIME = 1   # each time interval
+    LINE = 2   # each line of the scan
+    SCAN = 3   # each full scan
 
 
 class DriftCorrectionSettings:
-    def __init__(self) -> None:
-        self.interval = 0
-        self.interval_units = DriftIntervalUnit.FRAME
+    def __init__(self, interval: int = 0, interval_units: DriftIntervalUnit = DriftIntervalUnit.FRAME) -> None:
+        self.interval = interval
+        self.interval_units = interval_units
+
+    def __eq__(self, other: typing.Any) -> bool:
+        if other is None:
+            return False
+        if not isinstance(other, self.__class__):
+            return False
+        if other.interval != self.interval:
+            return False
+        if other.interval_units != self.interval_units:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"{self.interval=} {self.interval_units=}"
 
 
 AxisType = typing.Tuple[str, str]
