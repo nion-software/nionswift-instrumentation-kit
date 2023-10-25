@@ -1,6 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+22.1.1 (2023-10-25)
+-------------------
+- Fix multiple issues with drift correction during scans.
+- Fix issue with new acquisition API (still a work in progress)
+- Fix issue with 1D and 2D ramp acquisition using wrong device (scan) values.
+
 22.1.0 (2023-10-23)
 -------------------
 - Add console startup component to define stem_controller.
