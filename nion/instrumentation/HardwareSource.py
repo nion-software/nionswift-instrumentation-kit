@@ -752,7 +752,7 @@ class DataChannel:
         channel_index = self.channel_index
         channel_id = self.channel_id
         channel_name = self.name
-        metadata = dict(copy.deepcopy(data_and_metadata.metadata))
+        metadata = dict(data_and_metadata.metadata)
         hardware_source_metadata: typing.Dict[str, typing.Any] = dict()
         hardware_source_metadata["hardware_source_id"] = hardware_source_id
         if channel_index is not None:

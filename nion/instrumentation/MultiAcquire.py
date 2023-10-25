@@ -120,8 +120,8 @@ class ScanDataChannel:
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
-        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
-        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
+        data_item_metadata["MultiAcquire.settings"] = dict(self.__multi_acquire_settings)
+        data_item_metadata["MultiAcquire.parameters"] = dict(self.__multi_acquire_parameters[self.__current_parameters_index])
         data_item.metadata = data_item_metadata
         return data_item
 
@@ -148,9 +148,9 @@ class ScanDataChannel:
                 data_shape = (frames,) + data_shape
                 data_shape_and_dtype = (data_shape, data_shape_and_dtype[1])
             intensity_calibration = data_and_metadata.intensity_calibration
-            metadata = dict(copy.deepcopy(data_and_metadata.metadata))
-            metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
-            metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
+            metadata = dict(data_and_metadata.metadata)
+            metadata["MultiAcquire.settings"] = dict(self.__multi_acquire_settings)
+            metadata["MultiAcquire.parameters"] = dict(self.__multi_acquire_parameters[self.__current_parameters_index])
             data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
                                                          intensity_calibration,
                                                          dimensional_calibrations,
@@ -261,8 +261,8 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
         data_item_metadata["instrument"] = copy.deepcopy(self.__grab_sync_info.instrument_metadata)
         data_item_metadata["hardware_source"] = copy.deepcopy(self.__grab_sync_info.camera_metadata)
         data_item_metadata["scan"] = copy.deepcopy(self.__grab_sync_info.scan_metadata)
-        data_item_metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
-        data_item_metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
+        data_item_metadata["MultiAcquire.settings"] = dict(self.__multi_acquire_settings)
+        data_item_metadata["MultiAcquire.parameters"] = dict(self.__multi_acquire_parameters[self.__current_parameters_index])
         data_item.metadata = data_item_metadata
         return data_item
 
@@ -304,7 +304,7 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
         is_sequence = axes_descriptor.sequence_axes is not None
         collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
         datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0
-        metadata = dict(copy.deepcopy(data_and_metadata.metadata))
+        metadata = dict(data_and_metadata.metadata)
 
         src_slice: typing.List[slice] = list()
         dst_slice: typing.List[slice] = list()
@@ -362,8 +362,8 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
                                data_and_metadata.dimensional_calibrations[-1].scale / exposure_s / _number_frames)
             intensity_calibration = Calibration.Calibration(scale=intensity_scale)
 
-        metadata["MultiAcquire.settings"] = copy.deepcopy(dict(self.__multi_acquire_settings))
-        metadata["MultiAcquire.parameters"] = copy.deepcopy(dict(self.__multi_acquire_parameters[self.__current_parameters_index]))
+        metadata["MultiAcquire.settings"] = dict(self.__multi_acquire_settings)
+        metadata["MultiAcquire.parameters"] = dict(self.__multi_acquire_parameters[self.__current_parameters_index])
         # This is needed for metadata that changes with each spectrum image in the stack and needs to be preserved.
         # One usecase is the storage information that comes with virtual detector data that has the full dataset saved
         # in the background. Currently the camera defines which metadata keys to stack and we copy that information
@@ -567,7 +567,7 @@ class MultiAcquireController:
     def set_offset_x(self, index: int, offset_x: float) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        parameters = dict(copy.deepcopy(d))
+        parameters = dict(d)
         if offset_x != parameters.get('offset_x'):
             parameters['offset_x'] = offset_x
             self.spectrum_parameters[index] = parameters
@@ -580,7 +580,7 @@ class MultiAcquireController:
     def set_exposure_ms(self, index: int, exposure_ms: float) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        parameters = dict(copy.deepcopy(d))
+        parameters = dict(d)
         if exposure_ms != parameters.get('exposure_ms'):
             parameters['exposure_ms'] = exposure_ms
             self.spectrum_parameters[index] = parameters
@@ -593,7 +593,7 @@ class MultiAcquireController:
     def set_frames(self,index: int, frames: int) -> None:
         assert index < len(self.spectrum_parameters), 'Index {:.0f} > then number of spectra defined. Add a new spectrum before changing its parameters!'.format(index)
         d = typing.cast(typing.Mapping[str, typing.Any], self.spectrum_parameters[index])
-        parameters = dict(copy.deepcopy(d))
+        parameters = dict(d)
         if frames != parameters.get('frames'):
             parameters['frames'] = frames
             self.spectrum_parameters[index] = parameters

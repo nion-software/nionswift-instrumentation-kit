@@ -1641,7 +1641,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
         data_element: ImportExportManager.DataElementType = dict()
         data_element["metadata"] = dict()
-        data_element["metadata"]["hardware_source"] = copy.deepcopy(dict(properties))
+        data_element["metadata"]["hardware_source"] = dict(properties)
         data_element["data"] = data
         data_element["version"] = 1
         data_element["state"] = "complete"
@@ -2146,7 +2146,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         acquisition_data = AcquisitionData()
         data_element = acquisition_data.data_element
         data_element["metadata"] = dict()
-        data_element["metadata"]["hardware_source"] = copy.deepcopy(dict(properties))
+        data_element["metadata"]["hardware_source"] = dict(properties)
         data_element["data"] = data
         data_element["version"] = 1
         data_element["state"] = "complete"
@@ -2507,7 +2507,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             is_complete = self.__partial_data_info.is_complete
             camera_metadata: typing.Dict[str, typing.Any] = dict()
             self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
-            metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
+            metadata = dict(uncropped_xdata.metadata)
             # this is a hack to prevent potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
@@ -2601,7 +2601,7 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             is_complete = self.__partial_data_info.is_complete
             camera_metadata: typing.Dict[str, typing.Any] = dict()
             self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
-            metadata = dict(copy.deepcopy(uncropped_xdata.metadata))
+            metadata = dict(uncropped_xdata.metadata)
             # this is a hack to prevent some of the potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
