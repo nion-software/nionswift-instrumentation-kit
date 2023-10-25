@@ -243,6 +243,27 @@ def ravel_slice_stop(slices: SliceType, shape: ShapeType) -> int:
     i = tuple(s.stop if s.stop is not None else l for s, l in zip(slices, shape))
     return better_ravel_index(i, shape) - better_ravel_index((1,) * len(slices[:-1]) + (0,), shape)
 
+def simple_unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typing.Tuple[typing.Tuple[slice, ...], ...]:
+    shape_plus = (shape[0] + 1,) + tuple(shape[1:])
+    index0 = numpy.unravel_index(range_slice.start, shape_plus)
+    index1 = numpy.unravel_index(range_slice.stop, shape_plus)
+    ss: typing.List[slice] = list()
+    b = False
+    for i in reversed(range(0, len(shape))):
+        i0 = index0[i]
+        i1 = index1[i]
+        if i0 == i1 and not b:
+            ss.append(slice(None))
+        else:
+            if b:
+                ss.append(slice(i0, i0 + 1))
+            else:
+                b = True
+                if i1 == 0:
+                    ss.append(slice(i0, i1 + shape[i]))
+                else:
+                    ss.append(slice(i0, i1))
+    return (tuple(reversed(ss)),)
 
 def unravel_flat_slice(range_slice: slice, shape: typing.Sequence[int]) -> typing.Tuple[typing.Tuple[slice, ...], ...]:
     start, stop = range_slice.start, range_slice.stop
@@ -2361,7 +2382,7 @@ class AccumulatedDataStream(ContainerDataStream):
         dest_slice_offest = self.__dest_indexes.get(channel, 0)
         dest_slice = slice(dest_slice_offest + source_start, dest_slice_offest + source_stop)
         self.__dest_indexes[channel] = dest_slice.stop % dest_count
-        new_source_slices = unravel_flat_slice(dest_slice, data_metadata.data_shape)
+        new_source_slices = simple_unravel_flat_slice(dest_slice, data_metadata.data_shape)
         assert len(new_source_slices) == 1
         new_source_slice = new_source_slices[0]
         self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_slice.start],
