@@ -1983,7 +1983,8 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
                                  "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                             selected_display_panel.change_display_panel_content(d)
 
-                    display_name = "%s (%s)" % (hardware_source.display_name, view_data_channel_specifier.channel_name or "Scan Data")
+                    channel_name = view_data_channel_specifier.channel_name or _("Scan Data")
+                    display_name = f"{hardware_source.display_name} ({channel_name})"
                     assert view_data_channel_specifier.channel_id
                     data_channel_id = view_data_channel_specifier.channel_id + ("_" + view_data_channel_specifier.channel_variant if view_data_channel_specifier.channel_variant else "")
                     action = display_type_menu.add_menu_item(display_name, functools.partial(switch_to_live_controller, hardware_source, data_channel_id))

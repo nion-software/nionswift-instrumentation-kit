@@ -1219,7 +1219,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 return new_data_channel_specifier
         if data_channel_specifier.channel_variant == "subscan":
             return DataChannelSpecifier(data_channel_specifier.channel_id, data_channel_specifier.channel_variant, data_channel_specifier.channel_name + _(" Subscan"))
-        return DataChannelSpecifier(data_channel_specifier.channel_id, None, data_channel_specifier.channel_name)
+        if data_channel_specifier.channel_variant == "drift":
+            return DataChannelSpecifier(data_channel_specifier.channel_variant, None, _("Drift"))
+        return DataChannelSpecifier(data_channel_specifier.channel_id, data_channel_specifier.channel_variant, data_channel_specifier.channel_name)
 
     # subclasses can implement this method which is called when the data channels are updated.
     def data_channels_updated(self) -> None:
