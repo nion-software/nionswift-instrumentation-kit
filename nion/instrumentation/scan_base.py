@@ -2655,7 +2655,15 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         section_height: typing.Optional[int] = None
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker and scan_context_description.drift_interval_lines > 0:
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, scan_context_description.drift_interval_scans)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
+                scan_hardware_source,
+                scan_frame_parameters,
+                drift_tracker,
+                scan_context_description.drift_interval_scans,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation
+            )
             section_height = scan_context_description.drift_interval_lines
         enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
 

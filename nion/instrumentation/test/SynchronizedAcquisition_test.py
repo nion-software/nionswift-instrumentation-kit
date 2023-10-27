@@ -617,7 +617,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             drift = Geometry.FloatSize(0.0, 1.5e-9)
             # we cannot use drift prediction since we are running a test using the scan mover, which is not continuous.
             # this is still measuring drift, just not using timing to predict its future location.
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker, 0, use_prediction=False)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
+                scan_hardware_source,
+                scan_frame_parameters,
+                scan_hardware_source.drift_tracker,
+                0,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation,
+                use_prediction=False)
             scan_mover_functor = ScanMoverFunctor(scan_hardware_source, drift, drift_correction_functor)
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
@@ -646,7 +654,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker, 0)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
+                scan_hardware_source,
+                scan_frame_parameters,
+                scan_hardware_source.drift_tracker,
+                0,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation,
+                use_prediction=False)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -687,7 +703,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             camera_data_channel = None
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, scan_hardware_source.drift_tracker, 0)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
+                scan_hardware_source,
+                scan_frame_parameters,
+                scan_hardware_source.drift_tracker,
+                0,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation,
+                use_prediction=False)
             def do_grab():
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
@@ -719,7 +743,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.6554, 0.2932), Geometry.FloatSize(0.15, 0.15))
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(drift_tracker, scan_hardware_source, scan_frame_parameters, 0)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(
+                drift_tracker,
+                scan_hardware_source,
+                scan_frame_parameters,
+                0,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation
+            )
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)
@@ -756,7 +788,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_hardware_source.drift_rotation = rotation
             document_controller.periodic()
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(drift_tracker, scan_hardware_source, scan_frame_parameters, 0)
+            drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(
+                drift_tracker,
+                scan_hardware_source,
+                scan_frame_parameters,
+                0,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation
+            )
             self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
             self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
             # offset will be rotated into the context reference frame
@@ -800,7 +840,15 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_customization.dwell_time_us = 17.3
                 scan_customization.scan_width_pixels = 111
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(drift_tracker, scan_hardware_source, scan_frame_parameters, 0)
+                drift_correction_behavior = DriftTracker.DriftCorrectionBehavior(
+                    drift_tracker,
+                    scan_hardware_source,
+                    scan_frame_parameters,
+                    0,
+                    scan_hardware_source.drift_channel_id,
+                    scan_hardware_source.drift_region,
+                    scan_hardware_source.drift_rotation
+                )
                 self.assertEqual(0.0, drift_tracker.last_delta_nm.width)
                 self.assertEqual(0.0, drift_tracker.last_delta_nm.height)
                 drift_correction_behavior.prepare_section(utc_time=drift_tracker._last_entry_utc_time)

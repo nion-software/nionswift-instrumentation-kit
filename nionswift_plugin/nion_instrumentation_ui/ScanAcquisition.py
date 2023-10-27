@@ -116,7 +116,15 @@ class ScanAcquisitionController:
         section_height = section_height_override
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker and (self.__scan_specifier.drift_interval_lines > 0 or self.__scan_specifier.drift_interval_scans > 0):
-            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(scan_hardware_source, scan_frame_parameters, drift_tracker, self.__scan_specifier.drift_interval_scans)
+            drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
+                scan_hardware_source,
+                scan_frame_parameters,
+                drift_tracker,
+                self.__scan_specifier.drift_interval_scans,
+                scan_hardware_source.drift_channel_id,
+                scan_hardware_source.drift_region,
+                scan_hardware_source.drift_rotation
+            )
             if self.__scan_specifier.drift_interval_lines > 0:
                 section_height = self.__scan_specifier.drift_interval_lines
         enable_drift_tracker = False

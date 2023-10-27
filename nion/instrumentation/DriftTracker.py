@@ -254,13 +254,19 @@ class DriftCorrectionBehavior:
                  drift_tracker: DriftTracker,
                  scan_hardware_source: scan_base.ScanHardwareSource,
                  scan_frame_parameters: scan_base.ScanFrameParameters,
-                 drift_scan_interval: int,
+                 drift_interval_scans: int,
+                 drift_channel_id: typing.Optional[str],
+                 drift_region: typing.Optional[Geometry.FloatRect],
+                 drift_rotation: float,
                  *, use_prediction: bool = True) -> None:
         # init with the frame parameters from the synchronized grab
         self.__drift_tracker = drift_tracker
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
-        self.__drift_scan_interval = drift_scan_interval
+        self.__drift_scan_interval = drift_interval_scans
+        self.__drift_channel_id = drift_channel_id
+        self.__drift_region = drift_region
+        self.__drift_rotation = drift_rotation
         self.__drift_scan_interval_index = 0
         self.__use_prediction = use_prediction
         # here we convert those frame parameters to the context
@@ -281,9 +287,9 @@ class DriftCorrectionBehavior:
             # start with the context frame parameters and adjust for the drift region
             frame_parameters = copy.deepcopy(self.__scan_frame_parameters)
             context_size = frame_parameters.pixel_size.to_float_size()
-            drift_channel_id = self.__scan_hardware_source.drift_channel_id
-            drift_region = self.__scan_hardware_source.drift_region
-            drift_rotation = self.__scan_hardware_source.drift_rotation
+            drift_channel_id = self.__drift_channel_id
+            drift_region = self.__drift_region
+            drift_rotation = self.__drift_rotation
             if drift_channel_id is not None and drift_region is not None:
                 drift_channel_index = self.__scan_hardware_source.get_channel_index(drift_channel_id)
                 assert drift_channel_index is not None
@@ -354,11 +360,18 @@ class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
     it has created with the functor object.
     """
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker, drift_scan_interval: int, *, use_prediction: bool = True) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource,
+                 scan_frame_parameters: scan_base.ScanFrameParameters, drift_tracker: DriftTracker,
+                 drift_interval_scans: int, drift_channel_id: typing.Optional[str],
+                 drift_region: typing.Optional[Geometry.FloatRect],
+                 drift_rotation: float, *, use_prediction: bool = True) -> None:
         self.scan_hardware_source = scan_hardware_source
         self.scan_frame_parameters = scan_frame_parameters
         self.__drift_tracker = drift_tracker
-        self.__drift_scan_interval = drift_scan_interval
+        self.__drift_interval_scans = drift_interval_scans
+        self.__drift_channel_id = drift_channel_id
+        self.__drift_region = drift_region
+        self.__drift_rotation = drift_rotation
         self.__use_prediction = use_prediction
         # for testing
         self._drift_correction_data_stream: typing.Optional[DriftCorrectionDataStream] = None
@@ -368,7 +381,10 @@ class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
         drift_correction_behavior = DriftCorrectionBehavior(self.__drift_tracker,
                                                             self.scan_hardware_source,
                                                             self.scan_frame_parameters,
-                                                            self.__drift_scan_interval,
+                                                            self.__drift_interval_scans,
+                                                            self.__drift_channel_id,
+                                                            self.__drift_region,
+                                                            self.__drift_rotation,
                                                             use_prediction=self.__use_prediction)
         self._drift_correction_data_stream = DriftCorrectionDataStream(drift_correction_behavior, data_stream)
         return self._drift_correction_data_stream
