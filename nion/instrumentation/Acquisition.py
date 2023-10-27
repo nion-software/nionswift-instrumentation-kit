@@ -2456,21 +2456,25 @@ class Acquisition:
         # this is called on the main thread. give data channel a chance to prepare.
         self.__data_stream.prepare_data_channel()
 
-    def acquire(self) -> None:
+    def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
             with self.__data_stream.ref():
-                acquire(self.__data_stream)
+                acquire(self.__data_stream, error_handler=error_handler)
                 self.__is_aborted = self.__data_stream.is_aborted
                 self.__is_error = self.__data_stream.is_error
         finally:
             self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
 
-    def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None]) -> None:
+    def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None], error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         async def grab_async() -> None:
             try:
                 self.prepare_acquire()
-                await asyncio.get_running_loop().run_in_executor(None, self.acquire)
+
+                def call_acquire() -> None:
+                    self.acquire(error_handler=error_handler)
+
+                await asyncio.get_running_loop().run_in_executor(None, call_acquire)
             finally:
                 on_completion()
                 self.__task = None
@@ -2777,7 +2781,9 @@ def _acquire_data_stream(data_stream: DataStream,
                          progress_value_model: Model.PropertyModel[int],
                          is_acquiring_model: Model.PropertyModel[bool],
                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
-                         event_loop: asyncio.AbstractEventLoop) -> None:
+                         event_loop: asyncio.AbstractEventLoop,
+                         *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
+                         ) -> None:
     """Perform acquisition of the data stream."""
 
     framed_data_stream = FramedDataStream(data_stream, data_channel=data_channel).add_ref()
@@ -2827,7 +2833,8 @@ def _acquire_data_stream(data_stream: DataStream,
                                                                                     acquisition_state,
                                                                                     scan_drift_logger, progress_task,
                                                                                     progress_value_model,
-                                                                                    is_acquiring_model))
+                                                                                    is_acquiring_model),
+                                                    error_handler=error_handler)
 
 
 def start_acquire(data_stream: DataStream,
@@ -2838,7 +2845,9 @@ def start_acquire(data_stream: DataStream,
                   drift_logger: typing.Optional[DriftTracker.DriftLogger],
                   progress_value_model: Model.PropertyModel[int],
                   is_acquiring_model: Model.PropertyModel[bool],
-                  event_loop: asyncio.AbstractEventLoop) -> None:
+                  event_loop: asyncio.AbstractEventLoop,
+                  *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
+                  ) -> None:
     with data_stream.ref():
         _acquire_data_stream(data_stream,
                              data_channel_provider.get_data_channel(title_base, channel_names),
@@ -2846,7 +2855,8 @@ def start_acquire(data_stream: DataStream,
                              progress_value_model,
                              is_acquiring_model,
                              drift_logger,
-                             event_loop)
+                             event_loop,
+                             error_handler=error_handler)
 
 
 

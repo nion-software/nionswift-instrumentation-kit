@@ -1128,7 +1128,14 @@ class TestCameraControlClass(unittest.TestCase):
                 with data_stream.ref():
                     self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
 
-    def __test_acq(self, document_controller: DocumentController.DocumentController, acquisition_device: Acquisition.AcquisitionDeviceLike, acquisition_method: Acquisition.AcquisitionMethodLike, expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> None:
+    def __test_acq(self,
+                   document_controller: DocumentController.DocumentController,
+                   acquisition_device: Acquisition.AcquisitionDeviceLike,
+                   acquisition_method: Acquisition.AcquisitionMethodLike,
+                   expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]],
+                   expected_error: bool = False,
+                   error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
+                   ) -> None:
 
         class DataChannelProvider(Acquisition.DataChannelProviderLike):
             def __init__(self, document_controller: DocumentController.DocumentController) -> None:
@@ -1168,7 +1175,8 @@ class TestCameraControlClass(unittest.TestCase):
                                           drift_logger,
                                           progress_value_model,
                                           is_acquiring_model,
-                                          document_controller.event_loop)
+                                          document_controller.event_loop,
+                                          error_handler=error_handler)
 
         last_progress_time = time.time()
         last_progress = progress_value_model.value
@@ -1181,7 +1189,8 @@ class TestCameraControlClass(unittest.TestCase):
                 last_progress = progress
                 last_progress_time = time.time()
             time.sleep(0.05)
-        self.assertFalse(acquisition_state.is_error)
+        self.assertEqual(expected_error, acquisition_state.is_error)
+        self.assertFalse(acquisition_state.is_active)
         if expected_dimensions:
             self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
             for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
@@ -1243,6 +1252,35 @@ class TestCameraControlClass(unittest.TestCase):
                 # confirm the acquisition is still running
                 self.assertTrue(test_context.scan_hardware_source.is_playing)
                 self.assertTrue(test_context.camera_hardware_source.is_playing)
+            finally:
+                # stop the hardware sources
+                test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
+                test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
+
+    def test_acquisition_panel_recovers_after_error_in_start_stream(self) -> None:
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            acquisition_device = make_camera_device(test_context)
+            acquisition_method = make_series_acquisition_method()
+            try:
+                def raise_exception() -> None:
+                    raise Exception("Error during acquisition")
+
+                had_error = False
+
+                def handle_error(e: Exception) -> None:
+                    nonlocal had_error
+                    had_error = True
+
+                test_context.camera_hardware_source._test_start_hook = raise_exception
+                test_context.camera_hardware_source._test_acquire_exception = lambda *args: None
+                # run the acquisition procedure
+                self.__test_acq(document_controller, acquisition_device, acquisition_method, [], True, handle_error)
+                # confirm the acquisition is not running
+                self.assertFalse(test_context.scan_hardware_source.is_playing)
+                self.assertFalse(test_context.camera_hardware_source.is_playing)
+                # confirm the error was handled
+                self.assertTrue(had_error)
             finally:
                 # stop the hardware sources
                 test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)

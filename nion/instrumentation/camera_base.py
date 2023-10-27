@@ -2885,7 +2885,10 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def _finish_stream(self) -> None:
         if self.__record_task:
-            self.__record_task.grab()  # ensure grab is finished
+            try:
+                self.__record_task.grab()  # ensure grab is finished
+            except Exception:
+                pass  # kill the exception here, it has already been handled and grab is only called for sync'ing.
             self.__record_task = typing.cast(typing.Any, None)
         else:
             assert self.__camera_device_stream_interface
