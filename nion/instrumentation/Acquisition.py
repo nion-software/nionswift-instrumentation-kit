@@ -822,7 +822,7 @@ class CollectedDataStream(DataStream):
         self.__indexes.clear()
         self.__all_channels_need_start = False
         self.__index_stack[-1].index = better_unravel_index(0, self.__collection_shape)
-        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_shape), self.__index_stack)
+        self.__data_stream.prepare_stream(DataStreamArgs(self.__collection_shape), list(self.__index_stack))
         self.__data_stream.start_stream(DataStreamArgs(self.__collection_shape))
         self.__data_stream_started = True
 
@@ -1188,7 +1188,7 @@ class StackedDataStream(DataStream):
         self.__current_index = 0
         self.__stream_args = DataStreamArgs((1,))
         self.__index_stack = list(index_stack)
-        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
+        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
         self.__sequence_count = stream_args.sequence_count
         self.__sequence_index = 0
 
@@ -1217,7 +1217,7 @@ class StackedDataStream(DataStream):
                     self.__current_index = 0
                     self.__sequence_index += 1
                 if self.__current_index < len(self.__data_streams):
-                    self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
+                    self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
                     self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
                     self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                     self.__data_streams[self.__current_index].start_stream(self.__stream_args)
@@ -1312,7 +1312,7 @@ class SequentialDataStream(DataStream):
         self.__current_index = 0
         self.__stream_args = DataStreamArgs((1,))
         self.__index_stack = list(index_stack)
-        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
+        self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
         self.__sequence_count = stream_args.sequence_count
         self.__sequence_index = 0
 
@@ -1340,7 +1340,7 @@ class SequentialDataStream(DataStream):
                 self.__current_index = 0
                 self.__sequence_index += 1
             if self.__current_index < len(self.__data_streams):
-                self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, self.__index_stack)
+                self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
                 self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, SequentialDataStream.__data_available))
                 self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                 self.__data_streams[self.__current_index].start_stream(self.__stream_args)
