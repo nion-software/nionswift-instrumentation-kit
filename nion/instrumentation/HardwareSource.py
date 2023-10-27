@@ -401,6 +401,17 @@ class AcquisitionTask:
         self.__finished = True
         self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, e)
 
+    def __safe_stop_acquisition(self) -> None:
+        try:
+            self._stop_acquisition()
+        except Exception as e:
+            if callable(self._test_acquire_exception):
+                self._test_acquire_exception(e)
+            else:
+                import traceback
+                logging.debug(f"STOP Error: {e}")
+                traceback.print_exc()
+
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
     # one can't be executing when the other is called.
@@ -441,7 +452,7 @@ class AcquisitionTask:
             except Exception as e:
                 # the task is finished if it doesn't execute
                 # logging.debug("exception")
-                self._safe_stop_acquisition()
+                self.__safe_stop_acquisition()
                 self.__mark_as_error(e)
                 raise
 
@@ -576,17 +587,6 @@ class AcquisitionTask:
     # must be thread safe
     def _stop_acquisition(self) -> None:
         self.stop_event.fire()
-
-    def _safe_stop_acquisition(self) -> None:
-        try:
-            self._stop_acquisition()
-        except Exception as e:
-            if callable(self._test_acquire_exception):
-                self._test_acquire_exception(e)
-            else:
-                import traceback
-                logging.debug(f"STOP Error: {e}")
-                traceback.print_exc()
 
     # subclasses are expected to implement this function efficiently since it will
     # be repeatedly called. in practice that means that subclasses MUST sleep (directly

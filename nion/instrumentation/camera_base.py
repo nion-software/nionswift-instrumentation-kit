@@ -348,6 +348,70 @@ class CameraDevice(typing.Protocol):
         """
         pass
 
+    def acquire_single_begin(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> PartialData:
+        """Begin single acquire.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        partial_data = self.acquire_sequence_begin(camera_frame_parameters, 1, **kwargs)
+        xdata = partial_data.xdata
+        data_shape = xdata.data_shape
+        new_xdata = DataAndMetadata.new_data_and_metadata(
+            xdata.data.reshape(data_shape[1:]),
+            xdata.intensity_calibration,
+            xdata.dimensional_calibrations,
+            xdata.metadata,
+            xdata.timestamp,
+            DataAndMetadata.DataDescriptor(False, 0, xdata.data_descriptor.datum_dimension_count),
+            xdata.timezone,
+            xdata.timezone_offset
+        )
+        return PartialData(new_xdata, partial_data.is_complete, partial_data.is_canceled, partial_data.valid_rows, partial_data.valid_count)
+
+    def acquire_single_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
+        """Continue single acquire.
+
+        The camera device should wait up to update_period seconds for data and populate PartialData with data and
+        information about the acquisition.
+
+        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+        """
+        partial_data = self.acquire_sequence_continue(update_period=update_period, **kwargs)
+        xdata = partial_data.xdata
+        data_shape = xdata.data_shape
+        new_xdata = DataAndMetadata.new_data_and_metadata(
+            xdata.data.reshape(data_shape[1:]),
+            xdata.intensity_calibration,
+            xdata.dimensional_calibrations,
+            xdata.metadata,
+            xdata.timestamp,
+            DataAndMetadata.DataDescriptor(False, 0, xdata.data_descriptor.datum_dimension_count),
+            xdata.timezone,
+            xdata.timezone_offset
+        )
+        return PartialData(new_xdata, partial_data.is_complete, partial_data.is_canceled, partial_data.valid_rows, partial_data.valid_count)
+
+    def acquire_single_end(self, **kwargs: typing.Any) -> None:
+        """Clean up single acquire.
+
+        The camera device can clean up anything internal that was required for acquisition.
+
+        The memory returned during acquire_single_begin or acquire_single_continue must remain valid until
+        the last Python reference to that memory is released.
+        """
+        self.acquire_sequence_end(**kwargs)
+
+    def acquire_single_cancel(self) -> None:
+        """Request to cancel a single acquisition.
+
+        Future calls to acquire_single_continue should have the is_cancelled flag set.
+        """
+        self.acquire_sequence_cancel()
+
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         pass
@@ -768,6 +832,70 @@ class CameraDevice3(typing.Protocol):
         """
         pass
 
+    def acquire_single_begin(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> PartialData:
+        """Begin single acquire.
+
+        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
+        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+
+        Returns PartialData.
+        """
+        partial_data = self.acquire_sequence_begin(camera_frame_parameters, 1, **kwargs)
+        xdata = partial_data.xdata
+        data_shape = xdata.data_shape
+        new_xdata = DataAndMetadata.new_data_and_metadata(
+            xdata.data.reshape(data_shape[1:]),
+            xdata.intensity_calibration,
+            xdata.dimensional_calibrations[1:],
+            xdata.metadata,
+            xdata.timestamp,
+            DataAndMetadata.DataDescriptor(False, 0, xdata.data_descriptor.datum_dimension_count),
+            xdata.timezone,
+            xdata.timezone_offset
+        )
+        return PartialData(new_xdata, partial_data.is_complete, partial_data.is_canceled, partial_data.valid_rows, partial_data.valid_count)
+
+    def acquire_single_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
+        """Continue single acquire.
+
+        The camera device should wait up to update_period seconds for data and populate PartialData with data and
+        information about the acquisition.
+
+        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+        """
+        partial_data = self.acquire_sequence_continue(update_period=update_period, **kwargs)
+        xdata = partial_data.xdata
+        data_shape = xdata.data_shape
+        new_xdata = DataAndMetadata.new_data_and_metadata(
+            xdata.data.reshape(data_shape[1:]),
+            xdata.intensity_calibration,
+            xdata.dimensional_calibrations[1:],
+            xdata.metadata,
+            xdata.timestamp,
+            DataAndMetadata.DataDescriptor(False, 0, xdata.data_descriptor.datum_dimension_count),
+            xdata.timezone,
+            xdata.timezone_offset
+        )
+        return PartialData(new_xdata, partial_data.is_complete, partial_data.is_canceled, partial_data.valid_rows, partial_data.valid_count)
+
+    def acquire_single_end(self, **kwargs: typing.Any) -> None:
+        """Clean up single acquire.
+
+        The camera device can clean up anything internal that was required for acquisition.
+
+        The memory returned during acquire_single_begin or acquire_single_continue must remain valid until
+        the last Python reference to that memory is released.
+        """
+        self.acquire_sequence_end(**kwargs)
+
+    def acquire_single_cancel(self) -> None:
+        """Request to cancel a single acquisition.
+
+        Future calls to acquire_single_continue should have the is_cancelled flag set.
+        """
+        self.acquire_sequence_cancel()
+
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         return  # required to avoid being recognized as abstract by mypy
@@ -853,7 +981,14 @@ class AcquisitionData:
             self.__data_element.get("metadata", dict()).get("hardware_source", dict()).pop("counts_per_electron", None)
 
 
-class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
+class LiveCameraAcquisitionTask(HardwareSource.AcquisitionTask):
+    """An acquisition task used for live camera acquisition.
+
+    This task is suspendable and resumable, allowing higher priority acquisition to occur.
+
+    There is no guarantee about the timing of the acquisition, only that it will be as fast as possible. A frame
+    with exposure starting before the call to _start_acquisition may be included in the acquisition.
+    """
 
     def __init__(self, instrument_controller: InstrumentController, camera_hardware_source: CameraHardwareSource, is_continuous: bool,
                  camera_category: str, signal_type: typing.Optional[str], frame_parameters: CameraFrameParameters) -> None:
@@ -905,7 +1040,6 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
             self.__activate_frame_parameters()
         assert self.__frame_parameters is not None
         frame_parameters = self.__frame_parameters
-        binning = frame_parameters.binning
         integration_count = frame_parameters.integration_count if frame_parameters.integration_count else 1
         cumulative_frame_count = 0  # used for integration_count
         cumulative_data: typing.Optional[_NDArray] = None
@@ -938,6 +1072,46 @@ class CameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__frame_parameters = self.frame_parameters
         self.__pending_frame_parameters = None
         self.__camera.set_frame_parameters(self.__frame_parameters)
+
+
+class RecordCameraAcquisitionTask(HardwareSource.AcquisitionTask):
+    """An acquisition task used for recording a camera acquisition.
+
+    This task is not suspendable or resumable since it represents the highest priority acquisition.
+
+    The frame returned by this task must begin exposure after the call to _start_acquisition.
+    """
+
+    def __init__(self, camera_hardware_source: CameraHardwareSource, frame_parameters: CameraFrameParameters) -> None:
+        super().__init__(False)
+        self.__camera = camera_hardware_source.camera
+        self.__camera_hardware_source = camera_hardware_source
+        frame_parameters = frame_parameters or self.__camera_hardware_source.get_current_frame_parameters()
+        self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
+        self.__partial_data: typing.Optional[PartialData] = None
+
+    def _start_acquisition(self) -> bool:
+        if not super()._start_acquisition():
+            return False
+        self.__partial_data = self.__camera.acquire_single_begin(self.__frame_parameters)
+        return True
+
+    def _stop_acquisition(self) -> None:
+        super()._stop_acquisition()
+        self.__camera.acquire_single_cancel()
+
+    def _acquire_data_elements(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        while True:
+            self.__partial_data = self.__camera.acquire_single_continue()
+            if self.__partial_data.is_complete or self.__partial_data.is_canceled:
+                break
+            time.sleep(0.01)  # 10ms
+        self.__camera.acquire_single_end()
+        if self.__partial_data.is_complete:
+            xdata = self.__partial_data.xdata
+            properties = { "frame_number": 0 }
+            return [self.__camera_hardware_source.make_live_data_element(xdata.data, properties, xdata.timestamp, self.__frame_parameters, 1)]
+        return list()
 
 
 class Mask:
@@ -1466,7 +1640,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
+        return LiveCameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
 
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
@@ -1474,7 +1648,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self, False, self.__camera_category, self.__signal_type, record_parameters)
+        return RecordCameraAcquisitionTask(self, record_parameters)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         acquire_synchronized_begin = getattr(self.__camera, "acquire_synchronized_begin", None)
@@ -1530,7 +1704,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def __acquire_sequence_fallback(self, n: int, frame_parameters: CameraFrameParameters) -> typing.Optional[ImportExportManager.DataElementType]:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
         processing = frame_parameters.processing
-        acquisition_task = CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, frame_parameters)
+        acquisition_task = LiveCameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, frame_parameters)
         acquisition_task._start_acquisition()
         try:
             properties = None
@@ -1715,7 +1889,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def __current_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
         acquisition_task = self.__acquisition_task
-        if isinstance(acquisition_task, CameraAcquisitionTask):
+        if isinstance(acquisition_task, LiveCameraAcquisitionTask):
             acquisition_task.set_frame_parameters(CameraFrameParameters(frame_parameters.as_dict()))
         self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
@@ -2090,7 +2264,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def _create_acquisition_view_task(self) -> HardwareSource.AcquisitionTask:
         assert self.__frame_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
+        return LiveCameraAcquisitionTask(self.__get_instrument_controller(), self, True, self.__camera_category, self.__signal_type, self.__frame_parameters)
 
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
@@ -2098,7 +2272,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         record_parameters = CameraFrameParameters(frame_parameters.as_dict()) if frame_parameters else self.__record_parameters
         assert record_parameters is not None
-        return CameraAcquisitionTask(self.__get_instrument_controller(), self, False, self.__camera_category, self.__signal_type, record_parameters)
+        return RecordCameraAcquisitionTask(self, record_parameters)
 
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
         # added this because it turns out it is needed - sequence/sync prepare needs to go before
@@ -2221,7 +2395,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def __current_frame_parameters_changed(self, frame_parameters: CameraFrameParameters) -> None:
         acquisition_task = self.__acquisition_task
-        if isinstance(acquisition_task, CameraAcquisitionTask):
+        if isinstance(acquisition_task, LiveCameraAcquisitionTask):
             acquisition_task.set_frame_parameters(CameraFrameParameters(frame_parameters.as_dict()))
         self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)

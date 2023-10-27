@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Added single frame variants to camera device, utilize when recording.
+
 22.1.1 (2023-10-25)
 -------------------
 - Fix multiple issues with drift correction during scans.
