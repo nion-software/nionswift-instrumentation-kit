@@ -840,6 +840,7 @@ class CameraDevice3(typing.Protocol):
 
         Returns PartialData.
         """
+        self.acquire_sequence_prepare(camera_frame_parameters, 1, **kwargs)
         partial_data = self.acquire_sequence_begin(camera_frame_parameters, 1, **kwargs)
         xdata = partial_data.xdata
         data_shape = xdata.data_shape
@@ -1101,11 +1102,10 @@ class RecordCameraAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__camera.acquire_single_cancel()
 
     def _acquire_data_elements(self) -> typing.List[typing.Dict[str, typing.Any]]:
-        while True:
+        assert self.__partial_data
+        while not self.__partial_data.is_complete and not self.__partial_data.is_canceled:
+            time.sleep(0.010)  # 10ms
             self.__partial_data = self.__camera.acquire_single_continue()
-            if self.__partial_data.is_complete or self.__partial_data.is_canceled:
-                break
-            time.sleep(0.01)  # 10ms
         self.__camera.acquire_single_end()
         if self.__partial_data.is_complete:
             xdata = self.__partial_data.xdata
