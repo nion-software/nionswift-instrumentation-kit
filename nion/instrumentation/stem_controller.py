@@ -903,6 +903,34 @@ class GraphicSetController:
         self.__graphic_trackers = graphic_trackers
 
 
+class SafeEventLoop:
+    """Utility base class to monitor availability of event loop."""
+
+    def __init__(self, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
+        self.__event_loop : typing.Optional[asyncio.AbstractEventLoop] = event_loop
+        self.__document_close_listener = document_model.about_to_close_event.listen(self.__unlisten)
+        self.__closed = False
+
+    def __unlisten(self) -> None:
+        self.__closed = True
+
+    def _mark_closed(self) -> None:
+        if not self.__closed:
+            self.__closed = True
+            self.__document_close_listener.close()
+            self.__document_close_listener = typing.cast(typing.Any, None)
+            self.__event_loop = None
+
+    def _call_soon_threadsafe(self, fn: typing.Callable[...,  None], *args: typing.Any) -> None:
+        if not self.__closed:
+            def safe_fn() -> None:
+                if not self.__closed:
+                    fn(*args)
+
+            assert self.__event_loop
+            self.__event_loop.call_soon_threadsafe(safe_fn)
+
+
 class DisplayItemListModel(Observable.Observable):
     """Make an observable list model from the item source with a list as the item.
 
@@ -911,12 +939,12 @@ class DisplayItemListModel(Observable.Observable):
 
     def __init__(self,
                  document_model: DocumentModel.DocumentModel,
-                 call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None],
+                 safe_event_loop: SafeEventLoop,
                  item_key: str,
                  stem_controller: STEMController):
         super().__init__()
         self.__document_model = document_model
-        self.__call_soon_threadsafe = call_soon_threadsafe
+        self.__safe_event_loop = safe_event_loop
         self.__item_key = item_key
         self.__stem_controller = stem_controller
         self.__items : typing.List[DisplayItem.DisplayItem] = list()
@@ -938,6 +966,7 @@ class DisplayItemListModel(Observable.Observable):
         self.__document_close_listener = document_model.about_to_close_event.listen(unlisten)
 
     def close(self) -> None:
+        self.__safe_event_loop._mark_closed()
         if self.__change_event_listener:
             self.__change_event_listener.close()
             self.__change_event_listener = None
@@ -947,7 +976,6 @@ class DisplayItemListModel(Observable.Observable):
         self.__item_removed_listener = typing.cast(typing.Any, None)
         self.__document_close_listener.close()
         self.__document_close_listener = typing.cast(typing.Any, None)
-        self.__call_soon_threadsafe = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
     def __get_scan_context_display_items(self) -> typing.Set[DisplayItem.DisplayItem]:
@@ -999,7 +1027,7 @@ class DisplayItemListModel(Observable.Observable):
         if threading.current_thread() == threading.main_thread():
             self.__refilter()
         else:
-            self.__call_soon_threadsafe(self.__refilter)
+            self.__safe_event_loop._call_soon_threadsafe(self.__refilter)
 
     def clean(self, graphic_id: str) -> None:
         display_items = self.__get_scan_context_display_items()
@@ -1010,47 +1038,21 @@ class DisplayItemListModel(Observable.Observable):
                         display_item.remove_graphic(graphic).close()
 
 
-def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, call_soon_threadsafe: typing.Callable[[typing.Callable[..., None]], None]) -> DisplayItemListModel:
-    return DisplayItemListModel(document_model, call_soon_threadsafe, "display_items", stem_controller)
+def make_scan_display_item_list_model(document_model: DocumentModel.DocumentModel, stem_controller: STEMController, safe_event_loop: SafeEventLoop) -> DisplayItemListModel:
+    return DisplayItemListModel(document_model, safe_event_loop, "display_items", stem_controller)
 
 
-class EventLoopMonitor:
-    """Utility base class to monitor availability of event loop."""
-
-    def __init__(self, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        self.__event_loop : typing.Optional[asyncio.AbstractEventLoop] = event_loop
-        self.__document_close_listener = document_model.about_to_close_event.listen(self._unlisten)
-        self.__closed = False
-
-    def _unlisten(self) -> None:
-        pass
-
-    def _mark_closed(self) -> None:
-        self.__closed = True
-        self.__document_close_listener.close()
-        self.__document_close_listener = typing.cast(typing.Any, None)
-        self.__event_loop = None
-
-    def _call_soon_threadsafe(self, fn: typing.Callable[...,  None], *args: typing.Any) -> None:
-        if not self.__closed:
-            def safe_fn() -> None:
-                if not self.__closed:
-                    fn(*args)
-
-            assert self.__event_loop
-            self.__event_loop.call_soon_threadsafe(safe_fn)
-
-
-class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the probe (STEM controller) and updates data items and graphics."""
     count = 0
 
-    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        super().__init__(document_model, event_loop)
+    def __init__(self, stem_controller: STEMController, scan_display_items_model: DisplayItemListModel, document_model: DocumentModel.DocumentModel, safe_event_loop: SafeEventLoop):
+        super().__init__()
         self.__class__.count += 1
         self.__stem_controller = stem_controller
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__scan_display_items_model = scan_display_items_model
+        self.__safe_event_loop = safe_event_loop
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(ProbeView.__display_item_inserted, self))
         self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(ProbeView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(ProbeView.__refilter_scan_display_items, self))
@@ -1063,7 +1065,7 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
 
     def close(self) -> None:
-        self._mark_closed()
+        self.__safe_event_loop._mark_closed()
         if self.__probe_state_changed_listener:
             self.__probe_state_changed_listener.close()
             self.__probe_state_changed_listener = typing.cast(typing.Any, None)
@@ -1079,14 +1081,9 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
-    def _unlisten(self) -> None:
-        if self.__probe_state_changed_listener:
-            self.__probe_state_changed_listener.close()
-            self.__probe_state_changed_listener = typing.cast(typing.Any, None)
-
     def __probe_state_changed(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         # thread safe. move actual call to main thread using the event loop.
-        self._call_soon_threadsafe(self.__update_probe_state, probe_state, probe_position)
+        self.__safe_event_loop._call_soon_threadsafe(self.__update_probe_state, probe_state, probe_position)
 
     def __update_probe_state(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         assert threading.current_thread() == threading.main_thread()
@@ -1144,63 +1141,64 @@ class ProbeView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abstr
         return list()
 
 
-class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+class SubscanSettings(typing.Protocol):
+    subscan_state: SubscanState
+    subscan_region: typing.Optional[Geometry.FloatRect]
+    subscan_rotation: float
+    line_scan_state: LineScanState
+    line_scan_vector: typing.Optional[_VectorType]
+
+    @property
+    def property_changed_event(self) -> Event.Event:
+        raise NotImplementedError()
+
+
+class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the STEM controller and updates data items and graphics."""
     count = 0
 
-    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        super().__init__(document_model, event_loop)
+    def __init__(self, subscan_settings: SubscanSettings, scan_display_items_model: DisplayItemListModel, document_model: DocumentModel.DocumentModel, safe_event_loop: SafeEventLoop):
+        super().__init__()
         self.__class__.count += 1
-        self.__stem_controller = stem_controller
+        self.__subscan_settings = subscan_settings
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__scan_display_items_model = scan_display_items_model
+        self.__safe_event_loop = safe_event_loop
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(SubscanView.__display_item_inserted, self))
         self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(SubscanView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(SubscanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
-        self.__subscan_region_changed_listener = stem_controller.property_changed_event.listen(self.__subscan_region_changed)
-        self.__subscan_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
+        self.__subscan_settings_changed_listener = self.__subscan_settings.property_changed_event.listen(self.__subscan_settings_changed)
         self.__document_model.register_implicit_dependency(self)
         # update in case a new document model is opened with the line scan already enabled
         self.__update_subscan_region()
 
     def close(self) -> None:
-        self._mark_closed()
+        self.__safe_event_loop._mark_closed()
+        self.__subscan_settings_changed_listener = typing.cast(typing.Any, None)
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
         self.__graphic_set = typing.cast(typing.Any, None)
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
-        self.__stem_controller = typing.cast(typing.Any, None)
+        self.__subscan_settings = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
-    def _unlisten(self) -> None:
-        # unlisten to the event loop dependent listeners
-        self.__subscan_region_changed_listener.close()
-        self.__subscan_region_changed_listener = typing.cast(typing.Any, None)
-        self.__subscan_rotation_changed_listener.close()
-        self.__subscan_rotation_changed_listener = typing.cast(typing.Any, None)
-
     # methods for handling changes to the subscan region
 
-    def __subscan_region_changed(self, name: str) -> None:
+    def __subscan_settings_changed(self, name: str) -> None:
         # must be thread safe
-        if name == "subscan_region":
-            self._call_soon_threadsafe(self.__update_subscan_region)
-
-    def __subscan_rotation_changed(self, name: str) -> None:
-        # must be thread safe
-        if name == "subscan_rotation":
-            self._call_soon_threadsafe(self.__update_subscan_region)
+        if name in ("subscan_region", "subscan_rotation"):
+            self.__safe_event_loop._call_soon_threadsafe(self.__update_subscan_region)
 
     def __update_subscan_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if self.__stem_controller.subscan_region:
+        if self.__subscan_settings.subscan_region:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
             self.__graphic_set.remove_all_graphics()
@@ -1222,34 +1220,34 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
 
     def _graphic_removed(self, subscan_graphic: Graphics.Graphic) -> None:
         # clear subscan state
-        self.__stem_controller.subscan_state = SubscanState.DISABLED
-        self.__stem_controller.subscan_region = None
-        self.__stem_controller.subscan_rotation = 0
+        self.__subscan_settings.subscan_state = SubscanState.DISABLED
+        self.__subscan_settings.subscan_region = None
+        self.__subscan_settings.subscan_rotation = 0
 
     def _create_graphic(self) -> Graphics.RectangleGraphic:
         subscan_graphic = Graphics.RectangleGraphic()
         subscan_graphic.graphic_id = "subscan"
         subscan_graphic.label = _("Subscan")
-        subscan_graphic.bounds = self.__stem_controller.subscan_region or Geometry.FloatRect.empty_rect()
-        subscan_graphic.rotation = self.__stem_controller.subscan_rotation
+        subscan_graphic.bounds = self.__subscan_settings.subscan_region or Geometry.FloatRect.empty_rect()
+        subscan_graphic.rotation = self.__subscan_settings.subscan_rotation
         subscan_graphic.is_bounds_constrained = True
         return subscan_graphic
 
     def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
         assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
-        subscan_region = self.__stem_controller.subscan_region
+        subscan_region = self.__subscan_settings.subscan_region
         if subscan_region and subscan_graphic.bounds != subscan_region:
             subscan_graphic.bounds = subscan_region
-        if subscan_graphic.rotation != self.__stem_controller.subscan_rotation:
-            subscan_graphic.rotation = self.__stem_controller.subscan_rotation
+        if subscan_graphic.rotation != self.__subscan_settings.subscan_rotation:
+            subscan_graphic.rotation = self.__subscan_settings.subscan_rotation
 
     def _graphic_property_changed(self, subscan_graphic: Graphics.Graphic, name: str) -> None:
         if name == "bounds":
             assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
-            self.__stem_controller.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
+            self.__subscan_settings.subscan_region = Geometry.FloatRect.make(subscan_graphic.bounds)
         if name == "rotation":
             assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
-            self.__stem_controller.subscan_rotation = subscan_graphic.rotation
+            self.__subscan_settings.subscan_rotation = subscan_graphic.rotation
 
     def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
@@ -1258,55 +1256,52 @@ class SubscanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Abs
         return list()
 
 
-class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
+class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDependency):
     """Observes the STEM controller and updates data items and graphics."""
     count = 0
 
-    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        super().__init__(document_model, event_loop)
+    def __init__(self, subscan_settings: SubscanSettings, scan_display_items_model: DisplayItemListModel, document_model: DocumentModel.DocumentModel, safe_event_loop: SafeEventLoop):
+        super().__init__()
         self.__class__.count += 1
-        self.__stem_controller = stem_controller
+        self.__subscan_settings = subscan_settings
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__scan_display_items_model = scan_display_items_model
+        self.__safe_event_loop = safe_event_loop
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(LineScanView.__display_item_inserted, self))
         self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(LineScanView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(LineScanView.__refilter_scan_display_items, self))
         self.__graphic_set = GraphicSetController(self)
         # note: these property changed listeners can all possibly be fired from a thread.
-        self.__line_scan_vector_changed_listener = stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
+        self.__line_scan_vector_changed_listener = self.__subscan_settings.property_changed_event.listen(self.__line_scan_vector_changed)
         self.__document_model.register_implicit_dependency(self)
         # update in case a new document model is opened with the line scan already enabled
         self.__update_line_scan_vector()
 
     def close(self) -> None:
-        self._mark_closed()
+        self.__safe_event_loop._mark_closed()
+        self.__subscan_settings_changed_listener = typing.cast(typing.Any, None)
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
         self.__graphic_set = typing.cast(typing.Any, None)
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
-        self.__stem_controller = typing.cast(typing.Any, None)
+        self.__subscan_settings = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
-
-    def _unlisten(self) -> None:
-        # unlisten to the event loop dependent listeners
-        self.__line_scan_vector_changed_listener.close()
-        self.__line_scan_vector_changed_listener = typing.cast(typing.Any, None)
 
     # methods for handling changes to the line scan region
 
     def __line_scan_vector_changed(self, name: str) -> None:
         # must be thread safe
         if name == "line_scan_vector":
-            self._call_soon_threadsafe(self.__update_line_scan_vector)
+            self.__safe_event_loop._call_soon_threadsafe(self.__update_line_scan_vector)
 
     def __update_line_scan_vector(self) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if self.__stem_controller.line_scan_vector:
+        if self.__subscan_settings.line_scan_vector:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
             self.__graphic_set.remove_all_graphics()
@@ -1328,8 +1323,8 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
 
     def _graphic_removed(self, line_scan_graphic: Graphics.Graphic) -> None:
         # clear line scan state
-        self.__stem_controller.line_scan_state = LineScanState.DISABLED
-        self.__stem_controller.line_scan_vector = None
+        self.__subscan_settings.line_scan_state = LineScanState.DISABLED
+        self.__subscan_settings.line_scan_vector = None
 
     def _create_graphic(self) -> Graphics.LineGraphic:
         line_scan_graphic = Graphics.LineGraphic()
@@ -1341,7 +1336,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
 
     def _update_graphic(self, line_scan_graphic: Graphics.Graphic) -> None:
         assert isinstance(line_scan_graphic, Graphics.LineTypeGraphic)
-        line_scan_vector = self.__stem_controller.line_scan_vector
+        line_scan_vector = self.__subscan_settings.line_scan_vector
         graphic_vector = line_scan_graphic.vector
         graphic_vector_tuple = graphic_vector[0].as_tuple(), graphic_vector[1].as_tuple()
         if line_scan_vector and graphic_vector_tuple != line_scan_vector:
@@ -1352,7 +1347,7 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
             assert isinstance(line_scan_graphic, Graphics.LineTypeGraphic)
             graphic_vector = line_scan_graphic.vector
             graphic_vector_tuple = graphic_vector[0].as_tuple(), graphic_vector[1].as_tuple()
-            self.__stem_controller.line_scan_vector = graphic_vector_tuple
+            self.__subscan_settings.line_scan_vector = graphic_vector_tuple
 
     def get_dependents(self, item: Graphics.Graphic) -> typing.Sequence[Graphics.Graphic]:
         graphics = self.__graphic_set.graphics
@@ -1361,16 +1356,27 @@ class LineScanView(EventLoopMonitor, AbstractGraphicSetHandler, DocumentModel.Ab
         return list()
 
 
-class DriftView(EventLoopMonitor):
+class DriftViewSettings(typing.Protocol):
+    drift_channel_id: typing.Optional[str]
+    drift_region: typing.Optional[Geometry.FloatRect]
+    drift_rotation: float
+
+    @property
+    def property_changed_event(self) -> Event.Event:
+        raise NotImplementedError()
+
+
+class DriftView:
     """Observes the STEM controller and updates drift data item and graphic."""
     count = 0
 
-    def __init__(self, stem_controller: STEMController, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop):
-        super().__init__(document_model, event_loop)
+    def __init__(self, scan_hardware_source_id: str, drift_view_settings: DriftViewSettings, scan_display_items_model: DisplayItemListModel, document_model: DocumentModel.DocumentModel, safe_event_loop: SafeEventLoop):
         self.__class__.count += 1
-        self.__stem_controller = stem_controller
+        self.__scan_hardware_source_id = scan_hardware_source_id
+        self.__drift_view_settings = drift_view_settings
         self.__document_model = document_model
-        self.__scan_display_items_model = make_scan_display_item_list_model(document_model, stem_controller, self._call_soon_threadsafe)
+        self.__scan_display_items_model = scan_display_items_model
+        self.__safe_event_loop = safe_event_loop
         self.__display_item_inserted_event_listener = self.__scan_display_items_model.item_inserted_event.listen(ReferenceCounting.weak_partial(DriftView.__display_item_inserted, self))
         self.__display_item_removed_event_listener = self.__scan_display_items_model.item_removed_event.listen(ReferenceCounting.weak_partial(DriftView.__display_item_removed, self))
         self.__project_loaded_event_listener = document_model.project_loaded_event.listen(ReferenceCounting.weak_partial(DriftView.__clean, self))
@@ -1379,15 +1385,13 @@ class DriftView(EventLoopMonitor):
         self.__graphic_property_changed_listener: typing.Optional[Event.EventListener] = None
         self.__graphic_about_to_be_removed_listener: typing.Optional[Event.EventListener] = None
         # note: these property changed listeners can all possibly be fired from a thread.
-        self.__scan_context_data_items_changed_listener = stem_controller.scan_context_data_items_changed_event.listen(self.__scan_context_data_items_changed)
-        self.__drift_channel_id_changed_listener = stem_controller.property_changed_event.listen(self.__drift_channel_id_changed)
-        self.__drift_region_changed_listener = stem_controller.property_changed_event.listen(self.__drift_region_changed)
-        self.__drift_rotation_changed_listener = stem_controller.property_changed_event.listen(self.__drift_rotation_changed)
+        self.__drift_settings_changed_listener = self.__drift_view_settings.property_changed_event.listen(self.__drift_settings_changed)
         # update in case a new document model is opened with the line scan already enabled
         self.__update_drift_region()
 
     def close(self) -> None:
-        self._mark_closed()
+        self.__safe_event_loop._mark_closed()
+        self.__drift_settings_changed_listener = typing.cast(typing.Any, None)
         if self.__graphic_property_changed_listener:
             self.__graphic_property_changed_listener.close()
             self.__graphic_property_changed_listener = None
@@ -1399,56 +1403,29 @@ class DriftView(EventLoopMonitor):
         self.__scan_display_items_model.close()
         self.__scan_display_items_model = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
-        self.__stem_controller = typing.cast(typing.Any, None)
+        self.__drift_view_settings = typing.cast(typing.Any, None)
         self.__display_item_inserted_event_listener = typing.cast(typing.Any, None)
         self.__display_item_removed_event_listener = typing.cast(typing.Any, None)
         self.__project_loaded_event_listener = typing.cast(typing.Any, None)
         self.__class__.count -= 1
 
-    def _unlisten(self) -> None:
-        # unlisten to the event loop dependent listeners
-        self.__drift_region_changed_listener.close()
-        self.__drift_region_changed_listener = typing.cast(typing.Any, None)
-        self.__drift_rotation_changed_listener.close()
-        self.__drift_rotation_changed_listener = typing.cast(typing.Any, None)
-        self.__drift_channel_id_changed_listener.close()
-        self.__drift_channel_id_changed_listener = typing.cast(typing.Any, None)
-        self.__scan_context_data_items_changed_listener.close()
-        self.__scan_context_data_items_changed_listener = typing.cast(typing.Any, None)
-
-    def __scan_context_data_items_changed(self) -> None:
-        # must be thread safe
-        self._call_soon_threadsafe(self.__update_drift_region)
-
     # methods for handling changes to the drift region
 
-    def __drift_channel_id_changed(self, name: str) -> None:
+    def __drift_settings_changed(self, name: str) -> None:
         # must be thread safe
-        if name == "drift_channel_id":
-            self._call_soon_threadsafe(self.__update_drift_region)
-
-    def __drift_region_changed(self, name: str) -> None:
-        # must be thread safe
-        if name == "drift_region":
-            self._call_soon_threadsafe(self.__update_drift_region)
-
-    def __drift_rotation_changed(self, name: str) -> None:
-        # must be thread safe
-        if name == "drift_rotation":
-            self._call_soon_threadsafe(self.__update_drift_region)
+        if name in ("drift_channel_id", "drift_region", "drift_rotation"):
+            self.__safe_event_loop._call_soon_threadsafe(self.__update_drift_region)
 
     def __update_drift_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if self.__stem_controller.drift_channel_id:
-            scan_controller = self.__stem_controller.scan_controller
-            assert scan_controller
-            data_item_channel_reference = self.__document_model.get_data_item_channel_reference(scan_controller.hardware_source_id, self.__stem_controller.drift_channel_id)
+        if self.__drift_view_settings.drift_channel_id:
+            data_item_channel_reference = self.__document_model.get_data_item_channel_reference(self.__scan_hardware_source_id, self.__drift_view_settings.drift_channel_id)
             drift_data_item = data_item_channel_reference.display_item.data_item if data_item_channel_reference and data_item_channel_reference.display_item else None
         else:
             drift_data_item = None
         # determine if a new graphic should exist and if it exists already
-        drift_region = self.__stem_controller.drift_region
-        if self.__stem_controller.drift_channel_id and drift_region and drift_data_item:
+        drift_region = self.__drift_view_settings.drift_region
+        if self.__drift_view_settings.drift_channel_id and drift_region and drift_data_item:
             drift_display_item = self.__document_model.get_display_item_for_data_item(drift_data_item)
             # remove the graphic if it already exists on the wrong display item
             if self.__graphic and (not drift_display_item or not self.__graphic in drift_display_item.graphics):
@@ -1458,15 +1435,15 @@ class DriftView(EventLoopMonitor):
                 # only fire messages when something changes to avoid flickering, difficulty editing.
                 if self.__graphic.bounds != drift_region:
                     self.__graphic.bounds = drift_region
-                if self.__graphic.rotation != self.__stem_controller.drift_rotation:
-                    self.__graphic.rotation = self.__stem_controller.drift_rotation
+                if self.__graphic.rotation != self.__drift_view_settings.drift_rotation:
+                    self.__graphic.rotation = self.__drift_view_settings.drift_rotation
             # otherwise create it if there is a display item for it
             elif drift_display_item:
                 drift_graphic = Graphics.RectangleGraphic()
                 drift_graphic.graphic_id = "drift"
                 drift_graphic.label = _("Drift")
                 drift_graphic.bounds = drift_region
-                drift_graphic.rotation = self.__stem_controller.drift_rotation
+                drift_graphic.rotation = self.__drift_view_settings.drift_rotation
                 drift_graphic.is_bounds_constrained = True
                 drift_graphic.color = "#F0F"  # purple
                 drift_display_item.add_graphic(drift_graphic)
@@ -1494,16 +1471,16 @@ class DriftView(EventLoopMonitor):
 
     def __graphic_about_to_be_removed(self) -> None:
         # clear drift state
-        self.__stem_controller.drift_channel_id = None
-        self.__stem_controller.drift_region = None
-        self.__stem_controller.drift_rotation = 0
+        self.__drift_view_settings.drift_channel_id = None
+        self.__drift_view_settings.drift_region = None
+        self.__drift_view_settings.drift_rotation = 0
 
     def __graphic_property_changed(self, key: str) -> None:
         assert self.__graphic
         if key == "bounds":
-            self.__stem_controller.drift_region = Geometry.FloatRect.make(self.__graphic.bounds)
+            self.__drift_view_settings.drift_region = Geometry.FloatRect.make(self.__graphic.bounds)
         if key == "rotation":
-            self.__stem_controller.drift_rotation = self.__graphic.rotation
+            self.__drift_view_settings.drift_rotation = self.__graphic.rotation
 
     def __clean(self) -> None:
         self.__scan_display_items_model.clean("drift")
@@ -1547,13 +1524,22 @@ class ScanContextController:
     def register_instrument(self, instrument: typing.Any) -> None:
         # if this is a stem controller, add a probe view
         if hasattr(instrument, "probe_position"):
-            self.__m.setdefault(instrument, dict())["probe_view"] = ProbeView(instrument, self.__document_model, self.__event_loop)
+            safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
+            scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
+            self.__m.setdefault(instrument, dict())["probe_view"] = ProbeView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
         if hasattr(instrument, "subscan_region"):
-            self.__m.setdefault(instrument, dict())["subscan_view"] = SubscanView(instrument, self.__document_model, self.__event_loop)
+            safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
+            scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
+            self.__m.setdefault(instrument, dict())["subscan_view"] = SubscanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
         if hasattr(instrument, "line_scan_vector"):
-            self.__m.setdefault(instrument, dict())["line_scan_view"] = LineScanView(instrument, self.__document_model, self.__event_loop)
+            safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
+            scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
+            self.__m.setdefault(instrument, dict())["line_scan_view"] = LineScanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
         if hasattr(instrument, "drift_region"):
-            self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(instrument, self.__document_model, self.__event_loop)
+            safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
+            scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
+            scan_hardware_source_id = instrument.scan_controller.hardware_source_id
+            self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(scan_hardware_source_id, instrument, scan_display_items_model, self.__document_model, safe_event_loop)
 
     def unregister_instrument(self, instrument: typing.Any) -> None:
         probe_view = self.__m.get(instrument, dict()).pop("probe_view")
