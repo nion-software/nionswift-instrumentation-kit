@@ -74,7 +74,10 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context) 
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
     scan_frame_parameters = test_context.scan_hardware_source.get_current_frame_parameters()
     test_context.scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
-    return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, scan_frame_parameters, test_context.camera_hardware_source, test_context.camera_hardware_source.get_frame_parameters(0), None, scan_context_description)
+    return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, scan_frame_parameters,
+                                                       test_context.camera_hardware_source,
+                                                       test_context.camera_hardware_source.get_frame_parameters(0),
+                                                       None, False, 0, 0, None, None, 0.0)
 
 def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     return Acquisition.SequenceAcquisitionMethod(4)

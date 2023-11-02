@@ -2915,6 +2915,8 @@ class AcquisitionProcedureFactoryInterface(typing.Protocol):
 
     class DeviceAcquisitionParameters(typing.Protocol): pass
 
+    class DriftCorrectionParameters(typing.Protocol): pass
+
     class ControlController(typing.Protocol): pass
 
     class DeviceControlController(ControlController): pass
@@ -2965,6 +2967,16 @@ class AcquisitionProcedureFactoryInterface(typing.Protocol):
                                  **kwargs: typing.Any,
                                  ) -> AcquisitionProcedureFactoryInterface.CameraParameters: ...
 
+    def create_drift_parameters(self, *,
+                                drift_correction_enabled: bool = False,
+                                drift_interval_lines: int = 0,
+                                drift_scan_lines: int = 0,
+                                drift_channel: typing.Optional[AcquisitionProcedureFactoryInterface.DeviceChannelSpecifier] = None,
+                                drift_region: typing.Optional[Geometry.FloatRect] = None,
+                                drift_rotation: float = 0.0,
+                                **kwargs: typing.Any,
+                                ) -> AcquisitionProcedureFactoryInterface.DriftCorrectionParameters: ...
+
     def create_device_acquisition_parameters(self, *,
                                              device: AcquisitionProcedureFactoryInterface.Device,
                                              device_parameters: typing.Optional[AcquisitionProcedureFactoryInterface.DeviceParametersLike] = None,
@@ -2978,7 +2990,8 @@ class AcquisitionProcedureFactoryInterface(typing.Protocol):
 
     def create_multi_device_acquisition_step(self, *,
                                              primary_device_acquisition_parameters: AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters,
-                                             secondary_device_acquisition_parameters: typing.Sequence[AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters]) -> AcquisitionProcedureFactoryInterface.MultiDeviceAcquisitionStep: ...
+                                             secondary_device_acquisition_parameters: typing.Sequence[AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters],
+                                             drift_parameters: typing.Optional[AcquisitionProcedureFactoryInterface.DriftCorrectionParameters] = None) -> AcquisitionProcedureFactoryInterface.MultiDeviceAcquisitionStep: ...
 
     def create_device_controller(self, *,
                                  device: AcquisitionProcedureFactoryInterface.Device,

@@ -2453,6 +2453,7 @@ def make_synchronized_scan_data_stream(
         include_raw: bool = True,
         include_summed: bool = False,
         enable_drift_tracker: bool = False,
+        drift_rotation: float = 0.0,
         fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
         rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
         old_move_axis: bool = False) -> Acquisition.DataStream:
@@ -2525,7 +2526,7 @@ def make_synchronized_scan_data_stream(
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker and enable_drift_tracker:
-            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, scan_hardware_source.drift_rotation)
+            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed
@@ -2610,19 +2611,29 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
                  camera_hardware_source: camera_base.CameraHardwareSource,
                  camera_frame_parameters: camera_base.CameraFrameParameters,
                  camera_channel: typing.Optional[str],
-                 scan_context_description: STEMController.ScanSpecifier) -> None:
+                 drift_correction_enabled: bool,
+                 drift_interval_lines: int,
+                 drift_interval_scans: int,
+                 drift_channel_id: typing.Optional[str],
+                 drift_region: typing.Optional[Geometry.FloatRect],
+                 drift_rotation: float
+                 ) -> None:
         self.__scan_hardware_source = scan_hardware_source
         self.__scan_frame_parameters = scan_frame_parameters
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
         self.__camera_channel = camera_channel
-        self.__scan_context_description = scan_context_description
+        self.__drift_correction_enabled = drift_correction_enabled
+        self.__drift_interval_lines = drift_interval_lines
+        self.__drift_interval_scans = drift_interval_scans
+        self.__drift_channel_id = drift_channel_id
+        self.__drift_region = drift_region
+        self.__drift_rotation = drift_rotation
 
     def build_acquisition_device_data_stream(self, device_map: typing.MutableMapping[str, STEMController.DeviceController]) -> Acquisition.DataStream:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         scan_hardware_source = self.__scan_hardware_source
         scan_frame_parameters = self.__scan_frame_parameters
-        scan_context_description = self.__scan_context_description
         camera_hardware_source = self.__camera_hardware_source
         camera_frame_parameters = self.__camera_frame_parameters
         camera_channel = self.__camera_channel
@@ -2636,7 +2647,6 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         assert camera_channel_description is not None
 
         assert scan_hardware_source is not None
-        assert scan_context_description is not None
 
         # configure the camera hardware source processing. always use camera parameters at index 0.
         if camera_channel_description.processing_id:
@@ -2654,18 +2664,18 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
         drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
         section_height: typing.Optional[int] = None
         drift_tracker = scan_hardware_source.drift_tracker
-        if drift_tracker and scan_context_description.drift_interval_lines > 0:
+        if drift_tracker and self.__drift_interval_lines > 0:
             drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
                 scan_hardware_source,
                 scan_frame_parameters,
                 drift_tracker,
-                scan_context_description.drift_interval_scans,
-                scan_hardware_source.drift_channel_id,
-                scan_hardware_source.drift_region,
-                scan_hardware_source.drift_rotation
+                self.__drift_interval_scans,
+                self.__drift_channel_id,
+                self.__drift_region,
+                self.__drift_rotation
             )
-            section_height = scan_context_description.drift_interval_lines
-        enable_drift_tracker = drift_tracker is not None and scan_context_description.drift_correction_enabled
+            section_height = self.__drift_interval_lines
+        enable_drift_tracker = drift_tracker is not None and self.__drift_correction_enabled
 
         # build the magnification device controller, here until this is fully separated and available as part of the STEM controller
         magnification_device_controller = STEMController.MagnificationDeviceController(scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
@@ -2682,6 +2692,7 @@ class SynchronizedScanAcquisitionDevice(Acquisition.AcquisitionDeviceLike):
             include_raw=True,
             include_summed=False,
             enable_drift_tracker=enable_drift_tracker,
+            drift_rotation=self.__drift_rotation,
             fov_nm_model=magnification_device_controller.fov_nm_model,
             rotation_model=magnification_device_controller.rotation_model
         )

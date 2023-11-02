@@ -139,7 +139,8 @@ class ScanAcquisitionController:
             scan_count=self.__scan_specifier.scan_count,
             include_raw=scan_processing.include_raw,
             include_summed=scan_processing.include_summed,
-            enable_drift_tracker=enable_drift_tracker
+            enable_drift_tracker=enable_drift_tracker,
+            drift_rotation=0.0
         )
         self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
         self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)

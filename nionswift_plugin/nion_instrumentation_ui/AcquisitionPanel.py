@@ -1299,7 +1299,18 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         assert scan_context_description
         scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
-        return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source, scan_frame_parameters, camera_hardware_source, camera_frame_parameters, camera_channel, scan_context_description)
+        return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source,
+                                                           scan_frame_parameters,
+                                                           camera_hardware_source,
+                                                           camera_frame_parameters,
+                                                           camera_channel,
+                                                           scan_context_description.drift_correction_enabled,
+                                                           scan_context_description.drift_interval_lines,
+                                                           scan_context_description.drift_interval_scans,
+                                                           scan_hardware_source.drift_channel_id,
+                                                           scan_hardware_source.drift_region,
+                                                           scan_hardware_source.drift_rotation
+                                                           )
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):

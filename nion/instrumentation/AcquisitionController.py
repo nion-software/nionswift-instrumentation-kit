@@ -96,6 +96,16 @@ class DeviceAcquisitionParameters(Acquisition_.AcquisitionProcedureFactoryInterf
 
 
 @dataclasses.dataclass
+class DriftCorrectionParameters:
+    drift_correction_enabled: bool
+    drift_interval_lines: int
+    drift_interval_scans: int
+    drift_channel: typing.Optional[DeviceChannelSpecifier]
+    drift_region: typing.Optional[Geometry.FloatRect]
+    drift_rotation: float
+
+
+@dataclasses.dataclass
 class ProcedureStepLike(Acquisition_.AcquisitionProcedureFactoryInterface.ProcedureStepLike, typing.Protocol):
     step_id: str
 
@@ -115,11 +125,13 @@ class MultiDeviceAcquisitionStep(ProcedureStepLike, Acquisition_.AcquisitionProc
     step_id: str
     primary_device_acquisition_parameters: DeviceAcquisitionParameters
     secondary_device_acquisition_parameters: typing.Sequence[DeviceAcquisitionParameters]
+    drift_parameters: typing.Optional[DriftCorrectionParameters]
 
-    def __init__(self, primary_device_acquisition_parameters: DeviceAcquisitionParameters, secondary_device_acquisition_parameters: typing.Sequence[DeviceAcquisitionParameters]) -> None:
+    def __init__(self, primary_device_acquisition_parameters: DeviceAcquisitionParameters, secondary_device_acquisition_parameters: typing.Sequence[DeviceAcquisitionParameters], drift_parameters: typing.Optional[DriftCorrectionParameters]) -> None:
         self.step_id = "multi-device-acquisition"
         self.primary_device_acquisition_parameters = primary_device_acquisition_parameters
         self.secondary_device_acquisition_parameters = secondary_device_acquisition_parameters
+        self.drift_parameters = drift_parameters
 
 
 @dataclasses.dataclass
@@ -369,17 +381,30 @@ class AcquisitionController(Acquisition_.AcquisitionProcedureFactoryInterface.Ac
                 if isinstance(primary_data_stream_producer.acquisition_device, camera_base.CameraAcquisitionDevice) and isinstance(secondary_data_stream_producer.acquisition_device, scan_base.ScanAcquisitionDevice):
                     camera_acquisition_device = primary_data_stream_producer.acquisition_device
                     scan_acquisition_device = secondary_data_stream_producer.acquisition_device
-                    scan_context_description = STEMController.ScanSpecifier()
-                    scan_context_description.scan_context_valid = True
-                    scan_context_description.scan_size = scan_acquisition_device._scan_frame_parameters.pixel_size
+                    drift_parameters = step.drift_parameters
+                    drift_correction_enabled = drift_parameters.drift_correction_enabled if drift_parameters else False
+                    drift_interval_lines = drift_parameters.drift_interval_lines if drift_parameters else 0
+                    drift_interval_scans = drift_parameters.drift_interval_scans if drift_parameters else 0
+                    drift_channel_id: typing.Optional[str] = None
+                    if drift_parameters and (drift_channel := drift_parameters.drift_channel):
+                        if drift_channel.channel_id:
+                            drift_channel_id = drift_channel.channel_id
+                        elif (drift_channel_index := drift_channel.channel_index) is not None:
+                            drift_channel_id  = scan_acquisition_device._scan_hardware_source.get_channel_id(drift_channel_index)
+                    drift_region = drift_parameters.drift_region if drift_parameters else None
+                    drift_rotation = drift_parameters.drift_rotation if drift_parameters else 0.0
                     acquisition_device = scan_base.SynchronizedScanAcquisitionDevice(
                         scan_acquisition_device._scan_hardware_source,
                         scan_acquisition_device._scan_frame_parameters,
                         camera_acquisition_device._camera_hardware_source,
                         camera_acquisition_device._camera_frame_parameters,
                         camera_acquisition_device._camera_channel,
-                        STEMController.ScanSpecifier()
-                    )
+                        drift_correction_enabled,
+                        drift_interval_lines,
+                        drift_interval_scans,
+                        drift_channel_id,
+                        drift_region,
+                        drift_rotation)
                     return AcquisitionDeviceDataStreamProducer(acquisition_device, self.__device_map)
         elif isinstance(step, CollectionStep):
             device_data_stream = self.__create_data_stream(step.sub_step)
@@ -465,6 +490,22 @@ class AcquisitionProcedureFactoryInterface(Acquisition_.AcquisitionProcedureFact
                                  ) -> CameraParameters:
         return CameraParameters(exposure_ms, binning, **kwargs)
 
+    def create_drift_parameters(self, *,
+                                drift_correction_enabled: bool = False,
+                                drift_interval_lines: int = 0,
+                                drift_scan_lines: int = 0,
+                                drift_channel: typing.Optional[AcquisitionProcedureFactoryInterface.DeviceChannelSpecifier] = None,
+                                drift_region: typing.Optional[Geometry.FloatRect] = None,
+                                drift_rotation: float = 0.0,
+                                **kwargs: typing.Any,
+                                ) -> AcquisitionProcedureFactoryInterface.DriftCorrectionParameters:
+        return DriftCorrectionParameters(drift_correction_enabled,
+                                         drift_interval_lines,
+                                         drift_scan_lines,
+                                         typing.cast(typing.Optional[DeviceChannelSpecifier], drift_channel),
+                                         drift_region,
+                                         drift_rotation)
+
     def create_device_acquisition_parameters(self, *,
                                              device: AcquisitionProcedureFactoryInterface.Device,
                                              device_parameters: typing.Optional[AcquisitionProcedureFactoryInterface.DeviceParametersLike] = None,
@@ -482,8 +523,9 @@ class AcquisitionProcedureFactoryInterface(Acquisition_.AcquisitionProcedureFact
 
     def create_multi_device_acquisition_step(self, *,
                                              primary_device_acquisition_parameters: AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters,
-                                             secondary_device_acquisition_parameters: typing.Sequence[Acquisition_.AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters]) -> MultiDeviceAcquisitionStep:
-        return MultiDeviceAcquisitionStep(typing.cast(DeviceAcquisitionParameters, primary_device_acquisition_parameters), typing.cast(typing.Sequence[DeviceAcquisitionParameters], secondary_device_acquisition_parameters))
+                                             secondary_device_acquisition_parameters: typing.Sequence[Acquisition_.AcquisitionProcedureFactoryInterface.DeviceAcquisitionParameters],
+                                             drift_parameters: typing.Optional[Acquisition_.AcquisitionProcedureFactoryInterface.DriftCorrectionParameters] = None) -> MultiDeviceAcquisitionStep:
+        return MultiDeviceAcquisitionStep(typing.cast(DeviceAcquisitionParameters, primary_device_acquisition_parameters), typing.cast(typing.Sequence[DeviceAcquisitionParameters], secondary_device_acquisition_parameters), typing.cast(DriftCorrectionParameters, drift_parameters))
 
     def create_device_controller(self, *,
                                  device: Acquisition_.AcquisitionProcedureFactoryInterface.Device,

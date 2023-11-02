@@ -278,10 +278,10 @@ class DriftCorrectionBehavior:
         self.__drift_tracker.reset()
 
     def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
-        # if this is called, it means some form of drift-sub-area drift correction has been enabled.
-        # if the scan interval is 0, it means every n lines; so do the drift correction here since the
-        # each section wil have its own acquisition and this will be called for each section. if the scan
-        # interval is non-zero, then only perform drift correction every n scans.
+        # if this is called, it means some form of drift-sub-area drift correction has been enabled. if the scan
+        # interval is 0, it means every n lines; so do the drift correction here since each section wil have its own
+        # acquisition and this will be called for each section. if the scan interval is non-zero, then only perform
+        # drift correction every n scans.
         if self.__drift_scan_interval == 0 or (self.__drift_scan_interval_index % self.__drift_scan_interval) == 0:
             # this method must be thread safe
             # start with the context frame parameters and adjust for the drift region
