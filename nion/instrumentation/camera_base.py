@@ -2851,10 +2851,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
             device_state.add_state("restart_camera", functools.partial(restart_camera, self.__camera_hardware_source, self.__camera_hardware_source.get_current_frame_parameters()))
 
     @property
-    def progress(self) -> float:
-        if not self.is_finished:
-            return self.__progress
-        return super().progress
+    def _progress(self) -> float:
+        return self.__progress
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):

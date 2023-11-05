@@ -41,7 +41,6 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
-from nion.swift.model import DocumentModel
 from nion.swift.model import Schema
 from nion.ui import Application
 from nion.ui import CanvasItem
