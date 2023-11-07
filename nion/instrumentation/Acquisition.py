@@ -729,7 +729,6 @@ class CollectedDataStream(DataStream):
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         assert len(shape) in (1, 2)
         self.__index_stack: IndexDescriptionList = list()
-        self.__index = 0
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         # sub-slice indexes track the destination of the next data within the current slice.
@@ -990,7 +989,7 @@ class CollectedDataStream(DataStream):
         self.__indexes[channel] = next_index
         # whether all channels are in the 'needs_start' state.
         needs_starts = {channel: self.__indexes.get(channel, 0) == collection_count for channel in self.channels}
-        self.__all_channels_need_start = all(needs_starts.get(channel, False) for channel in self.input_channels)
+        self.__all_channels_need_start = all(needs_starts.get(channel, False) for channel in self.channels)
         self.__index_stack[-1].index = better_unravel_index(min(self.__indexes.get(channel, 0) for channel in self.channels), self.__collection_shape)
 
 
