@@ -736,7 +736,6 @@ class CollectedDataStream(DataStream):
         # needs starts tracks whether the downstream data stream needs a start call.
         self.__data_stream_started = False
         self.__all_channels_need_start = False
-        self.__is_frames = False  # used for progress computation
 
     def about_to_delete(self) -> None:
         if self.__data_available_event_listener:
@@ -779,22 +778,16 @@ class CollectedDataStream(DataStream):
 
     @property
     def _progress(self) -> float:
-        # p will be the progress for the current frame
         # count is the number of frames in this collection
-        # index is the number of frames completed in this collection, calculated as the minimum progress among incomplete channels
-        # adding p to index will give the number of frames completed plus the fraction of the current one completed
-        # all channels progress simultaneously in a collection; so use the last one for calculation
         count = expand_shape(self.__collection_shape)
-        # only add current progress if we're not about to advance to the next sub slice
-        p = 0.0 if self.__all_channels_need_start else self.__data_stream.progress
+        # if all channels are complete, return 0.0 by convention. progress will be called at the start of the next
+        # section, so we want it to be 0.0 at the start of the next section. bad design.
         incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
         if not incomplete_indexes:
             return 0.0
-        index = min(incomplete_indexes)
-        # if child data stream is submitting frames, we can just use the child data stream progress
-        # as the progress of this collection; on the other hand, if it is submitting partial data,
-        # we must compute it.
-        return p if self.__is_frames else (index + p) / count
+        # sum progress for each channel and average.
+        progress_list = list(self.__indexes.get(c, 0) / count for c in self.channels)
+        return sum(progress_list) / len(self.channels)
 
     def _send_next(self) -> None:
         assert self.__data_stream_started
@@ -902,7 +895,6 @@ class CollectedDataStream(DataStream):
             current_index = index
             # incoming data is frames
             # count must either be a multiple of last dimensions of collection shape or one
-            self.__is_frames = True
             assert remaining_count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
             assert current_index + remaining_count <= collection_count
             assert remaining_count > 0
@@ -975,7 +967,6 @@ class CollectedDataStream(DataStream):
             # incoming data is partial
             # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
             # remaining dimensions. add dimensions for collection dimensions to the new source data.
-            self.__is_frames = False
             new_source_slice = (index_slice(0), ) * collection_rank + tuple(data_stream_event.source_slice)
             new_source_data = data_stream_event.source_data.reshape((1,) * collection_rank + data_stream_event.source_data.shape)
             # new state is complete if data chunk is complete and it will put us at the end of our collection.
