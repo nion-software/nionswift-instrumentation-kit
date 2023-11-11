@@ -732,7 +732,12 @@ class HardwareSourceChoiceModel(Observable.Observable):
         self.__hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__hardware_source_choice_model, filter)
 
         # a model that indicates whether the hardware source choice should be presented in the UI.
-        self.ui_enabled_model = Model.StreamValueModel(Stream.MapStream(Stream.PropertyChangedEventStream(self.__hardware_source_choice.hardware_sources_model, "value"), lambda x: force_enabled or len(x or list()) > 1))
+        def is_enabled(x: typing.Optional[typing.List[typing.Optional[HardwareSource.HardwareSource]]]) -> bool:
+            return force_enabled or len(x or list()) > 1
+
+        self.ui_enabled_model = Model.StreamValueModel(Stream.MapStream(
+            Stream.PropertyChangedEventStream(self.__hardware_source_choice.hardware_sources_model, "value"),
+            is_enabled))
 
         def property_changed(handler: HardwareSourceChoiceHandler, property: str) -> None:
             handler.notify_property_changed("hardware_source_display_names")
@@ -1704,9 +1709,13 @@ class AcquisitionController(Declarative.Handler):
         # updates according to whether acquire is running or not.
         self.progress_value_model = Model.PropertyModel[int](0)
         self.is_acquiring_model = Model.PropertyModel[bool](False)
+
+        def is_enabled(b: typing.Optional[bool]) -> str:
+            return _("Acquire") if not b else _("Cancel")
+
         self.button_text_model = Model.StreamValueModel(Stream.MapStream(
             Stream.PropertyChangedEventStream(self.is_acquiring_model, "value"),
-            lambda b: _("Acquire") if not b else _("Cancel")))
+            is_enabled))
 
         # create the button enabled property model.
         # the device_component_stream is a stream that maps the acquisition mode to the device component handler.
