@@ -1293,7 +1293,7 @@ class SequentialDataStream(DataStream):
     @property
     def _progress(self) -> float:
         # return the average of combined streams progress
-        return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
+        return ((self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count) if self.__sequence_count > 0 else .0
 
     def _send_next(self) -> None:
         self.__data_streams[self.__current_index].send_next()
@@ -2687,7 +2687,7 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
             if camera_value_controller:
                 values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]])
                 value_controllers.append(
-                    ControlCustomizationValueController(camera_value_controller, control_customization_energy_offset, values, None))
+                    ControlCustomizationValueController(camera_value_controller, control_customization_exposure, values, None))
             sequence_data_stream = SequenceDataStream(
                 ActionDataStream(device_data_stream, ValueControllersActionValueController(value_controllers)),
                 max(1, multi_acquire_entry.count))

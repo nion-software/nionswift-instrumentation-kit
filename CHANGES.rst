@@ -4,6 +4,8 @@ Changelog (nionswift-instrumentation)
 UNRELEASED
 ----------
 - Added single frame variants to camera device, utilize when recording.
+- Improve error reporting during acquisition panel errors.
+- Fix #166. Multi acquire now properly sets exposure time on camera.
 
 22.1.1 (2023-10-25)
 -------------------

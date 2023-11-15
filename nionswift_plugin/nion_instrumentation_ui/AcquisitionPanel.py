@@ -655,7 +655,7 @@ class MultiAcquireEntryHandler(Declarative.Handler):
 class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
     """Multiple acquisition method - a sequential set of acquires from acquisition device with a control and exposure.
 
-    Currently the control is always energy offset.
+    Currently, the control is always energy offset.
 
     Produces multiple data streams that are sequences of the acquisition device data stream.
 

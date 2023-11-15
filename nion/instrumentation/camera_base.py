@@ -3300,7 +3300,7 @@ class CameraDeviceController(STEMController.DeviceController):
         assert control_description
         if control_customization.control_id == "exposure":
             return [self.camera_frame_parameters.exposure_ms]
-        raise ValueError()
+        raise ValueError(f"Unknown camera device value {control_customization.control_id}")
 
     def update_values(self, control_customization: AcquisitionPreferences.ControlCustomization, original_values: typing.Sequence[float], values: typing.Sequence[float], axis: typing.Optional[STEMController.AxisType] = None) -> None:
         self.set_values(control_customization, values, axis)
