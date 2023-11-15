@@ -1882,7 +1882,7 @@ class AcquisitionPreferencePanel:
                 self.ui_view = u.create_column(
                     u.create_row(
                         u.create_label(text="@binding(item.name)", width=120),
-                        u.create_line_edit(text="@binding(item.device_control_id)", width=180),
+                        u.create_line_edit(text="@binding(item.device_control_id)", width=160),
                         u.create_line_edit(text="@binding(item.delay, converter=delay_converter)", width=80),
                         u.create_stretch(),
                         spacing=8
@@ -1899,13 +1899,13 @@ class AcquisitionPreferencePanel:
                 self.ui_view = u.create_column(
                     u.create_row(
                         u.create_label(text="Name", width=120),
-                        u.create_label(text="Control", width=180),
+                        u.create_label(text="Control", width=160),
                         u.create_label(text="Delay", width=80),
                         u.create_stretch(),
                         spacing=8
                     ),
                     u.create_divider(orientation="horizontal"),
-                    u.create_column(items="sorted_controls.items", item_component_id="control-component", spacing=8),
+                    u.create_scroll_area(content=u.create_column(items="sorted_controls.items", item_component_id="control-component", spacing=4)),
                     u.create_stretch(),
                     spacing=8
                 )
