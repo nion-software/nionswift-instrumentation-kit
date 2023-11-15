@@ -1906,7 +1906,6 @@ class AcquisitionPreferencePanel:
                     ),
                     u.create_divider(orientation="horizontal"),
                     u.create_scroll_area(content=u.create_column(items="sorted_controls.items", item_component_id="control-component", spacing=4)),
-                    u.create_stretch(),
                     spacing=8
                 )
 
