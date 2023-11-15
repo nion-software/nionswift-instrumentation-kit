@@ -2395,30 +2395,35 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     """
     TIMEOUT = 60.0
     data_stream.prepare_stream(DataStreamArgs((1,)), [])
-    data_stream.start_stream(DataStreamArgs((1,)))
     try:
-        last_progress = 0.0
-        last_progress_time = time.time()
-        while not data_stream.is_finished and not data_stream.is_aborted:
-            # progress checking is for tests and self-consistency
-            pre_progress = data_stream.progress
-            data_stream.send_next()
-            post_progress = data_stream.progress
-            data_stream.advance_stream()
-            next_progress = data_stream.progress
-            assert pre_progress <= post_progress <= next_progress, f"{pre_progress=} <= {post_progress=} <= {next_progress=}"
-            assert next_progress >= last_progress
-            if next_progress > last_progress:
-                last_progress = next_progress
-                last_progress_time = time.time()
-            assert time.time() - last_progress_time < TIMEOUT
-            time.sleep(0.05)  # play nice with other threads
-        if data_stream.is_finished:
-            assert data_stream.progress == 1.0
-            data_stream._acquire_finished()
+        data_stream.start_stream(DataStreamArgs((1,)))
+        try:
+            last_progress = 0.0
+            last_progress_time = time.time()
+            while not data_stream.is_finished and not data_stream.is_aborted:
+                # progress checking is for tests and self-consistency
+                pre_progress = data_stream.progress
+                data_stream.send_next()
+                post_progress = data_stream.progress
+                data_stream.advance_stream()
+                next_progress = data_stream.progress
+                assert pre_progress <= post_progress <= next_progress, f"{pre_progress=} <= {post_progress=} <= {next_progress=}"
+                assert next_progress >= last_progress
+                if next_progress > last_progress:
+                    last_progress = next_progress
+                    last_progress_time = time.time()
+                assert time.time() - last_progress_time < TIMEOUT
+                time.sleep(0.05)  # play nice with other threads
+            if data_stream.is_finished:
+                assert data_stream.progress == 1.0
+                data_stream._acquire_finished()
+        except Exception as e:
+            data_stream.is_error = True
+            data_stream.abort_stream()
+            raise
+        finally:
+            data_stream.finish_stream()
     except Exception as e:
-        data_stream.is_error = True
-        data_stream.abort_stream()
         from nion.swift.model import Notification
         Notification.notify(Notification.Notification("nion.acquisition.error", "\N{WARNING SIGN} Acquisition", "Acquisition Failed", str(e)))
         if error_handler:
@@ -2426,8 +2431,6 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
         else:
             import traceback
             traceback.print_exc()
-    finally:
-        data_stream.finish_stream()
 
 
 class Acquisition:
