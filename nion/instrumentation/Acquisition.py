@@ -362,9 +362,9 @@ class DataStreamEventArgs:
     The `state` property indicates if the data chunk completes a frame or not.
     """
 
-    def __init__(self, data_stream: DataStream, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
+    def __init__(self, channel: Channel, data_metadata: DataAndMetadata.DataMetadata,
                  source_data: _NDArray, count: typing.Optional[int], source_slice: SliceType,
-                 state: DataStreamStateEnum) -> None:
+                 state: DataStreamStateEnum, update_in_place: bool = False) -> None:
         self.__print = False
 
         # check data shapes
@@ -380,9 +380,6 @@ class DataStreamEventArgs:
         for slice, dim in zip(source_slice, source_data.shape):
             assert slice.start is None or slice.start >= 0, f"{source_slice}, {source_data.shape}"
             assert slice.stop is None or slice.stop <= dim, f"{source_slice}, {source_data.shape}"
-
-        # the data stream sending this event
-        self.data_stream = data_stream
 
         # the data stream channel. must be unique within a data stream collector.
         self.channel = channel
@@ -404,6 +401,9 @@ class DataStreamEventArgs:
 
         # frame reset trigger. used to tell frames that data is being resent for the same frame.
         self.reset_frame = False
+
+        # the type of update
+        self.update_in_place = update_in_place
 
 
 @dataclasses.dataclass
@@ -589,16 +589,25 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.is_error = True
         self.handle_error_event.fire()
 
-    def send_next(self) -> None:
+    def send_next(self) -> typing.Sequence[DataStreamEventArgs]:
         """Send next data."""
+        data_stream_events = list[DataStreamEventArgs]()
         if not self.is_finished and not self.is_aborted:
             for channel in self.input_channels:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
-            self._send_next()
+            next_data_stream_events = self._send_next()
+            for data_stream_event in next_data_stream_events:
+                processed_data_stream_events = self._process_data_stream_event(data_stream_event)
+                for processed_data_stream_event in processed_data_stream_events:
+                    self.handle_data_available(processed_data_stream_event)
+                    data_stream_events.append(processed_data_stream_event)
+        return data_stream_events
 
-    def _send_next(self) -> None:
-        """Used for testing. Send next data. Subclasses can override as required."""
-        pass
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return list()
+
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return [data_stream_event]
 
     def prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         """Prepare stream. Top level prepare_stream is called before start_stream.
@@ -662,36 +671,21 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         """
         pass
 
-    def fire_data_available(self, data_stream_event: DataStreamEventArgs, update_in_place: bool = False) -> None:
-        """Fire the data available event.
+    def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        self._handle_data_available(data_stream_event)
 
+    def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        """
         update_in_place is a hack to allow for operations such as summing in place to not trigger sequence index updates
         since they are repeating the same update over and over. future plans would be to include an update operation
         with the data stream event, perhaps 'clear', 'replace', 'update', 'final_update' with only 'replace' and
         'final_update' advancing the sequence indexes.
         """
-        self._fire_data_available(data_stream_event)
-        if data_stream_event.state == DataStreamStateEnum.COMPLETE and not update_in_place:
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE and not data_stream_event.update_in_place:
             count = data_stream_event.count or 1
             channel = data_stream_event.channel
             assert self.__sequence_indexes.get(channel, 0) + count <= self.__sequence_counts.get(channel, self.__sequence_count)
             self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + count
-
-    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        """Fire the data available event.
-
-        Subclasses can override.
-        """
-        exceptions: typing.List[Exception] = list()
-
-        self.data_available_event.fire(data_stream_event, exceptions)
-
-        # ensure that exceptions occurring in data_available get raised.
-        # this mechanism allows handlers to raise exceptions without regard
-        # to how they will be handled through the event.fire call.
-        # exceptions raised here are typically caught at the top level handler.
-        for e in exceptions:
-            raise e
 
     def wrap_in_sequence(self, length: int) -> DataStream:
         """Wrap this data stream in a sequence of length."""
@@ -725,7 +719,6 @@ class CollectedDataStream(DataStream):
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         assert len(shape) in (1, 2)
         self.__index_stack: IndexDescriptionList = list()
@@ -738,9 +731,6 @@ class CollectedDataStream(DataStream):
         self.__all_channels_need_start = False
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -789,18 +779,18 @@ class CollectedDataStream(DataStream):
         progress_list = list(self.__indexes.get(c, 0) / count for c in self.channels)
         return sum(progress_list) / len(self.channels)
 
-    def _send_next(self) -> None:
-        assert self.__data_stream_started
-        self.__data_stream.send_next()
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.send_next()
+
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_available(data_stream_event)
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__index_stack = list(index_stack) + [IndexDescription(better_unravel_index(0, self.__collection_shape), self.__collection_shape)]
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, CollectedDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self._start_next_sub_stream()
 
@@ -829,8 +819,6 @@ class CollectedDataStream(DataStream):
         assert self.__data_stream_started
         self.__data_stream.finish_stream()
         self.__data_stream_started = False
-        self.__data_available_event_listener.close()
-        self.__data_available_event_listener = typing.cast(typing.Any, None)
         self.__handle_error_event_listener.close()
         self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
@@ -850,13 +838,15 @@ class CollectedDataStream(DataStream):
         else:
             return DataAndMetadata.DataDescriptor(False, 0, collection_rank)
 
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         # when data arrives, put it into the sequence/collection and send it out again.
         # data will be arriving as either partial data or as frame data. partial data
         # is restricted to arrive in groups that are multiples of the product of all
         # dimensions except the first one or with a count of exactly one. frame data
         # is restricted to arrive in groups that are multiples of the collection size
         # and cannot overlap the end of a collection chunk.
+
+        processed_data_stream_events = list[DataStreamEventArgs]()
 
         # useful variables
         data_metadata = data_stream_event.data_metadata
@@ -908,7 +898,8 @@ class CollectedDataStream(DataStream):
                 new_source_data = old_source_data.reshape((1,) * collection_rank + old_source_data.shape[1:])
                 new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
                 new_state = DataStreamStateEnum.COMPLETE if current_index + remaining_count == collection_count else DataStreamStateEnum.PARTIAL
-                self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state)
+                processed_data_stream_events.append(data_stream_event)
             else:
                 # multiple data chunks have been provided.
                 # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
@@ -925,7 +916,8 @@ class CollectedDataStream(DataStream):
                     next_source_index = source_index + slice_width
                     new_source_data = old_source_data[source_index:next_source_index].reshape((1, slice_width) + old_source_data.shape[1:])
                     new_state = DataStreamStateEnum.COMPLETE if current_index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
-                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state)
+                    processed_data_stream_events.append(data_stream_event)
                     source_index = next_source_index
                     current_index += slice_width
                     remaining_count -= slice_width
@@ -944,7 +936,8 @@ class CollectedDataStream(DataStream):
                     new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + self.__collection_shape[1:] + old_source_data.shape[1:])
                     new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
                     new_state = DataStreamStateEnum.COMPLETE if current_index + row_count * collection_row_length == collection_count else DataStreamStateEnum.PARTIAL
-                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state)
+                    processed_data_stream_events.append(data_stream_event)
                     source_index = next_source_index
                     current_index += row_count * collection_row_length
                     remaining_count -= row_count * collection_row_length
@@ -957,7 +950,8 @@ class CollectedDataStream(DataStream):
                     next_source_index = source_index + remaining_count
                     new_source_data = old_source_data[source_index:next_source_index].reshape((1, remaining_count) + old_source_data.shape[1:])
                     new_state = DataStreamStateEnum.PARTIAL  # always partial, otherwise would have been sent in previous section
-                    self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state)
+                    processed_data_stream_events.append(data_stream_event)
                     # source_index = next_source_index  # no need for this
                     current_index += remaining_count
                     remaining_count -= remaining_count
@@ -976,12 +970,14 @@ class CollectedDataStream(DataStream):
                 next_index += 1
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
-            self.fire_data_available(DataStreamEventArgs(self, channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+            data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state)
+            processed_data_stream_events.append(data_stream_event)
         self.__indexes[channel] = next_index
         # whether all channels are in the 'needs_start' state.
         needs_starts = {channel: self.__indexes.get(channel, 0) == collection_count for channel in self.channels}
         self.__all_channels_need_start = all(needs_starts.get(channel, False) for channel in self.channels)
         self.__index_stack[-1].index = better_unravel_index(min(self.__indexes.get(channel, 0) for channel in self.channels), self.__collection_shape)
+        return processed_data_stream_events
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -990,7 +986,8 @@ class SequenceDataStream(CollectedDataStream):
     This is a subclass of CollectedDataStream.
     """
     def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None) -> None:
-        super().__init__(data_stream, (count,), (calibration or Calibration.Calibration(),))
+        calibration_ = calibration or Calibration.Calibration()
+        super().__init__(data_stream, (count,), (calibration_,))
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
@@ -1011,13 +1008,9 @@ class CombinedDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams = [data_stream.add_ref() for data_stream in data_streams]
-        self.__data_available_event_listeners: typing.List[Event.EventListener] = list()
         self.__handle_error_event_listeners: typing.List[Event.EventListener] = list()
 
     def about_to_delete(self) -> None:
-        for listener in self.__data_available_event_listeners:
-            listener.close()
-        self.__data_available_event_listeners = typing.cast(typing.Any, None)
         for listener in self.__handle_error_event_listeners:
             listener.close()
         self.__handle_error_event_listeners = typing.cast(typing.Any, None)
@@ -1052,18 +1045,18 @@ class CombinedDataStream(DataStream):
         # return the average of combined streams progress
         return sum(data_stream.progress for data_stream in self.__data_streams) / len(self.__data_streams)
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        data_stream_events = list[DataStreamEventArgs]()
         for data_stream in self.__data_streams:
-            data_stream.send_next()
+            data_stream_events.extend(data_stream.send_next())
+        return data_stream_events
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         for data_stream in self.__data_streams:
             data_stream.prepare_stream(stream_args, index_stack)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__data_available_event_listeners
         assert not self.__handle_error_event_listeners
-        self.__data_available_event_listeners = [data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, CombinedDataStream.__data_available)) for data_stream in self.__data_streams]
         self.__handle_error_event_listeners = [data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self)) for data_stream in self.__data_streams]
         for data_stream in self.__data_streams:
             data_stream.start_stream(stream_args)
@@ -1079,15 +1072,9 @@ class CombinedDataStream(DataStream):
     def _finish_stream(self) -> None:
         for data_stream in self.__data_streams:
             data_stream.finish_stream()
-        for listener in self.__data_available_event_listeners:
-            listener.close()
-        self.__data_available_event_listeners = list()
         for listener in self.__handle_error_event_listeners:
             listener.close()
         self.__handle_error_event_listeners = list()
-
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        self.fire_data_available(data_stream_event)
 
 
 class StackedDataStream(DataStream):
@@ -1101,7 +1088,6 @@ class StackedDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0  # data stream index
@@ -1126,9 +1112,6 @@ class StackedDataStream(DataStream):
             self.__height = height
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -1171,8 +1154,11 @@ class StackedDataStream(DataStream):
             return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
         return 0.0
 
-    def _send_next(self) -> None:
-        self.__data_streams[self.__current_index].send_next()
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_streams[self.__current_index].send_next()
+
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_available(data_stream_event)
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__current_index = 0
@@ -1184,9 +1170,7 @@ class StackedDataStream(DataStream):
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert self.__current_index == 0
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
@@ -1198,8 +1182,6 @@ class StackedDataStream(DataStream):
         if self.__current_index < len(self.__data_streams):
             if self.__data_streams[self.__current_index].is_finished:
                 self.__data_streams[self.__current_index].finish_stream()
-                self.__data_available_event_listener.close()
-                self.__data_available_event_listener = typing.cast(typing.Any, None)
                 self.__handle_error_event_listener.close()
                 self.__handle_error_event_listener = typing.cast(typing.Any, None)
                 self.__current_index += 1
@@ -1208,7 +1190,6 @@ class StackedDataStream(DataStream):
                     self.__sequence_index += 1
                 if self.__current_index < len(self.__data_streams):
                     self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
-                    self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, StackedDataStream.__data_available))
                     self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                     self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
@@ -1219,7 +1200,7 @@ class StackedDataStream(DataStream):
         if self.__current_index < len(self.__data_streams):
             self.__data_streams[self.__current_index].finish_stream()
 
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams):
             state = DataStreamStateEnum.COMPLETE
         else:
@@ -1229,7 +1210,6 @@ class StackedDataStream(DataStream):
         data_metadata._set_data_shape_and_dtype(((self.__height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype)))
         # create the data stream event with the overridden data_metadata and state.
         data_stream_event = DataStreamEventArgs(
-            data_stream_event.data_stream,
             data_stream_event.channel,
             data_metadata,
             data_stream_event.source_data,
@@ -1237,7 +1217,7 @@ class StackedDataStream(DataStream):
             data_stream_event.source_slice,
             state
         )
-        self.fire_data_available(data_stream_event)
+        return [data_stream_event]
 
 
 class SequentialDataStream(DataStream):
@@ -1248,7 +1228,6 @@ class SequentialDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0
@@ -1256,9 +1235,6 @@ class SequentialDataStream(DataStream):
         self.__sequence_index = 0
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -1295,8 +1271,11 @@ class SequentialDataStream(DataStream):
         # return the average of combined streams progress
         return ((self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count) if self.__sequence_count > 0 else .0
 
-    def _send_next(self) -> None:
-        self.__data_streams[self.__current_index].send_next()
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_streams[self.__current_index].send_next()
+
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_available(data_stream_event)
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__current_index = 0
@@ -1308,9 +1287,7 @@ class SequentialDataStream(DataStream):
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert self.__current_index == 0
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, SequentialDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
@@ -1321,8 +1298,6 @@ class SequentialDataStream(DataStream):
         # handle calling finish and start for the contained data stream.
         if self.__data_streams[self.__current_index].is_finished:
             self.__data_streams[self.__current_index].finish_stream()
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
             self.__current_index += 1
@@ -1331,7 +1306,6 @@ class SequentialDataStream(DataStream):
                 self.__sequence_index += 1
             if self.__current_index < len(self.__data_streams):
                 self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
-                self.__data_available_event_listener = self.__data_streams[self.__current_index].data_available_event.listen(weak_partial(_handle_data_available, self, SequentialDataStream.__data_available))
                 self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                 self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
@@ -1342,10 +1316,9 @@ class SequentialDataStream(DataStream):
         if self.__current_index < len(self.__data_streams):
             self.__data_streams[self.__current_index].finish_stream()
 
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         state = DataStreamStateEnum.COMPLETE if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__current_index + 1 == len(self.__data_streams) else DataStreamStateEnum.PARTIAL
         data_stream_event = DataStreamEventArgs(
-            data_stream_event.data_stream,
             Channel(str(self.__current_index), *data_stream_event.channel.segments),
             data_stream_event.data_metadata,
             data_stream_event.source_data,
@@ -1353,7 +1326,7 @@ class SequentialDataStream(DataStream):
             data_stream_event.source_slice,
             state
         )
-        self.fire_data_available(data_stream_event)
+        return [data_stream_event]
 
 
 class DataStreamFunctor:
@@ -1622,12 +1595,13 @@ class DataAndMetadataDataChannel(DataChannel):
         data_and_metadata._set_metadata(data_metadata.metadata)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        # print(f"get data {list(self.__data.keys())}")
         return self.__data[channel]
 
 
-class FrameCallbacks:
-    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None: ...
-    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None: ...
+class FrameCallbacks(typing.Protocol):
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]: ...
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]: ...
 
 
 class Framer(ReferenceCounting.ReferenceCounted):
@@ -1653,11 +1627,14 @@ class Framer(ReferenceCounting.ReferenceCounted):
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data_channel.get_data(channel)
 
-    def data_available(self, data_stream_event: DataStreamEventArgs, callbacks: FrameCallbacks) -> None:
+    def data_available(self, data_stream_event: DataStreamEventArgs, callbacks: FrameCallbacks) -> typing.Sequence[DataStreamEventArgs]:
         # when data arrives, store it into a data item with the same description/shape.
         # data is assumed to be partial data. this restriction may be removed in a future
         # version. separate indexes are kept for each channel and represent the next destination
         # for the data.
+
+        # return the processed events for the next level up.
+        processed_data_stream_events = list[DataStreamEventArgs]()
 
         # useful variables
         channel = data_stream_event.channel
@@ -1686,7 +1663,7 @@ class Framer(ReferenceCounting.ReferenceCounted):
             # if the data chunk is complete, perform processing and send out the new data.
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
                 assert index == flat_shape[0]  # index should be at the end.
-                callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel))
+                processed_data_stream_events.extend(callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel)))
                 self.__indexes[channel] = 0
         else:
             # no storage takes place in this case; receiving full frames and sending out full (processed) frames.
@@ -1707,8 +1684,9 @@ class Framer(ReferenceCounting.ReferenceCounted):
                                                                       new_data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            callbacks._send_data_multiple(data_stream_event.channel, data_and_metadata, count)
+            processed_data_stream_events.extend(callbacks._send_data_multiple(data_stream_event.channel, data_and_metadata, count))
             self.__indexes[channel] = 0
+        return processed_data_stream_events
 
 
 class FramedDataStream(DataStream):
@@ -1728,14 +1706,10 @@ class FramedDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__framer = Framer(data_channel or DataAndMetadataDataChannel()).add_ref()
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -1789,17 +1763,18 @@ class FramedDataStream(DataStream):
     def _progress(self) -> float:
         return self.__data_stream.progress
 
-    def _send_next(self) -> None:
-        self.__data_stream.send_next()
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.send_next()
+
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_available(data_stream_event)
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__operator.reset()
         self.__data_stream.prepare_stream(stream_args, index_stack, operator=self.__operator)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, FramedDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_stream.start_stream(stream_args)
 
@@ -1811,8 +1786,6 @@ class FramedDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
-        self.__data_available_event_listener.close()
-        self.__data_available_event_listener = typing.cast(typing.Any, None)
         self.__handle_error_event_listener.close()
         self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
@@ -1822,23 +1795,25 @@ class FramedDataStream(DataStream):
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
 
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        self.__framer.data_available(data_stream_event, typing.cast(FrameCallbacks, self))
+    def __data_available(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__framer.data_available(data_stream_event, typing.cast(FrameCallbacks, self))
 
-    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
+        processed_data_stream_events = list[DataStreamEventArgs]()
         if not self.__operator.is_applied:
             for new_channel_data in self.__operator.process(ChannelData(channel, data_and_metadata)):
-                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata, update_in_place=True)
+                processed_data_stream_events.extend(self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata, update_in_place=True))
         else:
-            self.__send_data(channel, data_and_metadata)
+            processed_data_stream_events.extend(self.__send_data(channel, data_and_metadata))
+        return processed_data_stream_events
 
-    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
+        processed_data_stream_events = list[DataStreamEventArgs]()
         if not self.__operator.is_applied:
-            for new_channel_data in self.__operator.process_multiple(
-                    ChannelData(channel, data_and_metadata)):
-                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count, update_in_place=True)
+            for new_channel_data in self.__operator.process_multiple(ChannelData(channel, data_and_metadata)):
+                processed_data_stream_events.extend(self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count, update_in_place=True))
         else:
             # special case for camera compatibility. cameras should not return empty dimensions.
             if data_and_metadata.data_shape[-1] == 1:
@@ -1856,9 +1831,10 @@ class FramedDataStream(DataStream):
                                                                               data_metadata.data_descriptor.datum_dimension_count - 1),
                                                                           data_metadata.timezone,
                                                                           data_metadata.timezone_offset)
-            self.__send_data_multiple(channel, data_and_metadata, count)
+            processed_data_stream_events.extend(self.__send_data_multiple(channel, data_and_metadata, count))
+        return processed_data_stream_events
 
-    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, update_in_place: bool = False) -> None:
+    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, update_in_place: bool = False) -> typing.Sequence[DataStreamEventArgs]:
         new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
         new_count: typing.Optional[int] = None
         new_source_slice: typing.Tuple[slice, ...]
@@ -1871,14 +1847,12 @@ class FramedDataStream(DataStream):
         # form the new slice
         new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
         # send the new data chunk
-        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, new_data, new_count,
-                                                    new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.fire_data_available(new_data_stream_event, update_in_place)
+        new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_data, new_count, new_source_slice, DataStreamStateEnum.COMPLETE, update_in_place)
+        return [new_data_stream_event]
 
-    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, update_in_place: bool = False) -> None:
+    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, update_in_place: bool = False) -> typing.Sequence[DataStreamEventArgs]:
         assert data_and_metadata.is_sequence
-        new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count,
-                                                             data_and_metadata.datum_dimension_count)
+        new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count, data_and_metadata.datum_dimension_count)
         data_dtype = data_and_metadata.data_dtype
         assert data_dtype is not None
         new_data_metadata = DataAndMetadata.DataMetadata(
@@ -1893,8 +1867,8 @@ class FramedDataStream(DataStream):
         new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
         data = data_and_metadata.data
         assert data is not None
-        new_data_stream_event = DataStreamEventArgs(self, channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
-        self.fire_data_available(new_data_stream_event, update_in_place)
+        new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE, update_in_place)
+        return [new_data_stream_event]
 
 
 class MaskLike(typing.Protocol):
@@ -2073,13 +2047,9 @@ class ContainerDataStream(DataStream):
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -2116,16 +2086,14 @@ class ContainerDataStream(DataStream):
     def _abort_stream(self) -> None:
         self.__data_stream.abort_stream()
 
-    def _send_next(self) -> None:
-        self.__data_stream.send_next()
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.send_next()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__data_stream.prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, ContainerDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_stream.start_stream(stream_args)
 
@@ -2134,13 +2102,8 @@ class ContainerDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
-        self.__data_available_event_listener.close()
-        self.__data_available_event_listener = typing.cast(typing.Any, None)
         self.__handle_error_event_listener.close()
         self.__handle_error_event_listener = typing.cast(typing.Any, None)
-
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        self.fire_data_available(data_stream_event)
 
 
 class ActionValueControllerLike(typing.Protocol):
@@ -2216,9 +2179,9 @@ class ActionDataStream(ContainerDataStream):
         self.__delegate.finish()
         super()._finish_stream()
 
-    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+    def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         assert data_stream_event.count is None or data_stream_event.count == 1
-        super()._fire_data_available(data_stream_event)
+        super()._handle_data_available(data_stream_event)
         if data_stream_event.state == DataStreamStateEnum.COMPLETE:
             assert (data_stream_event.count or 1) == 1
             self.__complete_channel_count += 1
@@ -2231,13 +2194,9 @@ class MonitorDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__channel_segment = channel_segment
-        self.__data_available_event_listener = typing.cast(Event.EventListener, None)
         self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
 
     def about_to_delete(self) -> None:
-        if self.__data_available_event_listener:
-            self.__data_available_event_listener.close()
-            self.__data_available_event_listener = typing.cast(typing.Any, None)
         if self.__handle_error_event_listener:
             self.__handle_error_event_listener.close()
             self.__handle_error_event_listener = typing.cast(typing.Any, None)
@@ -2274,31 +2233,27 @@ class MonitorDataStream(DataStream):
     def _abort_stream(self) -> None:
         pass
 
-    def _send_next(self) -> None:
-        pass
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.send_next()
+
+    def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
+        super()._handle_data_available(data_stream_event)
+        data_stream_event.channel = data_stream_event.channel.parent
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         pass
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__data_available_event_listener
         assert not self.__handle_error_event_listener
-        self.__data_available_event_listener = self.__data_stream.data_available_event.listen(weak_partial(_handle_data_available, self, MonitorDataStream.__data_available))
         self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
 
     def _advance_stream(self) -> None:
         pass
 
     def _finish_stream(self) -> None:
-        self.__data_available_event_listener.close()
-        self.__data_available_event_listener = typing.cast(typing.Any, None)
         self.__handle_error_event_listener.close()
         self.__handle_error_event_listener = typing.cast(typing.Any, None)
-
-    def __data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
-        self.fire_data_available(data_stream_event)
-        data_stream_event.channel = data_stream_event.channel.parent
 
 
 class AccumulatedDataStream(ContainerDataStream):
@@ -2343,7 +2298,7 @@ class AccumulatedDataStream(ContainerDataStream):
         )
         return DataStreamInfo(data_metadata, data_stream_info.duration)
 
-    def _fire_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         count = data_stream_event.count
         assert count is None
         old_data_metadata = data_stream_event.data_metadata
@@ -2379,11 +2334,11 @@ class AccumulatedDataStream(ContainerDataStream):
                                             data_stream_event.source_slice[1:], dest_slice, data_metadata)
         data_channel_data = self.__data_channel.get_data(channel).data
         assert data_channel_data is not None
-        new_data_stream_event = DataStreamEventArgs(self, channel, data_metadata,
+        new_data_stream_event = DataStreamEventArgs(channel, data_metadata,
                                                     data_channel_data, None, new_source_slice,
                                                     data_stream_event.state)
         new_data_stream_event.reset_frame = dest_slice.start == 0
-        super()._fire_data_available(new_data_stream_event)
+        return [new_data_stream_event]
 
 
 def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
@@ -2400,6 +2355,13 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
         try:
             last_progress = 0.0
             last_progress_time = time.time()
+
+            # useful for debugging
+            # data_stream._print()
+            # print(data_stream.channels)
+
+            assert isinstance(data_stream, FramedDataStream)
+
             while not data_stream.is_finished and not data_stream.is_aborted:
                 # progress checking is for tests and self-consistency
                 pre_progress = data_stream.progress

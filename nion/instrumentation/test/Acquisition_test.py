@@ -48,7 +48,8 @@ class ScanDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return ((self.__frame_index + (self.__partial_index / self.__scan_length)) / self.__frame_count)
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         assert self.__frame_index < self.__frame_count
         assert self.__partial_index < self.__scan_length
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
@@ -66,16 +67,17 @@ class ScanDataStream(Acquisition.DataStream):
                 if self.__error_after == 0:
                     new_count = 0  # this will trigger an exception in send data
                 self.__error_after -= 1
-            data_stream_event = Acquisition.DataStreamEventArgs(self, channel, data_metadata,
+            data_stream_event = Acquisition.DataStreamEventArgs(channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
                                                                 new_count, source_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
-            self.fire_data_available(data_stream_event)
+            data_stream_events.append(data_stream_event)
         # update indexes
         if state == Acquisition.DataStreamStateEnum.COMPLETE:
             self.__partial_index = 0
             self.__frame_index = self.__frame_index + 1
         else:
             self.__partial_index = stop_index
+        return data_stream_events
 
 
 class SingleFrameDataStream(Acquisition.DataStream):
@@ -115,7 +117,8 @@ class SingleFrameDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return self.__partial_index / self.__frame_shape[0]
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
@@ -125,10 +128,10 @@ class SingleFrameDataStream(Acquisition.DataStream):
         source_data_slice = (slice(self.__partial_index, new_partial), slice(None))
         # send the data with no count. this is required when using partial.
         state = Acquisition.DataStreamStateEnum.PARTIAL if new_partial < self.__frame_shape[0] else Acquisition.DataStreamStateEnum.COMPLETE
-        data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata,
+        data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata,
                                                             self.data[self.__frame_index], None,
                                                             source_data_slice, state)
-        self.fire_data_available(data_stream_event)
+        data_stream_events.append(data_stream_event)
         if state == Acquisition.DataStreamStateEnum.PARTIAL:
             self.__partial_index = new_partial
         else:
@@ -138,6 +141,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
             if self.__error_after == 0:
                 raise Exception()
             self.__error_after -= 1
+        return data_stream_events
 
 
 
@@ -180,7 +184,8 @@ class MultiFrameDataStream(Acquisition.DataStream):
             operator = typing.cast(Acquisition.DataStreamOperator, kwargs.get("operator", Acquisition.NullDataStreamOperator()))
             operator.apply()
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         if self.__do_processing:
@@ -203,10 +208,10 @@ class MultiFrameDataStream(Acquisition.DataStream):
         source_data = self.data[self.__frame_index:self.__frame_index + count]
         if self.__do_processing:
             source_data = source_data.sum(axis=1)
-        data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, source_data, count,
-                                                            source_data_slice, state)
-        self.fire_data_available(data_stream_event)
+        data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, source_data, count, source_data_slice, state)
+        data_stream_events.append(data_stream_event)
         self.__frame_index += count
+        return data_stream_events
 
 
 class RectangleMask(Acquisition.MaskLike):

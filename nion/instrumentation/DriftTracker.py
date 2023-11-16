@@ -277,7 +277,13 @@ class DriftCorrectionBehavior:
         self.__scan_frame_parameters.channel_variant = "drift"
         self.__drift_tracker.reset()
 
-    def prepare_section(self, *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
+    def get_channel(self) -> Acquisition.Channel:
+        drift_channel_index = self.__scan_hardware_source.get_channel_index(self.__drift_channel_id)
+        if drift_channel_index is not None:
+            return Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(drift_channel_index), "drift")
+        return Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, "drift")
+
+    def prepare_section(self, drift_xdata_list: typing.List[DataAndMetadata.DataAndMetadata], *, utc_time: typing.Optional[datetime.datetime] = None) -> None:
         # if this is called, it means some form of drift-sub-area drift correction has been enabled. if the scan
         # interval is 0, it means every n lines; so do the drift correction here since each section wil have its own
         # acquisition and this will be called for each section. if the scan interval is non-zero, then only perform
@@ -326,6 +332,7 @@ class DriftCorrectionBehavior:
                     xdata0 = xdatas[0]
                     if xdata0:
                         self.__drift_tracker.submit_image(xdata0, drift_rotation, wait=True)
+                        drift_xdata_list.append(xdata0)
         self.__drift_scan_interval_index += 1
 
 
@@ -342,15 +349,28 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
     def __init__(self, drift_correction_behavior: DriftCorrectionBehavior, data_stream: Acquisition.DataStream) -> None:
         super().__init__(data_stream)
         self.__drift_correction_behavior = drift_correction_behavior
+        self.__pending_drift_xdata: typing.List[DataAndMetadata.DataAndMetadata] = list()
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         # during preparation for this section of the scan, let the drift correction behavior capture
         # the drift region and submit it to the drift tracker. the super prepare stream will then call
         # prepare stream of the scan, which can use the drift tracker to adjust the center_nm frame
         # parameter.
-        self.__drift_correction_behavior.prepare_section()
+        self.__drift_correction_behavior.prepare_section(self.__pending_drift_xdata)
         # call this last so that we measure drift before preparing the scan section (which will utilize the measured drift).
         super()._prepare_stream(stream_args, index_stack, **kwargs)
+
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        while self.__pending_drift_xdata:
+            drift_xdata = self.__pending_drift_xdata.pop(0)
+            data_stream_event = Acquisition.DataStreamEventArgs(
+                self.__drift_correction_behavior.get_channel(),
+                drift_xdata.data_metadata,
+                drift_xdata.data,
+                None,
+                (slice(0, drift_xdata.data_shape[0]), slice(None)),
+                Acquisition.DataStreamStateEnum.COMPLETE)
+        return super()._send_next()
 
 
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):
@@ -404,16 +424,17 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         super()._start_stream(stream_args)
         self.__drift_tracker.reset()
 
-    def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+    def _handle_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel == data_stream_event.channel:
             self.__framer.data_available(data_stream_event, typing.cast(Acquisition.FrameCallbacks, self))
-        super()._fire_data_available(data_stream_event)
+        super()._handle_data_available(data_stream_event)
 
-    def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation)
+        return list()
 
-    def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
-        pass
+    def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        return list()
 
 
 def run() -> None:

@@ -2899,7 +2899,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
             assert self.__camera_device_stream_interface
             self.__camera_device_stream_interface.abort_stream()
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         if self.__record_task:
             # use send_next to send the data acquiring a sequence of single frames
             if self.__record_task.is_finished:
@@ -2912,8 +2913,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
                 xdata = xdatas[0] if xdatas else None
                 data = xdata.data if xdata else None
                 assert data is not None
-                data_stream_event = Acquisition.DataStreamEventArgs(self, self.__channel, data_metadata, data, None, source_data_slice, state)
-                self.fire_data_available(data_stream_event)
+                data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, data, None, source_data_slice, state)
+                data_stream_events.append(data_stream_event)
         else:
             assert self.__camera_device_stream_interface
             partial_data = self.__camera_device_stream_interface.get_next_data()
@@ -2945,18 +2946,18 @@ class CameraFrameDataStream(Acquisition.DataStream):
                     data_count = numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64)
                     data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
                     source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
-                    data_stream_event = Acquisition.DataStreamEventArgs(self,
-                                                                        channel,
+                    data_stream_event = Acquisition.DataStreamEventArgs(channel,
                                                                         data_metadata,
                                                                         data,
                                                                         count,
                                                                         source_slice,
                                                                         Acquisition.DataStreamStateEnum.COMPLETE)
-                    self.fire_data_available(data_stream_event)
+                    data_stream_events.append(data_stream_event)
                     # total_count is the total for this entire stream.
                     self.__progress = valid_index / self.__total_count
                 self.__last_index = valid_index
             self.__camera_device_stream_interface.continue_data(partial_data)
+        return data_stream_events
 
     def _advance_stream(self) -> None:
         if self.__record_task:
@@ -2971,7 +2972,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
         return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
-        # return Acquisition.SequenceDataStream(self, length)
 
 
 def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
@@ -3139,7 +3139,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
         super()._start_stream(stream_args)
         self.__dst_index = 0
 
-    def _fire_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+    def _handle_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         if self.__channel is None or self.__channel == data_stream_event.channel:
             data_channel_state = "complete" if data_stream_event.state == Acquisition.DataStreamStateEnum.COMPLETE else "partial"
             assert data_stream_event.count is None
@@ -3221,7 +3221,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
                 start_index += length
                 self.__dst_index += length
 
-        super()._fire_data_available(data_stream_event)
+        super()._handle_data_available(data_stream_event)
 
 
 class SynchronizedDataChannelInterface:

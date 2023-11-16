@@ -2073,6 +2073,7 @@ def get_limited_scan_shape(scan_size: Geometry.IntSize) -> Geometry.IntSize:
         return Geometry.IntSize(scan_size_height, scan_size_width)
     return scan_size
 
+
 class ScanFrameSequenceDataStream(Acquisition.DataStream):
     def __init__(self,
                  scan_hardware_source: ScanHardwareSource,
@@ -2149,7 +2150,8 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return self.__sent_count / self.__count
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         while self.__scan_hardware_source.get_sequence_buffer_count() > 0 and self.__sent_count < self.__count and not self.__is_aborted:
             buffer_data = self.__scan_hardware_source.pop_sequence_buffer_data(self.__scan_id)
             self.__sent_count += 1
@@ -2163,14 +2165,14 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
                 data = data_channel_data.reshape((1,) + tuple(xdata.datum_dimension_shape))
                 source_slice = (slice(0, 1),) + (slice(None),) * len(xdata.datum_dimension_shape)
                 state = Acquisition.DataStreamStateEnum.COMPLETE  # always complete since sending full frame chunks
-                data_stream_event = Acquisition.DataStreamEventArgs(self,
-                                                                    channel,
+                data_stream_event = Acquisition.DataStreamEventArgs(channel,
                                                                     data_metadata,
                                                                     data,
                                                                     1,
                                                                     source_slice,
                                                                     state)
-                self.fire_data_available(data_stream_event)
+                data_stream_events.append(data_stream_event)
+        return data_stream_events
 
 
 class ScanDataStream(Acquisition.DataStream):
@@ -2333,7 +2335,8 @@ class ScanDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return sum(self.__sent_rows.values()) / self.__scan_size[0] / len(self.channels)
 
-    def _send_next(self) -> None:
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
         with self.__lock:
             for channel in self.__buffers.keys():
                 sent_rows = self.__sent_rows.get(channel, self.__section_rect.top)
@@ -2360,16 +2363,16 @@ class ScanDataStream(Acquisition.DataStream):
                         source_slice = (slice(start, stop),)
                         scan_data_data = scan_data.data
                         assert scan_data_data is not None
-                        data_stream_event = Acquisition.DataStreamEventArgs(self,
-                                                                            channel,
+                        data_stream_event = Acquisition.DataStreamEventArgs(channel,
                                                                             data_metadata,
                                                                             scan_data_data.reshape(-1),
                                                                             stop - start,
                                                                             source_slice,
                                                                             Acquisition.DataStreamStateEnum.COMPLETE)
                         if stop - start > 0:
-                            self.fire_data_available(data_stream_event)
+                            data_stream_events.append(data_stream_event)
                             self.__sent_rows[channel] = available_rows
+        return data_stream_events
 
 
 class ScanFrameDataStream(Acquisition.StackedDataStream):
@@ -2420,10 +2423,11 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
 
 class SynchronizedDataStream(Acquisition.ContainerDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
-                 camera_hardware_source: camera_base.CameraHardwareSource):
+                 camera_hardware_source: camera_base.CameraHardwareSource, section_count: int) -> None:
         super().__init__(data_stream)
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
+        self.__section_count = section_count
         self.__stem_controller = scan_hardware_source.stem_controller
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
@@ -2521,7 +2525,7 @@ def make_synchronized_scan_data_stream(
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
-    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source)
+    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, section_count)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         drift_tracker = scan_hardware_source.drift_tracker
