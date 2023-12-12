@@ -130,7 +130,6 @@ from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import ReferenceCounting
 from nion.utils import Registry
-from nion.utils.ReferenceCounting import weak_partial
 
 if typing.TYPE_CHECKING:
     from nion.instrumentation import DriftTracker
@@ -506,7 +505,6 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         super().__init__()
         # these two events are used to communicate data updates and errors to the listening data streams or clients.
         self.data_available_event = Event.Event()
-        self.handle_error_event = Event.Event()
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
         self.__sequence_count = sequence_count
         self.__sequence_counts: typing.Dict[Channel, int] = dict()
@@ -583,11 +581,6 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     def _abort_stream(self) -> None:
         pass
-
-    def handle_error(self) -> None:
-        """Handle an error occurring on this data stream."""
-        self.is_error = True
-        self.handle_error_event.fire()
 
     def send_next(self) -> typing.Sequence[DataStreamEventArgs]:
         """Send next data."""
@@ -719,7 +712,6 @@ class CollectedDataStream(DataStream):
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         assert len(shape) in (1, 2)
         self.__index_stack: IndexDescriptionList = list()
         self.__collection_shape = tuple(shape)
@@ -731,9 +723,6 @@ class CollectedDataStream(DataStream):
         self.__all_channels_need_start = False
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         if self.__data_stream_started:
             warnings.warn("Stream deleted but not finished.", category=RuntimeWarning)
         self.__data_stream.remove_ref()
@@ -790,8 +779,6 @@ class CollectedDataStream(DataStream):
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self._start_next_sub_stream()
 
     def _abort_stream(self) -> None:
@@ -819,8 +806,6 @@ class CollectedDataStream(DataStream):
         assert self.__data_stream_started
         self.__data_stream.finish_stream()
         self.__data_stream_started = False
-        self.__handle_error_event_listener.close()
-        self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # subclasses can override this method to provide different collection shapes.
@@ -1008,12 +993,8 @@ class CombinedDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams = [data_stream.add_ref() for data_stream in data_streams]
-        self.__handle_error_event_listeners: typing.List[Event.EventListener] = list()
 
     def about_to_delete(self) -> None:
-        for listener in self.__handle_error_event_listeners:
-            listener.close()
-        self.__handle_error_event_listeners = typing.cast(typing.Any, None)
         for data_stream in self.__data_streams:
             data_stream.remove_ref()
         self.__data_streams = typing.cast(typing.Any, None)
@@ -1056,8 +1037,6 @@ class CombinedDataStream(DataStream):
             data_stream.prepare_stream(stream_args, index_stack)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__handle_error_event_listeners
-        self.__handle_error_event_listeners = [data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self)) for data_stream in self.__data_streams]
         for data_stream in self.__data_streams:
             data_stream.start_stream(stream_args)
 
@@ -1072,9 +1051,6 @@ class CombinedDataStream(DataStream):
     def _finish_stream(self) -> None:
         for data_stream in self.__data_streams:
             data_stream.finish_stream()
-        for listener in self.__handle_error_event_listeners:
-            listener.close()
-        self.__handle_error_event_listeners = list()
 
 
 class StackedDataStream(DataStream):
@@ -1088,7 +1064,6 @@ class StackedDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0  # data stream index
         assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
@@ -1112,9 +1087,6 @@ class StackedDataStream(DataStream):
             self.__height = height
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         for data_stream in self.__data_streams:
             data_stream.remove_ref()
         self.__data_streams = typing.cast(typing.Any, None)
@@ -1170,8 +1142,6 @@ class StackedDataStream(DataStream):
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert self.__current_index == 0
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
     def _abort_stream(self) -> None:
@@ -1182,15 +1152,12 @@ class StackedDataStream(DataStream):
         if self.__current_index < len(self.__data_streams):
             if self.__data_streams[self.__current_index].is_finished:
                 self.__data_streams[self.__current_index].finish_stream()
-                self.__handle_error_event_listener.close()
-                self.__handle_error_event_listener = typing.cast(typing.Any, None)
                 self.__current_index += 1
                 if self.__current_index == len(self.__data_streams) and self.__sequence_index + 1 < self.__sequence_count:
                     self.__current_index = 0
                     self.__sequence_index += 1
                 if self.__current_index < len(self.__data_streams):
                     self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
-                    self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                     self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
         if self.__current_index < len(self.__data_streams):
@@ -1228,16 +1195,12 @@ class SequentialDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0
         self.__sequence_count = 0
         self.__sequence_index = 0
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         for data_stream in self.__data_streams:
             data_stream.remove_ref()
         self.__data_streams = typing.cast(typing.Any, None)
@@ -1287,8 +1250,6 @@ class SequentialDataStream(DataStream):
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         assert self.__current_index == 0
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
     def _abort_stream(self) -> None:
@@ -1298,15 +1259,12 @@ class SequentialDataStream(DataStream):
         # handle calling finish and start for the contained data stream.
         if self.__data_streams[self.__current_index].is_finished:
             self.__data_streams[self.__current_index].finish_stream()
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
             self.__current_index += 1
             if self.__current_index == len(self.__data_streams) and self.__sequence_index + 1 < self.__sequence_count:
                 self.__current_index = 0
                 self.__sequence_index += 1
             if self.__current_index < len(self.__data_streams):
                 self.__data_streams[self.__current_index].prepare_stream(self.__stream_args, list(self.__index_stack))
-                self.__handle_error_event_listener = self.__data_streams[self.__current_index].handle_error_event.listen(weak_partial(DataStream.handle_error, self))
                 self.__data_streams[self.__current_index].start_stream(self.__stream_args)
 
         if self.__current_index < len(self.__data_streams):
@@ -1706,13 +1664,9 @@ class FramedDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
         self.__framer = Framer(data_channel or DataAndMetadataDataChannel()).add_ref()
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
         self.__framer.remove_ref()
@@ -1774,8 +1728,6 @@ class FramedDataStream(DataStream):
         self.__data_stream.prepare_stream(stream_args, index_stack, operator=self.__operator)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_stream.start_stream(stream_args)
 
     def _abort_stream(self) -> None:
@@ -1786,8 +1738,6 @@ class FramedDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
-        self.__handle_error_event_listener.close()
-        self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
     def prepare_data_channel(self) -> None:
         self.__framer.prepare(self)
@@ -2047,12 +1997,8 @@ class ContainerDataStream(DataStream):
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__()
         self.__data_stream = data_stream.add_ref()
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
@@ -2093,8 +2039,6 @@ class ContainerDataStream(DataStream):
         self.__data_stream.prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
         self.__data_stream.start_stream(stream_args)
 
     def _advance_stream(self) -> None:
@@ -2102,8 +2046,6 @@ class ContainerDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
-        self.__handle_error_event_listener.close()
-        self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
 
 class ActionValueControllerLike(typing.Protocol):
@@ -2194,12 +2136,8 @@ class MonitorDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__channel_segment = channel_segment
-        self.__handle_error_event_listener = typing.cast(Event.EventListener, None)
 
     def about_to_delete(self) -> None:
-        if self.__handle_error_event_listener:
-            self.__handle_error_event_listener.close()
-            self.__handle_error_event_listener = typing.cast(typing.Any, None)
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
         super().about_to_delete()
@@ -2223,15 +2161,9 @@ class MonitorDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    def _acquire_finished(self) -> None:
-        pass
-
     @property
     def _progress(self) -> float:
         return self.__data_stream.progress
-
-    def _abort_stream(self) -> None:
-        pass
 
     def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_stream.send_next()
@@ -2240,20 +2172,6 @@ class MonitorDataStream(DataStream):
         data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
         super()._handle_data_available(data_stream_event)
         data_stream_event.channel = data_stream_event.channel.parent
-
-    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
-        pass
-
-    def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        assert not self.__handle_error_event_listener
-        self.__handle_error_event_listener = self.__data_stream.handle_error_event.listen(weak_partial(DataStream.handle_error, self))
-
-    def _advance_stream(self) -> None:
-        pass
-
-    def _finish_stream(self) -> None:
-        self.__handle_error_event_listener.close()
-        self.__handle_error_event_listener = typing.cast(typing.Any, None)
 
 
 class AccumulatedDataStream(ContainerDataStream):
@@ -2575,7 +2493,6 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
         assert control_description
         device_controller = device_map.get(control_description.device_id)
         if device_controller:
-            # configure the action function and data stream using weak_partial to carefully control ref counts
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, None)
             action_delegate = ValueControllersActionValueController([value_controller])
             device_data_stream = SequenceDataStream(ActionDataStream(device_data_stream, action_delegate), self.__control_values.shape[0])
@@ -2600,7 +2517,6 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
         assert control_description
         device_controller = device_map.get(control_description.device_id)
         if device_controller:
-            # configure the action function and data stream using weak_partial to carefully control ref counts
             axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, axis)
             action_delegate = ValueControllersActionValueController([value_controller])
