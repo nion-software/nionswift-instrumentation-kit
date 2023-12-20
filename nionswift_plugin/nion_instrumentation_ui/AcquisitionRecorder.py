@@ -101,6 +101,7 @@ class Controller:
                     time.sleep(0.2)
                     if self.cancel_event.is_set():
                         return False, max(i - 1, 0)
+                    self.progress_model.value = min(50, int(i / frame_count * 50))
                 return True, frame_count
             except Exception as e:
                 import traceback
@@ -128,7 +129,7 @@ class Controller:
                 for i in range(actual_count):
                     if self.cancel_event.is_set():
                         return False
-                    self.progress_model.value = min(100, int(i / actual_count * 100))
+                    self.progress_model.value = min(100, 50 + int(i / actual_count * 50))
                     xdata_group_list.append(list(hardware_source.pop_sequence_buffer_data(scan_id).values()))
                 self.progress_model.value = 100
                 return True
