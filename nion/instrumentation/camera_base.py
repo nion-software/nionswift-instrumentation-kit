@@ -3236,7 +3236,6 @@ def make_sequence_data_stream(
         camera_hardware_source: CameraHardwareSource,
         camera_frame_parameters: CameraFrameParameters,
         count: int,
-        camera_data_channel: typing.Optional[SynchronizedDataChannelInterface] = None,
         include_raw: bool = True,
         include_summed: bool = False) -> Acquisition.DataStream:
 
@@ -3280,14 +3279,7 @@ def make_sequence_data_stream(
         elif include_summed:
             sequence = Acquisition.AccumulatedDataStream(sequence)
         # include_raw is the default behavior
-    # the optional ChannelDataStream updates the camera data channel for the stream matching 999
-    data_stream: Acquisition.DataStream
-    if camera_data_channel:
-        data_stream = ChannelDataStream(sequence, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id))
-    else:
-        data_stream = sequence
-    # return the top level stream
-    return data_stream
+    return sequence
 
 
 class CameraDeviceController(STEMController.DeviceController):
