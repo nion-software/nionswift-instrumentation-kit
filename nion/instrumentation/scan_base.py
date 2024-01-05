@@ -1386,11 +1386,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                                                                            scan_frame_parameters=copy.copy(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
                                                                            camera_frame_parameters=camera_frame_parameters,
-                                                                           camera_data_channel=camera_data_channel,
                                                                            scan_data_stream_functor=scan_data_stream_functor,
                                                                            section_height=section_height,
                                                                            scan_count=scan_count,
                                                                            old_move_axis=camera_data_channel is not None)
+
+        # the optional ChannelDataStream updates the camera data channel for the stream matching 999
+        if camera_data_channel:
+            synchronized_scan_data_stream = camera_base.ChannelDataStream(synchronized_scan_data_stream, camera_data_channel, Acquisition.Channel(camera.hardware_source_id))
         result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_channel)
         scan_acquisition = Acquisition.Acquisition(result_data_stream)
         with result_data_stream.ref(), contextlib.closing(scan_acquisition):
@@ -2450,7 +2453,6 @@ def make_synchronized_scan_data_stream(
         scan_frame_parameters: ScanFrameParameters,
         camera_hardware_source: camera_base.CameraHardwareSource,
         camera_frame_parameters: camera_base.CameraFrameParameters,
-        camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
         section_height: typing.Optional[int] = None,
         scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
         scan_count: int = 1,
@@ -2542,14 +2544,7 @@ def make_synchronized_scan_data_stream(
         elif include_summed:
             collector = Acquisition.AccumulatedDataStream(collector)
         # include_raw is the default behavior
-    # the optional ChannelDataStream updates the camera data channel for the stream matching 999
-    data_stream: Acquisition.DataStream
-    if camera_data_channel:
-        data_stream = camera_base.ChannelDataStream(collector, camera_data_channel, Acquisition.Channel(camera_hardware_source.hardware_source_id))
-    else:
-        data_stream = collector
-    # return the top level stream
-    return data_stream
+    return collector
 
 
 class ScanDeviceController(STEMController.DeviceController):
