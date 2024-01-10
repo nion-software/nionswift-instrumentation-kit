@@ -27,10 +27,11 @@ class TestMultiAcquire(unittest.TestCase):
     def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context(is_eels=is_eels)
 
-    def _set_up_multi_acquire(self, settings: typing.Mapping[str, typing.Any], parameters: list, stem_controller):
+    def _set_up_multi_acquire(self, settings: typing.Mapping[str, typing.Any], parameters_list: typing.Sequence[typing.Mapping[str, typing.Any]], stem_controller):
         multi_acquire = MultiAcquire.MultiAcquireController(stem_controller)
         multi_acquire.settings.update_from_dict(settings)
-        multi_acquire.spectrum_parameters[:] = parameters
+        for parameters in parameters_list:
+            multi_acquire.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters.from_dict(parameters))
         return multi_acquire
 
     def test_acquire_multi_eels_spectrum_works_and_finishes_in_time(self):
@@ -196,10 +197,10 @@ class TestMultiAcquire(unittest.TestCase):
                             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
                             multi_acquire_controller.scan_controller = scan_hardware_source
 
-                            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
+                            def get_acquisition_handler_fn(multi_acquire_parameters: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index].exposure_ms
                                 camera_frame_parameters.processing = multi_acquire_settings.processing
                                 camera_frame_parameters.active_masks = masks
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
@@ -317,10 +318,10 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
             multi_acquire_controller.scan_controller = scan_hardware_source
 
-            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
+            def get_acquisition_handler_fn(multi_acquire_parameters: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index].exposure_ms
                 camera_frame_parameters.processing = multi_acquire_settings.processing
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,

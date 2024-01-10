@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 # standard libraries
+import copy
 import gettext
 import itertools
 import os
 import pkgutil
 import threading
 import typing
-import uuid
 import webbrowser
 
 # third party libraries
@@ -205,7 +205,7 @@ class MultiAcquirePanelDelegate:
         parameter_column = self.parameter_column
         multi_acquire_controller = self.multi_acquire_controller
         if multi_acquire_controller and parameter_column:
-            parameter_list = multi_acquire_controller.spectrum_parameters.copy()
+            parameter_list = copy.deepcopy(multi_acquire_controller.spectrum_parameters.parameters)
             column_widget = typing.cast(UserInterface.BoxWidget, parameter_column._widget)
             if len(parameter_list) != len(column_widget.children):
                 column_widget.remove_all()
@@ -321,6 +321,9 @@ class MultiAcquirePanelDelegate:
         self._camera = None
         self._scan_controller = None
         self.multi_acquire_controller = MultiAcquire.MultiAcquireController(self.stem_controller, savepath=os.path.join(os.path.expanduser('~'), 'MultiAcquire'))
+        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=0, offset_x=0.0, exposure_ms=1.0, frames=1))
+        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=1, offset_x=160.0, exposure_ms=8.0, frames=1))
+        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=2, offset_x=320.0, exposure_ms=16.0, frames=1))
         self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
         self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
         self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)
@@ -374,14 +377,14 @@ class MultiAcquirePanelDelegate:
                 multi_acquire_controller.camera = camera
                 multi_acquire_controller.scan_controller = scan_controller
 
-                def create_acquisition_handler(multi_acquire_parameters: MultiAcquire.MultiEELSParameters, current_parameters_index: int, multi_acquire_settings: MultiAcquire.MultiEELSSettings) -> MultiAcquire.SISequenceAcquisitionHandler:
+                def create_acquisition_handler(multi_acquire_parameters: MultiAcquire.MultiEELSParametersList, current_parameters_index: int, multi_acquire_settings: MultiAcquire.MultiEELSSettings) -> MultiAcquire.SISequenceAcquisitionHandler:
                     assert camera
                     assert scan_controller
                     assert multi_acquire_controller
                     document_model = self.document_controller._document_controller.document_model
                     camera_frame_parameters = camera.get_current_frame_parameters()
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
-                    camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
+                    camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index].exposure_ms
                     camera_frame_parameters.processing = multi_acquire_settings.processing
                     grab_synchronized_info = scan_controller.grab_synchronized_get_info(
                         scan_frame_parameters=scan_frame_parameters,
@@ -604,7 +607,7 @@ class MultiAcquirePanelDelegate:
         column.add(parameter_description_row)
         column.add_spacing(10)
         self.parameter_column = ui.create_column_widget()
-        for spectrum_parameters in self.multi_acquire_controller.spectrum_parameters:
+        for spectrum_parameters in self.multi_acquire_controller.spectrum_parameters.parameters:
             line = self.create_parameter_line(spectrum_parameters)
             self.parameter_column.add(line)
         column.add(self.parameter_column)
@@ -661,12 +664,12 @@ class MultiAcquirePanelDelegate:
         self.camera_choice_combo_box.current_item = camera
         self.update_time_estimate()
 
-    def update_parameter_line(self, spectrum_parameters: typing.Mapping[str, typing.Any]) -> None:
+    def update_parameter_line(self, spectrum_parameters: MultiAcquire.MultiEELSParameters) -> None:
         line_edit_widgets = self.line_edit_widgets
-        widgets = line_edit_widgets[typing.cast(int, spectrum_parameters['index'])]
-        widgets['offset_x'].text = '{:g}'.format(spectrum_parameters['offset_x'])
-        widgets['exposure_ms'].text = '{:g}'.format(spectrum_parameters['exposure_ms'])
-        widgets['frames'].text = '{:.0f}'.format(spectrum_parameters['frames'])
+        widgets = line_edit_widgets[spectrum_parameters.index]
+        widgets['offset_x'].text = '{:g}'.format(spectrum_parameters.offset_x)
+        widgets['exposure_ms'].text = '{:g}'.format(spectrum_parameters.exposure_ms)
+        widgets['frames'].text = '{:.0f}'.format(spectrum_parameters.frames)
 
     def __format_time_string(self, acquisition_time: float) -> str:
         if acquisition_time > 3600:
@@ -686,30 +689,30 @@ class MultiAcquirePanelDelegate:
             self.time_estimate_label.text = time_str
             self.si_time_estimate_label.text = si_time_str
 
-    def create_parameter_line(self, spectrum_parameters: typing.Dict[str, typing.Any]) -> Facade.ColumnWidget:
+    def create_parameter_line(self, spectrum_parameters: MultiAcquire.MultiEELSParameters) -> Facade.ColumnWidget:
         row = self.ui.create_row_widget()
         column = self.ui.create_column_widget()
         widgets: typing.Dict[str, typing.Union[Facade.LabelWidget, Facade.LineEditWidget]] = {}
 
-        index = self.ui.create_label_widget('{:g}'.format(spectrum_parameters['index']+1))
-        offset_x = self.ui.create_line_edit_widget('{:g}'.format(spectrum_parameters['offset_x']))
-        exposure_ms = self.ui.create_line_edit_widget('{:g}'.format(spectrum_parameters['exposure_ms']))
-        frames = self.ui.create_line_edit_widget('{:.0f}'.format(spectrum_parameters['frames']))
+        index = self.ui.create_label_widget('{:g}'.format(spectrum_parameters.index + 1))
+        offset_x = self.ui.create_line_edit_widget('{:g}'.format(spectrum_parameters.offset_x))
+        exposure_ms = self.ui.create_line_edit_widget('{:g}'.format(spectrum_parameters.exposure_ms))
+        frames = self.ui.create_line_edit_widget('{:.0f}'.format(spectrum_parameters.frames))
 
         multi_acquire_controller = self.multi_acquire_controller
         assert multi_acquire_controller
 
         def handle_editing_finished_offset_x(text: str) -> None:
             assert multi_acquire_controller
-            multi_acquire_controller.set_offset_x(spectrum_parameters['index'], float(text))
+            multi_acquire_controller.set_offset_x(spectrum_parameters.index, float(text))
 
         def handle_editing_finished_exposure_ms(text: str) -> None:
             assert multi_acquire_controller
-            multi_acquire_controller.set_exposure_ms(spectrum_parameters['index'], float(text))
+            multi_acquire_controller.set_exposure_ms(spectrum_parameters.index, float(text))
 
         def handle_editing_finished_frames(text: str) -> None:
             assert multi_acquire_controller
-            multi_acquire_controller.set_frames(spectrum_parameters['index'], int(text))
+            multi_acquire_controller.set_frames(spectrum_parameters.index, int(text))
 
         offset_x.on_editing_finished = handle_editing_finished_offset_x
         exposure_ms.on_editing_finished = handle_editing_finished_exposure_ms
@@ -733,7 +736,7 @@ class MultiAcquirePanelDelegate:
         row.add_stretch()
         row.add_spacing(5)
 
-        self.line_edit_widgets[typing.cast(int, spectrum_parameters['index'])] = widgets
+        self.line_edit_widgets[spectrum_parameters.index] = widgets
 
         column.add(row)
         column.add_spacing(10)
