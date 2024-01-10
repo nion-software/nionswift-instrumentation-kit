@@ -2501,7 +2501,7 @@ def make_synchronized_scan_data_stream(
                 [Acquisition.MaskedSumOperator(active_mask) for active_mask in active_masks])
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
         else:
-            operator = Acquisition.StackedDataStreamOperator([Acquisition.SumOperator()])
+            operator = Acquisition.StackedDataStreamOperator([Acquisition.MaskedSumOperator(camera_base.Mask())])
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
     scan_data_stream = ScanDataStream(scan_hardware_source, scan_frame_parameters, scan_id,
                                       scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream,

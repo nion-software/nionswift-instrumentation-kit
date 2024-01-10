@@ -1,3 +1,5 @@
+import typing
+
 import numpy as np
 import unittest
 import time
@@ -25,16 +27,16 @@ class TestMultiAcquire(unittest.TestCase):
     def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context(is_eels=is_eels)
 
-    def _set_up_multi_acquire(self, settings: dict, parameters: list, stem_controller):
+    def _set_up_multi_acquire(self, settings: typing.Mapping[str, typing.Any], parameters: list, stem_controller):
         multi_acquire = MultiAcquire.MultiAcquireController(stem_controller)
-        multi_acquire.settings.update(settings)
+        multi_acquire.settings.update_from_dict(settings)
         multi_acquire.spectrum_parameters[:] = parameters
         return multi_acquire
 
     def test_acquire_multi_eels_spectrum_works_and_finishes_in_time(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank',
                     'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
-                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                    'processing': 'sum_project', 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
                     'use_multi_eels_calibration': False}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
                       {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
@@ -73,7 +75,7 @@ class TestMultiAcquire(unittest.TestCase):
     def test_acquire_multi_eels_spectrum_applies_shift_for_each_frame(self):
         settings = {'x_shifter': 'C10', 'blanker': 'C_Blank',
                     'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
-                    'bin_spectra': True, 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                    'processing': 'sum_project', 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
                     'use_multi_eels_calibration': False, 'shift_each_sequence_slice': True}
         parameters = [{'index': 0, 'offset_x': 1e-7, 'exposure_ms': 5, 'frames': 5},
                       {'index': 1, 'offset_x': -1e-7, 'exposure_ms': 8, 'frames': 3},
@@ -116,7 +118,7 @@ class TestMultiAcquire(unittest.TestCase):
 
     def test_data_intensity_scale_is_correct_for_summed_frames(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
-                    'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
+                    'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',
                     'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
                     'use_multi_eels_calibration': True}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
@@ -138,7 +140,7 @@ class TestMultiAcquire(unittest.TestCase):
 
     def test_data_intensity_scale_is_correct_for_non_summed_frames(self):
         settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank', 'x_shift_delay': 0.05,
-                    'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'bin_spectra': True,
+                    'focus': '', 'focus_delay': 0, 'auto_dark_subtract': False, 'processing': 'sum_project',
                     'blanker_delay': 0.05, 'sum_frames': False, 'camera_hardware_source_id': '',
                     'use_multi_eels_calibration': True}
         parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
@@ -176,7 +178,7 @@ class TestMultiAcquire(unittest.TestCase):
                             document_controller = test_context.document_controller
                             total_acquisition_time = 0.0
                             for params in parameters:
-                                # the simulator cant go super fast, so make sure we give it enough time
+                                # give the simulator enough time
                                 total_acquisition_time += params['frames']*max(params['exposure_ms'], 100)/1000*scan_size[0]*scan_size[1]
                                 # add some extra overhead time
                                 total_acquisition_time += 0.15
@@ -194,11 +196,11 @@ class TestMultiAcquire(unittest.TestCase):
                             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
                             multi_acquire_controller.scan_controller = scan_hardware_source
 
-                            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings):
+                            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                                camera_frame_parameters.processing = multi_acquire_settings['processing']
+                                camera_frame_parameters.processing = multi_acquire_settings.processing
                                 camera_frame_parameters.active_masks = masks
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                                     camera=camera_hardware_source,
@@ -218,7 +220,7 @@ class TestMultiAcquire(unittest.TestCase):
 
                                 listener = handler.camera_data_channel.progress_updated_event.listen(multi_acquire_controller.set_progress_counter)
 
-                                def finish_fn():
+                                def finish_fn() -> None:
                                     listener.close()
                                     handler.camera_data_channel.stop()
                                     handler.scan_data_channel.stop()
@@ -315,11 +317,11 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
             multi_acquire_controller.scan_controller = scan_hardware_source
 
-            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings):
+            def get_acquisition_handler_fn(multi_acquire_parameters, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
                 camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                camera_frame_parameters.processing = multi_acquire_settings['processing']
+                camera_frame_parameters.processing = multi_acquire_settings.processing
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,
                                                                                     camera_frame_parameters=camera_frame_parameters)

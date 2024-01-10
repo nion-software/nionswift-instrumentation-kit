@@ -382,7 +382,7 @@ class MultiAcquirePanelDelegate:
                     camera_frame_parameters = camera.get_current_frame_parameters()
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
                     camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index]['exposure_ms']
-                    camera_frame_parameters.processing = multi_acquire_settings['processing']
+                    camera_frame_parameters.processing = multi_acquire_settings.processing
                     grab_synchronized_info = scan_controller.grab_synchronized_get_info(
                         scan_frame_parameters=scan_frame_parameters,
                         camera=camera,
@@ -447,7 +447,7 @@ class MultiAcquirePanelDelegate:
         def camera_changed(current_item: camera_base.CameraHardwareSource) -> None:
             multi_acquire_controller = self.multi_acquire_controller
             if current_item and multi_acquire_controller:
-                multi_acquire_controller.settings['camera_hardware_source_id'] = current_item.hardware_source_id
+                multi_acquire_controller.settings.camera_hardware_source_id = current_item.hardware_source_id
                 if current_item.features.get("has_masked_sum_option"):
                     self.binning_choice_combo_box.items = ['Spectra', 'Images', 'MultiEELS Spectra', 'Virtual Detectors']
                 else:
@@ -461,17 +461,17 @@ class MultiAcquirePanelDelegate:
             if not self.__acquisition_running:
                 self.start_button._widget.enabled = True
             if current_item == 'Spectra':
-                multi_acquire_controller.settings['processing'] = 'sum_project'
-                multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+                multi_acquire_controller.settings.processing = 'sum_project'
+                multi_acquire_controller.settings.use_multi_eels_calibration = False
             elif current_item == 'Images':
-                multi_acquire_controller.settings['processing'] = None
-                multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+                multi_acquire_controller.settings.processing = None
+                multi_acquire_controller.settings.use_multi_eels_calibration = False
             elif current_item == 'MultiEELS Spectra':
-                multi_acquire_controller.settings['processing'] = 'sum_project'
-                multi_acquire_controller.settings['use_multi_eels_calibration'] = True
+                multi_acquire_controller.settings.processing = 'sum_project'
+                multi_acquire_controller.settings.use_multi_eels_calibration = True
             elif current_item == 'Virtual Detectors':
-                multi_acquire_controller.settings['processing'] = 'sum_masked'
-                multi_acquire_controller.settings['use_multi_eels_calibration'] = False
+                multi_acquire_controller.settings.processing = 'sum_masked'
+                multi_acquire_controller.settings.use_multi_eels_calibration = False
                 self.start_button._widget.enabled = False
 
         camera_choice_row = ui.create_row_widget()
@@ -537,11 +537,11 @@ class MultiAcquirePanelDelegate:
             multi_acquire_controller = self.multi_acquire_controller
             if not multi_acquire_controller:
                 return
-            if multi_acquire_controller.settings['shift_each_sequence_slice']:
+            if multi_acquire_controller.settings.shift_each_sequence_slice:
                 offset_label.text = 'Offset (per frame)  '
             else:
                 offset_label.text = 'Offset                   '
-            if multi_acquire_controller.settings['sum_frames']:
+            if multi_acquire_controller.settings.sum_frames:
                 frames_label.text = 'Frames (summed)'
             else:
                 frames_label.text = 'Frames              '
@@ -630,11 +630,11 @@ class MultiAcquirePanelDelegate:
         if not multi_acquire_controller:
             return
         current_item = self.binning_choice_combo_box.current_item
-        if multi_acquire_controller.settings['processing'] == 'sum_project' and multi_acquire_controller.settings['use_multi_eels_calibration']:
+        if multi_acquire_controller.settings.processing == 'sum_project' and multi_acquire_controller.settings.use_multi_eels_calibration:
             new_item = 'MultiEELS Spectra'
-        elif multi_acquire_controller.settings['processing'] == 'sum_project':
+        elif multi_acquire_controller.settings.processing == 'sum_project':
             new_item = 'Spectra'
-        elif multi_acquire_controller.settings['processing'] == 'sum_masked':
+        elif multi_acquire_controller.settings.processing == 'sum_masked':
             new_item = 'Virtual Detectors'
         else:
             new_item = 'Images'
@@ -650,13 +650,13 @@ class MultiAcquirePanelDelegate:
         multi_acquire_controller = self.multi_acquire_controller
         if not multi_acquire_controller:
             return
-        current_camera_name = multi_acquire_controller.settings['camera_hardware_source_id']
+        current_camera_name = multi_acquire_controller.settings.camera_hardware_source_id
         for camera in self.camera_choice_combo_box.items:
             if camera.hardware_source_id == current_camera_name:
                 break
         else:
             if self.camera_choice_combo_box.current_item:
-                multi_acquire_controller.settings['camera_hardware_source_id'] = self.camera_choice_combo_box.current_item.hardware_source_id
+                multi_acquire_controller.settings.camera_hardware_source_id = self.camera_choice_combo_box.current_item.hardware_source_id
             return
         self.camera_choice_combo_box.current_item = camera
         self.update_time_estimate()
@@ -760,7 +760,7 @@ class MultiAcquirePanelDelegate:
                 def x_shifter_finished(text: str) -> None:
                     assert multi_acquire_controller
                     newvalue = str(text)
-                    multi_acquire_controller.settings['x_shifter'] = newvalue
+                    multi_acquire_controller.settings.x_shifter = newvalue
 
                 def x_shift_delay_finished(text: str) -> None:
                     assert multi_acquire_controller
@@ -769,14 +769,14 @@ class MultiAcquirePanelDelegate:
                     except ValueError:
                         pass
                     else:
-                        multi_acquire_controller.settings['x_shift_delay'] = newvalue
+                        multi_acquire_controller.settings.x_shift_delay = newvalue
                     finally:
-                        x_shift_delay_field.text = '{:g}'.format(multi_acquire_controller.settings['x_shift_delay'])
+                        x_shift_delay_field.text = '{:g}'.format(multi_acquire_controller.settings.x_shift_delay)
 
                 def blanker_finished(text: str) -> None:
                     assert multi_acquire_controller
                     newvalue = str(text)
-                    multi_acquire_controller.settings['blanker'] = newvalue
+                    multi_acquire_controller.settings.blanker = newvalue
 
                 def blanker_delay_finished(text: str) -> None:
                     assert multi_acquire_controller
@@ -785,21 +785,21 @@ class MultiAcquirePanelDelegate:
                     except ValueError:
                         pass
                     else:
-                        multi_acquire_controller.settings['blanker_delay'] = newvalue
+                        multi_acquire_controller.settings.blanker_delay = newvalue
                     finally:
-                        blanker_delay_field.text = '{:g}'.format(multi_acquire_controller.settings['blanker_delay'])
+                        blanker_delay_field.text = '{:g}'.format(multi_acquire_controller.settings.blanker_delay)
 
                 def auto_dark_subtract_checkbox_changed(check_state: str) -> None:
                     assert multi_acquire_controller
-                    multi_acquire_controller.settings['auto_dark_subtract'] = check_state == 'checked'
+                    multi_acquire_controller.settings.auto_dark_subtract = check_state == 'checked'
 
                 def sum_frames_checkbox_changed(check_state: str) -> None:
                     assert multi_acquire_controller
-                    multi_acquire_controller.settings['sum_frames'] = check_state == 'checked'
+                    multi_acquire_controller.settings.sum_frames = check_state == 'checked'
 
                 def shift_each_checkbox_changed(check_state: str) -> None:
                     assert multi_acquire_controller
-                    multi_acquire_controller.settings['shift_each_sequence_slice'] = check_state == 'checked'
+                    multi_acquire_controller.settings.shift_each_sequence_slice = check_state == 'checked'
 
                 column = self.ui.create_column_widget()
                 row1 = self.ui.create_row_widget()
@@ -887,7 +887,7 @@ class MultiAcquirePanelDelegate:
             def settings_changed(self) -> None:
                 multi_acquire_controller = self.multi_eels_panel.multi_acquire_controller
                 assert multi_acquire_controller
-                for key, value in multi_acquire_controller.settings.items():
+                for key, value in multi_acquire_controller.settings.as_dict().items():
                     if key in self.checkboxes:
                         self.checkboxes[key].checked = value
                     elif key in self.line_edits:
