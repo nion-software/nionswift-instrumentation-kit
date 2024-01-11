@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # standard libraries
 import copy
+import dataclasses
 import json
 import numpy
 import numpy.typing
@@ -17,6 +18,7 @@ from nion.data import DataAndMetadata, Calibration
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import ImportExportManager
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -640,7 +642,7 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
 
 
 class SequenceBehavior:
-    def __init__(self, multi_acquire_controller: 'MultiAcquireController', current_parameters_index: int) -> None:
+    def __init__(self, multi_acquire_controller: MultiAcquireController, current_parameters_index: int) -> None:
         self.__multi_acquire_controller = multi_acquire_controller
         self.__current_parameters_index = current_parameters_index
         self.__last_shift = 0.0
@@ -651,8 +653,13 @@ class SequenceBehavior:
             self.__last_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index].offset_x
 
 
-SISequenceBehavior = collections.namedtuple('SISequenceBehavior', ['scan_data_stream_functor', 'scan_section_height',
-                                                                   'sequence_behavior', 'sequence_section_length'])
+@dataclasses.dataclass
+class SISequenceBehavior:
+    scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor]
+    scan_section_height: typing.Optional[int]
+    sequence_behavior: typing.Optional[SequenceBehavior]
+    sequence_section_length: typing.Optional[int]
+
 
 class SISequenceAcquisitionHandler:
     def __init__(self,
