@@ -197,23 +197,36 @@ class TestMultiAcquire(unittest.TestCase):
                             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
                             multi_acquire_controller.scan_controller = scan_hardware_source
 
-                            def get_acquisition_handler_fn(multi_acquire_parameters: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
+                            def get_acquisition_handler_fn(multi_acquire_parameters_list: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index].exposure_ms
+                                camera_frame_parameters.exposure_ms = multi_acquire_parameters_list[current_parameters_index].exposure_ms
                                 camera_frame_parameters.processing = multi_acquire_settings.processing
                                 camera_frame_parameters.active_masks = masks
                                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                                     camera=camera_hardware_source,
                                                                                                     camera_frame_parameters=camera_frame_parameters)
-
-                                camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera_hardware_source.display_name, grab_synchronized_info,
-                                                                                     multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
+                                scan_size = tuple(grab_synchronized_info.scan_size)
+                                cumulative_elapsed_time = 0.0
+                                for parameters in multi_acquire_parameters_list.parameters:
+                                    if parameters.index >= current_parameters_index:
+                                        break
+                                    cumulative_elapsed_time += scan_size[0] * scan_size[1] * parameters.exposure_ms * parameters.frames
+                                multi_acquire_parameters = multi_acquire_parameters_list[current_parameters_index]
+                                camera_data_channel = MultiAcquire.CameraDataChannel(document_model,
+                                                                                     camera_hardware_source.display_name,
+                                                                                     grab_synchronized_info,
+                                                                                     multi_acquire_parameters,
+                                                                                     multi_acquire_settings,
+                                                                                     current_parameters_index,
+                                                                                     cumulative_elapsed_time,
                                                                                      stack_metadata_keys=[['hardware_source', 'binning']])
                                 enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
                                 enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
-                                scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
-                                                                                 multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
+                                scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names,
+                                                                                 grab_synchronized_info,
+                                                                                 multi_acquire_parameters,
+                                                                                 multi_acquire_settings)
                                 camera_data_channel.start()
                                 scan_data_channel.start()
                                 handler =  MultiAcquire.SISequenceAcquisitionHandler(camera_hardware_source, camera_data_channel, camera_frame_parameters,
@@ -318,22 +331,34 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
             multi_acquire_controller.scan_controller = scan_hardware_source
 
-            def get_acquisition_handler_fn(multi_acquire_parameters: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
+            def get_acquisition_handler_fn(multi_acquire_parameters_list: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
                 camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
                 scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                camera_frame_parameters.exposure_ms = multi_acquire_parameters[current_parameters_index].exposure_ms
+                camera_frame_parameters.exposure_ms = multi_acquire_parameters_list[current_parameters_index].exposure_ms
                 camera_frame_parameters.processing = multi_acquire_settings.processing
                 grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
                                                                                     camera=camera_hardware_source,
                                                                                     camera_frame_parameters=camera_frame_parameters)
-
-                camera_data_channel = MultiAcquire.CameraDataChannel(document_model, camera_hardware_source.display_name, grab_synchronized_info,
-                                                                     multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
+                scan_size = tuple(grab_synchronized_info.scan_size)
+                cumulative_elapsed_time = 0.0
+                for parameters in multi_acquire_parameters_list.parameters:
+                    if parameters.index >= current_parameters_index:
+                        break
+                    cumulative_elapsed_time += scan_size[0] * scan_size[1] * parameters.exposure_ms * parameters.frames
+                multi_acquire_parameters = multi_acquire_parameters_list[current_parameters_index]
+                camera_data_channel = MultiAcquire.CameraDataChannel(document_model,
+                                                                     camera_hardware_source.display_name,
+                                                                     grab_synchronized_info,
+                                                                     multi_acquire_parameters, multi_acquire_settings,
+                                                                     current_parameters_index,
+                                                                     cumulative_elapsed_time,
                                                                      stack_metadata_keys=[['hardware_source', 'defocus']])
                 enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
                 enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
-                scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
-                                                                 multi_acquire_parameters, multi_acquire_settings, current_parameters_index)
+                scan_data_channel = MultiAcquire.ScanDataChannel(document_model,
+                                                                 enabled_channel_names,
+                                                                 grab_synchronized_info,
+                                                                 multi_acquire_parameters, multi_acquire_settings)
                 camera_data_channel.start()
                 scan_data_channel.start()
                 sequence_behavior = MultiAcquire.SequenceBehavior(multi_acquire_controller, current_parameters_index)
