@@ -5,6 +5,7 @@ import copy
 import gettext
 import itertools
 import os
+import pathlib
 import pkgutil
 import threading
 import typing
@@ -320,10 +321,11 @@ class MultiAcquirePanelDelegate:
         self._stem_controller = None
         self._camera = None
         self._scan_controller = None
-        self.multi_acquire_controller = MultiAcquire.MultiAcquireController(self.stem_controller, savepath=os.path.join(os.path.expanduser('~'), 'MultiAcquire'))
-        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=0, offset_x=0.0, exposure_ms=1.0, frames=1))
-        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=1, offset_x=160.0, exposure_ms=8.0, frames=1))
-        self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=2, offset_x=320.0, exposure_ms=16.0, frames=1))
+        self.multi_acquire_controller = MultiAcquire.MultiAcquireController(self.stem_controller, pathlib.Path(ui._ui.get_configuration_location()))
+        if not self.multi_acquire_controller.spectrum_parameters.parameters:
+            self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=0, offset_x=0.0, exposure_ms=1.0, frames=1))
+            self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=1, offset_x=160.0, exposure_ms=8.0, frames=1))
+            self.multi_acquire_controller.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters(index=2, offset_x=320.0, exposure_ms=16.0, frames=1))
         self.__acquisition_state_changed_event_listener = self.multi_acquire_controller.acquisition_state_changed_event.listen(self.acquisition_state_changed)
         self.__multi_eels_parameters_changed_event_listener = self.multi_acquire_controller.spectrum_parameters.parameters_changed_event.listen(self.spectrum_parameters_changed)
         self.__progress_updated_event_listener = self.multi_acquire_controller.progress_updated_event.listen(self.update_progress_bar)

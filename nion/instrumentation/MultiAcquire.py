@@ -4,9 +4,11 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
+import logging
 import numpy
 import numpy.typing
 import os
+import pathlib
 import threading
 import time
 import gettext
@@ -258,6 +260,9 @@ class MultiEELSParametersList:
     def load(self, l: typing.Sequence[typing.Mapping[str, typing.Any]]) -> None:
         self.__parameters_list = [MultiEELSParameters.from_dict(d) for d in l]
         self.parameters_changed_event.fire()
+
+    def as_list(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        return [parameters.as_dict() for parameters in self.__parameters_list]
 
     @property
     def parameters(self) -> typing.Sequence[MultiEELSParameters]:
@@ -706,7 +711,7 @@ class SISequenceAcquisitionHandler:
 
 
 class MultiAcquireController:
-    def __init__(self, stem_controller: stem_controller.STEMController, savepath: typing.Optional[str] = None) -> None:
+    def __init__(self, stem_controller: stem_controller.STEMController, configuration_location: typing.Optional[pathlib.Path] = None) -> None:
         self.spectrum_parameters = MultiEELSParametersList()
         self.settings = MultiEELSSettings(
             camera_hardware_source_id='',
@@ -733,11 +738,18 @@ class MultiAcquireController:
         self.__active_settings = self.settings
         self.__active_spectrum_parameters = self.spectrum_parameters
         self.abort_event = threading.Event()
-        self.__savepath = savepath # or os.path.join(os.path.expanduser('~'), 'MultiAcquire')
+        if configuration_location:
+            configuration_location.mkdir(parents=True, exist_ok=True)
+        self.__settings_path = pathlib.Path(configuration_location) / 'multi_acquire_settings.json' if configuration_location else None
+        self.__parameters_path = pathlib.Path(configuration_location) / 'multi_acquire_spectrum_parameters.json' if configuration_location else None
         self.load_settings()
         self.load_parameters()
         self.__settings_changed_event_listener = self.settings.settings_changed_event.listen(self.save_settings)
         self.__spectrum_parameters_changed_event_listener = self.spectrum_parameters.parameters_changed_event.listen(self.save_parameters)
+        if self.__settings_path:
+            logging.info(f"Loading multi-acquire settings from {self.__settings_path} (if it exists)")
+        if self.__parameters_path:
+            logging.info(f"Loading multi-acquire parameters from {self.__parameters_path} (if it exists)")
 
     @property
     def active_settings(self) -> MultiEELSSettings:
@@ -748,14 +760,13 @@ class MultiAcquireController:
         return self.__active_spectrum_parameters
 
     def save_settings(self) -> None:
-        if self.__savepath:
-            os.makedirs(self.__savepath, exist_ok=True)
-            with open(os.path.join(self.__savepath, 'settings.json'), 'w+') as f:
-                json.dump(self.settings, f)
+        if self.__settings_path:
+            with self.__settings_path.open('w+') as f:
+                json.dump(self.settings.as_dict(), f)
 
     def load_settings(self) -> None:
-        if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'settings.json')):
-            with open(os.path.join(self.__savepath, 'settings.json')) as f:
+        if self.__settings_path and self.__settings_path.exists():
+            with self.__settings_path.open() as f:
                 settings_dict = json.load(f)
                 # Upgrade the settings dict to the new version. We replaced "bin_spectra" with "processing" to allow
                 # "sum_masked" as an additional option
@@ -765,14 +776,13 @@ class MultiAcquireController:
                 self.settings.update_from_dict(settings_dict)
 
     def save_parameters(self) -> None:
-        if self.__savepath:
-            os.makedirs(self.__savepath, exist_ok=True)
-            with open(os.path.join(self.__savepath, 'spectrum_parameters.json'), 'w+') as f:
-                json.dump(self.spectrum_parameters, f)
+        if self.__parameters_path:
+            with self.__parameters_path.open('w+') as f:
+                json.dump(self.spectrum_parameters.as_list(), f)
 
     def load_parameters(self) -> None:
-        if self.__savepath and os.path.isfile(os.path.join(self.__savepath, 'spectrum_parameters.json')):
-            with open(os.path.join(self.__savepath, 'spectrum_parameters.json')) as f:
+        if self.__parameters_path and self.__parameters_path.exists():
+            with self.__parameters_path.open() as f:
                 self.spectrum_parameters.load(json.load(f))
 
     def add_spectrum(self) -> None:
