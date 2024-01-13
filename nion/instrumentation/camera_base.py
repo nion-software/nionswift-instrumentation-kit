@@ -2878,7 +2878,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
             acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
             # NOTE: subsequent record tasks are created in advance_stream.
             self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
-            self.__record_count = numpy.prod(stream_args.shape, dtype=numpy.uint64)  # type: ignore
+            self.__record_count = int(numpy.prod(stream_args.shape, dtype=numpy.uint64))
         else:
             assert self.__camera_device_stream_interface
             self.__last_index = 0

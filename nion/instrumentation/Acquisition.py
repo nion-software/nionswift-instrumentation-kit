@@ -2091,8 +2091,10 @@ class ActionDataStream(ContainerDataStream):
         self.__complete_channel_count = 0
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
-        stream_args.max_count = 1
-        super()._prepare_stream(stream_args, index_stack, **kwargs)
+        # stream_args are reused, so make a copy before modifying.
+        stream_args_copy = copy.copy(stream_args)
+        stream_args_copy.max_count = 1
+        super()._prepare_stream(stream_args_copy, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
         self.__shape = stream_args.shape
@@ -2100,8 +2102,10 @@ class ActionDataStream(ContainerDataStream):
         self.__complete_channel_count = self.__channel_count
         self.__delegate.start()
         self.__check_action()
-        stream_args.max_count = 1
-        super()._start_stream(stream_args)
+        # stream_args are reused, so make a copy before modifying.
+        stream_args_copy = copy.copy(stream_args)
+        stream_args_copy.max_count = 1
+        super()._start_stream(stream_args_copy)
 
     def __check_action(self) -> None:
         if not self.is_finished and not self.is_aborted:
