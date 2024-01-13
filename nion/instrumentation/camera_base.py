@@ -2817,6 +2817,7 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__camera_device_stream_interface = camera_device_stream_delegate
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
+        self.__actual_camera_frame_parameters: typing.Optional[CameraFrameParameters] = None
         self.__record_task = typing.cast(HardwareSource.RecordTask, None)  # used for single frames
         self.__record_count = 0
         self.__frame_shape = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
@@ -2857,6 +2858,12 @@ class CameraFrameDataStream(Acquisition.DataStream):
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):
             self.__camera_hardware_source.abort_playing(sync_timeout=5.0)
+            # set up the actual frame parameters, which will turn off processing.
+            # this ensures that both channels are acquired and the processing is done in the data stream.
+            # this could be optimized by using the other channel and marking the operator as applied when
+            # acquiring the summed channel.
+            self.__actual_camera_frame_parameters = copy.copy(self.__camera_frame_parameters)
+            self.__actual_camera_frame_parameters.processing = None
         else:
             assert self.__camera_device_stream_interface
             self.__start = time.perf_counter()
@@ -2867,7 +2874,9 @@ class CameraFrameDataStream(Acquisition.DataStream):
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         if stream_args.max_count == 1 or stream_args.shape == (1,):
-            acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
+            assert self.__actual_camera_frame_parameters  # configured in prepare_stream
+            acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
+            # NOTE: subsequent record tasks are created in advance_stream.
             self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
             self.__record_count = numpy.prod(stream_args.shape, dtype=numpy.uint64)  # type: ignore
         else:
@@ -2904,16 +2913,15 @@ class CameraFrameDataStream(Acquisition.DataStream):
         if self.__record_task:
             # use send_next to send the data acquiring a sequence of single frames
             if self.__record_task.is_finished:
-                # data metadata describes the data being sent from this stream: shape, data type, and descriptor
-                data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-                data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, numpy.float32), data_descriptor=data_descriptor)
-                source_data_slice: typing.Tuple[slice, ...] = (slice(0, self.__frame_shape[0]), slice(None))
                 state = Acquisition.DataStreamStateEnum.COMPLETE
                 xdatas = self.__record_task.grab()
                 xdata = xdatas[0] if xdatas else None
-                data = xdata.data if xdata else None
-                assert data is not None
-                data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, data, None, source_data_slice, state)
+                assert xdata
+                data_metadata = xdata.data_metadata
+                # handle 2D vs 1D (sum_project) cases. not sure if this is the right place to do this.
+                assert data_metadata.data_descriptor.datum_dimension_count == 2
+                source_data_slice = (slice(0, self.__frame_shape[0]), slice(None))
+                data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, xdata.data, None, source_data_slice, state)
                 data_stream_events.append(data_stream_event)
         else:
             assert self.__camera_device_stream_interface
@@ -2967,7 +2975,8 @@ class CameraFrameDataStream(Acquisition.DataStream):
             if self.__record_task.is_finished:
                 self.__record_count -= 1
                 if self.__record_count > 0:
-                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__camera_frame_parameters, CameraAcquisitionTaskParameters())
+                    assert self.__actual_camera_frame_parameters
+                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
                     self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
 
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
