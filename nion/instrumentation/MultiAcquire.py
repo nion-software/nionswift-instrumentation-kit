@@ -646,43 +646,34 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
             self.__data_item.decrement_data_ref_count()
 
 
-class SequenceBehavior:
+class SISequenceBehavior:
     def __init__(self, multi_acquire_controller: MultiAcquireController, current_parameters_index: int) -> None:
         self.__multi_acquire_controller = multi_acquire_controller
         self.__current_parameters_index = current_parameters_index
-        self.__last_shift = 0.0
+        self.__next_shift = 0.0
 
     def prepare_frame(self) -> None:
-        if self.__multi_acquire_controller.active_settings.shift_each_sequence_slice:
-            self.__multi_acquire_controller.shift_x(self.__last_shift)
-            self.__last_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index].offset_x
-
-
-@dataclasses.dataclass
-class SISequenceBehavior:
-    scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor]
-    scan_section_height: typing.Optional[int]
-    sequence_behavior: typing.Optional[SequenceBehavior]
-    sequence_section_length: typing.Optional[int]
+        self.__multi_acquire_controller.shift_x(self.__next_shift)
+        self.__next_shift += self.__multi_acquire_controller.active_spectrum_parameters[self.__current_parameters_index].offset_x
 
 
 class SISequenceAcquisitionHandler:
     def __init__(self,
-                 camera: camera_base.CameraHardwareSource,
+                 camera_hardware_source: camera_base.CameraHardwareSource,
                  camera_data_channel: CameraDataChannel,
                  camera_frame_parameters: camera_base.CameraFrameParameters,
-                 scan_controller: scan_base.ScanHardwareSource,
+                 scan_hardware_source: scan_base.ScanHardwareSource,
                  scan_data_channel: ScanDataChannel,
                  scan_frame_parameters: scan_base.ScanFrameParameters,
                  si_sequence_behavior: typing.Optional[SISequenceBehavior] = None) -> None:
 
-        self.__camera = camera
+        self.__camera_hardware_source = camera_hardware_source
         self.camera_data_channel = camera_data_channel
         self.camera_frame_parameters = camera_frame_parameters
-        self.__scan_controller = scan_controller
+        self.__scan_hardware_source = scan_hardware_source
         self.scan_data_channel = scan_data_channel
         self.scan_frame_parameters = scan_frame_parameters
-        self.__si_sequence_behavior = si_sequence_behavior or SISequenceBehavior(None, None, None, None)
+        self.__si_sequence_behavior = si_sequence_behavior
         self.abort_event = threading.Event()
         self.finish_fn: typing.Optional[typing.Callable[[], None]] = None
 
@@ -692,20 +683,30 @@ class SISequenceAcquisitionHandler:
                 break
             self.camera_data_channel.current_frames_index = frame
             self.scan_data_channel.current_frames_index = frame
-            if self.__si_sequence_behavior.sequence_behavior and self.__si_sequence_behavior.sequence_section_length and frame % self.__si_sequence_behavior.sequence_section_length == 0:
-                self.__si_sequence_behavior.sequence_behavior.prepare_frame()
+            if self.__si_sequence_behavior:
+                self.__si_sequence_behavior.prepare_frame()
             camera_frame_parameters = camera_base.CameraFrameParameters(self.camera_frame_parameters) if isinstance(self.camera_frame_parameters, dict) else self.camera_frame_parameters
-            combined_data = self.__scan_controller.grab_synchronized(camera=self.__camera,
-                                                                     camera_frame_parameters=camera_frame_parameters,
-                                                                     camera_data_channel=self.camera_data_channel,
-                                                                     scan_frame_parameters=self.scan_frame_parameters,
-                                                                     section_height=self.__si_sequence_behavior.scan_section_height,
-                                                                     scan_data_stream_functor=self.__si_sequence_behavior.scan_data_stream_functor)
+
+            synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
+                scan_hardware_source=self.__scan_hardware_source,
+                scan_frame_parameters=copy.copy(self.scan_frame_parameters),
+                camera_hardware_source=self.__camera_hardware_source, camera_frame_parameters=camera_frame_parameters,
+                old_move_axis=True)
+            synchronized_scan_data_stream = camera_base.ChannelDataStream(
+                synchronized_scan_data_stream,
+                self.camera_data_channel, Acquisition.Channel(self.__camera_hardware_source.hardware_source_id))
+
+            combined_data = scan_base._acquire_synchronized_stream(
+                self.__scan_hardware_source.hardware_source_id,
+                self.__camera_hardware_source.hardware_source_id,
+                synchronized_scan_data_stream)
+
             if combined_data is not None:
-                scan_xdata_list, _ = combined_data
+                scan_xdata_list, _ = combined_data.scan_results, combined_data.camera_results
                 data_channel_state = 'complete' if frame >= number_frames - 1 else 'partial'
                 data_channel_view_id = None
                 self.scan_data_channel.update(scan_xdata_list, data_channel_state, data_channel_view_id)
+
         if callable(self.finish_fn):
             self.finish_fn()
 

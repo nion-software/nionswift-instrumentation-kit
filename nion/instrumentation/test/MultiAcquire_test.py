@@ -361,8 +361,9 @@ class TestMultiAcquire(unittest.TestCase):
                                                                  multi_acquire_parameters, multi_acquire_settings)
                 camera_data_channel.start()
                 scan_data_channel.start()
-                sequence_behavior = MultiAcquire.SequenceBehavior(multi_acquire_controller, current_parameters_index)
-                si_sequence_behavior = MultiAcquire.SISequenceBehavior(None, None, sequence_behavior, 1)
+                si_sequence_behavior: typing.Optional[MultiAcquire.SISequenceBehavior] = None
+                if multi_acquire_controller.active_settings.shift_each_sequence_slice:
+                    si_sequence_behavior = MultiAcquire.SISequenceBehavior(multi_acquire_controller, current_parameters_index)
                 handler =  MultiAcquire.SISequenceAcquisitionHandler(camera_hardware_source, camera_data_channel, camera_frame_parameters,
                                                                      scan_hardware_source, scan_data_channel, scan_frame_parameters,
                                                                      si_sequence_behavior)

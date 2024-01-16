@@ -96,8 +96,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
-            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
             # check the data
@@ -148,7 +147,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
 
             class TestAbortDataStream(Acquisition.ContainerDataStream):
                 def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, data_stream: Acquisition.DataStream) -> None:
@@ -173,7 +171,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scan_frame_parameters=scan_frame_parameters,
                 camera=camera_hardware_source,
                 camera_frame_parameters=camera_frame_parameters,
-                camera_data_channel=camera_data_channel,
                 section_height=2,
                 scan_data_stream_functor=TestAbortBehaviorFunctor(scan_hardware_source))
             self.assertIsNone(scans_and_spectrum_images)
@@ -189,11 +186,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
-                                                                            camera_data_channel=camera_data_channel,
                                                                             scan_count=3)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
@@ -216,9 +211,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
             old_frame_parameters_d = camera_hardware_source.get_current_frame_parameters().as_dict()
-            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
             document_controller.periodic()
             self._acquire_one(document_controller, test_context.camera_hardware_source)
@@ -236,8 +230,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
-            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             frame_time = scan_frame_parameters2.pixel_time_us * scan_frame_parameters2.size[0] * scan_frame_parameters2.size[1] / 1000000.0
             scan_hardware_source.start_recording()
             time.sleep(frame_time * 0.6)
@@ -321,8 +314,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.rotation_rad = math.radians(30)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
-            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, camera_data_channel=camera_data_channel)
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             for metadata_source in spectrum_images:
                 self.assertAlmostEqual(math.radians(30), Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
 
@@ -613,7 +605,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(8, 8)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
             drift = Geometry.FloatSize(0.0, 1.5e-9)
             # we cannot use drift prediction since we are running a test using the scan mover, which is not continuous.
             # this is still measuring drift, just not using timing to predict its future location.
@@ -630,7 +621,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                             camera=camera_hardware_source,
                                                                             camera_frame_parameters=camera_frame_parameters,
-                                                                            camera_data_channel=camera_data_channel,
                                                                             section_height=2,
                                                                             scan_data_stream_functor=scan_mover_functor)
             self.assertEqual(3, scan_hardware_source.drift_tracker.measurement_count)
@@ -653,7 +643,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.size = Geometry.IntSize(16, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
             drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
                 scan_hardware_source,
                 scan_frame_parameters,
@@ -667,7 +656,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
                                                                                 camera_frame_parameters=camera_frame_parameters,
-                                                                                camera_data_channel=camera_data_channel,
                                                                                 section_height=2,
                                                                                 scan_data_stream_functor=drift_correction_functor)
             # run the grab synchronized in a thread so that periodic can be called so that
@@ -702,7 +690,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scan_frame_parameters.subscan_fractional_center = Geometry.FloatPoint(0.5, 0.5)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            camera_data_channel = None
             drift_correction_functor = DriftTracker.DriftCorrectionDataStreamFunctor(
                 scan_hardware_source,
                 scan_frame_parameters,
@@ -716,7 +703,6 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                                                 camera=camera_hardware_source,
                                                                                 camera_frame_parameters=camera_frame_parameters,
-                                                                                camera_data_channel=camera_data_channel,
                                                                                 section_height=2,
                                                                                 scan_data_stream_functor=drift_correction_functor)
             # run the grab synchronized in a thread so that periodic can be called so that

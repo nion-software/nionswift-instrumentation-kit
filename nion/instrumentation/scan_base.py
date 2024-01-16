@@ -677,7 +677,6 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
                           scan_frame_parameters: ScanFrameParameters,
                           camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: camera_base.CameraFrameParameters,
-                          camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
                           section_height: typing.Optional[int] = None,
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1) -> GrabSynchronizedResult: ...
@@ -1378,7 +1377,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                           scan_frame_parameters: ScanFrameParameters,
                           camera: camera_base.CameraHardwareSource,
                           camera_frame_parameters: camera_base.CameraFrameParameters,
-                          camera_data_channel: typing.Optional[camera_base.SynchronizedDataChannelInterface] = None,
                           section_height: typing.Optional[int] = None,
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1) -> GrabSynchronizedResult:
@@ -1388,12 +1386,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                                                                            camera_frame_parameters=camera_frame_parameters,
                                                                            scan_data_stream_functor=scan_data_stream_functor,
                                                                            section_height=section_height,
-                                                                           scan_count=scan_count,
-                                                                           old_move_axis=camera_data_channel is not None)
+                                                                           scan_count=scan_count)
 
         # the optional ChannelDataStream updates the camera data channel for the stream matching 999
-        if camera_data_channel:
-            synchronized_scan_data_stream = camera_base.ChannelDataStream(synchronized_scan_data_stream, camera_data_channel, Acquisition.Channel(camera.hardware_source_id))
         result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_channel)
         scan_acquisition = Acquisition.Acquisition(result_data_stream)
         with result_data_stream.ref(), contextlib.closing(scan_acquisition):
@@ -2075,6 +2070,31 @@ def get_limited_scan_shape(scan_size: Geometry.IntSize) -> Geometry.IntSize:
         scan_size_height = int(scan_size_width // scan_size.aspect_ratio)
         return Geometry.IntSize(scan_size_height, scan_size_width)
     return scan_size
+
+
+
+
+@dataclasses.dataclass
+class _AcquireSynchronizedResult:
+    scan_results: typing.Sequence[DataAndMetadata.DataAndMetadata]
+    camera_results: typing.Sequence[DataAndMetadata.DataAndMetadata]
+
+
+# temporary (hopefully) method to acquire synchronized stream for use during transition of multi-acquire to data streams.
+def _acquire_synchronized_stream(scan_hardware_source_id: str, camera_hardware_source_id: str, synchronized_scan_data_stream: Acquisition.DataStream) -> typing.Optional[_AcquireSynchronizedResult]:
+    results: typing.Optional[_AcquireSynchronizedResult] = None
+    result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream)
+    scan_acquisition = Acquisition.Acquisition(result_data_stream)
+    with result_data_stream.ref(), contextlib.closing(scan_acquisition):
+        scan_acquisition.prepare_acquire()
+        scan_acquisition.acquire()
+        if scan_acquisition.is_error:
+            raise RuntimeError("grab_synchronized failed.")
+        if not scan_acquisition.is_aborted:
+            scan_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == scan_hardware_source_id]
+            camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera_hardware_source_id]
+            results = _AcquireSynchronizedResult(scan_results, camera_results)
+    return results
 
 
 class ScanFrameSequenceDataStream(Acquisition.DataStream):
