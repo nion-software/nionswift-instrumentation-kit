@@ -3001,7 +3001,7 @@ def build_calibration(instrument_controller: InstrumentController, calibration_c
     units = typing.cast(str, get_instrument_calibration_value(instrument_controller, calibration_controls, prefix + "_" + "units"))
     if calibration_controls.get(prefix + "_origin_override", None) == "center" and scale is not None and data_len:
         offset = -scale * data_len * 0.5
-    if offset is not None and scale is not None and math.isfinite(offset) and math.isfinite(scale) and scale != 0 and units:
+    if (offset is None or math.isfinite(offset)) and (scale is None or math.isfinite(scale)) and scale != 0 and units:
         return Calibration.Calibration(offset, scale, units)
     return Calibration.Calibration()
 
@@ -3097,7 +3097,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         scale = scale * relative_scale if scale is not None else scale
         if is_center_origin and scale is not None and data_len:
             offset = -scale * data_len * 0.5
-        if offset is not None and scale is not None and math.isfinite(offset) and math.isfinite(scale) and scale != 0 and units:
+        if (offset is None or math.isfinite(offset)) and (scale is None or math.isfinite(scale)) and scale != 0 and units:
             return Calibration.Calibration(offset, scale, units)
         return Calibration.Calibration()
 
