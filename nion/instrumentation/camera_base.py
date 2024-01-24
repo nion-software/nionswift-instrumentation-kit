@@ -898,6 +898,10 @@ class CameraDevice3(typing.Protocol):
         """
         self.acquire_sequence_cancel()
 
+    @property
+    def configuration_properties(self) -> typing.Mapping[str, typing.Any]:
+        return dict()
+
     def show_config_window(self) -> None:
         """Show a configuration dialog, if needed. Dialog can be modal or modeless."""
         return  # required to avoid being recognized as abstract by mypy
@@ -1388,6 +1392,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def exposure_precision(self) -> int: raise NotImplementedError()
 
+    @property
+    def configuration_properties(self) -> typing.Mapping[str, typing.Any]: raise NotImplementedError()
+
     # used in Facade. should be considered private.
 
     def set_current_frame_parameters(self, camera_frame_parameters: HardwareSource.FrameParameters) -> None: ...
@@ -1612,6 +1619,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def exposure_precision(self) -> int:
         return -3
+
+    @property
+    def configuration_properties(self) -> typing.Mapping[str, typing.Any]:
+        return dict()
 
     @property
     def binning_values(self) -> typing.Sequence[int]:
@@ -2236,6 +2247,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def exposure_precision(self) -> int:
         return self.__camera.exposure_precision
+
+    @property
+    def configuration_properties(self) -> typing.Mapping[str, typing.Any]:
+        return self.__camera.configuration_properties
 
     @property
     def binning_values(self) -> typing.Sequence[int]:
