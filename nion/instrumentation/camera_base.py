@@ -2384,6 +2384,9 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_counts_per_electron(self) -> typing.Optional[float]:
         return self.__get_camera_calibrator().get_counts_per_electron()
 
+    def get_pixel_angle(self) -> typing.Optional[float]:
+        return self.__get_camera_calibrator().get_pixel_angle()
+
     def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None:
         # added this because it turns out it is needed - sequence/sync prepare needs to go before
         # the scan is started.
@@ -3033,6 +3036,8 @@ class CameraCalibrator(typing.Protocol):
 
     def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]: ...
 
+    def get_pixel_angle(self, **kwargs: typing.Any) -> typing.Optional[float]: ...
+
 
 class CalibrationControlsCalibrator(CameraCalibrator):
     """Calibrator v1. Uses calibration controls dictionary."""
@@ -3059,6 +3064,11 @@ class CalibrationControlsCalibrator(CameraCalibrator):
     def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
         instrument_controller = self.__instrument_controller
         return typing.cast(typing.Optional[float], get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+    def get_pixel_angle(self, **kwargs: typing.Any) -> typing.Optional[float]:
+        instrument_controller = self.__instrument_controller
+        calibration_controls = self.__camera_device.calibration_controls
+        return typing.cast(float, get_instrument_calibration_value(instrument_controller, calibration_controls, "x_scale"))
 
 
 class CalibrationControlsCalibrator2(CameraCalibrator):
@@ -3135,6 +3145,11 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
     def get_counts_per_electron(self, **kwargs: typing.Any) -> typing.Optional[float]:
         instrument_controller = self.__instrument_controller
         return typing.cast(typing.Optional[float], self.__get_instrument_calibration_value(instrument_controller, self.__camera_device.calibration_controls, "counts_per_electron"))
+
+    def get_pixel_angle(self, **kwargs: typing.Any) -> typing.Optional[float]:
+        suffix = self.__construct_suffix()
+        x_calibration = self.__construct_calibration("calibX", suffix, 1.0, False, 0)
+        return x_calibration.scale
 
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
         if key + "_control" in calibration_controls:
