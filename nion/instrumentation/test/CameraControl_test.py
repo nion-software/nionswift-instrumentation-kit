@@ -1322,6 +1322,16 @@ class TestCameraControlClass(unittest.TestCase):
                 test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
                 test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
 
+    def test_acquisition_panel_acquisition_runs_with_only_second_channel(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            test_context.scan_hardware_source.set_channel_enabled(0, False)
+            test_context.scan_hardware_source.set_channel_enabled(1, True)
+            acquisition_device = make_scan_device(test_context)
+            acquisition_method = make_sequence_acquisition_method()
+            # run the acquisition procedure
+            self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
+
     def test_exposure_string(self):
         t = (
             (1.2E-0,  0,  "1.2", "s"),

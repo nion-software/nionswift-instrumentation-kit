@@ -1723,7 +1723,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), scan_id)
         xdata_group = dict()
         for channel_index, data_element in enumerate(data_element_group):
-            channel = Acquisition.Channel(self.hardware_source_id, str(channel_index))
+            channel = Acquisition.Channel(self.hardware_source_id, str(self.get_enabled_channel_indexes()[channel_index]))
             xdata_group[channel] = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
         return xdata_group
 
