@@ -2175,7 +2175,9 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
 
     def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         data_stream_events = list[Acquisition.DataStreamEventArgs]()
-        while self.__scan_hardware_source.get_sequence_buffer_count() > 0 and self.__sent_count < self.__count and not self.__is_aborted:
+        start_time = time.time()
+        MAX_TIME = 0.1
+        while self.__scan_hardware_source.get_sequence_buffer_count() > 0 and self.__sent_count < self.__count and not self.__is_aborted and time.time() - start_time < MAX_TIME:
             buffer_data = self.__scan_hardware_source.pop_sequence_buffer_data(self.__scan_id)
             self.__sent_count += 1
 
