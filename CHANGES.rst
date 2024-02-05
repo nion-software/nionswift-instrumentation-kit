@@ -1,11 +1,15 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+22.2.0 (2024-02-04)
+-------------------
 - Added single frame variants to camera device, utilize when recording.
 - Improve error reporting during acquisition panel errors.
+- Fix some display issues in the acquisition preferences panel.
+- Improve handling of malformed calibrations from instrument.
+- General performance and reliability improvements.
 - Fix #166. Multi acquire now properly sets exposure time on camera.
+- Fix #170. Improve handling of 1D recording data.
 
 22.1.1 (2023-10-25)
 -------------------
