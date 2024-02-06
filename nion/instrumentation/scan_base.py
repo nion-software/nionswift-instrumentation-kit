@@ -153,6 +153,12 @@ class ScanFrameParameters(ParametersBase):
         self.pixel_size = value
 
     @property
+    def scan_size(self) -> Geometry.IntSize:
+        if self.subscan_pixel_size:
+            return self.subscan_pixel_size
+        return self.pixel_size
+
+    @property
     def pixel_size_nm(self) -> Geometry.FloatSize:
         return Geometry.FloatSize(height=self.fov_nm / self.pixel_size.height, width=self.fov_nm / self.pixel_size.width)
 
@@ -2133,7 +2139,7 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
             self.__scan_frame_parameters.pixel_size = self.__scan_size
 
     def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        data_shape = tuple(self.__scan_frame_parameters.size)
+        data_shape = tuple(self.__scan_frame_parameters.scan_size)
         data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, 3.0)
 

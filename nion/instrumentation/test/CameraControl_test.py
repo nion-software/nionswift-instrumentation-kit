@@ -1332,6 +1332,31 @@ class TestCameraControlClass(unittest.TestCase):
             # run the acquisition procedure
             self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
 
+    def test_acquisition_panel_scan_sequence_works_with_subscan(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            # this is an unintuitive way to set the subscan region, but use it until it is cleaned up.
+            # the better way would be to be able to set it on the frame paramters and then set the current frame params.
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            acquisition_device = make_scan_device(test_context)
+            acquisition_method = make_sequence_acquisition_method()
+            # run the acquisition procedure
+            self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
+
+    def test_acquisition_panel_scan_sequence_works_with_linescan(self):
+        with self.__test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            # this is an unintuitive way to set the subscan region, but use it until it is cleaned up.
+            # the better way would be to be able to set it on the frame paramters and then set the current frame params.
+            scan_hardware_source.line_scan_enabled = True
+            acquisition_device = make_scan_device(test_context)
+            acquisition_method = make_sequence_acquisition_method()
+            # run the acquisition procedure
+            self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
+
     def test_exposure_string(self):
         t = (
             (1.2E-0,  0,  "1.2", "s"),
