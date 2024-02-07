@@ -110,9 +110,11 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gettext
+import logging
 import time
 import typing
 import warnings
@@ -2658,8 +2660,16 @@ def _acquire_data_stream(data_stream: DataStream,
                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
                          event_loop: asyncio.AbstractEventLoop,
                          *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
+                         title_base: typing.Optional[str] = None,
                          ) -> None:
     """Perform acquisition of the data stream."""
+    title = _("Acquisition")
+    if title_base:
+        title += f" ({title_base})"
+
+    logger = logging.getLogger("acquisition")
+
+    logger.info(f"{title} started: {datetime.datetime.now()}")
 
     framed_data_stream = FramedDataStream(data_stream, data_channel=data_channel).add_ref()
 
@@ -2676,6 +2686,7 @@ def _acquire_data_stream(data_stream: DataStream,
                           is_acquiring_model: Model.PropertyModel[bool]) -> None:
         acquisition_state._end()
         acquisition_state.is_error = framed_data_stream.is_error
+        logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if framed_data_stream.is_aborted else "") + (" with error" if acquisition_state.is_error else ""))
         framed_data_stream.remove_ref()
         if scan_drift_logger:
             scan_drift_logger.close()
@@ -2731,7 +2742,8 @@ def start_acquire(data_stream: DataStream,
                              is_acquiring_model,
                              drift_logger,
                              event_loop,
-                             error_handler=error_handler)
+                             error_handler=error_handler,
+                             title_base=title_base)
 
 
 

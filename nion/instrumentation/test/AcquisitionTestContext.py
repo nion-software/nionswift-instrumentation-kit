@@ -1,3 +1,4 @@
+import logging
 import typing
 
 from nion.instrumentation import camera_base
@@ -16,6 +17,7 @@ from nionswift_plugin.usim import ScanDevice
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
     def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025):
         super().__init__()
+        logging.getLogger("acquisition").setLevel(logging.ERROR)
         HardwareSource.run()
         instrument = self.setup_stem_controller()
         DriftTracker.run()
