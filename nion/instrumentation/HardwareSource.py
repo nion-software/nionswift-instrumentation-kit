@@ -137,6 +137,9 @@ class HardwareSourceBridge:
         This method is thread safe.
         """
         data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_id)
+
+        # grabbing this mutex introduces the possibility of a deadlock with append_data_items which runs on the main
+        # thread. ensure that append_data_items does hold its lock while potentially encountering the mutex.
         with data_item_reference.mutex:
             data_item = data_item_reference.data_item
             # if we still don't have a data item, create it.
@@ -148,28 +151,29 @@ class HardwareSourceBridge:
 
                 def append_data_items() -> None:
                     with self.__data_items_to_append_lock:
-                        for key, data_item in self.__data_items_to_append:
-                            self.__document_model.append_data_item(data_item)
-                            # this next line may be redundant since the data_item_reference.data_item is set above.
-                            # however, this line may ensure it is written to disk; needs a test before removing.
-                            self.__document_model._update_data_item_reference(key, data_item)
+                        data_items_to_append = list(self.__data_items_to_append)
                         self.__data_items_to_append.clear()
+                    for key, data_item in data_items_to_append:
+                        self.__document_model.append_data_item(data_item)
+                        # this next line may be redundant since the data_item_reference.data_item is set above.
+                        # however, this line may ensure it is written to disk; needs a test before removing.
+                        self.__document_model._update_data_item_reference(key, data_item)
 
                 with self.__data_items_to_append_lock:
                     self.__data_items_to_append.append((data_item_reference.key, data_item))
 
                 self.__call_soon(append_data_items)
 
-            def update_session(data_item: DataItem.DataItem) -> None:
-                # since this is a delayed call, the data item might have disappeared. check it.
-                if data_item._closed:
-                    return
-                self.__document_model.update_data_item_session(data_item)
+        def update_session(data_item: DataItem.DataItem) -> None:
+            # since this is a delayed call, the data item might have disappeared. check it.
+            if data_item._closed:
+                return
+            self.__document_model.update_data_item_session(data_item)
 
-            assert data_item
-            self.__call_soon(functools.partial(update_session, data_item))
+        assert data_item
+        self.__call_soon(functools.partial(update_session, data_item))
 
-            return data_item_reference
+        return data_item_reference
 
     def __data_channel_start(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs) -> None:
         def data_channel_start() -> None:

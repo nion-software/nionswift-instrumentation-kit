@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Eliminate possible deadlock during scan view when creating data items (new project).
+
 22.2.0 (2024-02-04)
 -------------------
 - Added single frame variants to camera device, utilize when recording.
