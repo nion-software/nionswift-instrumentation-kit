@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 # system imports
+import datetime
 import gettext
 import threading
 import time
@@ -109,7 +110,7 @@ class Controller:
             return False, 0
 
         if do_acquire:
-            print(f"AR: start playing {time.time()}")
+            print(f"AR: start playing {datetime.datetime.now()}")
             hardware_source.prepare_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             hardware_source.start_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             print("AR: wait for acquire")
@@ -117,7 +118,7 @@ class Controller:
             if not was_playing:
                 print("AR: restopping")
                 hardware_source.stop_playing()
-            print("AR: acquire finished")
+            print(f"AR: acquire finished {datetime.datetime.now()}")
         else:
             success = True
             actual_count = frame_count
@@ -141,16 +142,16 @@ class Controller:
                 hardware_source.finish_sequence_mode()
 
         if actual_count > 0:
-            print("AR: grabbing data")
+            print(f"AR: grabbing data {datetime.datetime.now()}")
             self.cancel_event.clear()
             success = await event_loop.run_in_executor(None, exec_grab, actual_count)
-            print(f"AR: grab finished {'success' if success else 'failure'}")
+            print(f"AR: grab finished {'success' if success else 'failure'} {datetime.datetime.now()}")
 
         xdata_group = None
 
         if success:
             if len(xdata_group_list) > 1:
-                print("AR: making xdata")
+                print(f"AR: making xdata {datetime.datetime.now()}")
                 valid_count = 0
                 examplar_xdata_group = xdata_group_list[-1]
                 shapes = [xdata._data_ex.shape for xdata in examplar_xdata_group if xdata]
@@ -180,7 +181,7 @@ class Controller:
                 xdata_group = xdata_group_list[0]
 
         if xdata_group:
-            print("AR: making data item")
+            print(f"AR: making data item {datetime.datetime.now()}")
             for xdata in xdata_group:
                 if xdata:
                     data_item = DataItem.DataItem(large_format=True)
@@ -198,7 +199,7 @@ class Controller:
             hardware_source.start_playing()
         self.state.value = "idle"
         self.progress_model.value = 0
-        print(f"AR: done {time.time()}")
+        print(f"AR: done {datetime.datetime.now()}")
 
     def cancel(self) -> None:
         self.cancel_event.set()
