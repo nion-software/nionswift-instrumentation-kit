@@ -1014,8 +1014,15 @@ class CameraSettingsModel(DeviceSettingsModel):
     def camera_frame_parameters(self) -> typing.Optional[camera_base.CameraFrameParameters]:
         camera_hardware_source = self.camera_hardware_source
         if camera_hardware_source:
+            # create a minimal camera frame parameters by creating a default one, then copying the exposure and
+            # binning. the exposure may come from the exposure model that is presented to the user in the UI;
+            # otherwise it is copied from the current parameters. the binning is always copied from the current
+            # parameters since it is not presented in the acquisition panel UI currently.
+            import traceback
+            traceback.print_stack()
             camera_frame_parameters = camera_hardware_source.validate_frame_parameters(camera_base.CameraFrameParameters(dict()))
             camera_frame_parameters.exposure = self.__camera_config_exposure_model.value or camera_hardware_source.get_current_frame_parameters().exposure
+            camera_frame_parameters.binning = camera_hardware_source.get_current_frame_parameters().binning
             return camera_frame_parameters
         return None
 
