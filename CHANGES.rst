@@ -3,7 +3,9 @@ Changelog (nionswift-instrumentation)
 
 UNRELEASED
 ----------
+- Fix #173. Fix issue with using subscan during scan sequence acquisition.
 - Eliminate possible deadlock during scan view when creating data items (new project).
+- Increase precision of current readout in camera panel when current less than 10 pA.
 
 22.2.0 (2024-02-04)
 -------------------

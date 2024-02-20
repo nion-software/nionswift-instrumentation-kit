@@ -865,8 +865,11 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         def camera_current_changed(camera_current: typing.Optional[float]) -> None:
             if camera_current:
-                camera_current_int = int(camera_current * 1e12) if math.isfinite(camera_current) else 0
-                camera_current_label.text = str(camera_current_int) + _("pA")
+                camera_current_pa = camera_current * 1e12 if math.isfinite(camera_current) else 0.0
+                if camera_current_pa < 10.0:
+                    camera_current_label.text = f"{camera_current_pa:.1f}" + _("pA")
+                else:
+                    camera_current_label.text = f"{int(camera_current_pa)}" + _("pA")
                 camera_current_label.text_color = "black"
             else:
                 camera_current_label.text_color = "gray"
