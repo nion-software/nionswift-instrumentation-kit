@@ -2204,6 +2204,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return self.get_next_xdatas_to_finish(timeout)
 
     def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool:
+        self.acquire_sequence_prepare(count)
         self.__grab_sequence_frame_parameters = self.get_current_frame_parameters()
         self.__grab_sequence_partial_data = self.acquire_sequence_begin(self.__grab_sequence_frame_parameters, count)
         return True
