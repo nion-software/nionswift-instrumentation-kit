@@ -313,7 +313,7 @@ The following code will perform a scan synchronized with a camera::
 
     frames, camera_data_list = combined_data
     frame = frames[0]
-    camera_data = camera_data[0]
+    camera_data = camera_data_list[0]
 
 You can use a camera frame parameter to control processing from 2d to 1d data.
 
