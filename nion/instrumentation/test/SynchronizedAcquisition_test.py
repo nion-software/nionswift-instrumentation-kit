@@ -301,7 +301,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                     si_data_item = data_item
                     break
             self.assertIsNotNone(si_data_item)
-            self.assertEqual((4, 5, 3), si_data_item.data_shape)
+            self.assertEqual((3, 4, 5), si_data_item.data_shape)
 
     def test_grab_rotated_synchronized_eels(self):
         # tests whether rotation was applied, as judged by the resulting metadata
@@ -1174,8 +1174,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                             break
                     self.assertIsNotNone(si_data_item)
                     if len(masks) > 1:
-                        self.assertEqual(2, si_data_item.collection_dimension_count)
-                        self.assertEqual((4, 4, len(masks)), si_data_item.data_shape)
+                        self.assertEqual(si_data_item.collection_dimension_count, 1)
+                        self.assertEqual((len(masks), 4, 4), si_data_item.data_shape)
                     else:
                         self.assertEqual(si_data_item.collection_dimension_count, 0)
                         self.assertEqual((4, 4), si_data_item.data_shape)

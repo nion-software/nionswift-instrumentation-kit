@@ -690,7 +690,8 @@ class SISequenceAcquisitionHandler:
             synchronized_scan_data_stream = scan_base.make_synchronized_scan_data_stream(
                 scan_hardware_source=self.__scan_hardware_source,
                 scan_frame_parameters=copy.copy(self.scan_frame_parameters),
-                camera_hardware_source=self.__camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+                camera_hardware_source=self.__camera_hardware_source, camera_frame_parameters=camera_frame_parameters,
+                old_move_axis=True)
             synchronized_scan_data_stream = camera_base.ChannelDataStream(
                 synchronized_scan_data_stream,
                 self.camera_data_channel, Acquisition.Channel(self.__camera_hardware_source.hardware_source_id))

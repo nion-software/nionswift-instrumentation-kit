@@ -2489,7 +2489,8 @@ def make_synchronized_scan_data_stream(
         enable_drift_tracker: bool = False,
         drift_rotation: float = 0.0,
         fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
-        rotation_model: typing.Optional[Model.PropertyModel[float]] = None) -> Acquisition.DataStream:
+        rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
+        old_move_axis: bool = False) -> Acquisition.DataStream:
 
     # there are two separate drift corrector possibilities:
     #   1 - a drift corrector that takes a separate scan, implemented using the scan_data_stream_functor
@@ -2548,6 +2549,11 @@ def make_synchronized_scan_data_stream(
         collectors.append(Acquisition.CollectedDataStream(combined_data_stream, (stop - start, scan_size.width), get_scan_calibrations(scan_frame_parameters)))
     # stack the sections together
     collector: Acquisition.DataStream = Acquisition.StackedDataStream(collectors)
+    if not old_move_axis and camera_frame_parameters.processing == "sum_masked":
+        active_masks = camera_frame_parameters.active_masks
+        if active_masks and len(active_masks) > 1:
+            collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
+                processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, section_count)
     if scan_count > 1:
