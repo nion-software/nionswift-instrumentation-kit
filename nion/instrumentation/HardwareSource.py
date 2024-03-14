@@ -2003,8 +2003,7 @@ class CalibrationProvider:
 
     def __get_spatial_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
                                    dimensional_calibrations: DataAndMetadata.CalibrationListType,
-                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
-        DataAndMetadata.CalibrationListType]:
+                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[DataAndMetadata.CalibrationListType]:
         defocus = metadata.get("instrument", dict()).get("defocus") if metadata else None
         if defocus and dimensional_calibrations and len(set(
                 (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
@@ -2020,8 +2019,7 @@ class CalibrationProvider:
 
     def __get_temporal_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
                                     dimensional_calibrations: DataAndMetadata.CalibrationListType,
-                                    metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
-        DataAndMetadata.CalibrationListType]:
+                                    metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[DataAndMetadata.CalibrationListType]:
         pixel_time_us = metadata.get("hardware_source", dict()).get("pixel_time_us") if metadata else None
         line_time_us = metadata.get("hardware_source", dict()).get("line_time_us") if metadata else None
         if pixel_time_us is not None and line_time_us is not None and len(dimensional_shape) == 2:
@@ -2030,8 +2028,7 @@ class CalibrationProvider:
 
     def __get_angular_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
                                    dimensional_calibrations: DataAndMetadata.CalibrationListType,
-                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
-        DataAndMetadata.CalibrationListType]:
+                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[DataAndMetadata.CalibrationListType]:
         defocus = metadata.get("instrument", dict()).get("defocus") if metadata else None
         if defocus and dimensional_calibrations and len(set(
                 (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
@@ -2054,21 +2051,32 @@ class CalibrationProvider:
         counts_per_electron = metadata.get("hardware_source", dict()).get("counts_per_electron") if metadata else None
         exposure = metadata.get("hardware_source", dict()).get("exposure") if metadata else None
         if counts_per_electron and intensity_calibration and intensity_calibration.units == "counts":
-            calibration_descriptions.append(CalibrationDescription("intensity", "calculated", "data",
+            calibration_descriptions.append(CalibrationDescription("intensity-e", "calculated", "data",
                                                                    Calibration.Calibration(
                                                                        scale=intensity_calibration.scale / counts_per_electron,
                                                                        units="e"), None))
-            if dimensional_calibrations and len(dimensional_calibrations) == 1 and (
-                    dimensional_units := dimensional_calibrations[-1].units) and (
-                    dimensional_scale := dimensional_calibrations[-1].scale):
-                calibration_descriptions.append(CalibrationDescription("intensity-per-channel", "calculated", "data",
+            # calibration_descriptions.append(CalibrationDescription("intensity-pc", "calculated", "data",
+            #                                                        Calibration.Calibration(
+            #                                                            scale=intensity_calibration.scale / counts_per_electron / 6.241509074e18 * 1e12,
+            #                                                            units="pC"), None))
+            if exposure:
+                pa_calibration = Calibration.Calibration(scale=intensity_calibration.scale / counts_per_electron / 6.241509074e18 * 1e12 / exposure, units=f"pA")
+                pa_calibration_description = CalibrationDescription("intensity-pa", "calculated", "data", pa_calibration, None)
+                calibration_descriptions.append(pa_calibration_description)
+            if len(dimensional_calibrations) == 1 and (dimensional_units := dimensional_calibrations[-1].units) and (dimensional_scale := dimensional_calibrations[-1].scale):
+                calibration_descriptions.append(CalibrationDescription("intensity-e-per-channel", "calculated", "data",
                                                                        Calibration.Calibration(
                                                                            scale=intensity_calibration.scale / counts_per_electron / dimensional_scale,
                                                                            units=f"e/{dimensional_units}"),
                                                                        None))
+                calibration_descriptions.append(CalibrationDescription("intensity-pc-per-channel", "calculated", "data",
+                                                                       Calibration.Calibration(
+                                                                           scale=intensity_calibration.scale / counts_per_electron / 6.241509074e18 * 1e12 / dimensional_scale,
+                                                                           units=f"pC/{dimensional_units}"),
+                                                                       None))
                 if exposure:
                     calibration_descriptions.append(
-                        CalibrationDescription("intensity-per-channel-per-time", "calculated", "data",
+                        CalibrationDescription("intensity-e-per-channel-per-time", "calculated", "data",
                                                Calibration.Calibration(
                                                    scale=intensity_calibration.scale / counts_per_electron / dimensional_scale / exposure,
                                                    units=f"e/{dimensional_units}/s"), None))

@@ -205,7 +205,7 @@ class CameraControlStateController:
                 exposure = xdata.metadata.get("hardware_source", dict()).get("exposure")
                 if xdata.intensity_calibration.units == "counts" and counts_per_electron and exposure:
                     sum_counts = xdata.intensity_calibration.convert_to_calibrated_value(numpy.sum(xdata._data_ex))
-                    detector_current = sum_counts / exposure / counts_per_electron / 6.242e18 if exposure > 0 and counts_per_electron > 0 else 0.0
+                    detector_current = sum_counts / exposure / counts_per_electron / 6.241509074e18 if exposure > 0 and counts_per_electron > 0 else 0.0
                     if detector_current != self.__camera_current:
                         self.__camera_current = detector_current
 
