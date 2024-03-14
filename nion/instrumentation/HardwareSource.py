@@ -20,6 +20,7 @@ import enum
 import functools
 import gettext
 import logging
+import math
 import threading
 import time
 import typing
@@ -29,6 +30,7 @@ import uuid
 import numpy
 
 # local imports
+from nion.data import Calibration
 from nion.data import Core
 from nion.data import DataAndMetadata
 from nion.instrumentation import ListListener
@@ -1970,6 +1972,110 @@ class MetadataDisplayComponent:
 
         if info_items:
             d["info_items"] = info_items
+
+
+@dataclasses.dataclass
+class CalibrationDescription:
+    calibration_style_id: str
+    calibration_style_type: str
+    dimension_set_id: str
+    intensity_calibration: typing.Optional[Calibration.Calibration]
+    dimensional_calibrations: typing.Optional[DataAndMetadata.CalibrationListType]
+
+
+class CalibrationProvider:
+
+    def get_calibration_descriptions(self, data_metadata: DataAndMetadata.DataMetadata, **kwargs: typing.Any) -> typing.Sequence[CalibrationDescription]:
+        dimensional_shape = data_metadata.dimensional_shape
+        intensity_calibration = data_metadata.intensity_calibration
+        dimensional_calibrations = data_metadata.dimensional_calibrations
+        metadata = data_metadata.metadata
+        calibration_descriptions = list()
+        if spatial_calibrations := self.__get_spatial_calibrations(dimensional_shape, dimensional_calibrations, metadata):
+            calibration_descriptions.append(CalibrationDescription("spatial", "calculated", "data", None, spatial_calibrations))
+        if temporal_calibrations := self.__get_temporal_calibrations(dimensional_shape, dimensional_calibrations, metadata):
+            calibration_descriptions.append(CalibrationDescription("temporal", "calculated", "data", None, temporal_calibrations))
+        if angular_calibrations := self.__get_angular_calibrations(dimensional_shape, dimensional_calibrations, metadata):
+            calibration_descriptions.append(CalibrationDescription("angular", "calculated", "data", None, angular_calibrations))
+        calibration_descriptions.extend(
+            self.__get_intensity_e_calibration_descriptions(dimensional_shape, intensity_calibration, dimensional_calibrations, metadata))
+        return calibration_descriptions
+
+    def __get_spatial_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
+                                   dimensional_calibrations: DataAndMetadata.CalibrationListType,
+                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
+        DataAndMetadata.CalibrationListType]:
+        defocus = metadata.get("instrument", dict()).get("defocus") if metadata else None
+        if defocus and dimensional_calibrations and len(set(
+                (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
+                dimensional_calibrations)) == 1 and dimensional_calibrations[0].units == "rad":
+            origin_px = [dimensional_calibration.convert_from_calibrated_value(0.0) for dimensional_calibration in dimensional_calibrations]
+            angular_scale = dimensional_calibrations[1].scale
+            image_width_px = dimensional_shape[1]
+            image_width_m = abs(defocus) * math.sin(angular_scale * image_width_px)
+            pixel_size_nm = 1e9 * image_width_m / image_width_px
+            offsets = [-origin * pixel_size_nm for origin in origin_px]
+            return [Calibration.Calibration(offset=offset, scale=pixel_size_nm, units="nm") for _, offset in zip(dimensional_shape, offsets)]
+        return None
+
+    def __get_temporal_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
+                                    dimensional_calibrations: DataAndMetadata.CalibrationListType,
+                                    metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
+        DataAndMetadata.CalibrationListType]:
+        pixel_time_us = metadata.get("hardware_source", dict()).get("pixel_time_us") if metadata else None
+        line_time_us = metadata.get("hardware_source", dict()).get("line_time_us") if metadata else None
+        if pixel_time_us is not None and line_time_us is not None and len(dimensional_shape) == 2:
+            return [Calibration.Calibration(scale=line_time_us, units="µs"), Calibration.Calibration(scale=pixel_time_us, units="µs")]
+        return None
+
+    def __get_angular_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
+                                   dimensional_calibrations: DataAndMetadata.CalibrationListType,
+                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Optional[
+        DataAndMetadata.CalibrationListType]:
+        defocus = metadata.get("instrument", dict()).get("defocus") if metadata else None
+        if defocus and dimensional_calibrations and len(set(
+                (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
+                dimensional_calibrations)) == 1 and dimensional_calibrations[0].units == "nm":
+            origin_px = [dimensional_calibration.convert_from_calibrated_value(0.0) for dimensional_calibration in dimensional_calibrations]
+            pixel_size_nm = dimensional_calibrations[1].scale
+            image_width_px = dimensional_shape[1]
+            image_width_m = pixel_size_nm * image_width_px / 1e9
+            if image_width_m / abs(defocus) < 1.0:
+                angular_scale = math.asin(image_width_m / abs(defocus)) / image_width_px
+                offsets = [-origin * angular_scale for origin in origin_px]
+                return [Calibration.Calibration(offset=offset, scale=angular_scale, units="rad") for _, offset in zip(dimensional_shape, offsets)]
+        return None
+
+    def __get_intensity_e_calibration_descriptions(self, dimensional_shape: DataAndMetadata.ShapeType,
+                                                   intensity_calibration: Calibration.Calibration,
+                                                   dimensional_calibrations: DataAndMetadata.CalibrationListType,
+                                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Sequence[CalibrationDescription]:
+        calibration_descriptions = list[CalibrationDescription]()
+        counts_per_electron = metadata.get("hardware_source", dict()).get("counts_per_electron") if metadata else None
+        exposure = metadata.get("hardware_source", dict()).get("exposure") if metadata else None
+        if counts_per_electron and intensity_calibration and intensity_calibration.units == "counts":
+            calibration_descriptions.append(CalibrationDescription("intensity", "calculated", "data",
+                                                                   Calibration.Calibration(
+                                                                       scale=intensity_calibration.scale / counts_per_electron,
+                                                                       units="e"), None))
+            if dimensional_calibrations and len(dimensional_calibrations) == 1 and (
+                    dimensional_units := dimensional_calibrations[-1].units) and (
+                    dimensional_scale := dimensional_calibrations[-1].scale):
+                calibration_descriptions.append(CalibrationDescription("intensity-per-channel", "calculated", "data",
+                                                                       Calibration.Calibration(
+                                                                           scale=intensity_calibration.scale / counts_per_electron / dimensional_scale,
+                                                                           units=f"e/{dimensional_units}"),
+                                                                       None))
+                if exposure:
+                    calibration_descriptions.append(
+                        CalibrationDescription("intensity-per-channel-per-time", "calculated", "data",
+                                               Calibration.Calibration(
+                                                   scale=intensity_calibration.scale / counts_per_electron / dimensional_scale / exposure,
+                                                   units=f"e/{dimensional_units}/s"), None))
+        return calibration_descriptions
+
+
+Registry.register_component(CalibrationProvider(), {"calibration-provider"})
 
 
 def matches_hardware_source(hardware_source_id: str, channel_id: typing.Optional[str], document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> bool:
