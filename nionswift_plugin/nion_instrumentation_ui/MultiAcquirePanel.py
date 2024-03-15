@@ -236,8 +236,6 @@ class MultiAcquirePanelDelegate:
                                                                     xdata,
                                                                     title='MultiAcquire (stacked)')
                 display_item = self.__api.library._document_model.get_display_item_for_data_item(data_item._data_item)
-                display_layer_index += 1  # display item has one display layer already
-            #else:
             units_str = ' eV' if data_dict['settings_list'][i]['use_multi_eels_calibration'] else ''
             new_data_item = self.document_controller.library.create_data_item_from_data_and_metadata(
                                 xdata,

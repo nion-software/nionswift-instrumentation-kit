@@ -3,16 +3,20 @@ import typing
 import numpy as np
 import unittest
 import time
-import uuid
 
 from nion.instrumentation import camera_base
 from nion.swift import Application
+from nion.swift import Facade
 from nion.swift.test import TestContext
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 
 from nion.instrumentation import MultiAcquire
+from nionswift_plugin.nion_instrumentation_ui import MultiAcquirePanel
+
+
+Facade.initialize()
 
 
 class TestMultiAcquire(unittest.TestCase):
@@ -35,43 +39,75 @@ class TestMultiAcquire(unittest.TestCase):
         return multi_acquire
 
     def test_acquire_multi_eels_spectrum_works_and_finishes_in_time(self):
-        settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank',
-                    'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
-                    'processing': 'sum_project', 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
-                    'use_multi_eels_calibration': False}
-        parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
-                      {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
-                      {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}]
-        with self.__test_context(is_eels=True) as test_context:
-            total_acquisition_time = 0.0
-            for parms in parameters:
-                # the simulator cant go super fast, so make sure we give it enough time
-                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
-                # add some extra overhead time
-                total_acquisition_time += 0.30
+        for use_multi_eels_calibration in [True, False]:
+            settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank',
+                        'x_shift_delay': 0.05, 'focus': '', 'focus_delay': 0, 'auto_dark_subtract': True,
+                        'processing': 'sum_project', 'blanker_delay': 0.05, 'sum_frames': True, 'camera_hardware_source_id': '',
+                        'use_multi_eels_calibration': use_multi_eels_calibration}
+            parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 10},
+                          {'index': 1, 'offset_x': 160, 'exposure_ms': 8, 'frames': 1},
+                          {'index': 2, 'offset_x': 320, 'exposure_ms': 16, 'frames': 1}]
+            with self.__test_context(is_eels=True) as test_context:
+                total_acquisition_time = 0.0
+                for parms in parameters:
+                    # the simulator cant go super fast, so make sure we give it enough time
+                    total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
+                    # add some extra overhead time
+                    total_acquisition_time += 0.30
+                    total_acquisition_time += settings['x_shift_delay']*2
                 total_acquisition_time += settings['x_shift_delay']*2
-            total_acquisition_time += settings['x_shift_delay']*2
-            total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
-            stem_controller = test_context.instrument
-            camera_hardware_source = test_context.camera_hardware_source
-            multi_acquire = self._set_up_multi_acquire(settings, parameters, stem_controller)
-            multi_acquire.camera = camera_hardware_source
-            # enable binning for speed
-            frame_parameters = multi_acquire.camera.get_current_frame_parameters()
-            frame_parameters.binning = 8
-            multi_acquire.camera.set_current_frame_parameters(frame_parameters)
-            progress = 0
-            def update_progress(minimum, maximum, value):
-                nonlocal progress
-                progress = minimum + value/maximum
-            progress_event_listener = multi_acquire.progress_updated_event.listen(update_progress)
-            t0 = time.time()
-            data_dict = multi_acquire.acquire_multi_eels_spectrum()
-            elapsed = time.time() - t0
-            progress_event_listener.close()
-            self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
-            self.assertEqual(len(data_dict['data_element_list']), len(parameters))
-            self.assertAlmostEqual(progress, 1.0, places=1)
+                total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
+                stem_controller = test_context.instrument
+                camera_hardware_source = test_context.camera_hardware_source
+                multi_acquire = self._set_up_multi_acquire(settings, parameters, stem_controller)
+                multi_acquire.camera = camera_hardware_source
+                # enable binning for speed
+                frame_parameters = multi_acquire.camera.get_current_frame_parameters()
+                frame_parameters.binning = 8
+                multi_acquire.camera.set_current_frame_parameters(frame_parameters)
+                progress = 0
+                def update_progress(minimum, maximum, value):
+                    nonlocal progress
+                    progress = minimum + value/maximum
+                progress_event_listener = multi_acquire.progress_updated_event.listen(update_progress)
+                t0 = time.time()
+                data_dict = multi_acquire.acquire_multi_eels_spectrum()
+                from nion.data import DataAndMetadata
+                from nion.swift.model import DataItem
+                # hack a test for the MultiAcquirePanelDelegate
+                class FakeAPI:
+                    def __init__(self) -> None:
+                        pass
+
+                    @property
+                    def library(self) -> typing.Any:
+                        return self
+
+                    @property
+                    def _document_model(self) -> typing.Any:
+                        return test_context.document_model
+
+                    @property
+                    def _document_window(self) -> typing.Any:
+                        return test_context.document_controller
+
+                    def create_data_item_from_data_and_metadata(self, data_and_metadata: DataAndMetadata.DataAndMetadata, title: str) -> typing.Any:
+                        data_item = DataItem.new_data_item(data_and_metadata)
+                        if title is not None:
+                            data_item.title = title
+                        test_context.document_model.append_data_item(data_item)
+                        return Facade.DataItem(data_item)
+
+                fake_api = FakeAPI()
+                multi_acquire_panel_delegate = MultiAcquirePanel.MultiAcquirePanelDelegate(fake_api)
+                multi_acquire_panel_delegate.document_controller = typing.cast(typing.Any, fake_api)
+                multi_acquire_panel_delegate.create_result_data_item(data_dict)
+                # check timing
+                elapsed = time.time() - t0
+                progress_event_listener.close()
+                self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+                self.assertEqual(len(data_dict['data_element_list']), len(parameters))
+                self.assertAlmostEqual(progress, 1.0, places=1)
 
     def test_acquire_multi_eels_spectrum_applies_shift_for_each_frame(self):
         settings = {'x_shifter': 'C10', 'blanker': 'C_Blank',
