@@ -1026,7 +1026,7 @@ class MultiAcquireController:
 
                     self.increment_progress_counter(parameters.frames * parameters.exposure_ms)
 
-                data_dict_list.append({'data_element': data_element, 'parameters': parameters, 'settings': self.__active_settings.as_dict()})
+                data_dict_list.append({'data_element': data_element, 'parameters': parameters.as_dict(), 'settings': self.__active_settings.as_dict()})
 
         except:
             self.acquisition_state_changed_event.fire({'message': 'exception'})
