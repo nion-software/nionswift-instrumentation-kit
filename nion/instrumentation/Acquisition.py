@@ -2565,11 +2565,11 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
         for multi_acquire_entry in sections:
             value_controllers: typing.List[ActionValueControllerLike] = list()
             if stem_value_controller:
-                values = numpy.array([[multi_acquire_entry.offset * control_description_energy_offset.multiplier]])
+                values = numpy.array([[multi_acquire_entry.offset * control_description_energy_offset.multiplier]] * multi_acquire_entry.count)
                 value_controllers.append(
                     ControlCustomizationValueController(stem_value_controller, control_customization_energy_offset, values, None))
             if camera_value_controller:
-                values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]])
+                values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]] * multi_acquire_entry.count)
                 value_controllers.append(
                     ControlCustomizationValueController(camera_value_controller, control_customization_exposure, values, None))
             sequence_data_stream = SequenceDataStream(

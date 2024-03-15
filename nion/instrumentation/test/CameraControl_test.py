@@ -1,8 +1,11 @@
 import contextlib
 import copy
+import dataclasses
 import functools
 import json
+import pathlib
 import random
+import tempfile
 import time
 import typing
 import unittest
@@ -83,6 +86,7 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context, 
                                                        test_context.camera_hardware_source.get_frame_parameters(0),
                                                        None, False, 0, 0, None, None, 0.0)
 
+
 def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     return Acquisition.SequenceAcquisitionMethod(4)
 
@@ -107,6 +111,16 @@ def make_tableau_acquisition_method() -> Acquisition.AcquisitionMethodLike:
         numpy.fromfunction(lambda y, x: -1e-9 + 1e-9 * x, shape)
     ], axis=-1)
     return Acquisition.TableAcquisitionMethod(control_customization, "tv", control_values)
+
+
+def make_multi_acquisition_method() -> Acquisition.AcquisitionMethodLike:
+    @dataclasses.dataclass
+    class MultiSection:
+        offset: float
+        exposure: float
+        count: int
+
+    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4), MultiSection(5.0, 0.05, 2)])
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -1161,48 +1175,51 @@ class TestCameraControlClass(unittest.TestCase):
 
                 return data_item_data_channel
 
-        acquisition_state = Acquisition.AcquisitionState()
-        progress_value_model = Model.PropertyModel[int](0)
-        is_acquiring_model = Model.PropertyModel[bool](False)
-        data_channel_provider = DataChannelProvider(document_controller)
-        stem_device_controller = stem_controller.STEMDeviceController()
-        device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
-        device_map["stem"] = stem_device_controller
-        device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
-        with device_data_stream.ref():
-            data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
-            with data_stream.ref():
-                drift_tracker = stem_device_controller.stem_controller.drift_tracker
-                drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
-                Acquisition.start_acquire(data_stream,
-                                          data_stream.title or str(),
-                                          data_stream.channel_names,
-                                          acquisition_state,
-                                          data_channel_provider,
-                                          drift_logger,
-                                          progress_value_model,
-                                          is_acquiring_model,
-                                          document_controller.event_loop,
-                                          error_handler=error_handler)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = pathlib.Path(temp_dir) / pathlib.Path("nion_acquisition_preferences.json")
+            AcquisitionPreferences.init_acquisition_preferences(file_path)
+            acquisition_state = Acquisition.AcquisitionState()
+            progress_value_model = Model.PropertyModel[int](0)
+            is_acquiring_model = Model.PropertyModel[bool](False)
+            data_channel_provider = DataChannelProvider(document_controller)
+            stem_device_controller = stem_controller.STEMDeviceController()
+            device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
+            device_map["stem"] = stem_device_controller
+            device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
+            with device_data_stream.ref():
+                data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
+                with data_stream.ref():
+                    drift_tracker = stem_device_controller.stem_controller.drift_tracker
+                    drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
+                    Acquisition.start_acquire(data_stream,
+                                              data_stream.title or str(),
+                                              data_stream.channel_names,
+                                              acquisition_state,
+                                              data_channel_provider,
+                                              drift_logger,
+                                              progress_value_model,
+                                              is_acquiring_model,
+                                              document_controller.event_loop,
+                                              error_handler=error_handler)
 
-        last_progress_time = time.time()
-        last_progress = progress_value_model.value
-        while is_acquiring_model.value:
-            if time.time() - last_progress_time > TIMEOUT:
-                raise Exception(f"Timeout {TIMEOUT}s")
-            document_controller.periodic()
-            progress = progress_value_model.value
-            if progress > last_progress:
-                last_progress = progress
-                last_progress_time = time.time()
-            time.sleep(0.05)
-        self.assertEqual(expected_error, acquisition_state.is_error)
-        self.assertFalse(acquisition_state.is_active)
-        if expected_dimensions:
-            self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
-            for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
-                self.assertEqual(expected_dimension[0], data_item.data_shape)
-                self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
+            last_progress_time = time.time()
+            last_progress = progress_value_model.value
+            while is_acquiring_model.value:
+                if time.time() - last_progress_time > TIMEOUT:
+                    raise Exception(f"Timeout {TIMEOUT}s")
+                document_controller.periodic()
+                progress = progress_value_model.value
+                if progress > last_progress:
+                    last_progress = progress
+                    last_progress_time = time.time()
+                time.sleep(0.05)
+            self.assertEqual(expected_error, acquisition_state.is_error)
+            self.assertFalse(acquisition_state.is_active)
+            if expected_dimensions:
+                self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
+                for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
+                    self.assertEqual(expected_dimension[0], data_item.data_shape)
+                    self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
 
     def test_acquisition_panel_acquisition(self):
         tc = [
@@ -1235,6 +1252,13 @@ class TestCameraControlClass(unittest.TestCase):
             # three data items will be created: the series and the two camera view (full frame, summed).
             (make_eels_device, True, "eels_image", make_series_acquisition_method,
              [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
+              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2)),
+              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1))]),
+
+            # three data items will be created: the series and the two camera view (full frame, summed).
+            (make_eels_device, True, "eels_image", make_multi_acquisition_method,
+             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
+              ((2, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
               ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2)),
               ((512,), DataAndMetadata.DataDescriptor(False, 0, 1))]),
 
