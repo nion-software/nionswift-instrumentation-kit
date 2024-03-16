@@ -1881,6 +1881,10 @@ class SumOperator(DataStreamOperator):
         if self.__axis is not None:
             summed_xdata = xd.sum(data_and_metadata, self.__axis)
             assert summed_xdata
+            summed_xdata._set_metadata(data_and_metadata.metadata)
+            summed_xdata.timestamp = data_and_metadata.timestamp
+            summed_xdata.timezone = data_and_metadata.timezone
+            summed_xdata.timezone_offset = data_and_metadata.timezone_offset
             return [ChannelData(channel_data.channel, summed_xdata)]
         else:
             data = data_and_metadata.data

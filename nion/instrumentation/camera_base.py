@@ -944,6 +944,10 @@ class AcquisitionData:
         return self.__data_element
 
     @property
+    def metadata(self) -> typing.MutableMapping[str, typing.Any]:
+        return typing.cast(typing.MutableMapping[str, typing.Any], self.__data_element.setdefault("metadata", dict()))
+
+    @property
     def is_signal_calibrated(self) -> bool:
         return "spatial_calibrations" in self.__data_element
 
@@ -1417,7 +1421,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     def get_acquire_sequence_metrics(self, frame_parameters: CameraFrameParameters) -> typing.Mapping[str, typing.Any]: ...
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType: ...
-    def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None: ...
+    def update_camera_properties(self, acquisition_data: AcquisitionData, frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None: ...
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]: ...
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration: ...
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
@@ -1821,8 +1825,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
             if "spatial_calibrations" in data_element:
                 data_element["spatial_calibrations"] = [dict(), ] + data_element["spatial_calibrations"]
         self.__update_intensity_calibration(data_element, instrument_controller, self.__camera)
-        STEMController.update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
-        update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+        self.update_camera_properties(AcquisitionData(data_element), frame_parameters, data_element.get("signal_type", self.__signal_type))
 
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
         data_element: ImportExportManager.DataElementType = dict()
@@ -1846,9 +1849,10 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         data_element["metadata"]["hardware_source"]["integration_count"] = frame_count
         return data_element
 
-    def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
-        STEMController.update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
-        update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
+    def update_camera_properties(self, acquisition_data: AcquisitionData, frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
+        metadata = acquisition_data.metadata
+        STEMController.update_instrument_properties(metadata.setdefault("instrument", dict()), self.__get_instrument_controller(), self.__camera)
+        update_camera_properties(metadata.setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
         processing = camera_frame_parameters.processing
@@ -2322,16 +2326,9 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return [data_element]
 
     def __update_data_element_for_sequence(self, data_element: ImportExportManager.DataElementType, frame_parameters: CameraFrameParameters) -> None:
-        acquisition_data = AcquisitionData(data_element)
         data_element["version"] = 1
         data_element["state"] = "complete"
-        instrument_controller = self.__get_instrument_controller()
-        camera_calibrations = self.get_camera_calibrations(frame_parameters)
-        acquisition_data.apply_signal_calibrations([Calibration.Calibration()] + list(camera_calibrations))
-        acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
-        acquisition_data.counts_per_electron = self.get_counts_per_electron()
-        STEMController.update_instrument_properties(data_element.setdefault("metadata", dict()).setdefault("instrument", dict()), instrument_controller, self.__camera)
-        update_camera_properties(data_element.setdefault("metadata", dict()).setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, data_element.get("signal_type", self.__signal_type))
+        self.update_camera_properties(AcquisitionData(data_element), frame_parameters, data_element.get("signal_type", self.__signal_type))
 
     def make_live_data_element(self, data: _NDArray, properties: typing.Mapping[str, typing.Any], timestamp: datetime.datetime, frame_parameters: CameraFrameParameters, frame_count: int) -> ImportExportManager.DataElementType:
         acquisition_data = AcquisitionData()
@@ -2363,9 +2360,14 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         data_element["metadata"]["hardware_source"]["integration_count"] = frame_count
         return data_element
 
-    def update_camera_properties(self, properties: typing.MutableMapping[str, typing.Any], frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
-        STEMController.update_instrument_properties(properties, self.__get_instrument_controller(), self.__camera)
-        update_camera_properties(properties, frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
+    def update_camera_properties(self, acquisition_data: AcquisitionData, frame_parameters: CameraFrameParameters, signal_type: typing.Optional[str] = None) -> None:
+        metadata = acquisition_data.metadata
+        camera_calibrations = self.get_camera_calibrations(frame_parameters)
+        acquisition_data.apply_signal_calibrations([Calibration.Calibration()] + list(camera_calibrations))
+        acquisition_data.apply_intensity_calibration(self.get_camera_intensity_calibration(frame_parameters))
+        acquisition_data.counts_per_electron = self.get_counts_per_electron()
+        STEMController.update_instrument_properties(metadata.setdefault("instrument", dict()), self.__get_instrument_controller(), self.__camera)
+        update_camera_properties(metadata.setdefault("hardware_source", dict()), frame_parameters, self.hardware_source_id, self.display_name, signal_type or self.__signal_type)
 
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
         calibrator = self.__get_camera_calibrator()
@@ -2699,9 +2701,10 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
         if valid_count > 0:
             uncropped_xdata = self.__partial_data_info.xdata  # this returns the entire result data array
             is_complete = self.__partial_data_info.is_complete
-            camera_metadata: typing.Dict[str, typing.Any] = dict()
-            self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
-            metadata = dict(uncropped_xdata.metadata)
+            acquisition_data = AcquisitionData()
+            acquisition_data.metadata.update(uncropped_xdata.metadata)
+            self.__camera_hardware_source.update_camera_properties(acquisition_data, self.__camera_frame_parameters)
+            metadata = acquisition_data.metadata
             # this is a hack to prevent potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
@@ -2711,7 +2714,6 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
             metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
             metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
-            metadata.setdefault("hardware_source", dict()).update(camera_metadata)
             metadata.update(copy.deepcopy(self.__additional_metadata))
 
             # TODO: this should be tracked elsewhere than here.
@@ -2793,9 +2795,10 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
         if valid_count > 0:
             uncropped_xdata = self.__partial_data_info.xdata  # this returns the entire result data array
             is_complete = self.__partial_data_info.is_complete
-            camera_metadata: typing.Dict[str, typing.Any] = dict()
-            self.__camera_hardware_source.update_camera_properties(camera_metadata, self.__camera_frame_parameters)
-            metadata = dict(uncropped_xdata.metadata)
+            acquisition_data = AcquisitionData()
+            acquisition_data.metadata.update(uncropped_xdata.metadata)
+            self.__camera_hardware_source.update_camera_properties(acquisition_data, self.__camera_frame_parameters)
+            metadata = acquisition_data.metadata
             # this is a hack to prevent some of the potentially misleading metadata
             # from getting saved into the synchronized data. while it is acceptable to
             # assume that the hardware_source properties will get copied to the final
@@ -2805,7 +2808,6 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             metadata.setdefault("hardware_source", dict()).pop("frame_number", None)
             metadata.setdefault("hardware_source", dict()).pop("integration_count", None)
             metadata.setdefault("hardware_source", dict()).pop("valid_rows", None)
-            metadata.setdefault("hardware_source", dict()).update(camera_metadata)
             metadata.update(copy.deepcopy(self.__additional_metadata))
             # note: collection calibrations will be added in the collections stream
             data_calibrations = self.__camera_hardware_source.get_camera_calibrations(self.__camera_frame_parameters)

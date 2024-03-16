@@ -423,6 +423,7 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
         self.__current_parameters_index = current_parameters_index
         self.__cumulative_elapsed_time = cumulative_elapsed_time
         self.__stack_metadata_keys = stack_metadata_keys
+        self.__stack_values = list[typing.Any]()
         self.current_frames_index = 0
         self.__data_item = self.__create_data_item(channel_name, grab_sync_info)
         self.progress_updated_event = Event.Event()
@@ -585,15 +586,15 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
         metadata["MultiAcquire.settings"] = self.__multi_acquire_settings.as_dict()
         metadata["MultiAcquire.parameters"] = self.__multi_acquire_parameters.as_dict()
         # This is needed for metadata that changes with each spectrum image in the stack and needs to be preserved.
-        # One usecase is the storage information that comes with virtual detector data that has the full dataset saved
-        # in the background. Currently the camera defines which metadata keys to stack and we copy that information
-        # when setting up the CameraDataChannel
+        # One usecase is the storage information that comes with virtual detector data that has the full dataset
+        # saved in the background. Currently, the camera defines which metadata keys to stack and we copy that
+        # information when setting up the CameraDataChannel
         if self.__stack_metadata_keys is not None:
             for key_path in self.__stack_metadata_keys:
-                existing_data = None
                 if isinstance(key_path, str):
                     key_path = [key_path]
-                sub_dict = dict(self.__data_item.metadata)
+                existing_data = None
+                sub_dict = dict(metadata)
                 for key in key_path:
                     sub_dict = typing.cast(typing.Dict[str, typing.Any], sub_dict.get(key))
                     if sub_dict is None:
@@ -601,23 +602,10 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
                 else:
                     existing_data = copy.deepcopy(sub_dict)
 
-                parent = None
-                sub_dict = metadata
-                for key in key_path:
-                    parent = sub_dict
-                    sub_dict = typing.cast(typing.Dict[str, typing.Any], sub_dict.get(key))
-                    if sub_dict is None:
-                        break
-                else:
-                    if self.current_frames_index == 0 and parent is not None:
-                        parent[key_path[-1]] = [sub_dict]
-                    elif existing_data is not None and parent is not None:
-                        if isinstance(existing_data, list):
-                            if len(existing_data) <= self.current_frames_index:
-                                existing_data.append(copy.deepcopy(sub_dict))
-                            else:
-                                existing_data[self.current_frames_index] = copy.deepcopy(sub_dict)
-                            parent[key_path[-1]] = existing_data
+                if len(self.__stack_values) <= self.current_frames_index:
+                    self.__stack_values.append(copy.deepcopy(existing_data))
+
+                metadata.setdefault("MultiAcquire.stack", dict())[key_path[-1]] = copy.deepcopy(self.__stack_values)
 
         data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
                                                      intensity_calibration,

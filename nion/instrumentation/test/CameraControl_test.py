@@ -1220,78 +1220,88 @@ class TestCameraControlClass(unittest.TestCase):
                 for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
                     self.assertEqual(expected_dimension[0], data_item.data_shape)
                     self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
+                    if expected_metadata_fn := expected_dimension[2]:
+                        self.assertTrue(expected_metadata_fn(data_item.data_and_metadata.data_metadata) if expected_metadata_fn else True)
 
     def test_acquisition_panel_acquisition(self):
+        def ensure_camera_metadata(data_metadata: DataAndMetadata.DataMetadata) -> bool:
+            return data_metadata.metadata.get("hardware_source", dict()).get("counts_per_electron", None) is not None
+
+        def print_metadata(data_metadata: DataAndMetadata.DataMetadata) -> bool:
+            print(f"{data_metadata.data_shape=} {data_metadata.metadata}")
+            return True
+
         tc = [
             # only one data item will be created: the sequence. the view data item does not exist since acquiring
             # a sequence will use the special sequence acquisition of the camera device.
             (make_camera_device, False, "ronchigram", make_sequence_acquisition_method,
-             [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2))]),
+             [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata)]),
 
             # only one data item will be created: the sequence. the view data item does not exist since acquiring
             # a sequence will use the special sequence acquisition of the camera device.
             (make_eels_device, True, "eels_spectrum", make_sequence_acquisition_method,
-             [((4, 512), DataAndMetadata.DataDescriptor(True, 0, 1))]),
+             [((4, 512), DataAndMetadata.DataDescriptor(True, 0, 1), ensure_camera_metadata)]),
 
             # only one data item will be created: the sequence. the view data item does not exist since acquiring
             # a sequence will use the special sequence acquisition of the camera device.
             (make_eels_device, True, "eels_image", make_sequence_acquisition_method,
-             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2))]),
+             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata)]),
 
             # two data items will be created: the series and the camera view.
             (make_camera_device, False, "ronchigram", make_series_acquisition_method,
-             [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+              ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata)]),
 
             # three data items will be created: the series and the two camera view (full frame, summed).
             (make_eels_device, True, "eels_spectrum", make_series_acquisition_method,
-             [((4, 512), DataAndMetadata.DataDescriptor(True, 0, 1)),
-              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2)),
-              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1))]),
+             [((4, 512), DataAndMetadata.DataDescriptor(True, 0, 1), ensure_camera_metadata),
+              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata)]),
 
             # three data items will be created: the series and the two camera view (full frame, summed).
             (make_eels_device, True, "eels_image", make_series_acquisition_method,
-             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2)),
-              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1))]),
+             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata)]),
 
             # three data items will be created: the series and the two camera view (full frame, summed).
             (make_eels_device, True, "eels_image", make_multi_acquisition_method,
-             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((2, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2)),
-              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1))]),
+             [((4, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+              ((2, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+              ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+              ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata)]),
 
             # two data items will be created: the series and the camera view.
             (make_camera_device, False, "ronchigram", make_tableau_acquisition_method,
-             [((3, 3, 1024, 1024), DataAndMetadata.DataDescriptor(False, 2, 2)),
-              ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((3, 3, 1024, 1024), DataAndMetadata.DataDescriptor(False, 2, 2), ensure_camera_metadata),
+              ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata)]),
 
             # two data items will be created: the series and the scan view.
             (make_scan_device, False, None, make_sequence_acquisition_method,
-             [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
 
             # two data items will be created: the series and the scan view.
             (make_scan_device, False, None, make_series_acquisition_method,
-             [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((4, 256, 256), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
 
             # two data items will be created: the tableau and the scan view.
             (make_scan_device, False, None, make_tableau_acquisition_method,
-             [((3, 3, 256, 256), DataAndMetadata.DataDescriptor(False, 2, 2)),
-              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((3, 3, 256, 256), DataAndMetadata.DataDescriptor(False, 2, 2), None),
+              ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
 
             # three data items will be created: the camera series, the sync'd series, and the scan view.
             (make_synchronized_device, False, None, make_sequence_acquisition_method,
-             [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
-              ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
-              ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+             [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+              ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2), ensure_camera_metadata),
+              ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
 
             # not supported yet; no way to represent it as a single data item.
             # (make_synchronized_device, False, make_series_acquisition_method, [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
             #                                                             ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
-            #                                                             ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))]),
+            #                                                             ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))],
+            #              ensure_camera_metadata),
         ]
         for acquisition_device_fn, is_eels, camera_channeL, acquisition_method_fn, expected_count in tc:
             with self.subTest(acquisition_device_fn=acquisition_device_fn, acquisition_method_fn=acquisition_method_fn, expected_count=expected_count):

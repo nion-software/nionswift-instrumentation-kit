@@ -1364,8 +1364,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         data_calibrations = camera.get_camera_calibrations(camera_frame_parameters)
         data_intensity_calibration = camera.get_camera_intensity_calibration(camera_frame_parameters)
 
-        camera_metadata: typing.Dict[str, typing.Any] = dict()
-        camera.update_camera_properties(camera_metadata, camera_frame_parameters)
+        acquisition_data = camera_base.AcquisitionData()
+        camera.update_camera_properties(acquisition_data, camera_frame_parameters)
 
         scan_metadata: typing.Dict[str, typing.Any] = dict()
         update_scan_metadata(scan_metadata, self.hardware_source_id, self.display_name, copy.copy(scan_frame_parameters), None, dict())
@@ -1375,7 +1375,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         return GrabSynchronizedInfo(scan_size, fractional_area, is_subscan, camera_readout_size,
                                     camera_readout_size_squeezed, scan_calibrations, data_calibrations,
-                                    data_intensity_calibration, instrument_metadata, camera_metadata,
+                                    data_intensity_calibration, instrument_metadata, acquisition_data.metadata.get("hardware_source", dict()),
                                     scan_metadata, axes_descriptor)
 
     def grab_synchronized(self, *,

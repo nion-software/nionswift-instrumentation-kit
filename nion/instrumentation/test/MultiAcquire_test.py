@@ -337,7 +337,7 @@ class TestMultiAcquire(unittest.TestCase):
                                 self.assertSequenceEqual(data_item.data.shape, total_shape)
                                 self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
 
-                                self.assertEqual(len(data_item.metadata['hardware_source']['binning']), parameters[index]['frames'])
+                                self.assertEqual(len(data_item.metadata['MultiAcquire.stack']['binning']), parameters[index]['frames'])
 
                                 # ensure that the multi acquire parameters exist in the metadata
                                 self.assertIsNotNone(data_item.metadata['MultiAcquire.parameters'])
@@ -398,7 +398,7 @@ class TestMultiAcquire(unittest.TestCase):
                                                                      multi_acquire_parameters, multi_acquire_settings,
                                                                      current_parameters_index,
                                                                      cumulative_elapsed_time,
-                                                                     stack_metadata_keys=[['hardware_source', 'defocus']])
+                                                                     stack_metadata_keys=[['instrument', 'defocus']])
                 enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
                 enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
                 scan_data_channel = MultiAcquire.ScanDataChannel(document_model,
@@ -474,8 +474,8 @@ class TestMultiAcquire(unittest.TestCase):
                 self.assertSequenceEqual(haadf_data_item.data.shape, haadf_shape)
 
                 # defocus here is a list of values, one for each frame
-                self.assertEqual(len(data_item.metadata['hardware_source']['defocus']), parameters[index]['frames'])
-                self.assertSequenceEqual(data_item.metadata['hardware_source']['defocus'], result_expected_defocus[index])
+                self.assertEqual(len(data_item.metadata['MultiAcquire.stack']['defocus']), parameters[index]['frames'])
+                self.assertSequenceEqual(data_item.metadata['MultiAcquire.stack']['defocus'], result_expected_defocus[index])
 
                 # ensure that the multi acquire parameters exist in the metadata
                 self.assertIsNotNone(data_item.metadata['MultiAcquire.parameters'])

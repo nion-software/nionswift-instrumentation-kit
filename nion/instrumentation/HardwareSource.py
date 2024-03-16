@@ -1997,8 +1997,7 @@ class CalibrationProvider:
             calibration_descriptions.append(CalibrationDescription("temporal", "calculated", "data", None, temporal_calibrations))
         if angular_calibrations := self.__get_angular_calibrations(dimensional_shape, dimensional_calibrations, metadata):
             calibration_descriptions.append(CalibrationDescription("angular", "calculated", "data", None, angular_calibrations))
-        calibration_descriptions.extend(
-            self.__get_intensity_e_calibration_descriptions(dimensional_shape, intensity_calibration, dimensional_calibrations, metadata))
+        calibration_descriptions.extend(self.__get_intensity_e_calibration_descriptions(data_metadata))
         return calibration_descriptions
 
     def __get_spatial_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
@@ -2043,14 +2042,14 @@ class CalibrationProvider:
                 return [Calibration.Calibration(offset=offset, scale=angular_scale, units="rad") for _, offset in zip(dimensional_shape, offsets)]
         return None
 
-    def __get_intensity_e_calibration_descriptions(self, dimensional_shape: DataAndMetadata.ShapeType,
-                                                   intensity_calibration: Calibration.Calibration,
-                                                   dimensional_calibrations: DataAndMetadata.CalibrationListType,
-                                                   metadata: typing.Optional[DataAndMetadata.MetadataType]) -> typing.Sequence[CalibrationDescription]:
+    def __get_intensity_e_calibration_descriptions(self, data_metadata: DataAndMetadata.DataMetadata) -> typing.Sequence[CalibrationDescription]:
+        intensity_calibration = data_metadata.intensity_calibration
+        dimensional_calibrations = data_metadata.datum_dimensional_calibrations
+        metadata = data_metadata.metadata
         calibration_descriptions = list[CalibrationDescription]()
         counts_per_electron = metadata.get("hardware_source", dict()).get("counts_per_electron") if metadata else None
         exposure = metadata.get("hardware_source", dict()).get("exposure") if metadata else None
-        if counts_per_electron and intensity_calibration and intensity_calibration.units == "counts":
+        if counts_per_electron and intensity_calibration.units == "counts":
             calibration_descriptions.append(CalibrationDescription("intensity-e", "calculated", "data",
                                                                    Calibration.Calibration(
                                                                        scale=intensity_calibration.scale / counts_per_electron,
