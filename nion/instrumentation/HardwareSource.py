@@ -2068,11 +2068,11 @@ class CalibrationProvider:
                                                                            scale=intensity_calibration.scale / counts_per_electron / dimensional_scale,
                                                                            units=f"e/{dimensional_units}"),
                                                                        None))
-                calibration_descriptions.append(CalibrationDescription("intensity-pc-per-channel", "calculated", "data",
-                                                                       Calibration.Calibration(
-                                                                           scale=intensity_calibration.scale / counts_per_electron / 6.241509074e18 * 1e12 / dimensional_scale,
-                                                                           units=f"pC/{dimensional_units}"),
-                                                                       None))
+                # calibration_descriptions.append(CalibrationDescription("intensity-pc-per-channel", "calculated", "data",
+                #                                                        Calibration.Calibration(
+                #                                                            scale=intensity_calibration.scale / counts_per_electron / 6.241509074e18 * 1e12 / dimensional_scale,
+                #                                                            units=f"pC/{dimensional_units}"),
+                #                                                        None))
                 if exposure:
                     calibration_descriptions.append(
                         CalibrationDescription("intensity-e-per-channel-per-time", "calculated", "data",
