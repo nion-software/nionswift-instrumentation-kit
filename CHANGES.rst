@@ -3,8 +3,9 @@ Changelog (nionswift-instrumentation)
 
 UNRELEASED
 ----------
-- Add calibration provider to provide alternate display calibrations for acquired data (prelimary implementation).
+- Fix #179. Record metadata about collections for acquisitions initiated by acquisition panel.
 - Fix #173. Fix issue with using subscan during scan sequence acquisition.
+- Add calibration provider to provide alternate display calibrations for acquired data (prelimary implementation).
 - Eliminate possible deadlock during scan view when creating data items (new project).
 - Increase precision of current readout in camera panel when current less than 10 pA.
 

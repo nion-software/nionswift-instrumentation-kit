@@ -723,6 +723,8 @@ class CollectedDataStream(DataStream):
         # needs starts tracks whether the downstream data stream needs a start call.
         self.__data_stream_started = False
         self.__all_channels_need_start = False
+        self.__collection_list = list[DataAndMetadata.MetadataType]()
+        self.__last_collection_index: typing.Optional[ShapeType] = None
 
     def about_to_delete(self) -> None:
         if self.__data_stream_started:
@@ -774,13 +776,32 @@ class CollectedDataStream(DataStream):
         return self.__data_stream.send_next()
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_available(data_stream_event)
+        # grab the current collection index to be used to update the collection list of state metadata.
+        # __data_available may update the collection index, so we need to grab it before calling __data_available.
+        collection_index = self.__index_stack[-1].index
+        # call __data_available to process the data_stream_event.
+        data_stream_events = self.__data_available(data_stream_event)
+        # for each data stream event, add the collection list to the metadata if action_state is present.
+        for data_stream_event in data_stream_events:
+            metadata = dict(data_stream_event.data_metadata.metadata)
+            action_state = typing.cast(typing.MutableMapping[str, typing.Any], metadata.pop("action_state", dict()))
+            if action_state:
+                if collection_index != self.__last_collection_index:
+                    action_state["index"] = collection_index
+                    self.__collection_list.append(action_state)
+                    self.__last_collection_index = collection_index
+                collection_list = copy.deepcopy(self.__collection_list)
+                metadata["collection"] = collection_list
+                data_stream_event.data_metadata._set_metadata(metadata)
+        return data_stream_events
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__index_stack = list(index_stack) + [IndexDescription(better_unravel_index(0, self.__collection_shape), self.__collection_shape)]
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: DataStreamArgs) -> None:
+        self.__collection_list = list()
+        self.__last_collection_index = None
         self._start_next_sub_stream()
 
     def _abort_stream(self) -> None:
@@ -2064,9 +2085,9 @@ class ActionValueControllerLike(typing.Protocol):
     def start(self, **kwargs: typing.Any) -> None:
         return
 
-    # perform the control with the given index.
-    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
-        return
+    # perform the control with the given index. return action state metadata if desired.
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> DataAndMetadata.MetadataType:
+        return dict()
 
     # finish the procedure; restore any values that need to be restored.
     def finish(self, **kwargs: typing.Any) -> None:
@@ -2074,14 +2095,14 @@ class ActionValueControllerLike(typing.Protocol):
 
 
 class ActionDataStreamFnDelegate(ActionValueControllerLike):
-    def __init__(self, fn: typing.Callable[[ShapeType], None]) -> None:
+    def __init__(self, fn: typing.Callable[[ShapeType], DataAndMetadata.MetadataType]) -> None:
         self.__fn = fn
 
-    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> DataAndMetadata.MetadataType:
         return self.__fn(index)
 
 
-def make_action_data_stream_delegate(fn: typing.Callable[[typing.Sequence[int]], None]) -> ActionValueControllerLike:
+def make_action_data_stream_delegate(fn: typing.Callable[[typing.Sequence[int]], DataAndMetadata.MetadataType]) -> ActionValueControllerLike:
     return ActionDataStreamFnDelegate(fn)
 
 
@@ -2095,6 +2116,7 @@ class ActionDataStream(ContainerDataStream):
         self.__index = 0
         self.__channel_count = len(self.channels)
         self.__complete_channel_count = 0
+        self.__action_state: DataAndMetadata.MetadataType = dict()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         # stream_args are reused, so make a copy before modifying.
@@ -2106,6 +2128,7 @@ class ActionDataStream(ContainerDataStream):
         self.__shape = stream_args.shape
         self.__index = 0
         self.__complete_channel_count = self.__channel_count
+        self.__action_state = dict()
         self.__delegate.start()
         self.__check_action()
         # stream_args are reused, so make a copy before modifying.
@@ -2119,7 +2142,7 @@ class ActionDataStream(ContainerDataStream):
                 # only proceed if all channels have completed the frame and index is in range.
                 if self.__index < numpy.prod(self.__shape, dtype=numpy.uint64):
                     c = better_unravel_index(self.__index, self.__shape)
-                    self.__delegate.perform(c)
+                    self.__action_state = self.__delegate.perform(c)
                     self.__index += 1
                     self.__complete_channel_count = 0
 
@@ -2130,6 +2153,14 @@ class ActionDataStream(ContainerDataStream):
     def _finish_stream(self) -> None:
         self.__delegate.finish()
         super()._finish_stream()
+
+    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+        data_stream_events = super()._send_next()
+        for data_stream_event in data_stream_events:
+            metadata = dict(data_stream_event.data_metadata.metadata)
+            metadata["action_state"] = copy.deepcopy(self.__action_state)
+            data_stream_event.data_metadata._set_metadata(metadata)
+        return data_stream_events
 
     def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         assert data_stream_event.count is None or data_stream_event.count == 1
@@ -2456,7 +2487,7 @@ class ControlCustomizationValueController(ActionValueControllerLike):
         self.__original_values = self.__device_controller.get_values(self.__control_customization, self.__axis)
 
     # define an action function to apply control values during acquisition
-    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> DataAndMetadata.MetadataType:
         # calculate the current value (in each dimension) and send the result to the
         # device controller. the device controller may be a camera, scan, or stem device
         # controller.
@@ -2464,6 +2495,16 @@ class ControlCustomizationValueController(ActionValueControllerLike):
                                                self.__original_values,
                                                typing.cast(typing.Sequence[float], self.__values[index]),
                                                self.__axis)
+        action_state = dict[str, typing.Any]()
+        action_state["control_value"] = tuple(self.__values[index])
+        control_description = self.__control_customization.control_description
+        if control_description:
+            action_state["control_id"] = control_description.control_id,
+            action_state["device_id"] = control_description.device_id
+            action_state["device_control_id"] = control_description.device_control_id,
+            if axis := control_description.axis:
+                action_state["axis"] = axis
+        return action_state
 
     def finish(self, **kwargs: typing.Any) -> None:
         self.__device_controller.set_values(self.__control_customization, self.__original_values, self.__axis)
@@ -2478,9 +2519,13 @@ class ValueControllersActionValueController(ActionValueControllerLike):
             value_controller.start()
 
     # define an action function to apply control values during acquisition
-    def perform(self, index: ShapeType, **kwargs: typing.Any) -> None:
+    def perform(self, index: ShapeType, **kwargs: typing.Any) -> DataAndMetadata.MetadataType:
+        action_states = list[DataAndMetadata.MetadataType]()
         for value_controller in self.__value_controllers:
-            value_controller.perform(index)
+            action_states.append(value_controller.perform(index))
+        if action_states:
+            return {"controls": action_states}
+        return dict()
 
     def finish(self, **kwargs: typing.Any) -> None:
         for value_controller in self.__value_controllers:
