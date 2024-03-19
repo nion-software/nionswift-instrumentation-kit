@@ -2010,10 +2010,11 @@ class CalibrationProvider:
             origin_px = [dimensional_calibration.convert_from_calibrated_value(0.0) for dimensional_calibration in dimensional_calibrations]
             angular_scale = dimensional_calibrations[1].scale
             image_width_px = dimensional_shape[1]
-            image_width_m = abs(defocus) * math.sin(angular_scale * image_width_px)
-            pixel_size_nm = 1e9 * image_width_m / image_width_px
-            offsets = [-origin * pixel_size_nm for origin in origin_px]
-            return [Calibration.Calibration(offset=offset, scale=pixel_size_nm, units="nm") for _, offset in zip(dimensional_shape, offsets)]
+            if math.isfinite(angular_scale * image_width_px):
+                image_width_m = abs(defocus) * math.sin(angular_scale * image_width_px)
+                pixel_size_nm = 1e9 * image_width_m / image_width_px
+                offsets = [-origin * pixel_size_nm for origin in origin_px]
+                return [Calibration.Calibration(offset=offset, scale=pixel_size_nm, units="nm") for _, offset in zip(dimensional_shape, offsets)]
         return None
 
     def __get_temporal_calibrations(self, dimensional_shape: DataAndMetadata.ShapeType,
