@@ -118,6 +118,7 @@ import logging
 import time
 import typing
 import warnings
+import weakref
 
 import numpy
 import numpy.typing
@@ -507,6 +508,8 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         super().__init__()
         # these two events are used to communicate data updates and errors to the listening data streams or clients.
         self.data_available_event = Event.Event()
+        # data handlers
+        self.__data_handlers = list[DataHandler]()
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
         self.__sequence_count = sequence_count
         self.__sequence_counts: typing.Dict[Channel, int] = dict()
@@ -517,6 +520,10 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         self.channel_names: typing.Mapping[Channel, str] = dict()
         self.title: typing.Optional[str] = None
 
+    def about_to_delete(self) -> None:
+        self.__data_handlers.clear()
+        super().about_to_delete()
+
     def add_ref(self) -> DataStream:
         super().add_ref()
         return self
@@ -526,6 +533,9 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         print(f".{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
+
+    def attach_data_handler(self, data_handler: DataHandler) -> None:
+        self.__data_handlers.append(data_handler)
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -560,9 +570,6 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         The stream is finished if all channels have sent the number of items in their sequence.
         """
         return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
-
-    def _acquire_finished(self) -> None:
-        pass
 
     @property
     def progress(self) -> float:
@@ -668,6 +675,8 @@ class DataStream(ReferenceCounting.ReferenceCounted):
 
     def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         self._handle_data_available(data_stream_event)
+        for data_handler in self.__data_handlers:
+            data_handler.handle_data_available(data_stream_event)
 
     def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         """
@@ -1506,7 +1515,7 @@ class DataChannel(ReferenceCounting.ReferenceCounted):
         super().add_ref()
         return self
 
-    def prepare(self, data_stream: DataStream) -> None:
+    def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
         pass
 
@@ -1601,9 +1610,9 @@ class Framer(ReferenceCounting.ReferenceCounted):
         super().add_ref()
         return self
 
-    def prepare(self, data_stream: DataStream) -> None:
+    def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
         self.__indexes = dict()
-        self.__data_channel.prepare(data_stream)
+        self.__data_channel.prepare(channel_info_map)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__data_channel.get_data(channel)
@@ -1733,9 +1742,6 @@ class FramedDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    def _acquire_finished(self) -> None:
-        assert all(self.get_info(c).data_metadata.data_shape == self.get_data(c).data_shape for c in self.channels)
-
     @property
     def _progress(self) -> float:
         return self.__data_stream.progress
@@ -1761,9 +1767,6 @@ class FramedDataStream(DataStream):
 
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
-
-    def prepare_data_channel(self) -> None:
-        self.__framer.prepare(self)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
@@ -2049,9 +2052,6 @@ class ContainerDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    def _acquire_finished(self) -> None:
-        self.__data_stream._acquire_finished()
-
     @property
     def _progress(self) -> float:
         return self.__data_stream.progress
@@ -2300,6 +2300,114 @@ class AccumulatedDataStream(ContainerDataStream):
         return [new_data_stream_event]
 
 
+class DataHandler:
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        raise NotImplementedError()
+
+    def send_packet(self, packet: DataStreamEventArgs) -> None:
+        pass
+
+
+class FramedDataHandler(DataHandler):
+    def __init__(self, framer: Framer, *, operator: typing.Optional[DataStreamOperator] = None) -> None:
+        self.__framer = framer.add_ref()
+        self.__operator = operator or NullDataStreamOperator()
+
+        def finalize() -> None:
+            framer.remove_ref()
+
+        weakref.finalize(self, finalize)
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__framer.get_data(channel)
+
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        self.__framer.data_available(packet, typing.cast(FrameCallbacks, self))
+
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]:
+        # callback for Framer
+        if not self.__operator.is_applied:
+            for new_channel_data in self.__operator.process(ChannelData(channel, data_and_metadata)):
+                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
+        else:
+            self.__send_data(channel, data_and_metadata)
+        return list()
+
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]:
+        # callback for Framer
+        if not self.__operator.is_applied:
+            for new_channel_data in self.__operator.process_multiple(ChannelData(channel, data_and_metadata)):
+                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
+        else:
+            # special case for camera compatibility. cameras should not return empty dimensions.
+            if data_and_metadata.data_shape[-1] == 1:
+                data_metadata = data_and_metadata.data_metadata
+                data = data_and_metadata.data
+                assert data is not None
+                data_and_metadata = DataAndMetadata.new_data_and_metadata(data.squeeze(axis=-1),
+                                                                          data_metadata.intensity_calibration,
+                                                                          data_metadata.dimensional_calibrations[:-1],
+                                                                          data_metadata.metadata,
+                                                                          data_metadata.timestamp,
+                                                                          DataAndMetadata.DataDescriptor(
+                                                                              data_metadata.data_descriptor.is_sequence,
+                                                                              data_metadata.data_descriptor.collection_dimension_count,
+                                                                              data_metadata.data_descriptor.datum_dimension_count - 1),
+                                                                          data_metadata.timezone,
+                                                                          data_metadata.timezone_offset)
+            self.__send_data_multiple(channel, data_and_metadata, count)
+        return list()
+
+    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
+        new_count: typing.Optional[int] = None
+        new_source_slice: typing.Tuple[slice, ...]
+        # special case for scalar
+        if new_data_metadata.data_descriptor.expected_dimension_count == 0:
+            new_data = numpy.array([new_data])
+            assert len(new_data.shape) == 1
+            new_count = new_data.shape[0]
+        assert new_data is not None
+        # form the new slice
+        new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
+        # send the new data chunk
+        new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_data, new_count, new_source_slice, DataStreamStateEnum.COMPLETE)
+        # TODO: what about update in place?
+        self.send_packet(new_data_stream_event)
+
+    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+        assert data_and_metadata.is_sequence
+        new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count, data_and_metadata.datum_dimension_count)
+        data_dtype = data_and_metadata.data_dtype
+        assert data_dtype is not None
+        new_data_metadata = DataAndMetadata.DataMetadata(
+            (data_and_metadata.data_shape[1:], data_dtype),
+            data_and_metadata.intensity_calibration,
+            data_and_metadata.dimensional_calibrations[1:],
+            data_and_metadata.metadata,
+            data_and_metadata.timestamp,
+            new_data_descriptor,
+            data_and_metadata.timezone,
+            data_and_metadata.timezone_offset)
+        new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
+        data = data_and_metadata.data
+        assert data is not None
+        new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
+        # TODO: what about update in place?
+        self.send_packet(new_data_stream_event)
+
+
+class MakerDataStream(ContainerDataStream):
+    def __init__(self, data_stream: DataStream) -> None:
+        super().__init__(data_stream)
+        self.__framer = Framer(DataAndMetadataDataChannel())
+        self.__framed_data_handler = FramedDataHandler(self.__framer)
+        data_stream.attach_data_handler(self.__framed_data_handler)
+
+    def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        return self.__framer.get_data(channel)
+
+
 def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
     """Perform an acquire. This is the main acquisition loop. It runs on a thread.
 
@@ -2319,7 +2427,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             # data_stream._print()
             # print(data_stream.channels)
 
-            assert isinstance(data_stream, FramedDataStream)
+            # assert isinstance(data_stream, FramedDataStream)
 
             while not data_stream.is_finished and not data_stream.is_aborted:
                 # progress checking is for tests and self-consistency
@@ -2337,7 +2445,6 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 time.sleep(0.05)  # play nice with other threads
             if data_stream.is_finished:
                 assert data_stream.progress == 1.0
-                data_stream._acquire_finished()
         except Exception as e:
             data_stream.is_error = True
             data_stream.abort_stream()
@@ -2355,8 +2462,9 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
 
 
 class Acquisition:
-    def __init__(self, data_stream: FramedDataStream) -> None:
+    def __init__(self, data_stream: DataStream, framer: Framer) -> None:
         self.__data_stream = data_stream.add_ref()
+        self.__framer = framer.add_ref()
         self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
         self.__is_error = False
@@ -2365,10 +2473,12 @@ class Acquisition:
         if self.__data_stream:
             self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
+        self.__framer.remove_ref()
+        self.__framer = typing.cast(typing.Any, None)
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.
-        self.__data_stream.prepare_data_channel()
+        self.__framer.prepare({channel: self.__data_stream.get_info(channel) for channel in self.__data_stream.channels})
 
     def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
@@ -2671,10 +2781,10 @@ class AcquisitionState:
         self._acquisition: typing.Optional[Acquisition] = None
         self.is_error = False
 
-    def _start(self, framed_data_stream: FramedDataStream) -> None:
-        self.device_state = framed_data_stream.prepare_device_state()
+    def _start(self, data_stream: DataStream, framer: Framer) -> None:
+        self.device_state = data_stream.prepare_device_state()
         time.sleep(0.5)
-        self._acquisition = Acquisition(framed_data_stream)
+        self._acquisition = Acquisition(data_stream, framer)
         self.is_error = False
 
     def _end(self) -> None:
@@ -2720,23 +2830,29 @@ def _acquire_data_stream(data_stream: DataStream,
 
     logger.info(f"{title} started: {datetime.datetime.now()}")
 
-    framed_data_stream = FramedDataStream(data_stream, data_channel=data_channel).add_ref()
+    framer = Framer(data_channel)
+
+    framed_data_handler = FramedDataHandler(framer)
+
+    data_stream.attach_data_handler(framed_data_handler)
+
+    data_stream.add_ref()  # removed in finish_grab_async
 
     # create the acquisition state/controller object based on the data item data channel data stream.
-    acquisition_state._start(framed_data_stream)
+    acquisition_state._start(data_stream, framer)
 
     # define a method that gets called when the async acquisition method finished. this closes the various
     # objects and updates the UI as 'complete'.
-    def finish_grab_async(framed_data_stream: FramedDataStream,
+    def finish_grab_async(data_stream: DataStream,
                           acquisition_state: AcquisitionState,
                           scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
                           progress_task: typing.Optional[asyncio.Task[None]],
                           progress_value_model: Model.PropertyModel[int],
                           is_acquiring_model: Model.PropertyModel[bool]) -> None:
         acquisition_state._end()
-        acquisition_state.is_error = framed_data_stream.is_error
-        logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if framed_data_stream.is_aborted else "") + (" with error" if acquisition_state.is_error else ""))
-        framed_data_stream.remove_ref()
+        acquisition_state.is_error = data_stream.is_error
+        logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if data_stream.is_aborted else "") + (" with error" if acquisition_state.is_error else ""))
+        data_stream.remove_ref()
         if scan_drift_logger:
             scan_drift_logger.close()
         is_acquiring_model.value = False
@@ -2764,7 +2880,7 @@ def _acquire_data_stream(data_stream: DataStream,
     # start async acquire.
     acquisition_state._acquisition_ex.acquire_async(event_loop=event_loop,
                                                     on_completion=functools.partial(finish_grab_async,
-                                                                                    framed_data_stream,
+                                                                                    data_stream,
                                                                                     acquisition_state,
                                                                                     scan_drift_logger, progress_task,
                                                                                     progress_value_model,
@@ -2798,10 +2914,11 @@ def start_acquire(data_stream: DataStream,
 
 def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
     with data_stream.ref():
-        framed_data_stream = FramedDataStream(data_stream)
-        with framed_data_stream.ref():
-            acquire(framed_data_stream)
-            return {channel: framed_data_stream.get_data(channel) for channel in framed_data_stream.channels}
+        framer = Framer(DataAndMetadataDataChannel())
+        framed_data_handler = FramedDataHandler(framer)
+        data_stream.attach_data_handler(framed_data_handler)
+        acquire(data_stream)
+        return {channel: framer.get_data(channel) for channel in data_stream.channels}
 
 
 class LinearSpace:

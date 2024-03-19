@@ -30,10 +30,9 @@ class DataItemDataChannel(Acquisition.DataChannel):
         self.__data_item_transaction_map: typing.Dict[Acquisition.Channel, DocumentModel.Transaction] = dict()
         self.on_display_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
 
-    def prepare(self, data_stream: Acquisition.DataStream) -> None:
+    def prepare(self, channel_info_map: typing.Mapping[Acquisition.Channel, Acquisition.DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
-        for channel in data_stream.channels:
-            data_stream_info = data_stream.get_info(channel)
+        for channel, data_stream_info in channel_info_map.items():
             if self.__title_base:
                 title = f"{self.__title_base} {self.__channel_names.get(channel, str(channel))}"
             else:

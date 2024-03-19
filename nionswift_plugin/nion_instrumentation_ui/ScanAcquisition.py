@@ -142,8 +142,11 @@ class ScanAcquisitionController:
             enable_drift_tracker=enable_drift_tracker,
             drift_rotation=0.0
         )
-        self.__scan_result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_item_data_channel).add_ref()
-        self.__scan_acquisition = Acquisition.Acquisition(self.__scan_result_data_stream)
+        framer = Acquisition.Framer(data_item_data_channel)
+        self.__synchronized_scan_data_stream = synchronized_scan_data_stream.add_ref()
+        framed_data_handler = Acquisition.FramedDataHandler(framer)
+        self.__synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
+        self.__scan_acquisition = Acquisition.Acquisition(self.__synchronized_scan_data_stream, framer)
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker:
             self.__scan_drift_logger = DriftTracker.DriftLogger(document_model, drift_tracker, event_loop)
@@ -156,8 +159,8 @@ class ScanAcquisitionController:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition.close()
             self.__scan_acquisition = typing.cast(typing.Any, None)
-            self.__scan_result_data_stream.remove_ref()
-            self.__scan_result_data_stream = typing.cast(typing.Any, None)
+            self.__synchronized_scan_data_stream.remove_ref()
+            self.__synchronized_scan_data_stream = typing.cast(typing.Any, None)
             if self.__scan_drift_logger:
                 self.__scan_drift_logger.close()
                 self.__scan_drift_logger = None

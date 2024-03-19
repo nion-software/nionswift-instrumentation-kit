@@ -1395,9 +1395,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                                                                            scan_count=scan_count)
 
         # the optional ChannelDataStream updates the camera data channel for the stream matching 999
-        result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream, data_channel=data_channel)
-        scan_acquisition = Acquisition.Acquisition(result_data_stream)
-        with result_data_stream.ref(), contextlib.closing(scan_acquisition):
+        framer = Acquisition.Framer(data_channel or Acquisition.DataAndMetadataDataChannel())
+        framed_data_handler = Acquisition.FramedDataHandler(framer)
+        synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
+        scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
+        with synchronized_scan_data_stream.ref(), contextlib.closing(scan_acquisition):
             results: GrabSynchronizedResult = None
             self.__scan_acquisition = scan_acquisition
             try:
@@ -1406,8 +1408,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 if scan_acquisition.is_error:
                     raise RuntimeError("grab_synchronized failed.")
                 if not scan_acquisition.is_aborted:
-                    scan_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == self.hardware_source_id]
-                    camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera.hardware_source_id]
+                    scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == self.hardware_source_id]
+                    camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera.hardware_source_id]
                     results = (scan_results, camera_results)
             finally:
                 self.__scan_acquisition = typing.cast(typing.Any, None)
@@ -2089,16 +2091,18 @@ class _AcquireSynchronizedResult:
 # temporary (hopefully) method to acquire synchronized stream for use during transition of multi-acquire to data streams.
 def _acquire_synchronized_stream(scan_hardware_source_id: str, camera_hardware_source_id: str, synchronized_scan_data_stream: Acquisition.DataStream) -> typing.Optional[_AcquireSynchronizedResult]:
     results: typing.Optional[_AcquireSynchronizedResult] = None
-    result_data_stream = Acquisition.FramedDataStream(synchronized_scan_data_stream)
-    scan_acquisition = Acquisition.Acquisition(result_data_stream)
-    with result_data_stream.ref(), contextlib.closing(scan_acquisition):
+    framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
+    framed_data_handler = Acquisition.FramedDataHandler(framer)
+    synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
+    scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
+    with synchronized_scan_data_stream.ref(), contextlib.closing(scan_acquisition):
         scan_acquisition.prepare_acquire()
         scan_acquisition.acquire()
         if scan_acquisition.is_error:
             raise RuntimeError("grab_synchronized failed.")
         if not scan_acquisition.is_aborted:
-            scan_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == scan_hardware_source_id]
-            camera_results = [result_data_stream.get_data(c) for c in result_data_stream.channels if c.segments[0] == camera_hardware_source_id]
+            scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == scan_hardware_source_id]
+            camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera_hardware_source_id]
             results = _AcquireSynchronizedResult(scan_results, camera_results)
     return results
 
