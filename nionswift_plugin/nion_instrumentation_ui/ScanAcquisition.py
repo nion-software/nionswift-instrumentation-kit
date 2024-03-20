@@ -157,7 +157,6 @@ class ScanAcquisitionController:
 
         def finish_grab_async() -> None:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
-            self.__scan_acquisition.close()
             self.__scan_acquisition = typing.cast(typing.Any, None)
             self.__synchronized_scan_data_stream.remove_ref()
             self.__synchronized_scan_data_stream = typing.cast(typing.Any, None)

@@ -1611,7 +1611,6 @@ class Framer(ReferenceCounting.ReferenceCounted):
         return self
 
     def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
-        self.__indexes = dict()
         self.__data_channel.prepare(channel_info_map)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
@@ -2469,12 +2468,11 @@ class Acquisition:
         self.__is_aborted = False
         self.__is_error = False
 
-    def close(self) -> None:
-        if self.__data_stream:
-            self.__data_stream.remove_ref()
-            self.__data_stream = typing.cast(typing.Any, None)
-        self.__framer.remove_ref()
-        self.__framer = typing.cast(typing.Any, None)
+        def finalize() -> None:
+            framer.remove_ref()
+            data_stream.remove_ref()
+
+        weakref.finalize(self, finalize)
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.
@@ -2487,7 +2485,6 @@ class Acquisition:
                 self.__is_aborted = self.__data_stream.is_aborted
                 self.__is_error = self.__data_stream.is_error
         finally:
-            self.__data_stream.remove_ref()
             self.__data_stream = typing.cast(typing.Any, None)
 
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None], error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
@@ -2789,7 +2786,6 @@ class AcquisitionState:
 
     def _end(self) -> None:
         assert self._acquisition
-        self._acquisition.close()
         self._acquisition = None
         self.device_state.restore()
 

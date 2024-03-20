@@ -1399,7 +1399,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         framed_data_handler = Acquisition.FramedDataHandler(framer)
         synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
-        with synchronized_scan_data_stream.ref(), contextlib.closing(scan_acquisition):
+        with synchronized_scan_data_stream.ref():
             results: GrabSynchronizedResult = None
             self.__scan_acquisition = scan_acquisition
             try:
@@ -2095,7 +2095,7 @@ def _acquire_synchronized_stream(scan_hardware_source_id: str, camera_hardware_s
     framed_data_handler = Acquisition.FramedDataHandler(framer)
     synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
     scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
-    with synchronized_scan_data_stream.ref(), contextlib.closing(scan_acquisition):
+    with synchronized_scan_data_stream.ref():
         scan_acquisition.prepare_acquire()
         scan_acquisition.acquire()
         if scan_acquisition.is_error:
