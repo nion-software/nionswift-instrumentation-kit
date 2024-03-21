@@ -2386,6 +2386,17 @@ class Acquisition:
         self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
         self.__is_error = False
+        self.__is_finished = False
+        self.__device_state: typing.Optional[DeviceState] = None
+
+    def save_device_state(self) -> None:
+        assert self.__device_state is None
+        self.__device_state = self.__data_stream.prepare_device_state()
+        time.sleep(0.5)
+
+    def restore_device_state(self) -> None:
+        assert self.__device_state is not None
+        self.__device_state.restore()
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.
@@ -2396,23 +2407,24 @@ class Acquisition:
             acquire(self.__data_stream, error_handler=error_handler)
             self.__is_aborted = self.__data_stream.is_aborted
             self.__is_error = self.__data_stream.is_error
+            self.__is_finished = True
         finally:
             self.__data_stream = typing.cast(typing.Any, None)
 
+    async def grab_async(self, *, on_completion: typing.Callable[[], None], error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
+        try:
+            self.prepare_acquire()
+
+            def call_acquire() -> None:
+                self.acquire(error_handler=error_handler)
+
+            await asyncio.get_running_loop().run_in_executor(None, call_acquire)
+        finally:
+            on_completion()
+            self.__task = None
+
     def acquire_async(self, *, event_loop: asyncio.AbstractEventLoop, on_completion: typing.Callable[[], None], error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
-        async def grab_async() -> None:
-            try:
-                self.prepare_acquire()
-
-                def call_acquire() -> None:
-                    self.acquire(error_handler=error_handler)
-
-                await asyncio.get_running_loop().run_in_executor(None, call_acquire)
-            finally:
-                on_completion()
-                self.__task = None
-
-        self.__task = event_loop.create_task(grab_async())
+        self.__task = event_loop.create_task(self.grab_async(on_completion=on_completion, error_handler=error_handler))
 
     def abort_acquire(self) -> None:
         if self.__data_stream:
@@ -2422,7 +2434,7 @@ class Acquisition:
         start = time.time()
         while self.__task and not self.__task.done() and time.time() - start < timeout:
             on_periodic()
-            time.sleep(0.05)  # don't take all of the CPU
+            time.sleep(0.05)  # don't take all the CPU
         on_periodic()  # one more periodic for clean up
 
     @property
@@ -2438,6 +2450,10 @@ class Acquisition:
     @property
     def is_error(self) -> bool:
         return self.__is_error
+
+    @property
+    def is_finished(self) -> bool:
+        return self.__is_finished
 
 
 class _MultiSectionLike(typing.Protocol):
@@ -2685,50 +2701,20 @@ hardware_source_channel_descriptions = {
 }
 
 
-class AcquisitionState:
-    def __init__(self) -> None:
-        self._acquisition: typing.Optional[Acquisition] = None
-        self.is_error = False
-
-    def _start(self, data_stream: DataStream, framer: Framer) -> None:
-        self.device_state = data_stream.prepare_device_state()
-        time.sleep(0.5)
-        self._acquisition = Acquisition(data_stream, framer)
-        self.is_error = False
-
-    def _end(self) -> None:
-        assert self._acquisition
-        self._acquisition = None
-        self.device_state.restore()
-
-    @property
-    def _acquisition_ex(self) -> Acquisition:
-        assert self._acquisition
-        return self._acquisition
-
-    @property
-    def is_active(self) -> bool:
-        return self._acquisition is not None
-
-    def abort_acquire(self) -> None:
-        if self._acquisition:
-            self._acquisition.abort_acquire()
-
-
 class DataChannelProviderLike(typing.Protocol):
     def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Channel, str], **kwargs: typing.Any) -> DataChannel: ...
 
 
 def _acquire_data_stream(data_stream: DataStream,
                          data_channel: DataChannel,
-                         acquisition_state: AcquisitionState,
                          progress_value_model: Model.PropertyModel[int],
                          is_acquiring_model: Model.PropertyModel[bool],
                          scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
                          event_loop: asyncio.AbstractEventLoop,
+                         completion_fn: typing.Callable[[], None],
                          *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
                          title_base: typing.Optional[str] = None,
-                         ) -> None:
+                         ) -> Acquisition:
     """Perform acquisition of the data stream."""
     title = _("Acquisition")
     if title_base:
@@ -2745,25 +2731,25 @@ def _acquire_data_stream(data_stream: DataStream,
     data_stream.attach_data_handler(framed_data_handler)
 
     # create the acquisition state/controller object based on the data item data channel data stream.
-    acquisition_state._start(data_stream, framer)
+    acquisition = Acquisition(data_stream, framer)
+    acquisition.save_device_state()
 
     # define a method that gets called when the async acquisition method finished. this closes the various
     # objects and updates the UI as 'complete'.
-    def finish_grab_async(data_stream: DataStream,
-                          acquisition_state: AcquisitionState,
+    def finish_grab_async(acquisition: Acquisition,
                           scan_drift_logger: typing.Optional[DriftTracker.DriftLogger],
                           progress_task: typing.Optional[asyncio.Task[None]],
                           progress_value_model: Model.PropertyModel[int],
                           is_acquiring_model: Model.PropertyModel[bool]) -> None:
-        acquisition_state._end()
-        acquisition_state.is_error = data_stream.is_error
-        logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if data_stream.is_aborted else "") + (" with error" if acquisition_state.is_error else ""))
+        acquisition.restore_device_state()
+        logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if acquisition.is_aborted else "") + (" with error" if acquisition.is_error else ""))
         if scan_drift_logger:
             scan_drift_logger.close()
         is_acquiring_model.value = False
         if progress_task:
             progress_task.cancel()
         progress_value_model.value = 100
+        completion_fn()
 
     # manage the 'is_acquiring' state.
     is_acquiring_model.value = True
@@ -2780,39 +2766,40 @@ def _acquire_data_stream(data_stream: DataStream,
                 traceback.print_exc()
                 raise
 
-    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition_state._acquisition_ex, progress_value_model))
+    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition, progress_value_model))
 
     # start async acquire.
-    acquisition_state._acquisition_ex.acquire_async(event_loop=event_loop,
-                                                    on_completion=functools.partial(finish_grab_async,
-                                                                                    data_stream,
-                                                                                    acquisition_state,
-                                                                                    scan_drift_logger, progress_task,
-                                                                                    progress_value_model,
-                                                                                    is_acquiring_model),
-                                                    error_handler=error_handler)
+    acquisition.acquire_async(event_loop=event_loop,
+                              on_completion=functools.partial(finish_grab_async,
+                                                              acquisition,
+                                                              scan_drift_logger, progress_task,
+                                                              progress_value_model,
+                                                              is_acquiring_model),
+                              error_handler=error_handler)
+
+    return acquisition
 
 
 def start_acquire(data_stream: DataStream,
                   title_base: str,
                   channel_names: typing.Mapping[Channel, str],
-                  acquisition_state: AcquisitionState,
                   data_channel_provider: DataChannelProviderLike,
                   drift_logger: typing.Optional[DriftTracker.DriftLogger],
                   progress_value_model: Model.PropertyModel[int],
                   is_acquiring_model: Model.PropertyModel[bool],
                   event_loop: asyncio.AbstractEventLoop,
+                  completion_fn: typing.Callable[[], None],
                   *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
-                  ) -> None:
-    _acquire_data_stream(data_stream,
-                         data_channel_provider.get_data_channel(title_base, channel_names),
-                         acquisition_state,
-                         progress_value_model,
-                         is_acquiring_model,
-                         drift_logger,
-                         event_loop,
-                         error_handler=error_handler,
-                         title_base=title_base)
+                  ) -> Acquisition:
+    return _acquire_data_stream(data_stream,
+                                data_channel_provider.get_data_channel(title_base, channel_names),
+                                progress_value_model,
+                                is_acquiring_model,
+                                drift_logger,
+                                event_loop,
+                                completion_fn,
+                                error_handler=error_handler,
+                                title_base=title_base)
 
 
 

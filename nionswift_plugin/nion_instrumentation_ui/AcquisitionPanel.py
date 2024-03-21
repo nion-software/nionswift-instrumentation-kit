@@ -1737,7 +1737,7 @@ class AcquisitionController(Declarative.Handler):
 
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
-        self.__acquisition_state = Acquisition.AcquisitionState()
+        self.__acquisition: typing.Optional[Acquisition.Acquisition] = None
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1789,8 +1789,8 @@ class AcquisitionController(Declarative.Handler):
 
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
-        if self.__acquisition_state.is_active:
-            self.__acquisition_state.abort_acquire()
+        if self.__acquisition and not self.__acquisition.is_finished:
+            self.__acquisition.abort_acquire()
         else:
             device_component = self.__device_component_stream.value
             assert device_component
@@ -1831,15 +1831,19 @@ class AcquisitionController(Declarative.Handler):
         data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(device_data_stream, device_map)
         drift_tracker = stem_device_controller.stem_controller.drift_tracker
         drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker, self.document_controller.event_loop) if drift_tracker else None
-        Acquisition.start_acquire(data_stream,
-                                  data_stream.title or _("Acquire"),
-                                  data_stream.channel_names,
-                                  self.__acquisition_state,
-                                  DataChannelProvider(self.document_controller),
-                                  drift_logger,
-                                  self.progress_value_model,
-                                  self.is_acquiring_model,
-                                  self.document_controller.event_loop)
+
+        def handle_acquire_finished() -> None:
+            self.__acquisition = None
+
+        self.__acquisition = Acquisition.start_acquire(data_stream,
+                                                       data_stream.title or _("Acquire"),
+                                                       data_stream.channel_names,
+                                                       DataChannelProvider(self.document_controller),
+                                                       drift_logger,
+                                                       self.progress_value_model,
+                                                       self.is_acquiring_model,
+                                                       self.document_controller.event_loop,
+                                                       handle_acquire_finished)
 
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:

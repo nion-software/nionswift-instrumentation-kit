@@ -1176,7 +1176,6 @@ class TestCameraControlClass(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = pathlib.Path(temp_dir) / pathlib.Path("nion_acquisition_preferences.json")
             AcquisitionPreferences.init_acquisition_preferences(file_path)
-            acquisition_state = Acquisition.AcquisitionState()
             progress_value_model = Model.PropertyModel[int](0)
             is_acquiring_model = Model.PropertyModel[bool](False)
             data_channel_provider = DataChannelProvider(document_controller)
@@ -1187,18 +1186,16 @@ class TestCameraControlClass(unittest.TestCase):
             data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
             drift_tracker = stem_device_controller.stem_controller.drift_tracker
             drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
-            Acquisition.start_acquire(data_stream,
-                                      data_stream.title or str(),
-                                      data_stream.channel_names,
-                                      acquisition_state,
-                                      data_channel_provider,
-                                      drift_logger,
-                                      progress_value_model,
-                                      is_acquiring_model,
-                                      document_controller.event_loop,
-                                      error_handler=error_handler)
-            data_stream = None
-
+            acquisition = Acquisition.start_acquire(data_stream,
+                                                    data_stream.title or str(),
+                                                    data_stream.channel_names,
+                                                    data_channel_provider,
+                                                    drift_logger,
+                                                    progress_value_model,
+                                                    is_acquiring_model,
+                                                    document_controller.event_loop,
+                                                    lambda: None,
+                                                    error_handler=error_handler)
             last_progress_time = time.time()
             last_progress = progress_value_model.value
             while is_acquiring_model.value:
@@ -1210,8 +1207,8 @@ class TestCameraControlClass(unittest.TestCase):
                     last_progress = progress
                     last_progress_time = time.time()
                 time.sleep(0.05)
-            self.assertEqual(expected_error, acquisition_state.is_error)
-            self.assertFalse(acquisition_state.is_active)
+            self.assertEqual(expected_error, acquisition.is_error)
+            self.assertTrue(acquisition.is_finished)
             if expected_dimensions:
                 self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
                 for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
@@ -1219,6 +1216,8 @@ class TestCameraControlClass(unittest.TestCase):
                     self.assertEqual(expected_dimension[1], data_item.data_and_metadata.data_descriptor)
                     if expected_metadata_fn := expected_dimension[2]:
                         self.assertTrue(expected_metadata_fn(data_item.data_and_metadata.data_metadata) if expected_metadata_fn else True)
+            data_stream = None
+            acquisition = None
 
     def test_acquisition_panel_acquisition(self):
         def ensure_camera_metadata(data_metadata: DataAndMetadata.DataMetadata) -> bool:
