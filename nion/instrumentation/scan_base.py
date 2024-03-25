@@ -2293,7 +2293,6 @@ class ScanDataStream(Acquisition.DataStream):
 
     def about_to_delete(self) -> None:
         if self.__record_task:
-            self.__record_task.close()
             self.__record_task = typing.cast(typing.Any, None)
         self.__data_channel_listener = typing.cast(typing.Any, None)
         super().about_to_delete()
@@ -2359,7 +2358,6 @@ class ScanDataStream(Acquisition.DataStream):
 
     def _finish_stream(self) -> None:
         if self.__record_task:
-            self.__record_task.close()
             self.__record_task = typing.cast(typing.Any, None)
         self.__started = False
 

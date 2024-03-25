@@ -25,6 +25,7 @@ import threading
 import time
 import typing
 import uuid
+import weakref
 
 # library imports
 import numpy
@@ -1747,41 +1748,46 @@ class ViewTask:
         return self.__data_channel_buffer.grab_earliest()
 
 
+def record_thread(
+        hardware_source: HardwareSource,
+        acquisition_parameters: AcquisitionParameters,
+        recording_started_or_error_event: threading.Event,
+        is_error_ref: typing.List[bool],
+        data_and_metadata_list: list[typing.Optional[DataAndMetadata.DataAndMetadata]]
+) -> None:
+    hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
+    # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
+    recording_task = hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
+    is_error_ref[0] = not recording_task.wait_started(timeout=5.0)
+    recording_started_or_error_event.set()
+    if not is_error_ref[0]:
+        data_and_metadata_list.extend(recording_task.grab_xdatas())
+        hardware_source.stop_recording(sync_timeout=5.0)
+
+
+
 class RecordTask:
     """Run acquisition in a thread and record the result."""
 
     def __init__(self, hardware_source: HardwareSource, acquisition_parameters: AcquisitionParameters) -> None:
         self.__hardware_source = hardware_source
-
         assert not self.__hardware_source.is_recording
-
-        self.__data_and_metadata_list: typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+        self.__data_and_metadata_list = list[typing.Optional[DataAndMetadata.DataAndMetadata]]()
         # synchronize start of thread; if this sync doesn't occur, the task can be closed before the acquisition
         # is started. in that case a deadlock occurs because the abort doesn't apply and the thread is waiting
         # for the acquisition.
-        self.__recording_started_or_error = threading.Event()
-        self.__is_error = False
-
-        def record_thread() -> None:
-            self.__hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
-            # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
-            recording_task = self.__hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
-            self.__is_error = not recording_task.wait_started(timeout=5.0)
-            self.__recording_started_or_error.set()
-            if not self.__is_error:
-                self.__data_and_metadata_list = recording_task.grab_xdatas()
-                self.__hardware_source.stop_recording(sync_timeout=5.0)
-
-        self.__thread = threading.Thread(target=record_thread)
+        self.__recording_started_or_error_event = threading.Event()
+        self.__is_error_ref = [False]
+        self.__thread = threading.Thread(target=record_thread, args=(self.__hardware_source, acquisition_parameters, self.__recording_started_or_error_event, self.__is_error_ref, self.__data_and_metadata_list))
         self.__thread.start()
-        self.__recording_started_or_error.wait()
+        self.__recording_started_or_error_event.wait()
 
-    def close(self) -> None:
-        if self.__thread.is_alive():
-            self.__hardware_source.abort_recording()
-            self.__thread.join()
-        self.__data_and_metadata_list = typing.cast(typing.Any, None)
-        self.__recording_started_or_error = typing.cast(typing.Any, None)
+        def finalize(thread: threading.Thread, hardware_source: HardwareSource) -> None:
+            if thread.is_alive():
+                hardware_source.abort_recording()
+                thread.join()
+
+        weakref.finalize(self, finalize, self.__thread, self.__hardware_source)
 
     @property
     def is_finished(self) -> bool:
@@ -1789,7 +1795,7 @@ class RecordTask:
 
     def grab(self) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         self.__thread.join()
-        if self.__is_error:
+        if self.__is_error_ref[0]:
             raise RuntimeError("Could not start " + str(self.__hardware_source.hardware_source_id))
         return self.__data_and_metadata_list
 
