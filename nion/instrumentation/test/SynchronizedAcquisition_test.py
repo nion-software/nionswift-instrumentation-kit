@@ -1231,8 +1231,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters.processing = "sum_project"
             data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4)
             maker = Acquisition.MakerDataStream(data_stream)
-            with maker.ref():
-                Acquisition.acquire(maker)
+            Acquisition.acquire(maker)
+            maker = None
             self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
             # another acquisition. verify it is calibrated.
             self._acquire_one(document_controller, test_context.camera_hardware_source)

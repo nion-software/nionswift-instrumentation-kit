@@ -143,7 +143,7 @@ class ScanAcquisitionController:
             drift_rotation=0.0
         )
         framer = Acquisition.Framer(data_item_data_channel)
-        self.__synchronized_scan_data_stream = synchronized_scan_data_stream.add_ref()
+        self.__synchronized_scan_data_stream = synchronized_scan_data_stream
         framed_data_handler = Acquisition.FramedDataHandler(framer)
         self.__synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
         self.__scan_acquisition = Acquisition.Acquisition(self.__synchronized_scan_data_stream, framer)
@@ -158,7 +158,6 @@ class ScanAcquisitionController:
         def finish_grab_async() -> None:
             self.acquisition_state_changed_event.fire(SequenceState.idle)
             self.__scan_acquisition = typing.cast(typing.Any, None)
-            self.__synchronized_scan_data_stream.remove_ref()
             self.__synchronized_scan_data_stream = typing.cast(typing.Any, None)
             if self.__scan_drift_logger:
                 self.__scan_drift_logger.close()

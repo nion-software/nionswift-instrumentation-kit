@@ -1828,20 +1828,18 @@ class AcquisitionController(Declarative.Handler):
         device_map["stem"] = stem_device_controller
 
         device_data_stream = device_component.build_acquisition_device().build_acquisition_device_data_stream(device_map)
-        with device_data_stream.ref():
-            data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(device_data_stream, device_map)
-            with data_stream.ref():
-                drift_tracker = stem_device_controller.stem_controller.drift_tracker
-                drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker, self.document_controller.event_loop) if drift_tracker else None
-                Acquisition.start_acquire(data_stream,
-                                          data_stream.title or _("Acquire"),
-                                          data_stream.channel_names,
-                                          self.__acquisition_state,
-                                          DataChannelProvider(self.document_controller),
-                                          drift_logger,
-                                          self.progress_value_model,
-                                          self.is_acquiring_model,
-                                          self.document_controller.event_loop)
+        data_stream = method_component.build_acquisition_method().wrap_acquisition_device_data_stream(device_data_stream, device_map)
+        drift_tracker = stem_device_controller.stem_controller.drift_tracker
+        drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker, self.document_controller.event_loop) if drift_tracker else None
+        Acquisition.start_acquire(data_stream,
+                                  data_stream.title or _("Acquire"),
+                                  data_stream.channel_names,
+                                  self.__acquisition_state,
+                                  DataChannelProvider(self.document_controller),
+                                  drift_logger,
+                                  self.progress_value_model,
+                                  self.is_acquiring_model,
+                                  self.document_controller.event_loop)
 
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:

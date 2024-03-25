@@ -291,9 +291,8 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), channel)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
 
     def test_camera_collection_acquisition(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan
@@ -303,10 +302,9 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
-            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+        self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_camera_collection_acquisition_with_individual_slices(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan
@@ -316,10 +314,9 @@ class TestAcquisitionClass(unittest.TestCase):
         collectors = [Acquisition.CollectedDataStream(data_stream, (1,), [Calibration.Calibration()]) for i in numpy.ndindex(*collection_shape)]
         collector = Acquisition.StackedDataStream(collectors)
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
-            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+        self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_camera_collection_acquisition_with_grouping(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan
@@ -331,10 +328,10 @@ class TestAcquisitionClass(unittest.TestCase):
                 collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                             [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
-                with maker.ref():
-                    Acquisition.acquire(maker)
-                    expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
-                    self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+                Acquisition.acquire(maker)
+                expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+                self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+                maker = None
 
     def test_camera_collection_acquisition_with_inconsistent_grouping(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan
@@ -347,10 +344,9 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
-            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+        self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_scan_sequence_acquisition(self):
         sequence_len = 4
@@ -358,9 +354,8 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len, (4, 4), channel, 2)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
 
     def test_scan_collection_acquisition(self):
         # in this case the collector is acting only to arrange the data, not to provide any scan.
@@ -371,10 +366,9 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
-            self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
+        self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
 
     def test_scan_as_collection(self):
         # scan will produce a data stream of pixels.
@@ -384,11 +378,10 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(1, scan_shape, [channel], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = scan_shape
-            self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_shape = scan_shape
+        self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
 
     def test_scan_as_collection_with_arbitrary_length(self):
         # scan will produce a data stream of pixels.
@@ -400,11 +393,11 @@ class TestAcquisitionClass(unittest.TestCase):
                 data_stream = ScanDataStream(1, scan_shape, [channel], 9)
                 collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
-                with maker.ref():
-                    Acquisition.acquire(maker)
-                    expected_shape = scan_shape
-                    self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
-                    self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
+                Acquisition.acquire(maker)
+                expected_shape = scan_shape
+                self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
+                self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
+                maker = None
 
     def test_scan_as_collection_as_sequence(self):
         # scan will produce a data stream of pixels.
@@ -417,11 +410,10 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = (sequence_len,) + scan_shape
-            self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_shape = (sequence_len,) + scan_shape
+        self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel).data_descriptor)
 
     def test_scan_as_collection_two_channels(self):
         # scan will produce two data streams of pixels.
@@ -432,13 +424,12 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(1, scan_shape, [channel0, channel1], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_shape = scan_shape
-            self.assertTrue(numpy.array_equal(data_stream.data[channel0].reshape(expected_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(data_stream.data[channel1].reshape(expected_shape), maker.get_data(channel1).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_shape = scan_shape
+        self.assertTrue(numpy.array_equal(data_stream.data[channel0].reshape(expected_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(data_stream.data[channel1].reshape(expected_shape), maker.get_data(channel1).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
 
     def test_scan_as_collection_two_channels_and_camera_summed_vertically(self):
         # scan will produce two data streams of pixels.
@@ -454,16 +445,15 @@ class TestAcquisitionClass(unittest.TestCase):
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = scan_shape
-            expected_camera_shape = scan_shape + (2,)
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum(-2).reshape(expected_camera_shape), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(channel2).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_scan_shape = scan_shape
+        expected_camera_shape = scan_shape + (2,)
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.sum(-2).reshape(expected_camera_shape), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(channel2).data_descriptor)
 
     def test_scan_as_collection_two_channels_and_multi_camera_summed_vertically(self):
         # scan will produce two data streams of pixels.
@@ -481,16 +471,15 @@ class TestAcquisitionClass(unittest.TestCase):
                 combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
                 collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
-                with maker.ref():
-                    Acquisition.acquire(maker)
-                    expected_scan_shape = scan_shape
-                    expected_camera_shape = scan_shape + (2,)
-                    self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-                    self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-                    self.assertTrue(numpy.array_equal(camera_data_stream.data.sum(-2).reshape(expected_camera_shape), maker.get_data(channel2).data))
-                    self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
-                    self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
-                    self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(channel2).data_descriptor)
+                Acquisition.acquire(maker)
+                expected_scan_shape = scan_shape
+                expected_camera_shape = scan_shape + (2,)
+                self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+                self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+                self.assertTrue(numpy.array_equal(camera_data_stream.data.sum(-2).reshape(expected_camera_shape), maker.get_data(channel2).data))
+                self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
+                self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
+                self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), maker.get_data(channel2).data_descriptor)
 
     def test_collection_camera_summed_to_single_scalar(self):
         # scan will produce two data streams of pixels.
@@ -502,11 +491,10 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_camera_shape = scan_shape
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_camera_shape = scan_shape
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
 
     def test_collection_camera_summed_to_single_scalar_in_mask(self):
         # scan will produce two data streams of pixels.
@@ -521,14 +509,13 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.MaskedSumOperator(mask))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_camera_shape = scan_shape
-            mask_data = numpy.zeros((8, 8))
-            mask_data[0:4, 0:4] = 1
-            mask_data[4:8, 4:8] = 1
-            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_camera_shape = scan_shape
+        mask_data = numpy.zeros((8, 8))
+        mask_data[0:4, 0:4] = 1
+        mask_data[4:8, 4:8] = 1
+        self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel).data_descriptor)
 
     def test_collection_camera_summed_to_two_scalars(self):
         # scan will produce two data streams of pixels.
@@ -542,13 +529,12 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({channel11: Acquisition.SumOperator(), channel22: Acquisition.SumOperator()}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_camera_shape = scan_shape
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel11).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel22).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel11).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel22).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_camera_shape = scan_shape
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel11).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel22).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel11).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel22).data_descriptor)
 
     def test_collection_camera_summed_to_two_scalars_in_masks(self):
         # scan will produce two data streams of pixels.
@@ -564,17 +550,16 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({channel11: Acquisition.MaskedSumOperator(mask1), channel22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_camera_shape = scan_shape
-            mask_data1 = numpy.zeros((8, 8))
-            mask_data1[0:4, 0:4] = 1
-            mask_data2 = numpy.zeros((8, 8))
-            mask_data2[4:8, 4:8] = 1
-            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data1).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel11).data))
-            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data2).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel22).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel11).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel22).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_camera_shape = scan_shape
+        mask_data1 = numpy.zeros((8, 8))
+        mask_data1[0:4, 0:4] = 1
+        mask_data2 = numpy.zeros((8, 8))
+        mask_data2[4:8, 4:8] = 1
+        self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data1).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel11).data))
+        self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data2).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel22).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel11).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel22).data_descriptor)
 
     def test_collection_camera_summed_to_two_scalars_in_masks_into_stack(self):
         # scan will produce two data streams of pixels.
@@ -589,17 +574,16 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(stacked_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         move_axis_data_stream = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator())
         maker = Acquisition.MakerDataStream(move_axis_data_stream)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_camera_shape = scan_shape
-            mask_data1 = numpy.zeros((8, 8))
-            mask_data1[0:4, 0:4] = 1
-            mask_data2 = numpy.zeros((8, 8))
-            mask_data2[4:8, 4:8] = 1
-            self.assertEqual((2, 8, 8), maker.get_data(channel).data_shape)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 1, 2), maker.get_data(channel).data_descriptor)
-            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data1).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data[0]))
-            self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data2).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data[1]))
+        Acquisition.acquire(maker)
+        expected_camera_shape = scan_shape
+        mask_data1 = numpy.zeros((8, 8))
+        mask_data1[0:4, 0:4] = 1
+        mask_data2 = numpy.zeros((8, 8))
+        mask_data2[4:8, 4:8] = 1
+        self.assertEqual((2, 8, 8), maker.get_data(channel).data_shape)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 1, 2), maker.get_data(channel).data_descriptor)
+        self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data1).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data[0]))
+        self.assertTrue(numpy.array_equal((camera_data_stream.data * mask_data2).sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data[1]))
 
     def test_scan_as_collection_two_channels_and_camera_summed_to_scalar(self):
         # scan will produce two data streams of pixels.
@@ -615,16 +599,15 @@ class TestAcquisitionClass(unittest.TestCase):
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = scan_shape
-            expected_camera_shape = scan_shape
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel2).data_descriptor)
+        Acquisition.acquire(maker)
+        expected_scan_shape = scan_shape
+        expected_camera_shape = scan_shape
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel2).data_descriptor)
 
     def test_sequence_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
@@ -641,17 +624,16 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = (sequence_len,) + scan_shape
-            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
-            self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+        Acquisition.acquire(maker)
+        expected_scan_shape = (sequence_len,) + scan_shape
+        expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
+        self.assertEqual(sequence_len, scan_data_stream.prepare_count)
 
     def test_sequence_grouped_into_sections_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
@@ -671,17 +653,16 @@ class TestAcquisitionClass(unittest.TestCase):
             ])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = (sequence_len,) + scan_shape
-            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
-            self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
+        Acquisition.acquire(maker)
+        expected_scan_shape = (sequence_len,) + scan_shape
+        expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
+        self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
 
     def test_sequence_split_into_slices_of_scan_as_collection_two_channels_and_camera(self):
         # scan will produce two data streams of pixels.
@@ -698,17 +679,16 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.StackedDataStream([Acquisition.SequenceDataStream(collector, 1) for i in range(sequence_len)])
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = (sequence_len,) + scan_shape
-            expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
-            self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
-            self.assertEqual(sequence_len, scan_data_stream.prepare_count)
+        Acquisition.acquire(maker)
+        expected_scan_shape = (sequence_len,) + scan_shape
+        expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel0].reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(scan_data_stream.data[channel1].reshape(expected_scan_shape), maker.get_data(channel1).data))
+        self.assertTrue(numpy.array_equal(camera_data_stream.data.reshape(expected_camera_shape), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(True, 2, 2), maker.get_data(channel2).data_descriptor)
+        self.assertEqual(sequence_len, scan_data_stream.prepare_count)
 
     def test_sequence_grouped_into_sections_of_scan_as_collection_two_channels_and_camera_and_accumulated(self):
         # scan will produce two data streams of pixels.
@@ -729,18 +709,17 @@ class TestAcquisitionClass(unittest.TestCase):
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         accumulator = Acquisition.AccumulatedDataStream(sequencer)
         maker = Acquisition.MakerDataStream(accumulator)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            expected_scan_shape = scan_shape
-            sequence_camera_shape = (sequence_len,) + scan_shape + (2, 2)
-            self.assertTrue(numpy.array_equal(numpy.sum(scan_data_stream.data[channel0], axis=0).reshape(expected_scan_shape), maker.get_data(channel0).data))
-            self.assertTrue(numpy.array_equal(numpy.sum(scan_data_stream.data[channel1], axis=0).reshape(expected_scan_shape), maker.get_data(channel1).data))
-            numpy.testing.assert_array_almost_equal(numpy.sum(camera_data_stream.data.reshape(sequence_camera_shape), axis=0), maker.get_data(channel2).data)
-            self.assertTrue(numpy.array_equal(numpy.sum(camera_data_stream.data.reshape(sequence_camera_shape), axis=0), maker.get_data(channel2).data))
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
-            self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 2), maker.get_data(channel2).data_descriptor)
-            self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
+        Acquisition.acquire(maker)
+        expected_scan_shape = scan_shape
+        sequence_camera_shape = (sequence_len,) + scan_shape + (2, 2)
+        self.assertTrue(numpy.array_equal(numpy.sum(scan_data_stream.data[channel0], axis=0).reshape(expected_scan_shape), maker.get_data(channel0).data))
+        self.assertTrue(numpy.array_equal(numpy.sum(scan_data_stream.data[channel1], axis=0).reshape(expected_scan_shape), maker.get_data(channel1).data))
+        numpy.testing.assert_array_almost_equal(numpy.sum(camera_data_stream.data.reshape(sequence_camera_shape), axis=0), maker.get_data(channel2).data)
+        self.assertTrue(numpy.array_equal(numpy.sum(camera_data_stream.data.reshape(sequence_camera_shape), axis=0), maker.get_data(channel2).data))
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel0).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 0, 2), maker.get_data(channel1).data_descriptor)
+        self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 2), maker.get_data(channel2).data_descriptor)
+        self.assertEqual(sequence_len * 2, scan_data_stream.prepare_count)
 
     def test_sequence_of_stacked_collections(self):
         channel = Acquisition.Channel("Cam")
@@ -749,11 +728,10 @@ class TestAcquisitionClass(unittest.TestCase):
         section2 = Acquisition.CollectedDataStream(camera_data_stream, (2, 4), [Calibration.Calibration(), Calibration.Calibration()])
         sections = Acquisition.StackedDataStream((section1, section2))
         maker = Acquisition.MakerDataStream(Acquisition.SequenceDataStream(sections, 2))
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertFalse(maker.is_error)
-            maker_data = maker.get_data(channel)
-            self.assertTrue(numpy.array_equal(numpy.reshape(camera_data_stream.data, maker_data.data_shape), maker_data.data))
+        Acquisition.acquire(maker)
+        self.assertFalse(maker.is_error)
+        maker_data = maker.get_data(channel)
+        self.assertTrue(numpy.array_equal(numpy.reshape(camera_data_stream.data, maker_data.data_shape), maker_data.data))
 
     def test_scan_as_collection_sequential(self):
         channel = Acquisition.Channel("Cam")
@@ -764,10 +742,9 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream2 = SingleFrameDataStream(sequence_len2, (2, 2), channel)
         sequencer2 = Acquisition.SequenceDataStream(data_stream2, sequence_len2)
         maker = Acquisition.MakerDataStream(Acquisition.SequentialDataStream((sequencer1, sequencer2)))
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertTrue(numpy.array_equal(data_stream1.data, maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
-            self.assertTrue(numpy.array_equal(data_stream2.data, maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
+        Acquisition.acquire(maker)
+        self.assertTrue(numpy.array_equal(data_stream1.data, maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
+        self.assertTrue(numpy.array_equal(data_stream2.data, maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
 
     def test_scan_as_collection_sequential_with_reuse(self):
         channel = Acquisition.Channel("Cam")
@@ -775,11 +752,10 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len * 2, (2, 2), channel)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(Acquisition.SequentialDataStream((sequencer, sequencer)))
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertEqual(2, len(maker.channels))
-            self.assertTrue(numpy.array_equal(data_stream.data[0:4], maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
-            self.assertTrue(numpy.array_equal(data_stream.data[4:8], maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
+        Acquisition.acquire(maker)
+        self.assertEqual(2, len(maker.channels))
+        self.assertTrue(numpy.array_equal(data_stream.data[0:4], maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
+        self.assertTrue(numpy.array_equal(data_stream.data[4:8], maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
 
     def test_action_stream_start_and_finish(self):
         sequence_len = 4
@@ -806,9 +782,8 @@ class TestAcquisitionClass(unittest.TestCase):
         action = Action()
         sequencer = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action), sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            Acquisition.acquire(maker)
-            self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
+        Acquisition.acquire(maker)
+        self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
         self.assertEqual(1, action._s)
         self.assertEqual(4, action._p)
         self.assertEqual(1, action._f)
@@ -819,16 +794,15 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), channel, error_after=0)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
-        with maker.ref():
-            had_error = False
+        had_error = False
 
-            def handle_error(e: Exception) -> None:
-                nonlocal had_error
-                had_error = True
+        def handle_error(e: Exception) -> None:
+            nonlocal had_error
+            had_error = True
 
-            Acquisition.acquire(maker, error_handler=handle_error)
-            self.assertTrue(had_error)
-            self.assertTrue(maker.is_error)
+        Acquisition.acquire(maker, error_handler=handle_error)
+        self.assertTrue(had_error)
+        self.assertTrue(maker.is_error)
 
     def test_error_during_data_available(self):
         scan_shape = (8, 8)
@@ -836,14 +810,13 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(1, scan_shape, [channel], scan_shape[1], error_after=1)
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
-        with maker.ref():
-            had_error = False
+        had_error = False
 
-            def handle_error(e: Exception) -> None:
-                nonlocal had_error
-                had_error = True
+        def handle_error(e: Exception) -> None:
+            nonlocal had_error
+            had_error = True
 
-            Acquisition.acquire(maker, error_handler=handle_error)
-            self.assertTrue(had_error)
-            self.assertTrue(maker.is_error)
-            self.assertAlmostEqual(1/8, collector.progress)
+        Acquisition.acquire(maker, error_handler=handle_error)
+        self.assertTrue(had_error)
+        self.assertTrue(maker.is_error)
+        self.assertAlmostEqual(1/8, collector.progress)

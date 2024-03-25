@@ -1144,10 +1144,8 @@ class TestCameraControlClass(unittest.TestCase):
             device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
             device_map["stem"] = stem_device_controller
             device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
-            with device_data_stream.ref():
-                data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
-                with data_stream.ref():
-                    self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
+            data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
+            self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
 
     def __test_acq(self,
                    document_controller: DocumentController.DocumentController,
@@ -1186,21 +1184,20 @@ class TestCameraControlClass(unittest.TestCase):
             device_map: typing.MutableMapping[str, stem_controller.DeviceController] = dict()
             device_map["stem"] = stem_device_controller
             device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
-            with device_data_stream.ref():
-                data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
-                with data_stream.ref():
-                    drift_tracker = stem_device_controller.stem_controller.drift_tracker
-                    drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
-                    Acquisition.start_acquire(data_stream,
-                                              data_stream.title or str(),
-                                              data_stream.channel_names,
-                                              acquisition_state,
-                                              data_channel_provider,
-                                              drift_logger,
-                                              progress_value_model,
-                                              is_acquiring_model,
-                                              document_controller.event_loop,
-                                              error_handler=error_handler)
+            data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
+            drift_tracker = stem_device_controller.stem_controller.drift_tracker
+            drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
+            Acquisition.start_acquire(data_stream,
+                                      data_stream.title or str(),
+                                      data_stream.channel_names,
+                                      acquisition_state,
+                                      data_channel_provider,
+                                      drift_logger,
+                                      progress_value_model,
+                                      is_acquiring_model,
+                                      document_controller.event_loop,
+                                      error_handler=error_handler)
+            data_stream = None
 
             last_progress_time = time.time()
             last_progress = progress_value_model.value
@@ -1226,10 +1223,6 @@ class TestCameraControlClass(unittest.TestCase):
     def test_acquisition_panel_acquisition(self):
         def ensure_camera_metadata(data_metadata: DataAndMetadata.DataMetadata) -> bool:
             return data_metadata.metadata.get("hardware_source", dict()).get("counts_per_electron", None) is not None
-
-        def print_metadata(data_metadata: DataAndMetadata.DataMetadata) -> bool:
-            print(f"{data_metadata.data_shape=} {data_metadata.metadata}")
-            return True
 
         tc = [
             # only one data item will be created: the sequence. the view data item does not exist since acquiring

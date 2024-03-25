@@ -2850,11 +2850,6 @@ class CameraFrameDataStream(Acquisition.DataStream):
         self.__start = 0.0
         self.__progress = 0.0
 
-    def about_to_delete(self) -> None:
-        if self.__record_task:
-            self.__record_task = typing.cast(typing.Any, None)
-        super().about_to_delete()
-
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)

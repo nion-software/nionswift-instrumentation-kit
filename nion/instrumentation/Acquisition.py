@@ -480,7 +480,7 @@ class DeviceState:
             state_unprepare_fn()
 
 
-class DataStream(ReferenceCounting.ReferenceCounted):
+class DataStream:
     """Provide a stream of data chunks.
 
     A data chunk is data that can be collected into a sequence or a 1d or 2d collection.
@@ -519,14 +519,6 @@ class DataStream(ReferenceCounting.ReferenceCounted):
         # optional advisory fields
         self.channel_names: typing.Mapping[Channel, str] = dict()
         self.title: typing.Optional[str] = None
-
-    def about_to_delete(self) -> None:
-        self.__data_handlers.clear()
-        super().about_to_delete()
-
-    def add_ref(self) -> DataStream:
-        super().add_ref()
-        return self
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
@@ -722,7 +714,7 @@ class CollectedDataStream(DataStream):
 
     def __init__(self, data_stream: DataStream, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
         super().__init__()
-        self.__data_stream = data_stream.add_ref()
+        self.__data_stream = data_stream
         assert len(shape) in (1, 2)
         self.__index_stack: IndexDescriptionList = list()
         self.__collection_shape = tuple(shape)
@@ -734,13 +726,6 @@ class CollectedDataStream(DataStream):
         self.__all_channels_need_start = False
         self.__collection_list = list[DataAndMetadata.MetadataType]()
         self.__last_collection_index: typing.Optional[ShapeType] = None
-
-    def about_to_delete(self) -> None:
-        if self.__data_stream_started:
-            warnings.warn("Stream deleted but not finished.", category=RuntimeWarning)
-        self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(typing.Any, None)
-        super().about_to_delete()
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -1024,17 +1009,11 @@ class CombinedDataStream(DataStream):
     """
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
-        self.__data_streams = [data_stream.add_ref() for data_stream in data_streams]
-
-    def about_to_delete(self) -> None:
-        for data_stream in self.__data_streams:
-            data_stream.remove_ref()
-        self.__data_streams = typing.cast(typing.Any, None)
-        super().about_to_delete()
+        self.__data_streams = tuple(data_streams)
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
-        return tuple(self.__data_streams)
+        return self.__data_streams
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1095,7 +1074,7 @@ class StackedDataStream(DataStream):
     """
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
-        self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
+        self.__data_streams = tuple(data_streams)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0  # data stream index
         assert len(set(data_stream.channels for data_stream in self.__data_streams)) == 1
@@ -1118,15 +1097,9 @@ class StackedDataStream(DataStream):
             assert self.__height == 0 or self.__height == height
             self.__height = height
 
-    def about_to_delete(self) -> None:
-        for data_stream in self.__data_streams:
-            data_stream.remove_ref()
-        self.__data_streams = typing.cast(typing.Any, None)
-        super().about_to_delete()
-
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
-        return tuple(self.__data_streams)
+        return self.__data_streams
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1226,21 +1199,15 @@ class SequentialDataStream(DataStream):
     """
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
-        self.__data_streams: typing.List[DataStream] = [data_stream.add_ref() for data_stream in data_streams]
+        self.__data_streams = tuple(data_streams)
         self.__stream_args = DataStreamArgs(list())
         self.__current_index = 0
         self.__sequence_count = 0
         self.__sequence_index = 0
 
-    def about_to_delete(self) -> None:
-        for data_stream in self.__data_streams:
-            data_stream.remove_ref()
-        self.__data_streams = typing.cast(typing.Any, None)
-        super().about_to_delete()
-
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
-        return tuple(self.__data_streams)
+        return self.__data_streams
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1676,15 +1643,9 @@ class FramedDataStream(DataStream):
 
     def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None) -> None:
         super().__init__()
-        self.__data_stream = data_stream.add_ref()
+        self.__data_stream = data_stream
         self.__operator = operator or NullDataStreamOperator()
         self.__framer = Framer(data_channel or DataAndMetadataDataChannel())
-
-    def about_to_delete(self) -> None:
-        self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(typing.Any, None)
-        self.__framer = typing.cast(typing.Any, None)
-        super().about_to_delete()
 
     def __str__(self) -> str:
         s = super().__str__()
@@ -1695,10 +1656,6 @@ class FramedDataStream(DataStream):
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
         return (self.__data_stream,)
-
-    def add_ref(self) -> FramedDataStream:
-        super().add_ref()
-        return self
 
     @property
     def operator(self) -> typing.Optional[DataStreamOperator]:
@@ -2007,12 +1964,7 @@ class ContainerDataStream(DataStream):
     """An abstract class to contain another data stream and facilitate decoration in subclasses."""
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__()
-        self.__data_stream = data_stream.add_ref()
-
-    def about_to_delete(self) -> None:
-        self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(typing.Any, None)
-        super().about_to_delete()
+        self.__data_stream = data_stream
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -2156,13 +2108,8 @@ class MonitorDataStream(DataStream):
 
     def __init__(self, data_stream: DataStream, channel_segment: ChannelSegment) -> None:
         super().__init__()
-        self.__data_stream = data_stream.add_ref()
+        self.__data_stream = data_stream
         self.__channel_segment = channel_segment
-
-    def about_to_delete(self) -> None:
-        self.__data_stream.remove_ref()
-        self.__data_stream = typing.cast(typing.Any, None)
-        super().about_to_delete()
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -2204,10 +2151,6 @@ class AccumulatedDataStream(ContainerDataStream):
         super().__init__(data_stream)
         self.__data_channel = DataAndMetadataDataChannel()
         self.__dest_indexes: typing.Dict[Channel, int] = dict()
-
-    def about_to_delete(self) -> None:
-        self.__data_channel = typing.cast(typing.Any, None)
-        super().about_to_delete()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__data_channel.clear_data()
@@ -2438,16 +2381,11 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
 
 class Acquisition:
     def __init__(self, data_stream: DataStream, framer: Framer) -> None:
-        self.__data_stream = data_stream.add_ref()
+        self.__data_stream = data_stream
         self.__framer = framer
         self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
         self.__is_error = False
-
-        def finalize() -> None:
-            data_stream.remove_ref()
-
-        weakref.finalize(self, finalize)
 
     def prepare_acquire(self) -> None:
         # this is called on the main thread. give data channel a chance to prepare.
@@ -2455,10 +2393,9 @@ class Acquisition:
 
     def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
-            with self.__data_stream.ref():
-                acquire(self.__data_stream, error_handler=error_handler)
-                self.__is_aborted = self.__data_stream.is_aborted
-                self.__is_error = self.__data_stream.is_error
+            acquire(self.__data_stream, error_handler=error_handler)
+            self.__is_aborted = self.__data_stream.is_aborted
+            self.__is_error = self.__data_stream.is_error
         finally:
             self.__data_stream = typing.cast(typing.Any, None)
 
@@ -2807,8 +2744,6 @@ def _acquire_data_stream(data_stream: DataStream,
 
     data_stream.attach_data_handler(framed_data_handler)
 
-    data_stream.add_ref()  # removed in finish_grab_async
-
     # create the acquisition state/controller object based on the data item data channel data stream.
     acquisition_state._start(data_stream, framer)
 
@@ -2823,7 +2758,6 @@ def _acquire_data_stream(data_stream: DataStream,
         acquisition_state._end()
         acquisition_state.is_error = data_stream.is_error
         logger.info(f"{title} finished: {datetime.datetime.now()}" + (" canceled" if data_stream.is_aborted else "") + (" with error" if acquisition_state.is_error else ""))
-        data_stream.remove_ref()
         if scan_drift_logger:
             scan_drift_logger.close()
         is_acquiring_model.value = False
@@ -2870,26 +2804,24 @@ def start_acquire(data_stream: DataStream,
                   event_loop: asyncio.AbstractEventLoop,
                   *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
                   ) -> None:
-    with data_stream.ref():
-        _acquire_data_stream(data_stream,
-                             data_channel_provider.get_data_channel(title_base, channel_names),
-                             acquisition_state,
-                             progress_value_model,
-                             is_acquiring_model,
-                             drift_logger,
-                             event_loop,
-                             error_handler=error_handler,
-                             title_base=title_base)
+    _acquire_data_stream(data_stream,
+                         data_channel_provider.get_data_channel(title_base, channel_names),
+                         acquisition_state,
+                         progress_value_model,
+                         is_acquiring_model,
+                         drift_logger,
+                         event_loop,
+                         error_handler=error_handler,
+                         title_base=title_base)
 
 
 
 def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
-    with data_stream.ref():
-        framer = Framer(DataAndMetadataDataChannel())
-        framed_data_handler = FramedDataHandler(framer)
-        data_stream.attach_data_handler(framed_data_handler)
-        acquire(data_stream)
-        return {channel: framer.get_data(channel) for channel in data_stream.channels}
+    framer = Framer(DataAndMetadataDataChannel())
+    framed_data_handler = FramedDataHandler(framer)
+    data_stream.attach_data_handler(framed_data_handler)
+    acquire(data_stream)
+    return {channel: framer.get_data(channel) for channel in data_stream.channels}
 
 
 class LinearSpace:

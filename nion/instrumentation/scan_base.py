@@ -1399,21 +1399,20 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         framed_data_handler = Acquisition.FramedDataHandler(framer)
         synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
-        with synchronized_scan_data_stream.ref():
-            results: GrabSynchronizedResult = None
-            self.__scan_acquisition = scan_acquisition
-            try:
-                scan_acquisition.prepare_acquire()
-                scan_acquisition.acquire()
-                if scan_acquisition.is_error:
-                    raise RuntimeError("grab_synchronized failed.")
-                if not scan_acquisition.is_aborted:
-                    scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == self.hardware_source_id]
-                    camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera.hardware_source_id]
-                    results = (scan_results, camera_results)
-            finally:
-                self.__scan_acquisition = typing.cast(typing.Any, None)
-            return results
+        results: GrabSynchronizedResult = None
+        self.__scan_acquisition = scan_acquisition
+        try:
+            scan_acquisition.prepare_acquire()
+            scan_acquisition.acquire()
+            if scan_acquisition.is_error:
+                raise RuntimeError("grab_synchronized failed.")
+            if not scan_acquisition.is_aborted:
+                scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == self.hardware_source_id]
+                camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera.hardware_source_id]
+                results = (scan_results, camera_results)
+        finally:
+            self.__scan_acquisition = typing.cast(typing.Any, None)
+        return results
 
     def grab_synchronized_abort(self) -> None:
         if self.__scan_acquisition:
@@ -2095,15 +2094,14 @@ def _acquire_synchronized_stream(scan_hardware_source_id: str, camera_hardware_s
     framed_data_handler = Acquisition.FramedDataHandler(framer)
     synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
     scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
-    with synchronized_scan_data_stream.ref():
-        scan_acquisition.prepare_acquire()
-        scan_acquisition.acquire()
-        if scan_acquisition.is_error:
-            raise RuntimeError("grab_synchronized failed.")
-        if not scan_acquisition.is_aborted:
-            scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == scan_hardware_source_id]
-            camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera_hardware_source_id]
-            results = _AcquireSynchronizedResult(scan_results, camera_results)
+    scan_acquisition.prepare_acquire()
+    scan_acquisition.acquire()
+    if scan_acquisition.is_error:
+        raise RuntimeError("grab_synchronized failed.")
+    if not scan_acquisition.is_aborted:
+        scan_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == scan_hardware_source_id]
+        camera_results = [framed_data_handler.get_data(c) for c in synchronized_scan_data_stream.channels if c.segments[0] == camera_hardware_source_id]
+        results = _AcquireSynchronizedResult(scan_results, camera_results)
     return results
 
 
@@ -2290,12 +2288,6 @@ class ScanDataStream(Acquisition.DataStream):
                         self.__available_rows[channel] = valid_rows
 
         self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(update_data)
-
-    def about_to_delete(self) -> None:
-        if self.__record_task:
-            self.__record_task = typing.cast(typing.Any, None)
-        self.__data_channel_listener = typing.cast(typing.Any, None)
-        super().about_to_delete()
 
     @property
     def scan_size(self) -> Geometry.IntSize:
