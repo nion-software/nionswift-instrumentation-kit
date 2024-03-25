@@ -254,6 +254,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
                                                    camera_frame_parameters=camera_frame_parameters)
+            data_item_data_channel = None
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
@@ -273,6 +274,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
                                                    camera_frame_parameters=camera_frame_parameters)
+            data_item_data_channel = None
 
     def test_grab_synchronized_sum_masked_produces_data_of_correct_shape(self):
         with self.__test_context() as test_context:
@@ -294,6 +296,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                    scan_frame_parameters=scan_frame_parameters,
                                                    camera=camera_hardware_source,
                                                    camera_frame_parameters=camera_frame_parameters)
+            data_item_data_channel = None
             document_controller.periodic()
             si_data_item = None
             for data_item in document_model.data_items:
@@ -534,6 +537,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 # self.assertIn("fov_nm", scan_metadata)
                 # self.assertIn("rotation", scan_metadata)
                 # self.assertIn("scan_id", scan_metadata)
+            data_channel = typing.cast(typing.Any, None)
 
     def test_partial_acquisition_has_proper_metadata_in_associated_view(self):
         # start an SI. use data channel to record the spectrum image item used for the view during the
@@ -589,6 +593,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
 
             for update in data_channel.updates:
                 self.assertEqual("eV", update[-1].units)
+
+            data_channel = None
 
     def test_grab_synchronized_basic_eels_with_drift_correction(self):
         with self.__test_context(is_eels=True) as test_context:

@@ -1503,17 +1503,13 @@ class StackedDataStreamOperator(DataStreamOperator):
         return [ChannelData(channel_data.channel, new_data_and_metadata)]
 
 
-class DataChannel(ReferenceCounting.ReferenceCounted):
+class DataChannel:
     """Acquisition data channel.
 
     An acquisition data channel receives partial data and must return full data when required.
     """
     def __init__(self) -> None:
         super().__init__()
-
-    def add_ref(self) -> DataChannel:
-        super().add_ref()
-        return self
 
     def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
@@ -1532,10 +1528,6 @@ class DataAndMetadataDataChannel(DataChannel):
     def __init__(self) -> None:
         super().__init__()
         self.__data: typing.Dict[Channel, DataAndMetadata.DataAndMetadata] = dict()
-
-    def add_ref(self) -> DataAndMetadataDataChannel:
-        super().add_ref()
-        return self
 
     def __make_data(self, channel: Channel, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data.get(channel, None)
@@ -1594,21 +1586,12 @@ class FrameCallbacks(typing.Protocol):
     def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]: ...
 
 
-class Framer(ReferenceCounting.ReferenceCounted):
+class Framer:
     def __init__(self, data_channel: DataChannel) -> None:
         super().__init__()
         # data and indexes use the _incoming_ data channels as keys.
-        self.__data_channel = data_channel.add_ref()
+        self.__data_channel = data_channel
         self.__indexes: typing.Dict[Channel, int] = dict()
-
-    def about_to_delete(self) -> None:
-        self.__data_channel.remove_ref()
-        self.__data_channel = typing.cast(typing.Any, None)
-        super().about_to_delete()
-
-    def add_ref(self) -> Framer:
-        super().add_ref()
-        return self
 
     def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
         self.__data_channel.prepare(channel_info_map)
@@ -1695,12 +1678,11 @@ class FramedDataStream(DataStream):
         super().__init__()
         self.__data_stream = data_stream.add_ref()
         self.__operator = operator or NullDataStreamOperator()
-        self.__framer = Framer(data_channel or DataAndMetadataDataChannel()).add_ref()
+        self.__framer = Framer(data_channel or DataAndMetadataDataChannel())
 
     def about_to_delete(self) -> None:
         self.__data_stream.remove_ref()
         self.__data_stream = typing.cast(typing.Any, None)
-        self.__framer.remove_ref()
         self.__framer = typing.cast(typing.Any, None)
         super().about_to_delete()
 
@@ -2220,11 +2202,10 @@ class AccumulatedDataStream(ContainerDataStream):
 
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__(data_stream)
-        self.__data_channel = DataAndMetadataDataChannel().add_ref()
+        self.__data_channel = DataAndMetadataDataChannel()
         self.__dest_indexes: typing.Dict[Channel, int] = dict()
 
     def about_to_delete(self) -> None:
-        self.__data_channel.remove_ref()
         self.__data_channel = typing.cast(typing.Any, None)
         super().about_to_delete()
 
@@ -2309,13 +2290,8 @@ class DataHandler:
 
 class FramedDataHandler(DataHandler):
     def __init__(self, framer: Framer, *, operator: typing.Optional[DataStreamOperator] = None) -> None:
-        self.__framer = framer.add_ref()
+        self.__framer = framer
         self.__operator = operator or NullDataStreamOperator()
-
-        def finalize() -> None:
-            framer.remove_ref()
-
-        weakref.finalize(self, finalize)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
@@ -2463,13 +2439,12 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
 class Acquisition:
     def __init__(self, data_stream: DataStream, framer: Framer) -> None:
         self.__data_stream = data_stream.add_ref()
-        self.__framer = framer.add_ref()
+        self.__framer = framer
         self.__task: typing.Optional[asyncio.Task[None]] = None
         self.__is_aborted = False
         self.__is_error = False
 
         def finalize() -> None:
-            framer.remove_ref()
             data_stream.remove_ref()
 
         weakref.finalize(self, finalize)
