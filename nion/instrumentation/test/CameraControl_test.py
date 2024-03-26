@@ -75,7 +75,7 @@ def make_scan_device(test_context: AcquisitionTestContext.test_context, *args: t
     return scan_base.ScanAcquisitionDevice(test_context.scan_hardware_source, test_context.scan_hardware_source.get_current_frame_parameters())
 
 
-def make_synchronized_device(test_context: AcquisitionTestContext.test_context, *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
+def make_synchronized_device(test_context: AcquisitionTestContext.test_context, camera_channel: typing.Optional[str], *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
@@ -84,11 +84,15 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context, 
     return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, scan_frame_parameters,
                                                        test_context.camera_hardware_source,
                                                        test_context.camera_hardware_source.get_frame_parameters(0),
-                                                       None, False, 0, 0, None, None, 0.0)
+                                                       camera_channel, False, 0, 0, None, None, 0.0)
 
 
 def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
     return Acquisition.SequenceAcquisitionMethod(4)
+
+
+def make_basic_acquisition_method() -> Acquisition.AcquisitionMethodLike:
+    return Acquisition.BasicAcquisitionMethod()
 
 
 def make_series_acquisition_method() -> Acquisition.AcquisitionMethodLike:
@@ -1184,6 +1188,7 @@ class TestCameraControlClass(unittest.TestCase):
             device_map["stem"] = stem_device_controller
             device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
             data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
+            device_data_stream = None
             drift_tracker = stem_device_controller.stem_controller.drift_tracker
             drift_logger = DriftTracker.DriftLogger(document_controller.document_model, drift_tracker, document_controller.event_loop) if drift_tracker else None
             acquisition = Acquisition.start_acquire(data_stream,
@@ -1209,6 +1214,10 @@ class TestCameraControlClass(unittest.TestCase):
                 time.sleep(0.05)
             self.assertEqual(expected_error, acquisition.is_error)
             self.assertTrue(acquisition.is_finished)
+            # useful for debugging
+            # print(document_controller.document_model.data_items)
+            # print([di.data_shape for di in document_controller.document_model.data_items])
+            # print([di.title for di in document_controller.document_model.data_items])
             if expected_dimensions:
                 self.assertEqual(len(expected_dimensions), len(document_controller.document_model.data_items))
                 for data_item, expected_dimension in zip(document_controller.document_model.data_items, expected_dimensions):
@@ -1283,11 +1292,41 @@ class TestCameraControlClass(unittest.TestCase):
              [((3, 3, 256, 256), DataAndMetadata.DataDescriptor(False, 2, 2), None),
               ((256, 256), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
 
+            # single spectrum image
+            # three data items will be created: the haadf, the spectrum image, amd the scan view.
+            (make_synchronized_device, True, "eels_spectrum", make_basic_acquisition_method,
+             [
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+                 ((6, 4, 512), DataAndMetadata.DataDescriptor(False, 2, 1), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+             ]),
+
+            # single spectrum image with 2d data
+            # three data items will be created: the haadf, the spectrum image, amd the scan view.
+            (make_synchronized_device, True, "eels_image", make_basic_acquisition_method,
+             [
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+                 ((6, 4, 128, 512), DataAndMetadata.DataDescriptor(False, 2, 2), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+             ]),
+
+            # sequence of spectrum image
+            # three data items will be created: the haadf, the spectrum image, amd the scan view.
+            (make_synchronized_device, True, "eels_spectrum", make_sequence_acquisition_method,
+             [
+                 ((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((4, 6, 4, 512), DataAndMetadata.DataDescriptor(True, 2, 1), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+             ]),
+
+            # sequence of spectrum image with 2d data
             # three data items will be created: the camera series, the sync'd series, and the scan view.
             (make_synchronized_device, False, None, make_sequence_acquisition_method,
-             [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
-              ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2), ensure_camera_metadata),
-              ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)]),
+             [
+                 ((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)
+             ]),
 
             # not supported yet; no way to represent it as a single data item.
             # (make_synchronized_device, False, make_series_acquisition_method, [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
@@ -1303,7 +1342,7 @@ class TestCameraControlClass(unittest.TestCase):
     def test_acquisition_panel_acquisition_restarts_view(self):
         with self.__test_context() as test_context:
             document_controller = test_context.document_controller
-            acquisition_device = make_synchronized_device(test_context)
+            acquisition_device = make_synchronized_device(test_context, None)
             acquisition_method = make_sequence_acquisition_method()
             try:
                 # start hardware sources playing
