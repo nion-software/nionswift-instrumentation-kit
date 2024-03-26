@@ -2631,6 +2631,8 @@ class CameraDeviceStreamInterface(typing.Protocol):
 
     def abort_stream(self) -> None: ...
 
+    def advance_stream(self) -> None: ...
+
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
         """Return the partial data; return None if nothing is available."""
         ...
@@ -2638,7 +2640,7 @@ class CameraDeviceStreamInterface(typing.Protocol):
     def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None: ...
 
 
-class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
+class CameraDeviceSynchronizedStreamDelegate(CameraDeviceStreamInterface):
     """An interface using the 'synchronized' style methods of the camera."""
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, flyback_pixels: int = 0, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
@@ -2693,6 +2695,9 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()
 
+    def advance_stream(self) -> None:
+        pass
+
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
         valid_rows = self.__partial_data_info.valid_rows
         width = self.__slice[1].stop - self.__slice[1].start
@@ -2737,7 +2742,7 @@ class CameraDeviceSynchronizedStream(CameraDeviceStreamInterface):
             self.__partial_data_info = typing.cast(typing.Any, None)
 
 
-class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
+class CameraDeviceSequenceStreamDelegate(CameraDeviceStreamInterface):
     """An interface using the 'sequence' style methods of the camera."""
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
@@ -2789,6 +2794,9 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
     def abort_stream(self) -> None:
         self.__camera_hardware_source.acquire_sequence_cancel()
 
+    def advance_stream(self) -> None:
+        pass
+
     def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
         valid_count = self.__partial_data_info.valid_count
         assert valid_count is not None
@@ -2824,19 +2832,15 @@ class CameraDeviceSequenceStream(CameraDeviceStreamInterface):
             self.__partial_data_info = typing.cast(typing.Any, None)
 
 
-class CameraFrameDataStream(Acquisition.DataStream):
-    """A data stream of individual camera frames, for use in synchronized/sequence acquisition.
-
-    The data stream may utilize the sequence acquisition mode if the number of expected frames (passed in
-    data stream args) is greater than one and the max count is unspecified. Otherwise, frames will be acquired
-    one by one.
+class CameraDataStream(Acquisition.DataStream):
+    """A data stream of a sequence of camera frames.
     """
 
     def __init__(self, camera_hardware_source: CameraHardwareSource,
                  camera_frame_parameters: CameraFrameParameters,
                  camera_device_stream_delegate: typing.Optional[CameraDeviceStreamInterface] = None) -> None:
         super().__init__()
-        self.__camera_device_stream_interface = camera_device_stream_delegate
+        self.__camera_device_stream_delegate = camera_device_stream_delegate
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
         self.__actual_camera_frame_parameters: typing.Optional[CameraFrameParameters] = None
@@ -2873,131 +2877,153 @@ class CameraFrameDataStream(Acquisition.DataStream):
         return self.__progress
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
-        if stream_args.max_count == 1 or stream_args.shape == (1,):
-            self.__camera_hardware_source.abort_playing(sync_timeout=5.0)
-            # set up the actual frame parameters, which will turn off processing.
-            # this ensures that both channels are acquired and the processing is done in the data stream.
-            # this could be optimized by using the other channel and marking the operator as applied when
-            # acquiring the summed channel.
-            self.__actual_camera_frame_parameters = copy.copy(self.__camera_frame_parameters)
-            self.__actual_camera_frame_parameters.processing = None
-        else:
-            assert self.__camera_device_stream_interface
-            self.__start = time.perf_counter()
-            self.__total_count = self.__camera_device_stream_interface.prepare_stream(stream_args, index_stack, **kwargs)
-            self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
-            while len(self.__camera_sequence_overheads) > 4:
-                self.__camera_sequence_overheads.pop(0)
+        assert self.__camera_device_stream_delegate
+        # bookkeeping for timing and progress
+        self.__start = time.perf_counter()
+        self.__total_count = self.__camera_device_stream_delegate.prepare_stream(stream_args, index_stack, **kwargs)
+        self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
+        while len(self.__camera_sequence_overheads) > 4:
+            self.__camera_sequence_overheads.pop(0)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
-        if stream_args.max_count == 1 or stream_args.shape == (1,):
-            assert self.__actual_camera_frame_parameters  # configured in prepare_stream
-            acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
-            # NOTE: subsequent record tasks are created in advance_stream.
-            self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
-            self.__record_count = int(numpy.prod(stream_args.shape, dtype=numpy.uint64))
-        else:
-            assert self.__camera_device_stream_interface
-            self.__last_index = 0
-            self.__progress = 0.0
-            self.__start = time.perf_counter()
-            self.__camera_device_stream_interface.start_stream(stream_args)
-            self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
-            while len(self.__camera_sequence_overheads) > 4:
-                self.__camera_sequence_overheads.pop(0)
-            self.camera_sequence_overhead = sum(self.__camera_sequence_overheads) / (len(self.__camera_sequence_overheads) / 2)
+        assert self.__camera_device_stream_delegate
+        self.__last_index = 0
+        self.__progress = 0.0
+        self.__start = time.perf_counter()
+        self.__camera_device_stream_delegate.start_stream(stream_args)
+        self.__camera_sequence_overheads.append(time.perf_counter() - self.__start)
+        while len(self.__camera_sequence_overheads) > 4:
+            self.__camera_sequence_overheads.pop(0)
+        self.camera_sequence_overhead = sum(self.__camera_sequence_overheads) / (len(self.__camera_sequence_overheads) / 2)
 
     def _finish_stream(self) -> None:
+        assert self.__camera_device_stream_delegate
+        self.__camera_device_stream_delegate.finish_stream()
+
+    def _abort_stream(self) -> None:
+        assert self.__camera_device_stream_delegate
+        self.__camera_device_stream_delegate.abort_stream()
+
+    def _advance_stream(self) -> None:
+        assert self.__camera_device_stream_delegate
+        self.__camera_device_stream_delegate.advance_stream()
+
+    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+        assert self.__camera_device_stream_delegate
+        partial_data = self.__camera_device_stream_delegate.get_next_data()
+        if partial_data:
+            valid_index = partial_data.valid_index
+            xdata = partial_data.xdata
+            if xdata.is_navigable:
+                start_index = self.__last_index
+                stop_index = valid_index
+            else:
+                start_index = 0
+                stop_index = 1
+            count = stop_index - start_index
+            if count > 0:
+                data_channel_data = xdata.data
+                assert data_channel_data is not None
+                data_channel_data_metadata = xdata.data_metadata
+                data_channel_data_dtype = data_channel_data_metadata.data_dtype
+                assert data_channel_data_dtype is not None
+                channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
+                data_metadata = DataAndMetadata.DataMetadata(
+                    (tuple(data_channel_data_metadata.datum_dimension_shape), data_channel_data_dtype),
+                    xdata.intensity_calibration,
+                    xdata.dimensional_calibrations[-len(data_channel_data_metadata.datum_dimension_shape):],
+                    xdata.metadata,
+                    xdata.timestamp,
+                    DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
+                    xdata.timezone,
+                    xdata.timezone_offset)
+                # data_count is the total for the data provided by the child data stream. some data streams will
+                # provide a slice into a chunk of data representing the entire stream; whereas others will provide
+                # smaller chunks.
+                data_count = numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64)
+                data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
+                source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
+                data_stream_event = Acquisition.DataStreamEventArgs(channel,
+                                                                    data_metadata,
+                                                                    data,
+                                                                    count,
+                                                                    source_slice,
+                                                                    Acquisition.DataStreamStateEnum.COMPLETE)
+                data_stream_events.append(data_stream_event)
+                # total_count is the total for this entire stream.
+                self.__progress = valid_index / self.__total_count
+            self.__last_index = valid_index
+        self.__camera_device_stream_delegate.continue_data(partial_data)
+        return data_stream_events
+
+    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
+        return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
+
+
+class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
+    """An interface using the 'sequence' style methods of the camera."""
+    def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters) -> None:
+        self.__camera_hardware_source = camera_hardware_source
+        self.__camera_frame_parameters = camera_frame_parameters
+        self.__actual_camera_frame_parameters: typing.Optional[CameraFrameParameters] = None
+        self.__record_task = typing.cast(HardwareSource.RecordTask, None)  # used for single frames
+        self.__record_count = 0
+
+    def prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> int:
+        self.__camera_hardware_source.abort_playing(sync_timeout=5.0)
+        # set up the actual frame parameters, which will turn off processing.
+        # this ensures that both channels are acquired and the processing is done in the data stream.
+        # this could be optimized by using the other channel and marking the operator as applied when
+        # acquiring the summed channel.
+        self.__actual_camera_frame_parameters = copy.copy(self.__camera_frame_parameters)
+        self.__actual_camera_frame_parameters.processing = None
+        self.__record_count = int(numpy.prod(stream_args.shape, dtype=numpy.uint64))
+        return self.__record_count
+
+    def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        assert self.__actual_camera_frame_parameters  # configured in prepare_stream
+        acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
+        # NOTE: subsequent record tasks are created in continue data.
+        self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
+
+    def finish_stream(self) -> None:
         if self.__record_task:
             try:
                 self.__record_task.grab()  # ensure grab is finished
             except Exception:
                 pass  # kill the exception here, it has already been handled and grab is only called for sync'ing.
             self.__record_task = typing.cast(typing.Any, None)
-        else:
-            assert self.__camera_device_stream_interface
-            self.__camera_device_stream_interface.finish_stream()
 
-    def _abort_stream(self) -> None:
+    def abort_stream(self) -> None:
         if self.__record_task:
             self.__camera_hardware_source.abort_recording()
-        else:
-            assert self.__camera_device_stream_interface
-            self.__camera_device_stream_interface.abort_stream()
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def get_next_data(self) -> typing.Optional[CameraDeviceStreamPartialData]:
         if self.__record_task:
             # use send_next to send the data acquiring a sequence of single frames
             if self.__record_task.is_finished:
-                state = Acquisition.DataStreamStateEnum.COMPLETE
                 xdatas = self.__record_task.grab()
+                self.__record_task = typing.cast(typing.Any, None)
+                self.__record_count -= 1
                 xdata = xdatas[0] if xdatas else None
-                assert xdata
-                data_metadata = xdata.data_metadata
-                # handle 2D vs 1D (sum_project) cases. not sure if this is the right place to do this.
-                assert data_metadata.data_descriptor.datum_dimension_count == 2
-                source_data_slice = (slice(0, self.__frame_shape[0]), slice(None))
-                data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, xdata.data, None, source_data_slice, state)
-                data_stream_events.append(data_stream_event)
-        else:
-            assert self.__camera_device_stream_interface
-            partial_data = self.__camera_device_stream_interface.get_next_data()
-            if partial_data:
-                valid_index = partial_data.valid_index
-                xdata = partial_data.xdata
-                start_index = self.__last_index
-                stop_index = valid_index
-                count = stop_index - start_index
-                if count > 0:
-                    data_channel_data = xdata.data
-                    assert data_channel_data is not None
-                    data_channel_data_metadata = xdata.data_metadata
-                    data_channel_data_dtype = data_channel_data_metadata.data_dtype
-                    assert data_channel_data_dtype is not None
-                    channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
-                    data_metadata = DataAndMetadata.DataMetadata(
-                        (tuple(data_channel_data_metadata.datum_dimension_shape), data_channel_data_dtype),
-                        xdata.intensity_calibration,
-                        xdata.dimensional_calibrations[-len(data_channel_data_metadata.datum_dimension_shape):],
-                        xdata.metadata,
-                        xdata.timestamp,
-                        DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
-                        xdata.timezone,
-                        xdata.timezone_offset)
-                    # data_count is the total for the data provided by the child data stream. some data streams will
-                    # provide a slice into a chunk of data representing the entire stream; whereas others will provide
-                    # smaller chunks.
-                    data_count = numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64)
-                    data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
-                    source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
-                    data_stream_event = Acquisition.DataStreamEventArgs(channel,
-                                                                        data_metadata,
-                                                                        data,
-                                                                        count,
-                                                                        source_slice,
-                                                                        Acquisition.DataStreamStateEnum.COMPLETE)
-                    data_stream_events.append(data_stream_event)
-                    # total_count is the total for this entire stream.
-                    self.__progress = valid_index / self.__total_count
-                self.__last_index = valid_index
-            self.__camera_device_stream_interface.continue_data(partial_data)
-        return data_stream_events
+                if xdata:
+                    return CameraDeviceStreamPartialData(1, self.__record_count == 0, xdata)
+        return None
 
-    def _advance_stream(self) -> None:
-        if self.__record_task:
+    def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None:
+        pass
+
+    def advance_stream(self) -> None:
+        if not self.__record_task:
             # use advance_stream to start the next frame when acquiring a sequence of single frames
             # this ensures that actions can take place (which occur in advance stream) after sending the data but
             # before starting the next frame.
-            if self.__record_task.is_finished:
-                self.__record_count -= 1
-                if self.__record_count > 0:
-                    assert self.__actual_camera_frame_parameters
-                    acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
-                    self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
-
-    def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
-        return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
+            if self.__record_count > 0:
+                assert self.__actual_camera_frame_parameters
+                acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters,
+                                                                              CameraAcquisitionTaskParameters())
+                self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
 
 
 def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
@@ -3268,11 +3294,11 @@ def make_sequence_data_stream(
     STEMController.update_instrument_properties(instrument_metadata, instrument_controller, camera_hardware_source.camera)
 
     additional_camera_metadata = {"instrument": copy.deepcopy(instrument_metadata)}
-    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
-                                                CameraDeviceSequenceStream(
-                                                    camera_hardware_source,
-                                                    camera_frame_parameters,
-                                                    additional_camera_metadata))
+    camera_data_stream = CameraDataStream(camera_hardware_source, camera_frame_parameters,
+                                          CameraDeviceSequenceStreamDelegate(
+                                                      camera_hardware_source,
+                                                      camera_frame_parameters,
+                                                      additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
@@ -3351,7 +3377,8 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     STEMController.update_instrument_properties(instrument_metadata, stem_controller, None)
 
     # construct the camera frame data stream. add processing.
-    camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
+    # camera_data_stream = CameraFrameDataStream(camera_hardware_source, camera_frame_parameters)
+    camera_data_stream = CameraDataStream(camera_hardware_source, camera_frame_parameters, CameraDeviceFrameStreamDelegate(camera_hardware_source, camera_frame_parameters))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,

@@ -2219,7 +2219,7 @@ class ScanDataStream(Acquisition.DataStream):
                  scan_frame_parameters: ScanFrameParameters, scan_id: uuid.UUID,
                  drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None,
                  camera_exposure_ms: typing.Optional[float] = None,
-                 camera_data_stream: typing.Optional[camera_base.CameraFrameDataStream] = None,
+                 camera_data_stream: typing.Optional[camera_base.CameraDataStream] = None,
                  *,
                  fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
                  rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
@@ -2508,11 +2508,12 @@ def make_synchronized_scan_data_stream(
     scan_paramaters_copy = copy.deepcopy(scan_frame_parameters)
     scan_hardware_source.scan_device.prepare_synchronized_scan(scan_paramaters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
     flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_paramaters_copy)
-    camera_data_stream = camera_base.CameraFrameDataStream(camera_hardware_source, camera_frame_parameters,
-                                                            camera_base.CameraDeviceSynchronizedStream(camera_hardware_source,
-                                                                                           camera_frame_parameters,
-                                                                                           flyback_pixels,
-                                                                                           additional_camera_metadata))
+    camera_data_stream = camera_base.CameraDataStream(camera_hardware_source, camera_frame_parameters,
+                                                      camera_base.CameraDeviceSynchronizedStreamDelegate(
+                                                                  camera_hardware_source,
+                                                                  camera_frame_parameters,
+                                                                  flyback_pixels,
+                                                                  additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
         processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
