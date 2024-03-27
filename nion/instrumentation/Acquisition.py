@@ -510,6 +510,7 @@ class DataStream:
         self.data_available_event = Event.Event()
         # data handlers
         self.__data_handlers = list[DataHandler]()
+        self.__unprocessed_data_handlers = list[DataHandler]()
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
         self.__sequence_count = sequence_count
         self.__sequence_counts: typing.Dict[Channel, int] = dict()
@@ -529,6 +530,9 @@ class DataStream:
     def attach_data_handler(self, data_handler: DataHandler) -> None:
         self.__data_handlers.append(data_handler)
 
+    def attach_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
+        self.__unprocessed_data_handlers.append(data_handler)
+
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         """Return the channels for this data stream."""
@@ -546,7 +550,7 @@ class DataStream:
         return self._get_info(channel)
 
     def _get_info(self, channel: Channel) -> DataStreamInfo:
-            return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
+        return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
 
     def prepare_device_state(self) -> DeviceState:
         """Prepares the device state (a dict of entries to restore state)."""
@@ -594,9 +598,13 @@ class DataStream:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
             next_data_stream_events = self._send_next()
             for data_stream_event in next_data_stream_events:
+                for data_handler in self.__unprocessed_data_handlers:
+                    data_handler.handle_data_available(data_stream_event)
                 processed_data_stream_events = self._process_data_stream_event(data_stream_event)
                 for processed_data_stream_event in processed_data_stream_events:
                     self.handle_data_available(processed_data_stream_event)
+                    for data_handler in self.__data_handlers:
+                        data_handler.handle_data_available(processed_data_stream_event)
                     data_stream_events.append(processed_data_stream_event)
         return data_stream_events
 
@@ -670,8 +678,6 @@ class DataStream:
 
     def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         self._handle_data_available(data_stream_event)
-        for data_handler in self.__data_handlers:
-            data_handler.handle_data_available(data_stream_event)
 
     def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         """
@@ -733,6 +739,14 @@ class CollectedDataStream(DataStream):
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
         return (self.__data_stream,)
+
+    @property
+    def collection_shape(self) -> DataAndMetadata.ShapeType:
+        return self.__collection_shape
+
+    @property
+    def collection_calibrations(self) -> typing.Sequence[Calibration.Calibration]:
+        return self.__collection_calibrations
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -1547,7 +1561,6 @@ class DataAndMetadataDataChannel(DataChannel):
         data_and_metadata._set_metadata(data_metadata.metadata)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
-        # print(f"get data {list(self.__data.keys())}")
         return self.__data[channel]
 
 
@@ -2227,15 +2240,221 @@ class AccumulatedDataStream(ContainerDataStream):
 
 
 class DataHandler:
+    def __init__(self) -> None:
+        self.__data_handlers = list[DataHandler]()
+
+    def attach_data_handler(self, data_handler: DataHandler) -> None:
+        self.__data_handlers.append(data_handler)
+
+    def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
+        return data_stream_info
+
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         raise NotImplementedError()
 
     def send_packet(self, packet: DataStreamEventArgs) -> None:
-        pass
+        for data_handler in self.__data_handlers:
+            data_handler.handle_data_available(packet)
+
+
+class CollectionDataHandler(DataHandler):
+    def __init__(self, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
+        super().__init__()
+        self.__collection_shape = tuple(shape)
+        self.__collection_calibrations = tuple(calibrations)
+        self.__indexes = dict[Channel, int]()
+
+    def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
+        count = expand_shape(self.__collection_shape)
+        data_metadata = data_stream_info.data_metadata
+        data_dtype = data_metadata.data_dtype
+        assert data_dtype is not None
+        data_metadata = DataAndMetadata.DataMetadata(
+            (self.__collection_shape + data_metadata.data_shape, data_dtype),
+            data_metadata.intensity_calibration,
+            list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
+            data_metadata.metadata,
+            data_metadata.timestamp,
+            self._get_new_data_descriptor(data_metadata),
+            data_metadata.timezone,
+            data_metadata.timezone_offset
+        )
+        return DataStreamInfo(data_metadata, count * data_stream_info.duration)
+
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        collection_count = expand_shape(self.__collection_shape)
+        assert self.__indexes.get(packet.channel, 0) < collection_count
+        # this will update the index too.
+        self.__process_packet(packet)
+
+    def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
+        # subclasses can override this method to provide different collection shapes.
+
+        # collections of sequences and collections of collections are not currently supported
+        assert not data_metadata.is_sequence
+        assert not data_metadata.is_collection
+
+        # new data descriptor is a collection
+        collection_rank = len(self.__collection_shape)
+        datum_dimension_count = data_metadata.datum_dimension_count
+
+        if datum_dimension_count > 0:
+            return DataAndMetadata.DataDescriptor(False, collection_rank, datum_dimension_count)
+        else:
+            return DataAndMetadata.DataDescriptor(False, 0, collection_rank)
+
+    def __process_packet(self, data_stream_event: DataStreamEventArgs) -> None:
+        # when data arrives, put it into the sequence/collection and send it out again.
+        # data will be arriving as either partial data or as frame data. partial data
+        # is restricted to arrive in groups that are multiples of the product of all
+        # dimensions except the first one or with a count of exactly one. frame data
+        # is restricted to arrive in groups that are multiples of the collection size
+        # and cannot overlap the end of a collection chunk.
+
+        results = list[DataStreamEventArgs]()
+
+        # useful variables
+        data_metadata = data_stream_event.data_metadata
+        channel = data_stream_event.channel
+        collection_count = expand_shape(self.__collection_shape)
+        index = self.__indexes.get(channel, 0)
+
+        # ensure that it is not complete already.
+        assert index < collection_count
+
+        # get the new data descriptor
+        new_data_descriptor = self._get_new_data_descriptor(data_metadata)
+
+        # add the collection count to the downstream data shape to produce the new collection shape.
+        new_shape = self.__collection_shape + tuple(data_metadata.data_shape)
+
+        # add designated calibrations for the new collection dimensions.
+        new_dimensional_calibrations = self.__collection_calibrations + tuple(data_metadata.dimensional_calibrations)
+
+        # create a new data metadata object
+        dtype = data_metadata.data_dtype
+        assert dtype is not None
+        new_data_metadata = DataAndMetadata.DataMetadata((new_shape, dtype),
+                                                         data_metadata.intensity_calibration,
+                                                         new_dimensional_calibrations,
+                                                         data_metadata.metadata,
+                                                         data_metadata.timestamp,
+                                                         new_data_descriptor,
+                                                         data_metadata.timezone,
+                                                         data_metadata.timezone_offset)
+
+        collection_rank = len(self.__collection_shape)
+        collection_row_length = expand_shape(self.__collection_shape[1:])
+        if data_stream_event.count is not None:
+            remaining_count = data_stream_event.count
+            current_index = index
+            # incoming data is frames
+            # count must either be a multiple of last dimensions of collection shape or one
+            assert remaining_count == data_stream_event.source_slice[0].stop - data_stream_event.source_slice[0].start
+            assert current_index + remaining_count <= collection_count
+            assert remaining_count > 0
+            next_index = index + remaining_count
+            if remaining_count == 1:
+                # a single data chunk has been provided.
+                # if the count is one, add new dimensions of length one for the collection shape and form
+                # the new slice with indexes of 0 for each collection dimension and full slices for the remaining
+                # dimensions.
+                old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
+                new_source_data = old_source_data.reshape((1,) * collection_rank + old_source_data.shape[1:])
+                new_source_slice = (index_slice(0), ) * collection_rank + (slice(None),) * (len(old_source_data.shape) - 1)
+                new_state = DataStreamStateEnum.COMPLETE if current_index + remaining_count == collection_count else DataStreamStateEnum.PARTIAL
+                results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+            else:
+                # multiple data chunks have been provided.
+                # if the count is greater than one, provide the "rows" of the collection. row is just first dimension.
+                # start by calculating the start/stop rows. reshape the data into collection shape and add a slice
+                # for the rows and full slices for the remaining dimensions.
+                old_source_data = data_stream_event.source_data[data_stream_event.source_slice]
+                source_index = 0
+                if current_index % collection_row_length != 0:
+                    # finish the current row
+                    assert len(self.__collection_shape) == 2
+                    slice_column = current_index % collection_row_length
+                    slice_width = min(collection_row_length - slice_column, remaining_count)
+                    new_source_slice = (slice(0, 1), slice(0, slice_width)) + (slice(None),) * (len(new_shape) - 2)
+                    next_source_index = source_index + slice_width
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, slice_width) + old_source_data.shape[1:])
+                    new_state = DataStreamStateEnum.COMPLETE if current_index + slice_width == collection_count else DataStreamStateEnum.PARTIAL
+                    results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    source_index = next_source_index
+                    current_index += slice_width
+                    remaining_count -= slice_width
+                    assert remaining_count is not None  # for type checker bug
+                else:
+                    new_state = DataStreamStateEnum.COMPLETE  # satisfy type checker
+                if remaining_count // collection_row_length > 0:
+                    # send as many complete rows as possible
+                    slice_offset = current_index // collection_row_length
+                    slice_start = better_unravel_index(current_index, self.__collection_shape)[0] - slice_offset
+                    slice_stop = better_unravel_index(current_index + remaining_count, self.__collection_shape)[0] - slice_offset
+                    assert 0 <= slice_start <= self.__collection_shape[0]
+                    assert 0 <= slice_stop <= self.__collection_shape[0]
+                    row_count = remaining_count // collection_row_length
+                    next_source_index = source_index + row_count * collection_row_length
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((row_count,) + self.__collection_shape[1:] + old_source_data.shape[1:])
+                    new_source_slice = (slice(slice_start, slice_stop),) + (slice(None),) * (len(new_shape) - 1)
+                    new_state = DataStreamStateEnum.COMPLETE if current_index + row_count * collection_row_length == collection_count else DataStreamStateEnum.PARTIAL
+                    results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    source_index = next_source_index
+                    current_index += row_count * collection_row_length
+                    remaining_count -= row_count * collection_row_length
+                    assert remaining_count is not None  # for type checker bug
+                if remaining_count > 0:
+                    # any remaining count means a partial row
+                    assert len(self.__collection_shape) == 2
+                    assert remaining_count < collection_row_length
+                    new_source_slice = (slice(0, 1), slice(0, remaining_count)) + (slice(None),) * (len(new_shape) - 2)
+                    next_source_index = source_index + remaining_count
+                    new_source_data = old_source_data[source_index:next_source_index].reshape((1, remaining_count) + old_source_data.shape[1:])
+                    new_state = DataStreamStateEnum.PARTIAL  # always partial, otherwise would have been sent in previous section
+                    results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+                    # source_index = next_source_index  # no need for this
+                    current_index += remaining_count
+                    remaining_count -= remaining_count
+                    assert remaining_count is not None  # for type checker bug
+                assert remaining_count == 0  # everything has been accounted for
+        else:
+            # incoming data is partial
+            # form the new slice with indexes of 0 for each collection dimension and the incoming slice for the
+            # remaining dimensions. add dimensions for collection dimensions to the new source data.
+            new_source_slice = (index_slice(0), ) * collection_rank + tuple(data_stream_event.source_slice)
+            new_source_data = data_stream_event.source_data.reshape((1,) * collection_rank + data_stream_event.source_data.shape)
+            # new state is complete if data chunk is complete and it will put us at the end of our collection.
+            new_state = DataStreamStateEnum.PARTIAL
+            next_index = index
+            if data_stream_event.state == DataStreamStateEnum.COMPLETE:
+                next_index += 1
+                if next_index == collection_count:
+                    new_state = DataStreamStateEnum.COMPLETE
+            results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
+        self.__indexes[channel] = next_index
+        for result in results:
+            self.send_packet(result)
+
+
+class SequenceDataHandler(CollectionDataHandler):
+    def __init__(self, count: int, calibration: Calibration.Calibration) -> None:
+        super().__init__((count,), (calibration,))
+
+    def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
+        # scalar data is not supported. and the data must not be a sequence already.
+        assert not data_metadata.is_sequence
+        assert data_metadata.datum_dimension_count > 0
+
+        # new data descriptor is a sequence
+        collection_dimension_count = data_metadata.collection_dimension_count
+        datum_dimension_count = data_metadata.datum_dimension_count
+        return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
 
 
 class FramedDataHandler(DataHandler):
     def __init__(self, framer: Framer, *, operator: typing.Optional[DataStreamOperator] = None) -> None:
+        super().__init__()
         self.__framer = framer
         self.__operator = operator or NullDataStreamOperator()
 
@@ -2731,7 +2950,18 @@ def _acquire_data_stream(data_stream: DataStream,
 
     framed_data_handler = FramedDataHandler(framer)
 
-    data_stream.attach_data_handler(framed_data_handler)
+    if isinstance(data_stream, SequenceDataStream):
+        child_data_stream = data_stream.data_streams[-1]
+        sequence_data_handler = SequenceDataHandler(data_stream.collection_shape[-1], data_stream.collection_calibrations[-1])
+        child_data_stream.attach_unprocessed_data_handler(sequence_data_handler)
+        sequence_data_handler.attach_data_handler(framed_data_handler)
+    elif isinstance(data_stream, CollectedDataStream):
+        child_data_stream = data_stream.data_streams[-1]
+        collection_data_handler = CollectionDataHandler(data_stream.collection_shape, data_stream.collection_calibrations)
+        child_data_stream.attach_unprocessed_data_handler(collection_data_handler)
+        collection_data_handler.attach_data_handler(framed_data_handler)
+    else:
+        data_stream.attach_data_handler(framed_data_handler)
 
     # create the acquisition state/controller object based on the data item data channel data stream.
     acquisition = Acquisition(data_stream, framer)
