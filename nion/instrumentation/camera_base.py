@@ -2858,7 +2858,7 @@ class CameraDataStream(Acquisition.DataStream):
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)
 
-    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+    def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
         data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)

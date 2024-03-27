@@ -543,7 +543,10 @@ class DataStream:
         """Return channel info.
 
         Should only be called with a channel return by channels property."""
-        return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
+        return self._get_info(channel)
+
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
+            return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
 
     def prepare_device_state(self) -> DeviceState:
         """Prepares the device state (a dict of entries to restore state)."""
@@ -735,7 +738,7 @@ class CollectedDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         data_stream_info = self.__data_stream.get_info(channel)
         count = expand_shape(self.__collection_shape)
         data_metadata = data_stream_info.data_metadata
@@ -1022,7 +1025,7 @@ class CombinedDataStream(DataStream):
             channels.extend(data_stream.channels)
         return tuple(channels)
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         for data_stream in self.__data_streams:
             if channel in data_stream.channels:
                 return data_stream.get_info(channel)
@@ -1105,7 +1108,7 @@ class StackedDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return self.__channels
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         # compute duration and height as a sum from contained data streams.
         data_metadata = copy.deepcopy(self.__data_streams[0].get_info(channel).data_metadata)
         duration = 0.0
@@ -1216,7 +1219,7 @@ class SequentialDataStream(DataStream):
             channels.extend([Channel(str(index), *channel.segments) for channel in data_stream.channels])
         return tuple(channels)
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         if channel in self.channels:
             index = int(channel.segments[0])
             sub_channel = Channel(*channel.segments[1:])
@@ -1594,7 +1597,7 @@ class Framer:
             else:
                 index = self.__indexes.get(channel, 0)
             dest_slice = slice(index, index + source_count)
-            assert index + source_count <= flat_shape[0]
+            assert index + source_count <= flat_shape[0], f"{index=} + {source_count=} <= {flat_shape[0]=}"
             self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
             # proceed
             index = index + source_count
@@ -1673,7 +1676,7 @@ class FramedDataStream(DataStream):
     def input_channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         return self.__operator.transform_data_stream_info(channel, self.__data_stream.get_info(channel))
 
     @property
@@ -1978,7 +1981,7 @@ class ContainerDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return self.__data_stream.channels
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         return self.__data_stream.get_info(channel)
 
     @property
@@ -2123,7 +2126,7 @@ class MonitorDataStream(DataStream):
     def channels(self) -> typing.Tuple[Channel, ...]:
         return tuple(c.join_segment(self.__channel_segment) for c in self.__data_stream.channels)
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         return self.__data_stream.get_info(channel.parent)
 
     @property
@@ -2160,7 +2163,7 @@ class AccumulatedDataStream(ContainerDataStream):
         self.__dest_indexes = dict()
         super()._start_stream(stream_args)
 
-    def get_info(self, channel: Channel) -> DataStreamInfo:
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
         data_stream_info = super().get_info(channel)
         old_data_metadata = data_stream_info.data_metadata
         data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)

@@ -2140,7 +2140,7 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
         else:
             self.__scan_frame_parameters.pixel_size = self.__scan_size
 
-    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+    def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__scan_frame_parameters.scan_size)
         data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
         return Acquisition.DataStreamInfo(data_metadata, 3.0)
@@ -2293,7 +2293,7 @@ class ScanDataStream(Acquisition.DataStream):
     def scan_size(self) -> Geometry.IntSize:
         return self.__scan_size
 
-    def get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+    def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata(((), numpy.float32)), 0.0)
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
