@@ -533,6 +533,14 @@ class DataStream:
     def attach_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
         self.__unprocessed_data_handlers.append(data_handler)
 
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        # build data handler for this data stream and send it to data_handler.
+        return False
+
+    def attach_root_data_handler(self, framed_data_handler: FramedDataHandler) -> None:
+        if not self.build_data_handler(framed_data_handler):
+            self.attach_data_handler(framed_data_handler)
+
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
         """Return the channels for this data stream."""
@@ -998,6 +1006,18 @@ class CollectedDataStream(DataStream):
         self.__index_stack[-1].index = better_unravel_index(min(self.__indexes.get(channel, 0) for channel in self.channels), self.__collection_shape)
         return processed_data_stream_events
 
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        collection_data_handler = self._get_data_handler()
+        # send the result of the collection data handler to data_handler
+        collection_data_handler.attach_data_handler(data_handler)
+        # let the child data stream build its data handler or attach the handler to this data stream.
+        if not self.__data_stream.build_data_handler(collection_data_handler):
+            self.__data_stream.attach_unprocessed_data_handler(collection_data_handler)
+        return True
+
+    def _get_data_handler(self) -> DataHandler:
+        return CollectionDataHandler(self.collection_shape, self.collection_calibrations)
+
 
 class SequenceDataStream(CollectedDataStream):
     """Collect a data stream into a sequence of datums.
@@ -1017,6 +1037,9 @@ class SequenceDataStream(CollectedDataStream):
         collection_dimension_count = data_metadata.collection_dimension_count
         datum_dimension_count = data_metadata.datum_dimension_count
         return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
+
+    def _get_data_handler(self) -> DataHandler:
+        return SequenceDataHandler(self.collection_shape[-1], self.collection_calibrations[-1])
 
 
 class CombinedDataStream(DataStream):
@@ -2541,8 +2564,7 @@ class MakerDataStream(ContainerDataStream):
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__(data_stream)
         self.__framer = Framer(DataAndMetadataDataChannel())
-        self.__framed_data_handler = FramedDataHandler(self.__framer)
-        data_stream.attach_data_handler(self.__framed_data_handler)
+        data_stream.attach_root_data_handler(FramedDataHandler(self.__framer))
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
@@ -2950,18 +2972,7 @@ def _acquire_data_stream(data_stream: DataStream,
 
     framed_data_handler = FramedDataHandler(framer)
 
-    if isinstance(data_stream, SequenceDataStream):
-        child_data_stream = data_stream.data_streams[-1]
-        sequence_data_handler = SequenceDataHandler(data_stream.collection_shape[-1], data_stream.collection_calibrations[-1])
-        child_data_stream.attach_unprocessed_data_handler(sequence_data_handler)
-        sequence_data_handler.attach_data_handler(framed_data_handler)
-    elif isinstance(data_stream, CollectedDataStream):
-        child_data_stream = data_stream.data_streams[-1]
-        collection_data_handler = CollectionDataHandler(data_stream.collection_shape, data_stream.collection_calibrations)
-        child_data_stream.attach_unprocessed_data_handler(collection_data_handler)
-        collection_data_handler.attach_data_handler(framed_data_handler)
-    else:
-        data_stream.attach_data_handler(framed_data_handler)
+    data_stream.attach_root_data_handler(framed_data_handler)
 
     # create the acquisition state/controller object based on the data item data channel data stream.
     acquisition = Acquisition(data_stream, framer)
@@ -3038,8 +3049,7 @@ def start_acquire(data_stream: DataStream,
 
 def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
     framer = Framer(DataAndMetadataDataChannel())
-    framed_data_handler = FramedDataHandler(framer)
-    data_stream.attach_data_handler(framed_data_handler)
+    data_stream.attach_root_data_handler(FramedDataHandler(framer))
     acquire(data_stream)
     return {channel: framer.get_data(channel) for channel in data_stream.channels}
 
