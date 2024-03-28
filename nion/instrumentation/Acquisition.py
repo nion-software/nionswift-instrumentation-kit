@@ -535,6 +535,7 @@ class DataStream:
 
     def build_data_handler(self, data_handler: DataHandler) -> bool:
         # build data handler for this data stream and send it to data_handler.
+        # print(f"{type(self)} cannot build data handler.")
         return False
 
     def attach_root_data_handler(self, framed_data_handler: FramedDataHandler) -> None:
@@ -1016,7 +1017,7 @@ class CollectedDataStream(DataStream):
         return True
 
     def _get_data_handler(self) -> DataHandler:
-        return CollectionDataHandler(self.collection_shape, self.collection_calibrations)
+        return CollectionDataHandler(self.collection_shape, self.collection_calibrations, 0, self.collection_shape[0], self.collection_shape[0])
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -1039,7 +1040,8 @@ class SequenceDataStream(CollectedDataStream):
         return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
 
     def _get_data_handler(self) -> DataHandler:
-        return SequenceDataHandler(self.collection_shape[-1], self.collection_calibrations[-1])
+        count = self.collection_shape[-1]
+        return SequenceDataHandler(count, self.collection_calibrations[-1], 0, count, count)
 
 
 class CombinedDataStream(DataStream):
@@ -1230,6 +1232,26 @@ class StackedDataStream(DataStream):
             state
         )
         return [data_stream_event]
+
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        stacked_data_handler = StackedDataHandler(len(self.__data_streams), self.__height)
+        # send the result of the framed data handler to data_handler
+        stacked_data_handler.attach_data_handler(data_handler)
+        # let the child data stream build its data handler or attach the handler to this data stream.
+        top = 0
+        for data_stream in self.__data_streams:
+            assert isinstance(data_stream, CollectedDataStream)
+            height = data_stream.collection_shape[0]
+            collection_data_handler: CollectionDataHandler
+            if isinstance(data_stream, SequenceDataStream):
+                collection_data_handler = SequenceDataHandler(data_stream.collection_shape[-1], data_stream.collection_calibrations[-1], top, height, self.__height)
+            else:
+                collection_data_handler = CollectionDataHandler(data_stream.collection_shape, data_stream.collection_calibrations, top, height, self.__height)
+            top += height
+            collection_data_handler.attach_data_handler(stacked_data_handler)
+            if not data_stream.data_streams[-1].build_data_handler(collection_data_handler):
+                data_stream.data_streams[-1].attach_unprocessed_data_handler(collection_data_handler)
+        return True
 
 
 class SequentialDataStream(DataStream):
@@ -1640,7 +1662,7 @@ class Framer:
             self.__indexes[channel] = index
             # if the data chunk is complete, perform processing and send out the new data.
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
-                assert index == flat_shape[0]  # index should be at the end.
+                assert index == flat_shape[0], f"{data_stream_event.channel}: {index=} == {flat_shape[0]=}"  # index should be at the end.
                 processed_data_stream_events.extend(callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel)))
                 self.__indexes[channel] = 0
         else:
@@ -1822,6 +1844,15 @@ class FramedDataStream(DataStream):
         assert data is not None
         new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE, update_in_place)
         return [new_data_stream_event]
+
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()), operator=self.__operator)
+        # send the result of the framed data handler to data_handler
+        framed_data_handler.attach_data_handler(data_handler)
+        # let the child data stream build its data handler or attach the handler to this data stream.
+        if not self.__data_stream.build_data_handler(framed_data_handler):
+            self.__data_stream.attach_unprocessed_data_handler(framed_data_handler)
+        return True
 
 
 class MaskLike(typing.Protocol):
@@ -2046,6 +2077,9 @@ class ContainerDataStream(DataStream):
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
 
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        return self.data_stream.build_data_handler(data_handler)
+
 
 class ActionValueControllerLike(typing.Protocol):
     """A delegate to perform the action.
@@ -2200,7 +2234,7 @@ class AccumulatedDataStream(ContainerDataStream):
         super()._start_stream(stream_args)
 
     def _get_info(self, channel: Channel) -> DataStreamInfo:
-        data_stream_info = super().get_info(channel)
+        data_stream_info = super()._get_info(channel)
         old_data_metadata = data_stream_info.data_metadata
         data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
         assert data_descriptor.is_sequence
@@ -2261,6 +2295,9 @@ class AccumulatedDataStream(ContainerDataStream):
         new_data_stream_event.reset_frame = dest_slice.start == 0
         return [new_data_stream_event]
 
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        return False
+
 
 class DataHandler:
     def __init__(self) -> None:
@@ -2281,11 +2318,24 @@ class DataHandler:
 
 
 class CollectionDataHandler(DataHandler):
-    def __init__(self, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
+    """A data handler that collects data and sends it out as a collection.
+
+    The top/height/total_height can be used to filter the data that is collected. This is required when stacked data is
+    being collected and multiple collections get sent into the stacked data handler. The top/height/total_height
+    ensures that only one of the feeder data handlers is active at a time.
+    """
+    def __init__(self, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], top: int, height: int, total_height: int) -> None:
         super().__init__()
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         self.__indexes = dict[Channel, int]()
+        self.__total_indexes = dict[Channel, int]()
+        self.__collection_list = list[DataAndMetadata.MetadataType]()
+        self.__last_collection_index: typing.Optional[ShapeType] = None
+        non_height_count = expand_shape(self.__collection_shape[1:])
+        self.__top = top * non_height_count
+        self.__height = height * non_height_count
+        self.__total_height = total_height * non_height_count
 
     def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         count = expand_shape(self.__collection_shape)
@@ -2306,9 +2356,13 @@ class CollectionDataHandler(DataHandler):
 
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         collection_count = expand_shape(self.__collection_shape)
-        assert self.__indexes.get(packet.channel, 0) < collection_count
-        # this will update the index too.
-        self.__process_packet(packet)
+        count = packet.count if packet.count is not None else 1
+        if self.__top <= self.__total_indexes.get(packet.channel, 0) < (self.__top + self.__height):
+            assert self.__indexes.get(packet.channel, 0) < collection_count
+            # this will update the index too.
+            self.__process_packet(packet)
+        if packet.count is not None or packet.state == DataStreamStateEnum.COMPLETE:
+            self.__total_indexes[packet.channel] = (self.__total_indexes.get(packet.channel, 0) + count) % self.__total_height
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # subclasses can override this method to provide different collection shapes.
@@ -2344,6 +2398,19 @@ class CollectionDataHandler(DataHandler):
 
         # ensure that it is not complete already.
         assert index < collection_count
+
+        # for each data stream event, add the collection list to the metadata if action_state is present.
+        metadata = dict(data_metadata.metadata)
+        action_state = typing.cast(typing.MutableMapping[str, typing.Any], metadata.pop("action_state", dict()))
+        if action_state:
+            collection_index = better_unravel_index(index, self.__collection_shape)
+            if collection_index != self.__last_collection_index:
+                action_state["index"] = collection_index
+                self.__collection_list.append(action_state)
+                self.__last_collection_index = collection_index
+            collection_list = copy.deepcopy(self.__collection_list)
+            metadata["collection"] = collection_list
+            data_stream_event.data_metadata._set_metadata(metadata)
 
         # get the new data descriptor
         new_data_descriptor = self._get_new_data_descriptor(data_metadata)
@@ -2455,14 +2522,19 @@ class CollectionDataHandler(DataHandler):
                 if next_index == collection_count:
                     new_state = DataStreamStateEnum.COMPLETE
             results.append(DataStreamEventArgs(channel, new_data_metadata, new_source_data, None, new_source_slice, new_state))
-        self.__indexes[channel] = next_index
-        for result in results:
-            self.send_packet(result)
+        if results and results[-1].state == DataStreamStateEnum.COMPLETE:
+            assert next_index == collection_count
+            self.__indexes[channel] = 0
+        else:
+            assert next_index < collection_count
+            self.__indexes[channel] = next_index
+        for data_stream_event in results:
+            self.send_packet(data_stream_event)
 
 
 class SequenceDataHandler(CollectionDataHandler):
-    def __init__(self, count: int, calibration: Calibration.Calibration) -> None:
-        super().__init__((count,), (calibration,))
+    def __init__(self, count: int, calibration: Calibration.Calibration, top: int, height: int, total_height: int) -> None:
+        super().__init__((count,), (calibration,), top, height, total_height)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
@@ -2558,6 +2630,43 @@ class FramedDataHandler(DataHandler):
         new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
         # TODO: what about update in place?
         self.send_packet(new_data_stream_event)
+
+
+class StackedDataHandler(DataHandler):
+    def __init__(self, count: int, height: int) -> None:
+        super().__init__()
+        self.__count = count
+        self.__height = height
+        self.__indexes: typing.Dict[Channel, int] = dict()
+
+    def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE and self.__indexes.get(data_stream_event.channel, 0) + 1 == self.__count:
+            state = DataStreamStateEnum.COMPLETE
+        else:
+            state = DataStreamStateEnum.PARTIAL
+
+        if data_stream_event.state == DataStreamStateEnum.COMPLETE:
+            self.__index = (self.__indexes.get(data_stream_event.channel, 0) + 1) % self.__count
+
+        # print(f"{data_stream_event.state=} {self.__index=}/{self.__count=}")
+
+        data_metadata = copy.deepcopy(data_stream_event.data_metadata)
+        data_metadata._set_data_shape_and_dtype(((self.__height,) + data_metadata.data_shape[1:], numpy.dtype(data_metadata.data_dtype)))
+
+        # print(f"{data_stream_event.source_slice=} {data_stream_event.source_data.shape=}")
+        # print(f"{data_stream_event.source_data}")
+
+        # create the data stream event with the overridden data_metadata and state.
+        data_stream_event = DataStreamEventArgs(
+            data_stream_event.channel,
+            data_metadata,
+            data_stream_event.source_data,
+            data_stream_event.count,
+            data_stream_event.source_slice,
+            state
+        )
+
+        self.send_packet(data_stream_event)
 
 
 class MakerDataStream(ContainerDataStream):

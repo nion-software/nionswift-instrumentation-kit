@@ -1,3 +1,4 @@
+import gc
 import logging
 import typing
 
@@ -38,6 +39,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         self.__exit_stack: typing.List[typing.Any] = list()
 
     def close(self) -> None:
+        gc.collect()  # allow acquisition objects to be garbage collected
         self.document_controller.periodic()
         self.document_controller.close()
         for ex in self.__exit_stack:
