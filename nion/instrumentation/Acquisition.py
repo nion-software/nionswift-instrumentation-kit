@@ -1105,6 +1105,12 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.finish_stream()
 
+    def build_data_handler(self, data_handler: DataHandler) -> bool:
+        for data_stream in self.__data_streams:
+            if not data_stream.build_data_handler(data_handler):
+                data_stream.attach_unprocessed_data_handler(data_handler)
+        return True
+
 
 class StackedDataStream(DataStream):
     """Acquire multiple streams and stack the results.
