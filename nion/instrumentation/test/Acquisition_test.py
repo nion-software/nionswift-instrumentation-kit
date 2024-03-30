@@ -79,6 +79,9 @@ class ScanDataStream(Acquisition.DataStream):
             self.__partial_index = stop_index
         return data_stream_events
 
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
+
 
 class SingleFrameDataStream(Acquisition.DataStream):
     """Provide a single data stream frame by frame.
@@ -142,6 +145,9 @@ class SingleFrameDataStream(Acquisition.DataStream):
                 raise Exception()
             self.__error_after -= 1
         return data_stream_events
+
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
 
 
 
@@ -212,6 +218,9 @@ class MultiFrameDataStream(Acquisition.DataStream):
         data_stream_events.append(data_stream_event)
         self.__frame_index += count
         return data_stream_events
+
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
 
 
 class RectangleMask(Acquisition.MaskLike):

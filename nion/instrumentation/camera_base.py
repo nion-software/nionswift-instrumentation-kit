@@ -2960,6 +2960,9 @@ class CameraDataStream(Acquisition.DataStream):
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
         return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
 
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
+
 
 class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
     """An interface using the 'sequence' style methods of the camera."""
@@ -3273,6 +3276,7 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
         super()._handle_data_available(data_stream_event)
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        print(f"{type(self)} cannot build data handler.")
         return False
 
 

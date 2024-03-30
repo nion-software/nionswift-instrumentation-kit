@@ -2207,6 +2207,9 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
                 data_stream_events.append(data_stream_event)
         return data_stream_events
 
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
+
 
 class ScanDataStream(Acquisition.DataStream):
     """A data stream that provides frames from a scan.
@@ -2398,6 +2401,9 @@ class ScanDataStream(Acquisition.DataStream):
                             data_stream_events.append(data_stream_event)
                             self.__sent_rows[channel] = available_rows
         return data_stream_events
+
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        return False
 
 
 class ScanFrameDataStream(Acquisition.StackedDataStream):

@@ -437,6 +437,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
         return list()
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+        print(f"{type(self)} cannot build data handler.")
         return False
 
 
