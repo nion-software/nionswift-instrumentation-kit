@@ -145,7 +145,7 @@ class ScanAcquisitionController:
         framer = Acquisition.Framer(data_item_data_channel)
         self.__synchronized_scan_data_stream = synchronized_scan_data_stream
         framed_data_handler = Acquisition.FramedDataHandler(framer)
-        self.__synchronized_scan_data_stream.attach_data_handler(framed_data_handler)
+        self.__synchronized_scan_data_stream.connect_data_handler(framed_data_handler)
         self.__scan_acquisition = Acquisition.Acquisition(self.__synchronized_scan_data_stream, framer)
         drift_tracker = scan_hardware_source.drift_tracker
         if drift_tracker:

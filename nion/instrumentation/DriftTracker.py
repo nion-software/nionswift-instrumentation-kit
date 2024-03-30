@@ -436,7 +436,7 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         return list()
 
-    def build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False
 
 

@@ -117,8 +117,6 @@ import gettext
 import logging
 import time
 import typing
-import warnings
-import weakref
 
 import numpy
 import numpy.typing
@@ -509,8 +507,9 @@ class DataStream:
         # these two events are used to communicate data updates and errors to the listening data streams or clients.
         self.data_available_event = Event.Event()
         # data handlers
-        self.__data_handlers = list[DataHandler]()
-        self.__unprocessed_data_handlers = list[DataHandler]()
+        self.__data_handler: typing.Optional[DataHandler] = None
+        self.__unprocessed_data_handler: typing.Optional[DataHandler] = None
+        self.__serial_data_handler: typing.Optional[SerialDataHandler] = None
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
         self.__sequence_count = sequence_count
         self.__sequence_counts: typing.Dict[Channel, int] = dict()
@@ -527,20 +526,38 @@ class DataStream:
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
 
-    def attach_data_handler(self, data_handler: DataHandler) -> None:
-        self.__data_handlers.append(data_handler)
+    def connect_data_handler(self, data_handler: DataHandler) -> None:
+        assert not self.__data_handler
+        self.__data_handler = data_handler
 
-    def attach_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
-        self.__unprocessed_data_handlers.append(data_handler)
+    def connect_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
+        if self.__unprocessed_data_handler != data_handler:
+            assert not self.__unprocessed_data_handler, f"{type(self)}"
+            self.__unprocessed_data_handler = data_handler
+
+    @property
+    def has_connected_data_handler(self) -> bool:
+        return self.__data_handler is not None or self.__unprocessed_data_handler is not None
 
     def build_data_handler(self, data_handler: DataHandler) -> bool:
-        # build data handler for this data stream and send it to data_handler.
+        # build a new data handler for this data stream and connect its output to data_handler.
+        # then ask each input data stream to build a data handler and connect it to the new data handler.
+        # return False if this data stream node does not support building a data handler.
+        # in that case, the data_handler should be connected to the unprocessed stream directly.
+        return self._build_data_handler(data_handler)
+
+    def _get_serial_data_handler(self) -> SerialDataHandler:
+        if not self.__serial_data_handler:
+            self.__serial_data_handler = SerialDataHandler()
+        return self.__serial_data_handler
+
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         # print(f"{type(self)} cannot build data handler.")
         return False
 
     def attach_root_data_handler(self, framed_data_handler: FramedDataHandler) -> None:
         if not self.build_data_handler(framed_data_handler):
-            self.attach_data_handler(framed_data_handler)
+            self.connect_data_handler(framed_data_handler)
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -607,13 +624,13 @@ class DataStream:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
             next_data_stream_events = self._send_next()
             for data_stream_event in next_data_stream_events:
-                for data_handler in self.__unprocessed_data_handlers:
-                    data_handler.handle_data_available(data_stream_event)
+                if self.__unprocessed_data_handler:
+                    self.__unprocessed_data_handler.handle_data_available(data_stream_event)
                 processed_data_stream_events = self._process_data_stream_event(data_stream_event)
                 for processed_data_stream_event in processed_data_stream_events:
                     self.handle_data_available(processed_data_stream_event)
-                    for data_handler in self.__data_handlers:
-                        data_handler.handle_data_available(processed_data_stream_event)
+                    if self.__data_handler:
+                        self.__data_handler.handle_data_available(processed_data_stream_event)
                     data_stream_events.append(processed_data_stream_event)
         return data_stream_events
 
@@ -1007,17 +1024,26 @@ class CollectedDataStream(DataStream):
         self.__index_stack[-1].index = better_unravel_index(min(self.__indexes.get(channel, 0) for channel in self.channels), self.__collection_shape)
         return processed_data_stream_events
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         collection_data_handler = self._get_data_handler()
         # send the result of the collection data handler to data_handler
-        collection_data_handler.attach_data_handler(data_handler)
-        # let the child data stream build its data handler or attach the handler to this data stream.
-        if not self.__data_stream.build_data_handler(collection_data_handler):
-            self.__data_stream.attach_unprocessed_data_handler(collection_data_handler)
+        collection_data_handler.connect_data_handler(data_handler)
+        # ask the child data stream build its data handler and send it to the collection data handler. the collected
+        # data stream uses a trick (hopefully temporary) of asking the input data stream to supply a serial data
+        # handler; then this collected stream feeds the serial data handler into the collection_data_handler and asks
+        # the input data stream to connect to the serial data handler. this allows the same input data stream to be
+        # connected to multiple collection data handlers, with the common serial data stream stored in the (common)
+        # input data stream.
+        count = expand_shape(self.__collection_shape)
+        serial_data_handler = self.__data_stream._get_serial_data_handler()
+        serial_data_handler.add_data_handler(collection_data_handler, count)
+        if not self.__data_stream.has_connected_data_handler:
+            if not self.__data_stream.build_data_handler(serial_data_handler):
+                self.__data_stream.connect_unprocessed_data_handler(serial_data_handler)
         return True
 
     def _get_data_handler(self) -> DataHandler:
-        return CollectionDataHandler(self.collection_shape, self.collection_calibrations, 0, self.collection_shape[0], self.collection_shape[0])
+        return CollectionDataHandler(self.collection_shape, self.collection_calibrations)
 
 
 class SequenceDataStream(CollectedDataStream):
@@ -1041,7 +1067,7 @@ class SequenceDataStream(CollectedDataStream):
 
     def _get_data_handler(self) -> DataHandler:
         count = self.collection_shape[-1]
-        return SequenceDataHandler(count, self.collection_calibrations[-1], 0, count, count)
+        return SequenceDataHandler(count, self.collection_calibrations[-1])
 
 
 class CombinedDataStream(DataStream):
@@ -1105,10 +1131,10 @@ class CombinedDataStream(DataStream):
         for data_stream in self.__data_streams:
             data_stream.finish_stream()
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         for data_stream in self.__data_streams:
             if not data_stream.build_data_handler(data_handler):
-                data_stream.attach_unprocessed_data_handler(data_handler)
+                data_stream.connect_unprocessed_data_handler(data_handler)
         return True
 
 
@@ -1239,24 +1265,14 @@ class StackedDataStream(DataStream):
         )
         return [data_stream_event]
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         stacked_data_handler = StackedDataHandler(len(self.__data_streams), self.__height)
         # send the result of the framed data handler to data_handler
-        stacked_data_handler.attach_data_handler(data_handler)
+        stacked_data_handler.connect_data_handler(data_handler)
         # let the child data stream build its data handler or attach the handler to this data stream.
-        top = 0
         for data_stream in self.__data_streams:
-            assert isinstance(data_stream, CollectedDataStream)
-            height = data_stream.collection_shape[0]
-            collection_data_handler: CollectionDataHandler
-            if isinstance(data_stream, SequenceDataStream):
-                collection_data_handler = SequenceDataHandler(data_stream.collection_shape[-1], data_stream.collection_calibrations[-1], top, height, self.__height)
-            else:
-                collection_data_handler = CollectionDataHandler(data_stream.collection_shape, data_stream.collection_calibrations, top, height, self.__height)
-            top += height
-            collection_data_handler.attach_data_handler(stacked_data_handler)
-            if not data_stream.data_streams[-1].build_data_handler(collection_data_handler):
-                data_stream.data_streams[-1].attach_unprocessed_data_handler(collection_data_handler)
+            if not data_stream.build_data_handler(stacked_data_handler):
+                data_stream.connect_unprocessed_data_handler(stacked_data_handler)
         return True
 
 
@@ -1851,13 +1867,13 @@ class FramedDataStream(DataStream):
         new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE, update_in_place)
         return [new_data_stream_event]
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()), operator=self.__operator)
         # send the result of the framed data handler to data_handler
-        framed_data_handler.attach_data_handler(data_handler)
+        framed_data_handler.connect_data_handler(data_handler)
         # let the child data stream build its data handler or attach the handler to this data stream.
         if not self.__data_stream.build_data_handler(framed_data_handler):
-            self.__data_stream.attach_unprocessed_data_handler(framed_data_handler)
+            self.__data_stream.connect_unprocessed_data_handler(framed_data_handler)
         return True
 
 
@@ -2083,7 +2099,7 @@ class ContainerDataStream(DataStream):
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         return self.data_stream.build_data_handler(data_handler)
 
 
@@ -2301,26 +2317,53 @@ class AccumulatedDataStream(ContainerDataStream):
         new_data_stream_event.reset_frame = dest_slice.start == 0
         return [new_data_stream_event]
 
-    def build_data_handler(self, data_handler: DataHandler) -> bool:
+    def _build_data_handler(self, data_handler: DataHandler) -> bool:
         return False
 
 
 class DataHandler:
     def __init__(self) -> None:
-        self.__data_handlers = list[DataHandler]()
+        self.__data_handler: typing.Optional[DataHandler] = None
 
-    def attach_data_handler(self, data_handler: DataHandler) -> None:
-        self.__data_handlers.append(data_handler)
-
-    def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
-        return data_stream_info
+    def connect_data_handler(self, data_handler: DataHandler) -> None:
+        assert not self.__data_handler
+        self.__data_handler = data_handler
 
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         raise NotImplementedError()
 
     def send_packet(self, packet: DataStreamEventArgs) -> None:
-        for data_handler in self.__data_handlers:
-            data_handler.handle_data_available(packet)
+        if self.__data_handler:
+            self.__data_handler.handle_data_available(packet)
+
+
+class NullDataHandler(DataHandler):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        self.send_packet(packet)
+
+
+class SerialDataHandler(DataHandler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.__data_handlers = list[DataHandler]()
+        self.__counts = list[int]()
+        self.__indexes = dict[Channel, int]()
+
+    def add_data_handler(self, data_handler: DataHandler, count: int) -> None:
+        self.__data_handlers.append(data_handler)
+        self.__counts.append(count)
+
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        index = self.__indexes.get(packet.channel, 0)
+        for i, count in enumerate(self.__counts):
+            if index < count:
+                self.__data_handlers[i].handle_data_available(packet)
+                self.__indexes[packet.channel] = (index + (packet.count or 1)) % sum(self.__counts)
+                break
+            index -= count
 
 
 class CollectionDataHandler(DataHandler):
@@ -2330,18 +2373,13 @@ class CollectionDataHandler(DataHandler):
     being collected and multiple collections get sent into the stacked data handler. The top/height/total_height
     ensures that only one of the feeder data handlers is active at a time.
     """
-    def __init__(self, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration], top: int, height: int, total_height: int) -> None:
+    def __init__(self, shape: DataAndMetadata.ShapeType, calibrations: typing.Sequence[Calibration.Calibration]) -> None:
         super().__init__()
         self.__collection_shape = tuple(shape)
         self.__collection_calibrations = tuple(calibrations)
         self.__indexes = dict[Channel, int]()
-        self.__total_indexes = dict[Channel, int]()
         self.__collection_list = list[DataAndMetadata.MetadataType]()
         self.__last_collection_index: typing.Optional[ShapeType] = None
-        non_height_count = expand_shape(self.__collection_shape[1:])
-        self.__top = top * non_height_count
-        self.__height = height * non_height_count
-        self.__total_height = total_height * non_height_count
 
     def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         count = expand_shape(self.__collection_shape)
@@ -2362,13 +2400,9 @@ class CollectionDataHandler(DataHandler):
 
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         collection_count = expand_shape(self.__collection_shape)
-        count = packet.count if packet.count is not None else 1
-        if self.__top <= self.__total_indexes.get(packet.channel, 0) < (self.__top + self.__height):
-            assert self.__indexes.get(packet.channel, 0) < collection_count
-            # this will update the index too.
-            self.__process_packet(packet)
-        if packet.count is not None or packet.state == DataStreamStateEnum.COMPLETE:
-            self.__total_indexes[packet.channel] = (self.__total_indexes.get(packet.channel, 0) + count) % self.__total_height
+        assert self.__indexes.get(packet.channel, 0) < collection_count
+        # this will update the index too.
+        self.__process_packet(packet)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # subclasses can override this method to provide different collection shapes.
@@ -2539,8 +2573,8 @@ class CollectionDataHandler(DataHandler):
 
 
 class SequenceDataHandler(CollectionDataHandler):
-    def __init__(self, count: int, calibration: Calibration.Calibration, top: int, height: int, total_height: int) -> None:
-        super().__init__((count,), (calibration,), top, height, total_height)
+    def __init__(self, count: int, calibration: Calibration.Calibration) -> None:
+        super().__init__((count,), (calibration,))
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
