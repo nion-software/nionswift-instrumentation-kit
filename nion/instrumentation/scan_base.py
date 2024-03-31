@@ -1397,7 +1397,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # the optional ChannelDataStream updates the camera data channel for the stream matching 999
         framer = Acquisition.Framer(data_channel or Acquisition.DataAndMetadataDataChannel())
         framed_data_handler = Acquisition.FramedDataHandler(framer)
-        synchronized_scan_data_stream.connect_data_handler(framed_data_handler)
+        synchronized_scan_data_stream.attach_root_data_handler(framed_data_handler)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
         results: GrabSynchronizedResult = None
         self.__scan_acquisition = scan_acquisition
@@ -2092,7 +2092,7 @@ def _acquire_synchronized_stream(scan_hardware_source_id: str, camera_hardware_s
     results: typing.Optional[_AcquireSynchronizedResult] = None
     framer = Acquisition.Framer(Acquisition.DataAndMetadataDataChannel())
     framed_data_handler = Acquisition.FramedDataHandler(framer)
-    synchronized_scan_data_stream.connect_data_handler(framed_data_handler)
+    synchronized_scan_data_stream.attach_root_data_handler(framed_data_handler)
     scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
     scan_acquisition.prepare_acquire()
     scan_acquisition.acquire()

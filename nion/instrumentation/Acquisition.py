@@ -507,7 +507,6 @@ class DataStream:
         # these two events are used to communicate data updates and errors to the listening data streams or clients.
         self.data_available_event = Event.Event()
         # data handlers
-        self.__data_handler: typing.Optional[DataHandler] = None
         self.__unprocessed_data_handler: typing.Optional[DataHandler] = None
         self.__serial_data_handler: typing.Optional[SerialDataHandler] = None
         # sequence counts are used for acquiring a sequence of frames controlled by the upstream
@@ -525,10 +524,6 @@ class DataStream:
         print(f".{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
-
-    def connect_data_handler(self, data_handler: DataHandler) -> None:
-        assert not self.__data_handler
-        self.__data_handler = data_handler
 
     def connect_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
         if self.__unprocessed_data_handler != data_handler:
@@ -554,7 +549,7 @@ class DataStream:
 
     def attach_root_data_handler(self, framed_data_handler: FramedDataHandler) -> None:
         if not self.build_data_handler(framed_data_handler):
-            self.connect_data_handler(framed_data_handler)
+            raise RuntimeError(f"{type(self)} cannot build data handler.")
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -626,8 +621,6 @@ class DataStream:
                 processed_data_stream_events = self._process_data_stream_event(data_stream_event)
                 for processed_data_stream_event in processed_data_stream_events:
                     self.handle_data_available(processed_data_stream_event)
-                    if self.__data_handler:
-                        self.__data_handler.handle_data_available(processed_data_stream_event)
                     data_stream_events.append(processed_data_stream_event)
         return data_stream_events
 

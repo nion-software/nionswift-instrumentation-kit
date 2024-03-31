@@ -3275,10 +3275,6 @@ class ChannelDataStream(Acquisition.ContainerDataStream):
 
         super()._handle_data_available(data_stream_event)
 
-    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
-        print(f"{type(self)} cannot build data handler.")
-        return False
-
 
 class SynchronizedDataChannelInterface:
     """Update the data.
