@@ -2854,6 +2854,13 @@ class CameraDataStream(Acquisition.DataStream):
         self.__start = 0.0
         self.__progress = 0.0
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> CameraDataStream:
+        return CameraDataStream(
+            self.__camera_hardware_source,
+            self.__camera_frame_parameters,
+            self.__camera_device_stream_delegate
+        )
+
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
         return (self.__channel,)

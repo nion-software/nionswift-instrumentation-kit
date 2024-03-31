@@ -2269,6 +2269,18 @@ class ScanDataStream(Acquisition.DataStream):
 
         self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(ReferenceCounting.weak_partial(ScanDataStream.__update_data, self))
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ScanDataStream:
+        return ScanDataStream(
+            self.__scan_hardware_source,
+            self.__scan_frame_parameters,
+            self.__scan_id,
+            drift_tracker=self.__drift_tracker,
+            camera_exposure_ms=self.__camera_exposure_ms,
+            camera_data_stream=self.__camera_data_stream,
+            fov_nm_model=self.__fov_nm_model,
+            rotation_model=self.__rotation_model
+        )
+
     def __update_data(self, data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
         # when data arrives here, it will be part of the overall data item, even if it is only a partial
         # acquire of the data item. so the buffer data shape will reflect the overall data item.
@@ -2460,6 +2472,9 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__camera_hardware_source = camera_hardware_source
         self.__section_count = section_count
         self.__stem_controller = scan_hardware_source.stem_controller
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SynchronizedDataStream:
+        return SynchronizedDataStream(copy.deepcopy(self.data_stream), self.__scan_hardware_source, self.__camera_hardware_source, self.__section_count)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source,

@@ -525,6 +525,9 @@ class DataStream:
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> DataStream:
+        raise NotImplementedError(f"{type(self)} deepcopy not implemented")
+
     def connect_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
         if self.__unprocessed_data_handler != data_handler:
             assert not self.__unprocessed_data_handler, f"{type(self)} {self.__unprocessed_data_handler} {data_handler}"
@@ -751,6 +754,9 @@ class CollectedDataStream(DataStream):
         self.__all_channels_need_start = False
         self.__collection_list = list[DataAndMetadata.MetadataType]()
         self.__last_collection_index: typing.Optional[ShapeType] = None
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> CollectedDataStream:
+        return CollectedDataStream(copy.deepcopy(self.__data_stream), copy.deepcopy(self.__collection_shape), copy.deepcopy(self.__collection_calibrations))
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -1045,6 +1051,9 @@ class SequenceDataStream(CollectedDataStream):
         calibration_ = calibration or Calibration.Calibration()
         super().__init__(data_stream, (count,), (calibration_,))
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SequenceDataStream:
+        return SequenceDataStream(copy.deepcopy(self.data_streams[-1]), copy.deepcopy(self.collection_shape[-1]), copy.deepcopy(self.collection_calibrations[-1]))
+
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
         assert not data_metadata.is_sequence
@@ -1068,6 +1077,9 @@ class CombinedDataStream(DataStream):
     def __init__(self, data_streams: typing.Sequence[DataStream]) -> None:
         super().__init__()
         self.__data_streams = tuple(data_streams)
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> CombinedDataStream:
+        return CombinedDataStream(copy.deepcopy(self.__data_streams))
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -1160,6 +1172,9 @@ class StackedDataStream(DataStream):
                 height += data_stream_data_metadata.data_shape[0]
             assert self.__height == 0 or self.__height == height
             self.__height = height
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> StackedDataStream:
+        return StackedDataStream(copy.deepcopy(self.__data_streams))
 
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
@@ -1279,6 +1294,9 @@ class SequentialDataStream(DataStream):
         self.__sequence_count = 0
         self.__sequence_index = 0
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SequentialDataStream:
+        return SequentialDataStream(copy.deepcopy(self.__data_streams))
+
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
         return self.__data_streams
@@ -1388,6 +1406,9 @@ class ChannelData:
 class DataStreamOperator:
     def __init__(self) -> None:
         self.__applied = False
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> DataStreamOperator:
+        raise NotImplementedError(f"{type(self)} deepcopy not implemented")
 
     def reset(self) -> None:
         self.__applied = False
@@ -1736,6 +1757,9 @@ class FramedDataStream(DataStream):
             s = s + f" ({self.__operator})"
         return s
 
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> FramedDataStream:
+        return FramedDataStream(copy.deepcopy(self.__data_stream), operator=copy.deepcopy(self.__operator))
+
     @property
     def data_streams(self) -> typing.Sequence[DataStream]:
         return (self.__data_stream,)
@@ -1891,6 +1915,9 @@ class SumOperator(DataStreamOperator):
 
     def __str__(self) -> str:
         return "sum"
+
+    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SumOperator:
+        return SumOperator(axis=self.__axis)
 
     @property
     def axis(self) -> typing.Optional[AxisType]:
@@ -3133,8 +3160,11 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
                 values = numpy.array([[multi_acquire_entry.exposure * control_description_exposure.multiplier]] * multi_acquire_entry.count)
                 value_controllers.append(
                     ControlCustomizationValueController(camera_value_controller, control_customization_exposure, values, None))
+            # copy the original device stream when constructing the sequence data stream. this is a workaround for
+            # the problem of sequencing complex data handler trees. without this, the low level streams send data to
+            # multiple collectors simultaneously and this causes problems with counting.
             sequence_data_stream = SequenceDataStream(
-                ActionDataStream(device_data_stream, ValueControllersActionValueController(value_controllers)),
+                ActionDataStream(copy.deepcopy(device_data_stream), ValueControllersActionValueController(value_controllers)),
                 max(1, multi_acquire_entry.count))
             data_streams.append(sequence_data_stream)
 

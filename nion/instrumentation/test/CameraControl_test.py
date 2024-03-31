@@ -1272,6 +1272,26 @@ class TestCameraControlClass(unittest.TestCase):
               ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
               ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata)]),
 
+            # five data items will be created. scan/si for each section + haadf.
+            (make_synchronized_device, True, "eels_spectrum", make_multi_acquisition_method,
+             [
+                 ((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((4, 6, 4, 512), DataAndMetadata.DataDescriptor(True, 2, 1), ensure_camera_metadata),
+                 ((2, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((2, 6, 4, 512), DataAndMetadata.DataDescriptor(True, 2, 1), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)
+             ]),
+
+            # five data items will be created. scan/si for each section + haadf.
+            (make_synchronized_device, True, "eels_image", make_multi_acquisition_method,
+             [
+                 ((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((4, 6, 4, 128, 512), DataAndMetadata.DataDescriptor(True, 2, 2), ensure_camera_metadata),
+                 ((2, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2), None),
+                 ((2, 6, 4, 128, 512), DataAndMetadata.DataDescriptor(True, 2, 2), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)
+             ]),
+
             # two data items will be created: the series and the camera view.
             (make_camera_device, False, "ronchigram", make_tableau_acquisition_method,
              [((3, 3, 1024, 1024), DataAndMetadata.DataDescriptor(False, 2, 2), ensure_camera_metadata),
@@ -1328,11 +1348,10 @@ class TestCameraControlClass(unittest.TestCase):
                  ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)
              ]),
 
-            # not supported yet; no way to represent it as a single data item.
-            # (make_synchronized_device, False, make_series_acquisition_method, [((4, 6, 4), DataAndMetadata.DataDescriptor(True, 0, 2)),
-            #                                                             ((4, 6, 4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 2, 2)),
-            #                                                             ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2))],
-            #              ensure_camera_metadata),
+            # these acquisitions are not supported yet; there is no way to represent the results as data items.
+
+            # make_synchronized_device, make_series_acquisition_method
+            # make_synchronized_device, make_tableau_acquisition_method
         ]
         for acquisition_device_fn, is_eels, camera_channeL, acquisition_method_fn, expected_count in tc:
             with self.subTest(acquisition_device_fn=acquisition_device_fn, acquisition_method_fn=acquisition_method_fn, expected_count=expected_count):
