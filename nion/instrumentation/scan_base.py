@@ -4,7 +4,6 @@ from __future__ import annotations
 import abc
 import asyncio
 import collections
-import contextlib
 import copy
 import dataclasses
 import datetime
@@ -38,6 +37,7 @@ from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
+from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
@@ -2267,30 +2267,30 @@ class ScanDataStream(Acquisition.DataStream):
 
         self.__started = False
 
-        def update_data(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-            # when data arrives here, it will be part of the overall data item, even if it is only a partial
-            # acquire of the data item. so the buffer data shape will reflect the overall data item.
-            if self.__started:
-                with self.__lock:
-                    channel_id = data_channel_event_args.channel_id
-                    assert channel_id
-                    channel_index = scan_hardware_source.get_channel_index(channel_id)
-                    channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, str(channel_index))
-                    # valid_rows will represent the number of valid rows within this section, not within the overall
-                    # data. so valid and available rows need to be offset by the section rect top.
-                    valid_rows = self.__section_rect.top + data_and_metadata.metadata.get("hardware_source", dict()).get("valid_rows", 0)
-                    available_rows = self.__available_rows.get(channel, self.__section_rect.top)
-                    if valid_rows > available_rows:
-                        if channel not in self.__buffers:
-                            self.__buffers[channel] = copy.deepcopy(data_and_metadata)
-                        buffer = self.__buffers[channel]
-                        assert buffer
-                        buffer_data = buffer.data
-                        assert buffer_data is not None
-                        buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
-                        self.__available_rows[channel] = valid_rows
+        self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(ReferenceCounting.weak_partial(ScanDataStream.__update_data, self))
 
-        self.__data_channel_listener = self.__scan_hardware_source.data_channel_updated_event.listen(update_data)
+    def __update_data(self, data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+        # when data arrives here, it will be part of the overall data item, even if it is only a partial
+        # acquire of the data item. so the buffer data shape will reflect the overall data item.
+        if self.__started:
+            with self.__lock:
+                channel_id = data_channel_event_args.channel_id
+                assert channel_id
+                channel_index = self.__scan_hardware_source.get_channel_index(channel_id)
+                channel = Acquisition.Channel(self.__scan_hardware_source.hardware_source_id, str(channel_index))
+                # valid_rows will represent the number of valid rows within this section, not within the overall
+                # data. so valid and available rows need to be offset by the section rect top.
+                valid_rows = self.__section_rect.top + data_and_metadata.metadata.get("hardware_source", dict()).get("valid_rows", 0)
+                available_rows = self.__available_rows.get(channel, self.__section_rect.top)
+                if valid_rows > available_rows:
+                    if channel not in self.__buffers:
+                        self.__buffers[channel] = copy.deepcopy(data_and_metadata)
+                    buffer = self.__buffers[channel]
+                    assert buffer
+                    buffer_data = buffer.data
+                    assert buffer_data is not None
+                    buffer_data[available_rows:valid_rows] = data_and_metadata[available_rows:valid_rows]
+                    self.__available_rows[channel] = valid_rows
 
     @property
     def scan_size(self) -> Geometry.IntSize:
