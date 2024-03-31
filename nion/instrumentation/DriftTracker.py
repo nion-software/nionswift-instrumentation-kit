@@ -436,10 +436,6 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
     def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         return list()
 
-    def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
-        print(f"{type(self)} cannot build data handler.")
-        return False
-
 
 def run() -> None:
     Registry.register_component(DriftTracker(), {"drift_tracker"})

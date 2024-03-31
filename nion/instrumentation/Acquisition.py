@@ -532,12 +532,8 @@ class DataStream:
 
     def connect_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
         if self.__unprocessed_data_handler != data_handler:
-            assert not self.__unprocessed_data_handler, f"{type(self)}"
+            assert not self.__unprocessed_data_handler, f"{type(self)} {self.__unprocessed_data_handler} {data_handler}"
             self.__unprocessed_data_handler = data_handler
-
-    @property
-    def has_connected_data_handler(self) -> bool:
-        return self.__data_handler is not None or self.__unprocessed_data_handler is not None
 
     def build_data_handler(self, data_handler: DataHandler) -> bool:
         # build a new data handler for this data stream and connect its output to data_handler.
@@ -546,10 +542,11 @@ class DataStream:
         # in that case, the data_handler should be connected to the unprocessed stream directly.
         return self._build_data_handler(data_handler)
 
-    def _get_serial_data_handler(self) -> SerialDataHandler:
+    def _get_serial_data_handler(self) -> typing.Tuple[SerialDataHandler, bool]:
         if not self.__serial_data_handler:
             self.__serial_data_handler = SerialDataHandler()
-        return self.__serial_data_handler
+            return self.__serial_data_handler, True
+        return self.__serial_data_handler, False
 
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
         print(f"{type(self)} cannot build data handler.")
@@ -1035,9 +1032,9 @@ class CollectedDataStream(DataStream):
         # connected to multiple collection data handlers, with the common serial data stream stored in the (common)
         # input data stream.
         count = expand_shape(self.__collection_shape)
-        serial_data_handler = self.__data_stream._get_serial_data_handler()
+        serial_data_handler, created = self.__data_stream._get_serial_data_handler()
         serial_data_handler.add_data_handler(collection_data_handler, count)
-        if not self.__data_stream.has_connected_data_handler:
+        if created:
             if not self.__data_stream.build_data_handler(serial_data_handler):
                 self.__data_stream.connect_unprocessed_data_handler(serial_data_handler)
         return True

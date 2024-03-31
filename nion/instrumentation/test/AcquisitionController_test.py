@@ -248,5 +248,82 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual((si_size.height, si_size.width, 512), list(acquisition_data.values())[3].data_shape)
             self.assertEqual((context_pixel_size.height, context_pixel_size.width), list(acquisition_data.values())[4].data_shape)
 
+    def test_si_with_drift_correction_within_scan(self) -> None:
+        # ensure test fails for case where drift log does not show up due to event loop issue
+        # ensure test fails if drift viewer is not updated or updates the wrong number of times
+
+        with self.__test_context(is_eels=True) as test_context:
+            acquisition_factory = Acquisition.acquisition_procedure_factory()
+
+            # define the acquisition device (scan) and camera (eels).
+            scan_device = acquisition_factory.create_scan_device()
+            eels_device = acquisition_factory.create_eels_device()
+
+            # define the acquisition camera (eels) parameters
+            eels_si_parameters = acquisition_factory.create_camera_parameters(exposure_ms=10.0)
+
+            # define the camera (eels 2d) acquisition parameters and acquisition step for the si acquisition.
+            # add a processing channel for summing the eels 2d into a eels 1d spectrum.
+            sum_processing = acquisition_factory.create_processing_channel(
+                processing_id="sum",
+                processing_parameters={"axis": 0})
+            eels_si_acquisition_parameters = acquisition_factory.create_device_acquisition_parameters(
+                device=eels_device,
+                device_parameters=eels_si_parameters,
+                processing_channels=(sum_processing,))
+
+            # define the si acquisition scan parameters
+            si_size: typing.Final = Geometry.IntSize(6, 4)
+            scan_si_parameters = acquisition_factory.create_scan_parameters(
+                pixel_size=si_size,
+                # TODO: subscan parameters
+                fov_nm=100,
+                rotation_rad=0.0
+            )
+
+            # define the scan acquisition parameters and acquisition step for the si acquisition.
+            # acquire two channels (typically HAADF and MAADF).
+            scan_channel_specifier = acquisition_factory.create_device_channel_specifier(channel_index=0)
+            scan_si_acquisition_parameters = acquisition_factory.create_device_acquisition_parameters(
+                device=scan_device,
+                device_parameters=scan_si_parameters,
+                device_channels=(scan_channel_specifier,)
+            )
+
+            # define the synchronized scan/eels si acquisition. this is a multi device acquisition step driven by
+            # the camera. the scan is a secondary device.
+            drift_parameters = acquisition_factory.create_drift_parameters(
+                drift_correction_enabled=True,
+                drift_interval_lines=2,
+                drift_channel=scan_channel_specifier,
+                drift_region=Geometry.FloatRect.from_tlhw(0.1, 0.7, 0.2, 0.2)
+            )
+            si_acquisition = acquisition_factory.create_multi_device_acquisition_step(
+                primary_device_acquisition_parameters=eels_si_acquisition_parameters,
+                secondary_device_acquisition_parameters=[scan_si_acquisition_parameters],
+                drift_parameters=drift_parameters
+            )
+
+            # define the acquisition object.
+            acquisition_procedure = acquisition_factory.create_acquisition_procedure(
+                devices=[scan_device, eels_device],
+                steps=(si_acquisition,))
+
+            # import pprint
+            # import dataclasses
+            # pprint.pprint(dataclasses.asdict(acquisition_procedure))
+
+            # create an acquisition controller. this is the object that will perform the acquisition.
+            # then, use the acquisition controller to perform the immediate acquisition.
+            acquisition_controller = acquisition_factory.create_acquisition_controller(acquisition_procedure=acquisition_procedure)
+            acquisition_data = acquisition_controller.acquire_immediate()
+
+            # check the results.
+            self.assertEqual(2, len(acquisition_data))
+            self.assertEqual((si_size.height, si_size.width), list(acquisition_data.values())[0].data_shape)
+            self.assertEqual((si_size.height, si_size.width, 512), list(acquisition_data.values())[1].data_shape)
+
 # TODO: drift correction (using streams to represent drift measurements)
+# TODO: drift tracker output when using full scans (scan sequence)
+# TODO: test packet processing ordering (threads can complete out of order)
 # TODO: 4D STEM
