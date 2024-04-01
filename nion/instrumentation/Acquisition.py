@@ -2126,8 +2126,14 @@ class ContainerDataStream(DataStream):
     def _finish_stream(self) -> None:
         self.__data_stream.finish_stream()
 
+    def _get_serial_data_handler(self) -> typing.Tuple[SerialDataHandler, bool]:
+        return self.__data_stream._get_serial_data_handler()
+
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
         return self.data_stream.build_data_handler(data_handler)
+
+    def connect_unprocessed_data_handler(self, data_handler: DataHandler) -> None:
+        self.data_stream.connect_unprocessed_data_handler(data_handler)
 
 
 class ActionValueControllerLike(typing.Protocol):
