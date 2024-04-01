@@ -17,6 +17,7 @@ import time
 import typing
 import traceback
 import uuid
+import weakref
 
 # typing
 # None
@@ -2915,8 +2916,8 @@ class CameraDataStream(Acquisition.DataStream):
         assert self.__camera_device_stream_delegate
         self.__camera_device_stream_delegate.advance_stream()
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         assert self.__camera_device_stream_delegate
         partial_data = self.__camera_device_stream_delegate.get_next_data()
         if partial_data:
@@ -2957,12 +2958,12 @@ class CameraDataStream(Acquisition.DataStream):
                                                                     count,
                                                                     source_slice,
                                                                     Acquisition.DataStreamStateEnum.COMPLETE)
-                data_stream_events.append(data_stream_event)
+                raw_data_stream_events.append((weakref.ref(self), data_stream_event))
                 # total_count is the total for this entire stream.
                 self.__progress = valid_index / self.__total_count
             self.__last_index = valid_index
         self.__camera_device_stream_delegate.continue_data(partial_data)
-        return data_stream_events
+        return raw_data_stream_events
 
     def wrap_in_sequence(self, length: int) -> Acquisition.DataStream:
         return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)

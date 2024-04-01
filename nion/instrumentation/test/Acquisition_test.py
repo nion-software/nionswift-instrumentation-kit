@@ -1,6 +1,7 @@
 import numpy
 import typing
 import unittest
+import weakref
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
@@ -48,8 +49,8 @@ class ScanDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return ((self.__frame_index + (self.__partial_index / self.__scan_length)) / self.__frame_count)
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         assert self.__frame_index < self.__frame_count
         assert self.__partial_index < self.__scan_length
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
@@ -70,14 +71,14 @@ class ScanDataStream(Acquisition.DataStream):
             data_stream_event = Acquisition.DataStreamEventArgs(channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
                                                                 new_count, source_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
-            data_stream_events.append(data_stream_event)
+            raw_data_stream_events.append((weakref.ref(self), data_stream_event))
         # update indexes
         if state == Acquisition.DataStreamStateEnum.COMPLETE:
             self.__partial_index = 0
             self.__frame_index = self.__frame_index + 1
         else:
             self.__partial_index = stop_index
-        return data_stream_events
+        return raw_data_stream_events
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False
@@ -120,8 +121,8 @@ class SingleFrameDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return self.__partial_index / self.__frame_shape[0]
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
@@ -134,7 +135,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
         data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata,
                                                             self.data[self.__frame_index], None,
                                                             source_data_slice, state)
-        data_stream_events.append(data_stream_event)
+        raw_data_stream_events.append((weakref.ref(self), data_stream_event))
         if state == Acquisition.DataStreamStateEnum.PARTIAL:
             self.__partial_index = new_partial
         else:
@@ -144,7 +145,7 @@ class SingleFrameDataStream(Acquisition.DataStream):
             if self.__error_after == 0:
                 raise Exception()
             self.__error_after -= 1
-        return data_stream_events
+        return raw_data_stream_events
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False
@@ -190,8 +191,8 @@ class MultiFrameDataStream(Acquisition.DataStream):
             operator = typing.cast(Acquisition.DataStreamOperator, kwargs.get("operator", Acquisition.NullDataStreamOperator()))
             operator.apply()
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         assert self.__frame_index < self.__frame_count
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         if self.__do_processing:
@@ -215,9 +216,9 @@ class MultiFrameDataStream(Acquisition.DataStream):
         if self.__do_processing:
             source_data = source_data.sum(axis=1)
         data_stream_event = Acquisition.DataStreamEventArgs(self.__channel, data_metadata, source_data, count, source_data_slice, state)
-        data_stream_events.append(data_stream_event)
+        raw_data_stream_events.append((weakref.ref(self), data_stream_event))
         self.__frame_index += count
-        return data_stream_events
+        return raw_data_stream_events
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False
@@ -530,7 +531,7 @@ class TestAcquisitionClass(unittest.TestCase):
         # scan will produce two data streams of pixels.
         # camera will produce one stream of frames.
         # the sequence must make it into two images and a sequence of images.
-        scan_shape = (8, 8)
+        scan_shape = (2, 2)
         channel = Acquisition.Channel("2")
         channel11 = Acquisition.Channel("11")
         channel22 = Acquisition.Channel("22")

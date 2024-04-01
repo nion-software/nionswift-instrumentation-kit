@@ -11,6 +11,7 @@ import numpy
 import numpy.typing
 import threading
 import typing
+import weakref
 
 # local libraries
 from nion.data import Calibration
@@ -360,7 +361,8 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
         # call this last so that we measure drift before preparing the scan section (which will utilize the measured drift).
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list(super()._get_raw_data_stream_events())
         while self.__pending_drift_xdata:
             drift_xdata = self.__pending_drift_xdata.pop(0)
             data_stream_event = Acquisition.DataStreamEventArgs(
@@ -370,7 +372,8 @@ class DriftCorrectionDataStream(Acquisition.ContainerDataStream):
                 None,
                 (slice(0, drift_xdata.data_shape[0]), slice(None)),
                 Acquisition.DataStreamStateEnum.COMPLETE)
-        return super()._send_next()
+            raw_data_stream_events.append((weakref.ref(self), data_stream_event))
+        return raw_data_stream_events
 
 
 class DriftCorrectionDataStreamFunctor(Acquisition.DataStreamFunctor):

@@ -21,6 +21,7 @@ import threading
 import time
 import typing
 import uuid
+import weakref
 
 # local libraries
 from nion.data import Calibration
@@ -2181,8 +2182,8 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return self.__sent_count / self.__count
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         start_time = time.time()
         MAX_TIME = 0.1
         while self.__scan_hardware_source.get_sequence_buffer_count() > 0 and self.__sent_count < self.__count and not self.__is_aborted and time.time() - start_time < MAX_TIME:
@@ -2204,8 +2205,8 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
                                                                     1,
                                                                     source_slice,
                                                                     state)
-                data_stream_events.append(data_stream_event)
-        return data_stream_events
+                raw_data_stream_events.append((weakref.ref(self), data_stream_event))
+        return raw_data_stream_events
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False
@@ -2375,8 +2376,8 @@ class ScanDataStream(Acquisition.DataStream):
     def _progress(self) -> float:
         return sum(self.__sent_rows.values()) / self.__scan_size[0] / len(self.channels)
 
-    def _send_next(self) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
-        data_stream_events = list[Acquisition.DataStreamEventArgs]()
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         with self.__lock:
             for channel in self.__buffers.keys():
                 sent_rows = self.__sent_rows.get(channel, self.__section_rect.top)
@@ -2410,9 +2411,9 @@ class ScanDataStream(Acquisition.DataStream):
                                                                             source_slice,
                                                                             Acquisition.DataStreamStateEnum.COMPLETE)
                         if stop - start > 0:
-                            data_stream_events.append(data_stream_event)
+                            raw_data_stream_events.append((weakref.ref(self), data_stream_event))
                             self.__sent_rows[channel] = available_rows
-        return data_stream_events
+        return raw_data_stream_events
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
         return False

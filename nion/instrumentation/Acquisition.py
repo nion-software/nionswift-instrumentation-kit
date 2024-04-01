@@ -117,6 +117,7 @@ import gettext
 import logging
 import time
 import typing
+import weakref
 
 import numpy
 import numpy.typing
@@ -521,7 +522,7 @@ class DataStream:
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
-        print(f".{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}]")
+        print(f".{indent} {self} [{self.channels} {self.data_shapes} {self.data_types}] {self.is_finished}")
         for data_stream in self.data_streams:
             data_stream._print(indent + "  ")
 
@@ -611,24 +612,43 @@ class DataStream:
     def _abort_stream(self) -> None:
         pass
 
-    def send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        """Send next data."""
+    def get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        """Return raw data stream events."""
+        if not self.is_finished and not self.is_aborted:
+            return self._get_raw_data_stream_events()
+        return list()
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return list()
+
+    def process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        """Process the raw stream events for counting."""
         data_stream_events = list[DataStreamEventArgs]()
         if not self.is_finished and not self.is_aborted:
             for channel in self.input_channels:
                 assert self.__sequence_indexes.get(channel, 0) <= self.__sequence_counts.get(channel, self.__sequence_count)
-            next_data_stream_events = self._send_next()
+
+            next_data_stream_events = list(self._process_raw_stream_events(raw_data_stream_events))
+
+            for data_stream_ref, data_stream_event in raw_data_stream_events:
+                if data_stream_ref() == self:
+                    next_data_stream_events.append(data_stream_event)
+
             for data_stream_event in next_data_stream_events:
-                if self.__unprocessed_data_handler:
-                    self.__unprocessed_data_handler.handle_data_available(data_stream_event)
-                processed_data_stream_events = self._process_data_stream_event(data_stream_event)
-                for processed_data_stream_event in processed_data_stream_events:
-                    self.handle_data_available(processed_data_stream_event)
-                    data_stream_events.append(processed_data_stream_event)
+                if data_stream_event.channel in self.input_channels:
+                    processed_data_stream_events = self._process_data_stream_event(data_stream_event)
+                    for processed_data_stream_event in processed_data_stream_events:
+                        self.handle_data_available(processed_data_stream_event)
+                        data_stream_events.append(processed_data_stream_event)
         return data_stream_events
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return list()
+
+    def send_raw_data_stream_event_to_data_handler(self, data_stream_event: DataStreamEventArgs) -> None:
+        """Process raw data stream event by sending it to the data handler."""
+        if self.__unprocessed_data_handler:
+            self.__unprocessed_data_handler.handle_data_available(data_stream_event)
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         return [data_stream_event]
@@ -805,8 +825,11 @@ class CollectedDataStream(DataStream):
         progress_list = list(self.__indexes.get(c, 0) / count for c in self.channels)
         return sum(progress_list) / len(self.channels)
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_stream.send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_stream.get_raw_data_stream_events()
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         # grab the current collection index to be used to update the collection list of state metadata.
@@ -1107,11 +1130,17 @@ class CombinedDataStream(DataStream):
         # return the average of combined streams progress
         return sum(data_stream.progress for data_stream in self.__data_streams) / len(self.__data_streams)
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         data_stream_events = list[DataStreamEventArgs]()
         for data_stream in self.__data_streams:
-            data_stream_events.extend(data_stream.send_next())
+            data_stream_events.extend(data_stream.process_raw_stream_events(raw_data_stream_events))
         return data_stream_events
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]()
+        for data_stream in self.__data_streams:
+            raw_data_stream_events.extend(data_stream.get_raw_data_stream_events())
+        return raw_data_stream_events
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         for data_stream in self.__data_streams:
@@ -1210,8 +1239,11 @@ class StackedDataStream(DataStream):
             return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
         return 0.0
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_streams[self.__current_index].send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_streams[self.__current_index].process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_streams[self.__current_index].get_raw_data_stream_events()
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_available(data_stream_event)
@@ -1325,8 +1357,11 @@ class SequentialDataStream(DataStream):
         # return the average of combined streams progress
         return ((self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count) if self.__sequence_count > 0 else .0
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_streams[self.__current_index].send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_streams[self.__current_index].process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_streams[self.__current_index].get_raw_data_stream_events()
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_available(data_stream_event)
@@ -1791,8 +1826,11 @@ class FramedDataStream(DataStream):
     def _progress(self) -> float:
         return self.__data_stream.progress
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_stream.send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_stream.get_raw_data_stream_events()
 
     def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_available(data_stream_event)
@@ -2111,8 +2149,11 @@ class ContainerDataStream(DataStream):
     def _abort_stream(self) -> None:
         self.__data_stream.abort_stream()
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_stream.send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_stream.get_raw_data_stream_events()
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__data_stream.prepare_stream(stream_args, index_stack, **kwargs)
@@ -2215,8 +2256,8 @@ class ActionDataStream(ContainerDataStream):
         self.__delegate.finish()
         super()._finish_stream()
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        data_stream_events = super()._send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        data_stream_events = super()._process_raw_stream_events(raw_data_stream_events)
         for data_stream_event in data_stream_events:
             metadata = dict(data_stream_event.data_metadata.metadata)
             metadata["action_state"] = copy.deepcopy(self.__action_state)
@@ -2262,8 +2303,11 @@ class MonitorDataStream(DataStream):
     def _progress(self) -> float:
         return self.__data_stream.progress
 
-    def _send_next(self) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_stream.send_next()
+    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
+        return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
+
+    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
+        return self.__data_stream.get_raw_data_stream_events()
 
     def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
@@ -2860,7 +2904,12 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             while not data_stream.is_finished and not data_stream.is_aborted:
                 # progress checking is for tests and self-consistency
                 pre_progress = data_stream.progress
-                data_stream.send_next()
+                raw_data_stream_events = data_stream.get_raw_data_stream_events()
+                for data_stream_ref, raw_data_stream_event in raw_data_stream_events:
+                    if data_stream_ := data_stream_ref():
+                        if not data_stream_.is_finished and not data_stream_.is_aborted:
+                            data_stream_.send_raw_data_stream_event_to_data_handler(raw_data_stream_event)
+                data_stream.process_raw_stream_events(raw_data_stream_events)
                 post_progress = data_stream.progress
                 data_stream.advance_stream()
                 next_progress = data_stream.progress
