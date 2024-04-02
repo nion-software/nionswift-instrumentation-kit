@@ -590,7 +590,15 @@ class DataStream:
 
         The stream is finished if all channels have sent the number of items in their sequence.
         """
-        return all(self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count) for channel in self.input_channels)
+        return all(self._is_channel_finished(channel) for channel in self.input_channels)
+
+    def _is_channel_finished(self, channel: Channel) -> bool:
+        # return True if the channel has sent the number of items in its sequence.
+        # subclasses may in limited cases override this to work around counting issues concerning side bands of
+        # data such as a sequence also producing summed data. overriding this should be a warning sign and the
+        # probable long term solution should be to fix the counting issue and more completely separate the data
+        # handlers from the streams.
+        return self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count)
 
     @property
     def progress(self) -> float:
@@ -1046,7 +1054,7 @@ class CollectedDataStream(DataStream):
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
         collection_data_handler = self._get_data_handler()
         # send the result of the collection data handler to data_handler
-        collection_data_handler.connect_data_handler(data_handler)
+        collection_data_handler.connect_data_handler(self._get_target_data_handler(data_handler))
         # ask the child data stream build its data handler and send it to the collection data handler. the collected
         # data stream uses a trick (hopefully temporary) of asking the input data stream to supply a serial data
         # handler; then this collected stream feeds the serial data handler into the collection_data_handler and asks
@@ -1061,7 +1069,15 @@ class CollectedDataStream(DataStream):
                 self.__data_stream.connect_unprocessed_data_handler(serial_data_handler)
         return True
 
+    def _get_target_data_handler(self, data_handler: DataHandler) -> DataHandler:
+        # subclass (SequenceDataStream) can override this to insert a more complex data handler network between
+        # the data handlers feeding the collection and the output data handler, useful for providing the sequence
+        # summing feature. this is a temporary solution until the data handlers are more completely separated from
+        # the data streams.
+        return data_handler
+
     def _get_data_handler(self) -> DataHandler:
+        # subclass (SequenceDataStream) can override this to provide a more specific data handler for its needs.
         return CollectionDataHandler(self.collection_shape, self.collection_calibrations)
 
 
@@ -1070,12 +1086,43 @@ class SequenceDataStream(CollectedDataStream):
 
     This is a subclass of CollectedDataStream.
     """
-    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None) -> None:
+    def __init__(self, data_stream: DataStream, count: int, calibration: typing.Optional[Calibration.Calibration] = None, *, include_sum: bool = False) -> None:
         calibration_ = calibration or Calibration.Calibration()
         super().__init__(data_stream, (count,), (calibration_,))
+        self.__include_sum = include_sum
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SequenceDataStream:
         return SequenceDataStream(copy.deepcopy(self.data_streams[-1]), copy.deepcopy(self.collection_shape[-1]), copy.deepcopy(self.collection_calibrations[-1]))
+
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        channels = list(super().channels)
+        if self.__include_sum:
+            for channel in list(channels):
+                channels.append(Channel(*channel.segments, "sum"))
+        return tuple(channels)
+
+    def _is_channel_finished(self, channel: Channel) -> bool:
+        if channel.segments[-1] == "sum":
+            return True
+        return super()._is_channel_finished(channel)
+
+    def _get_info(self, channel: Channel) -> DataStreamInfo:
+        if channel.segments[-1] == "sum":
+            data_stream_info = super()._get_info(Channel(*channel.segments[:-1]))
+            data_metadata = data_stream_info.data_metadata
+            return DataStreamInfo(DataAndMetadata.DataMetadata(
+                (data_metadata.data_shape[1:], data_metadata.data_dtype),
+                data_metadata.intensity_calibration,
+                data_metadata.dimensional_calibrations[1:],
+                data_metadata.metadata,
+                data_metadata.timestamp,
+                DataAndMetadata.DataDescriptor(False, data_metadata.collection_dimension_count, data_metadata.datum_dimension_count),
+                data_metadata.timezone,
+                data_metadata.timezone_offset
+            ), 0)
+        else:
+            return super()._get_info(channel)
 
     def _get_new_data_descriptor(self, data_metadata: DataAndMetadata.DataMetadata) -> DataAndMetadata.DataDescriptor:
         # scalar data is not supported. and the data must not be a sequence already.
@@ -1086,6 +1133,16 @@ class SequenceDataStream(CollectedDataStream):
         collection_dimension_count = data_metadata.collection_dimension_count
         datum_dimension_count = data_metadata.datum_dimension_count
         return DataAndMetadata.DataDescriptor(True, collection_dimension_count, datum_dimension_count)
+
+    def _get_target_data_handler(self, data_handler: DataHandler) -> DataHandler:
+        if self.__include_sum:
+            accumulated_framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()))
+            accumulated_framed_data_handler.connect_data_handler(data_handler)
+            accumulated_data_handler = AccumulatedDataHandler(True)
+            accumulated_data_handler.connect_data_handler(accumulated_framed_data_handler)
+            return SplittingDataHandler((data_handler, accumulated_data_handler))
+        else:
+            return data_handler
 
     def _get_data_handler(self) -> DataHandler:
         count = self.collection_shape[-1]
@@ -1733,7 +1790,7 @@ class Framer:
             else:
                 index = self.__indexes.get(channel, 0)
             dest_slice = slice(index, index + source_count)
-            assert index + source_count <= flat_shape[0], f"{index=} + {source_count=} <= {flat_shape[0]=}"
+            assert index + source_count <= flat_shape[0], f"{index=} + {source_count=} <= {flat_shape[0]=}; {channel=}"
             self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
             # proceed
             index = index + source_count
@@ -2428,6 +2485,16 @@ class NullDataHandler(DataHandler):
         self.send_packet(packet)
 
 
+class SplittingDataHandler(DataHandler):
+    def __init__(self, data_handlers: typing.Sequence[DataHandler]) -> None:
+        super().__init__()
+        self.__data_handlers = list(data_handlers)
+
+    def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        for data_handler in self.__data_handlers:
+            data_handler.handle_data_available(packet)
+
+
 class SerialDataHandler(DataHandler):
     def __init__(self) -> None:
         super().__init__()
@@ -2822,10 +2889,11 @@ class SequentialDataHandler(DataHandler):
 
 
 class AccumulatedDataHandler(DataHandler):
-    def __init__(self) -> None:
+    def __init__(self, do_rename: bool = False) -> None:
         super().__init__()
         self.__data_channel = DataAndMetadataDataChannel()
         self.__dest_indexes = dict[Channel, int]()
+        self.__do_rename = do_rename
 
     def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         count = data_stream_event.count
@@ -2863,7 +2931,8 @@ class AccumulatedDataHandler(DataHandler):
                                             data_stream_event.source_slice[1:], dest_slice, data_metadata)
         data_channel_data = self.__data_channel.get_data(channel).data
         assert data_channel_data is not None
-        new_data_stream_event = DataStreamEventArgs(channel, data_metadata,
+        new_channel = channel if not self.__do_rename else Channel(*channel.segments, "sum")
+        new_data_stream_event = DataStreamEventArgs(new_channel, data_metadata,
                                                     data_channel_data, None, new_source_slice,
                                                     data_stream_event.state)
         new_data_stream_event.reset_frame = dest_slice.start == 0
@@ -3019,6 +3088,7 @@ class _MultiSectionLike(typing.Protocol):
     offset: float
     exposure: float
     count: int
+    include_sum: bool
 
 
 class AcquisitionDeviceLike(typing.Protocol):
@@ -3220,7 +3290,7 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
             # multiple collectors simultaneously and this causes problems with counting.
             sequence_data_stream = SequenceDataStream(
                 ActionDataStream(copy.deepcopy(device_data_stream), ValueControllersActionValueController(value_controllers)),
-                max(1, multi_acquire_entry.count))
+                max(1, multi_acquire_entry.count), include_sum=multi_acquire_entry.include_sum)
             data_streams.append(sequence_data_stream)
 
         # create a sequential data stream from the section data streams.
@@ -3230,7 +3300,9 @@ class MultipleAcquisitionMethod(AcquisitionMethodLike):
         # for each index.
         channel_names = dict(device_data_stream.channel_names)
         for channel in sequential_data_stream.channels:
-            channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}", channel_names[Channel(*channel.segments[1:])]))
+            channel_ = Channel(*channel.segments[1:])
+            channel_name = channel_names.get(channel_, "Sum")
+            channel_names[channel] = " ".join((f"{int(channel.segments[0]) + 1} / {str(len(data_streams))}", channel_name))
         sequential_data_stream.channel_names = channel_names
         sequential_data_stream.title = _("Multiple")
         return sequential_data_stream

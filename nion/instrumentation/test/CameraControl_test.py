@@ -123,8 +123,20 @@ def make_multi_acquisition_method() -> Acquisition.AcquisitionMethodLike:
         offset: float
         exposure: float
         count: int
+        include_sum: bool
 
-    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4), MultiSection(5.0, 0.05, 2)])
+    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4, False), MultiSection(5.0, 0.05, 2, False)])
+
+
+def make_multi_acquisition_with_sum_method() -> Acquisition.AcquisitionMethodLike:
+    @dataclasses.dataclass
+    class MultiSection:
+        offset: float
+        exposure: float
+        count: int
+        include_sum: bool
+
+    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4, True), MultiSection(5.0, 0.05, 2, False)])
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -1271,6 +1283,15 @@ class TestCameraControlClass(unittest.TestCase):
               ((2, 128, 512), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
               ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
               ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata)]),
+
+            # data items: first multi-output (sequence), first multi-output (sum), second multi-output (sequence), camera view
+            (make_camera_device, False, "ronchigram", make_multi_acquisition_with_sum_method,
+             [
+                 ((4, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+                 ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+                 ((2, 1024, 1024), DataAndMetadata.DataDescriptor(True, 0, 2), ensure_camera_metadata),
+                 ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata)
+             ]),
 
             # five data items will be created. scan/si for each section + haadf.
             (make_synchronized_device, True, "eels_spectrum", make_multi_acquisition_method,

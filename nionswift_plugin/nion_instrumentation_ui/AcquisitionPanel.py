@@ -644,9 +644,10 @@ class MultiAcquireEntryHandler(Declarative.Handler):
         self.item = item
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_row(
-            u.create_line_edit(text="@binding(item.offset, converter=offset_converter)", width=100),
-            u.create_line_edit(text="@binding(item.exposure, converter=exposure_converter)", width=100),
-            u.create_line_edit(text="@binding(item.count, converter=count_converter)", width=100),
+            u.create_line_edit(text="@binding(item.offset, converter=offset_converter)", width=86),
+            u.create_line_edit(text="@binding(item.exposure, converter=exposure_converter)", width=86),
+            u.create_line_edit(text="@binding(item.count, converter=count_converter)", width=86),
+            u.create_check_box(checked="@binding(item.include_sum)", width=42),
             u.create_stretch(),
             spacing=8
         )
@@ -675,9 +676,10 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_row(
-                u.create_label(text=_("Offset"), width=100),
-                u.create_label(text=_("Exposure"), width=100),
-                u.create_label(text=_("Frames"), width=100),
+                u.create_label(text=_("Offset"), width=86),
+                u.create_label(text=_("Exposure"), width=86),
+                u.create_label(text=_("Frames"), width=86),
+                u.create_label(text=_("Sum"), width=42),
                 u.create_stretch(),
                 spacing=8
             ),
@@ -1508,6 +1510,7 @@ MultipleAcquireEntrySchema = Schema.entity("multi_acquire_entry", None, None, {
     "offset": Schema.prop(Schema.FLOAT),
     "exposure": Schema.prop(Schema.FLOAT),
     "count": Schema.prop(Schema.INT),
+    "include_sum": Schema.prop(Schema.BOOLEAN),
 })
 
 Schema.entity("acquisition_method_component_multiple_acquire", AcquisitionMethodSchema, None, {
