@@ -1173,6 +1173,11 @@ class CameraDisplayPanelController:
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
 
+    # for testing
+    @property
+    def _show_processed_data(self) -> bool:
+        return self.__show_processed_checkbox is not None and self.__show_processed_checkbox.check_state == "checked"
+
     def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
         d["hardware_source_id"] = self.__hardware_source_id
         if self.__show_processed_checkbox:
@@ -1203,6 +1208,46 @@ _component_registered_listener: typing.Optional[Event.EventListener] = None
 _component_unregistered_listener: typing.Optional[Event.EventListener] = None
 
 
+class CameraDisplayPanelControllerFactory:
+    def __init__(self, hardware_source: HardwareSource.HardwareSource) -> None:
+        self.hardware_source = hardware_source
+        self.priority = 2
+
+    def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
+        # return a list of actions that have been added to the menu.
+        assert isinstance(self.hardware_source, camera_base.CameraHardwareSource)
+        def switch_to_live_controller(hardware_source: camera_base.CameraHardwareSource) -> None:
+            d = {"type": "image", "controller_type": CameraDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
+            if selected_display_panel:
+                selected_display_panel.change_display_panel_content(d)
+
+        action = display_type_menu.add_menu_item(self.hardware_source.display_name, functools.partial(switch_to_live_controller, self.hardware_source))
+        display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
+        action.checked = isinstance(display_panel_controller, CameraDisplayPanelController) and display_panel_controller.hardware_source_id == self.hardware_source.hardware_source_id
+        return [action]
+
+    def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[CameraDisplayPanelController]:
+        # make a new display panel controller, typically called to restore contents of a display panel.
+        # controller_type will match the type property of the display panel controller when it was saved.
+        # d is the dictionary that is saved when the display panel controller closes.
+        hardware_source_id = d.get("hardware_source_id")
+        show_processed_data = d.get("show_processed_data", False)
+        if controller_type == CameraDisplayPanelController.type and hardware_source_id == self.hardware_source.hardware_source_id:
+            return CameraDisplayPanelController(display_panel, hardware_source_id, show_processed_data)
+        return None
+
+    def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
+        # determine whether the given data item represents a live view item that could be controlled by this display
+        # panel controller. if so, return a dictionary that can be used to restore the display panel controller (in the
+        # make_new method). the camera display panel controller can control 2d live view, but also a summed version, so
+        # be sure to check for that case here by looking for the "no channel" version and the "summed" channel version.
+        if HardwareSource.matches_hardware_source(self.hardware_source.hardware_source_id, None, document_model, data_item):
+            return {"controller_type": CameraDisplayPanelController.type, "hardware_source_id": self.hardware_source.hardware_source_id}
+        if HardwareSource.matches_hardware_source(self.hardware_source.hardware_source_id, "summed", document_model, data_item):
+            return {"controller_type": CameraDisplayPanelController.type, "hardware_source_id": self.hardware_source.hardware_source_id, "show_processed_data": True}
+        return None
+
+
 def run() -> None:
     global hardware_source_added_event_listener, hardware_source_removed_event_listener
     camera_control_panels = dict()
@@ -1218,39 +1263,7 @@ def run() -> None:
             name = hardware_source.display_name + " " + _("Camera Control")
             camera_control_panels[hardware_source.hardware_source_id] = panel_id
 
-            class CameraDisplayPanelControllerFactory:
-                def __init__(self) -> None:
-                    self.priority = 2
-
-                def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
-                    # return a list of actions that have been added to the menu.
-                    assert isinstance(hardware_source, camera_base.CameraHardwareSource)
-                    def switch_to_live_controller(hardware_source: camera_base.CameraHardwareSource) -> None:
-                        d = {"type": "image", "controller_type": CameraDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
-                        if selected_display_panel:
-                            selected_display_panel.change_display_panel_content(d)
-
-                    action = display_type_menu.add_menu_item(hardware_source.display_name, functools.partial(switch_to_live_controller, hardware_source))
-                    display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
-                    action.checked = isinstance(display_panel_controller, CameraDisplayPanelController) and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
-                    return [action]
-
-                def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[CameraDisplayPanelController]:
-                    # make a new display panel controller, typically called to restore contents of a display panel.
-                    # controller_type will match the type property of the display panel controller when it was saved.
-                    # d is the dictionary that is saved when the display panel controller closes.
-                    hardware_source_id = d.get("hardware_source_id")
-                    show_processed_data = d.get("show_processed_data", False)
-                    if controller_type == CameraDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
-                        return CameraDisplayPanelController(display_panel, hardware_source_id, show_processed_data)
-                    return None
-
-                def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
-                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, document_model, data_item):
-                        return {"controller_type": CameraDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
-                    return None
-
-            DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraDisplayPanelControllerFactory())
+            DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraDisplayPanelControllerFactory(hardware_source))
 
             panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
 

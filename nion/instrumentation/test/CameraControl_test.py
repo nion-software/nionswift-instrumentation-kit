@@ -1481,6 +1481,35 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(exposure_s, CameraControlPanel.make_exposure_str(exposure, precision))
             self.assertEqual(units, CameraControlPanel.exposure_units[precision])
 
+    def test_eels_summed_controller_is_recognized_when_dropping_data_into_display_panel(self):
+        from nion.swift import DisplayPanel
+        with self.__test_context(is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            display_panel_manager = DisplayPanel.DisplayPanelManager()
+            display_panel_manager.register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraControlPanel.CameraDisplayPanelControllerFactory(hardware_source))
+            try:
+                document_controller = test_context.document_controller
+                document_model = test_context.document_model
+                state_controller = self.__create_state_controller(test_context)
+                hardware_source.start_playing()
+                try:
+                    hardware_source.get_next_xdatas_to_finish(5)
+                    state_controller.use_processed_data = True
+                finally:
+                    hardware_source.stop_playing(sync_timeout=TIMEOUT)
+                document_controller.periodic()
+                display_panel = document_controller.selected_display_panel  # arbitrary
+                c1 = display_panel_manager.detect_controller(document_model, document_model.data_items[0])
+                c2 = display_panel_manager.detect_controller(document_model, document_model.data_items[1])
+                controller1 = typing.cast(CameraControlPanel.CameraDisplayPanelController, display_panel_manager.make_display_panel_controller("camera-live", display_panel, c1))
+                controller2 = typing.cast(CameraControlPanel.CameraDisplayPanelController, display_panel_manager.make_display_panel_controller("camera-live", display_panel, c2))
+                self.assertIsInstance(controller1, CameraControlPanel.CameraDisplayPanelController)
+                self.assertIsInstance(controller2, CameraControlPanel.CameraDisplayPanelController)
+                self.assertFalse(controller1._show_processed_data)
+                self.assertTrue(controller2._show_processed_data)
+            finally:
+                display_panel_manager.unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
+
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
 
