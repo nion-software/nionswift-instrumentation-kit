@@ -157,7 +157,7 @@ class TestAcquisitionClass(unittest.TestCase):
             self.assertEqual(1, len(acquisition_data))
             self.assertEqual((3, 3, pixel_size.height, pixel_size.width), list(acquisition_data.values())[0].data_shape)
 
-    def test_sychronized_scan_camera(self) -> None:
+    def test_synchronized_scan_camera(self) -> None:
         with self.__test_context(is_eels=True) as test_context:
             acquisition_factory = Acquisition.acquisition_procedure_factory()
 

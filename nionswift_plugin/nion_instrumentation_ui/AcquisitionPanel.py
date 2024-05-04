@@ -1750,7 +1750,7 @@ class AcquisitionController(Declarative.Handler):
             u.create_row(
                 u.create_label(text="Mode"),
                 u.create_radio_button(text="Scan", value=acquisition_modes[0], group_value="@binding(acquisition_mode_model.value)"),
-                u.create_radio_button(text="Scan Sychronized", value=acquisition_modes[1], group_value="@binding(acquisition_mode_model.value)"),
+                u.create_radio_button(text="Scan Synchronized", value=acquisition_modes[1], group_value="@binding(acquisition_mode_model.value)"),
                 u.create_radio_button(text="Camera", value=acquisition_modes[2], group_value="@binding(acquisition_mode_model.value)"),
                 u.create_stretch(),
                 spacing=8
