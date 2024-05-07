@@ -257,6 +257,7 @@ class ScanSpecifier:
             self.scan_count = max(scan_count, 1)
             self.size = 1, scan_length
             self.scan_size = Geometry.IntSize(height=1, width=scan_length)
+            self.scan_pixel_count = self.scan_size.height * self.scan_size.width
             self.drift_interval_lines = 0
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
@@ -284,6 +285,7 @@ class ScanSpecifier:
             self.scan_count = max(scan_count, 1)
             self.size = scan_height, scan_width
             self.scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
+            self.scan_pixel_count = self.scan_size.height * self.scan_size.width
             self.drift_interval_lines = drift_lines
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
@@ -311,6 +313,7 @@ class ScanSpecifier:
             self.scan_count = max(scan_count, 1)
             self.size = scan_height, scan_width
             self.scan_size = Geometry.IntSize(height=scan_height, width=scan_width)
+            self.scan_pixel_count = self.scan_size.height * self.scan_size.width
             self.drift_interval_lines = drift_lines
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
