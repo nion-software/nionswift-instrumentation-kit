@@ -16,8 +16,9 @@ from nionswift_plugin.usim import ScanDevice
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
-    def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025):
+    def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False):
         super().__init__()
+        assert not is_eels or not is_both_cameras
         logging.getLogger("acquisition").setLevel(logging.ERROR)
         HardwareSource.run()
         instrument = self.setup_stem_controller()
@@ -25,13 +26,17 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
         scan_hardware_source = self.setup_scan_hardware_source(instrument)
         camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
+        eels_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, True) if is_both_cameras else None
         HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
         self.instrument = instrument
         self.scan_hardware_source = scan_hardware_source
         self.camera_hardware_source = camera_hardware_source
+        self.eels_hardware_source = eels_hardware_source
         HardwareSource.HardwareSourceManager().register_hardware_source(self.camera_hardware_source)
+        if self.eels_hardware_source:
+            HardwareSource.HardwareSourceManager().register_hardware_source(self.eels_hardware_source)
         HardwareSource.HardwareSourceManager().register_hardware_source(self.scan_hardware_source)
         self.document_controller = self.create_document_controller(auto_close=False)
         self.document_model = self.document_controller.document_model
@@ -46,9 +51,14 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
             ex.close()
         stem_controller.unregister_event_loop()
         camera_type = self.camera_hardware_source.camera.camera_type
+        eels_type = self.eels_hardware_source.camera.camera_type if self.eels_hardware_source else None
         self.camera_hardware_source.close()
+        if self.eels_hardware_source:
+            self.eels_hardware_source.close()
         self.scan_hardware_source.close()
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
+        if self.eels_hardware_source:
+            HardwareSource.HardwareSourceManager().unregister_hardware_source(self.eels_hardware_source)
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
         Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
         DriftTracker.stop()
@@ -56,6 +66,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
         Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
         Registry.unregister_component(self.camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})
+        if self.eels_hardware_source:
+            Registry.unregister_component(self.eels_hardware_source, {"hardware_source", "camera_hardware_source", eels_type + "_camera_hardware_source"})
         HardwareSource.HardwareSourceManager()._close_instruments()
         HardwareSource.stop()
         super().close()
@@ -105,5 +117,5 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         return camera_hardware_source
 
 
-def test_context(*, is_eels: bool = False, camera_exposure: float = 0.025) -> AcquisitionTestContext:
-    return AcquisitionTestContext(is_eels=is_eels, camera_exposure=camera_exposure)
+def test_context(*, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False) -> AcquisitionTestContext:
+    return AcquisitionTestContext(is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras)

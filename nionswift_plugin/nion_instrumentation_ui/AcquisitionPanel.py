@@ -1063,7 +1063,7 @@ class CameraSettingsModel(DeviceSettingsModel):
     @channel_index.setter
     def channel_index(self, value: typing.Optional[int]) -> None:
         # map from the channel index to the channel model (channel identifier string).
-        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else "image"
+        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else (self.__channel_descriptions[0].channel_id if self.__channel_descriptions else "image")
         if channel_id != self.__camera_hardware_source_channel_model.value:
             self.__camera_hardware_source_channel_model.value = channel_id
             self.notify_property_changed("channel_index")

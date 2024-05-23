@@ -8,6 +8,7 @@ UNRELEASED
 - Add calibration provider to provide alternate display calibrations for acquired data (prelimary implementation).
 - Eliminate possible deadlock during scan view when creating data items (new project).
 - Increase precision of current readout in camera panel when current less than 10 pA.
+- Fixed issue where acquisition panel would not update properly after changing camera.
 
 22.2.0 (2024-02-04)
 -------------------
