@@ -1711,7 +1711,8 @@ class ConsoleStartupInfo:
 class ConsoleStartupComponent:
     def get_console_startup_info(self, logger: logging.Logger) -> ConsoleStartupInfo:
         logger.info("STEM Controller Console Startup (stem_controller)")
-        return ConsoleStartupInfo("stem_controller", ["stem_controller = Registry.get_component('stem_controller')"], None)
+        return ConsoleStartupInfo("stem_controller", ["from nion.utils import Registry",
+                                                      "stem_controller = Registry.get_component('stem_controller')"], None)
 
 
 Registry.register_component(ConsoleStartupComponent(), {"console-startup"})
