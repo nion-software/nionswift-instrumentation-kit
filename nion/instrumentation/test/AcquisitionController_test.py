@@ -4,11 +4,9 @@ import unittest
 import numpy
 
 from nion.instrumentation import Acquisition
-from nion.instrumentation import AcquisitionController
 from nion.instrumentation import AcquisitionLibrary
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift import Application
-from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 
@@ -16,11 +14,11 @@ from nion.utils import Geometry
 class TestAcquisitionClass(unittest.TestCase):
 
     def setUp(self) -> None:
-        TestContext.begin_leaks()
+        AcquisitionTestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
 
     def tearDown(self) -> None:
-        TestContext.end_leaks(self)
+        AcquisitionTestContext.end_leaks(self)
 
     def __test_context(self, is_eels: bool=False) -> AcquisitionTestContext.AcquisitionTestContext:
         return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=0.04)

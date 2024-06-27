@@ -23,10 +23,8 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
-from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
-from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 
 """
@@ -41,22 +39,11 @@ suite.run(result)
 class TestScanControlClass(unittest.TestCase):
 
     def setUp(self):
-        TestContext.begin_leaks()
+        AcquisitionTestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
 
     def tearDown(self) -> None:
-        self.assertEqual(0, len(Registry.get_components_by_type("hardware_source_manager")))
-        self.assertEqual(0, len(Registry.get_components_by_type("stem_controller")))
-        self.assertEqual(0, len(Registry.get_components_by_type("scan_device")))
-        self.assertEqual(0, len(Registry.get_components_by_type("scan_hardware_source")))
-        self.assertEqual(0, len(Registry.get_components_by_type("hardware_source")))
-        self.assertEqual(0, len(Registry.get_components_by_type("document_model")))
-        self.assertEqual(0, stem_controller.ScanContextController.count)
-        self.assertEqual(0, stem_controller.ProbeView.count)
-        self.assertEqual(0, stem_controller.SubscanView.count)
-        self.assertEqual(0, stem_controller.LineScanView.count)
-        self.assertEqual(0, stem_controller.DriftView.count)
-        TestContext.end_leaks(self)
+        AcquisitionTestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)

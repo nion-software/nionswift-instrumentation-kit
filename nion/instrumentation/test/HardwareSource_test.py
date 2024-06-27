@@ -9,6 +9,7 @@ import numpy
 
 from nion.data import DataAndMetadata
 from nion.instrumentation import HardwareSource
+from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
@@ -502,13 +503,13 @@ def _test_record_starts_and_finishes_in_reasonable_time(testcase, hardware_sourc
 class TestHardwareSourceClass(unittest.TestCase):
 
     def setUp(self):
-        TestContext.begin_leaks()
+        AcquisitionTestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         HardwareSource.HardwareSourceManager()._reset()
 
     def tearDown(self):
         HardwareSource.HardwareSourceManager().close()
-        TestContext.end_leaks(self)
+        AcquisitionTestContext.end_leaks(self)
 
     def __acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)

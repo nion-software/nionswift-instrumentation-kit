@@ -32,7 +32,6 @@ from nion.swift.model import DataItem
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
-from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Model
@@ -142,13 +141,13 @@ def make_multi_acquisition_with_sum_method() -> Acquisition.AcquisitionMethodLik
 class TestCameraControlClass(unittest.TestCase):
 
     def setUp(self):
-        TestContext.begin_leaks()
+        AcquisitionTestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
         self.exposure = 0.04
 
     def tearDown(self):
-        TestContext.end_leaks(self)
+        AcquisitionTestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller: DocumentController.DocumentController, hardware_source: camera_base.CameraHardwareSource) -> None:
         hardware_source.start_playing()

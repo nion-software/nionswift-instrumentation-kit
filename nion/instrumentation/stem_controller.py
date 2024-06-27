@@ -707,7 +707,7 @@ class STEMController(Observable.Observable):
         Queries the instrument for the reference setting number of a settings control.
 
         A reference setting is the setting that you would typically use for tuning and alignment of the microscope. In
-        this setting it is guaranteed that rotations, strenghts, etc. are calibrated and set up so that (automated)
+        this setting it is guaranteed that rotations, strengths, etc. are calibrated and set up so that (automated)
         procedures can work properly. There is always exactly one reference setting per settings control, because it
         is important to always align the microscope in the same setting to avoid creating diverging alignments and
         settings.

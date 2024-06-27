@@ -6,7 +6,7 @@ import weakref
 from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
-from nion.swift.test import TestContext
+from nion.instrumentation.test import AcquisitionTestContext
 from nion.utils import Geometry
 
 
@@ -252,10 +252,10 @@ class OrMask(Acquisition.MaskLike):
 class TestAcquisitionClass(unittest.TestCase):
 
     def setUp(self):
-        TestContext.begin_leaks()
+        AcquisitionTestContext.begin_leaks()
 
     def tearDown(self):
-        TestContext.end_leaks(self)
+        AcquisitionTestContext.end_leaks(self)
 
     def test_unravel_flat_slice(self):
         test_cases = [

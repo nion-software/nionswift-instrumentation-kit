@@ -1,6 +1,7 @@
 import gc
 import logging
 import typing
+import unittest
 
 from nion.instrumentation import camera_base
 from nion.instrumentation import DriftTracker
@@ -119,3 +120,25 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
 
 def test_context(*, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False) -> AcquisitionTestContext:
     return AcquisitionTestContext(is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras)
+
+
+def begin_leaks() -> None:
+    TestContext.begin_leaks()
+
+def end_leaks(test_case: unittest.TestCase) -> None:
+    test_case.assertEqual(0, len(Registry.get_components_by_type("hardware_source_manager")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("stem_controller")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("scan_device")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("camera_device")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("video_device")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("scan_hardware_source")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("camera_hardware_source")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("video_hardware_source")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("hardware_source")))
+    test_case.assertEqual(0, len(Registry.get_components_by_type("document_model")))
+    test_case.assertEqual(0, stem_controller.ScanContextController.count)
+    test_case.assertEqual(0, stem_controller.ProbeView.count)
+    test_case.assertEqual(0, stem_controller.SubscanView.count)
+    test_case.assertEqual(0, stem_controller.LineScanView.count)
+    test_case.assertEqual(0, stem_controller.DriftView.count)
+    TestContext.end_leaks(test_case)
