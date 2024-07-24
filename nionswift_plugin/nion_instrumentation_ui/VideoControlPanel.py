@@ -603,7 +603,8 @@ def run() -> None:
 
                 def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
                     # return a list of actions that have been added to the menu.
-                    def switch_to_live_controller(hardware_source: video_base.VideoHardwareSource) -> None:
+                    def switch_to_live_controller(hardware_source: HardwareSource.HardwareSource) -> None:
+                        assert isinstance(hardware_source, video_base.VideoHardwareSource)
                         d = {"type": "image", "controller_type": VideoDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
                         if selected_display_panel:
                             selected_display_panel.change_display_panel_content(d)
