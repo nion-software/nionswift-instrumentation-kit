@@ -107,7 +107,7 @@ class DriftTracker:
         self.__current_xdata: typing.Optional[DataAndMetadata.DataAndMetadata] = None
         self.__rotation = 0.0
 
-        self.__drift_data_frame: numpy.typing.NDArray[numpy.float_] = numpy.zeros((4, 0), float)
+        self.__drift_data_frame: numpy.typing.NDArray[numpy.float64] = numpy.zeros((4, 0), float)
 
         self.__total_delta_nm = Geometry.FloatSize()
 

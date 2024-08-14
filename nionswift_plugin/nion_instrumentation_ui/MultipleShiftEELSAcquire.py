@@ -135,7 +135,7 @@ class AcquireController(metaclass=Utility.Singleton):
             assert first_data is not None
 
             # Initialize an empty stack to fill with acquired data
-            image_stack_data: numpy.typing.NDArray[numpy.float_] = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
+            image_stack_data: numpy.typing.NDArray[numpy.float64] = numpy.empty((number_frames, first_data.shape[0], first_data.shape[1]), dtype=float)
 
             reference_energy = stem_controller.GetVal(energy_adjust_control)
 
