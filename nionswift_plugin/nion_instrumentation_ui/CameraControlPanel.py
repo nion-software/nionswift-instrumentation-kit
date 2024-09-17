@@ -355,14 +355,9 @@ class CameraControlStateController:
         self.acquisition_state_model.value = data_channel_event_args.data_channel_state
 
 
-class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
-
-    def __init__(self, icon_id: str) -> None:
+class ButtonCell(CanvasItem.Cell):
+    def __init__(self) -> None:
         super().__init__()
-        self.__icon_id = icon_id
-        self.wants_mouse_events = True
-        self.__mouse_inside = False
-        self.__mouse_pressed = False
         self.fill_style = "rgb(128, 128, 128)"
         self.fill_style_pressed = "rgb(64, 64, 64)"
         self.fill_style_disabled = "rgb(192, 192, 192)"
@@ -371,62 +366,26 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
         self.border_style_disabled: typing.Optional[str] = None
         self.stroke_style = "#FFF"
         self.stroke_width = 3.0
-        self.on_button_clicked: typing.Optional[typing.Callable[[], None]] = None
-        self.__size_to_content()
 
-    def close(self) -> None:
-        self.on_button_clicked = None
-        super().close()
 
-    def __size_to_content(self, horizontal_padding: typing.Optional[int] = None, vertical_padding: typing.Optional[int] = None) -> None:
-        """ Size the canvas item to the text content. """
+class IconCell(ButtonCell):
+    def __init__(self, icon_id: str) -> None:
+        super().__init__()
+        self.__icon_id = icon_id
 
-        if horizontal_padding is None:
-            horizontal_padding = 0
-
-        if vertical_padding is None:
-            vertical_padding = 0
-
-        self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18 + 2 * horizontal_padding, 18 + 2 * vertical_padding)))
-
-    def mouse_entered(self) -> bool:
-        self.__mouse_inside = True
-        self.update()
-        return True
-
-    def mouse_exited(self) -> bool:
-        self.__mouse_inside = False
-        self.update()
-        return True
-
-    def mouse_pressed(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        self.__mouse_pressed = True
-        self.update()
-        return True
-
-    def mouse_released(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        self.__mouse_pressed = False
-        self.update()
-        return True
-
-    def mouse_clicked(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        if self.enabled:
-            if self.on_button_clicked:
-                self.on_button_clicked()
-        return True
-
-    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
-        canvas_size = self.canvas_size
-        if not canvas_size:
-            return
+    def _paint_cell(self, drawing_context: DrawingContext.DrawingContext, rect: Geometry.FloatRect, style: typing.Set[str]) -> None:
+        canvas_size = rect.size
+        enabled = "disabled" not in style
+        active = "active" in style
         with drawing_context.saver():
+            drawing_context.translate(rect.left, rect.top)
             center_x = canvas_size.width * 0.5
             center_y = canvas_size.height * 0.5
             drawing_context.begin_path()
             drawing_context.move_to(center_x + 7.0, center_y)
             drawing_context.arc(center_x, center_y, 7.0, 0, 2 * math.pi)
-            if self.enabled:
-                if self.__mouse_inside and self.__mouse_pressed:
+            if enabled:
+                if active:
                     if self.fill_style_pressed:
                         drawing_context.fill_style = self.fill_style_pressed
                         drawing_context.fill()
@@ -460,73 +419,27 @@ class IconCanvasItem(CanvasItem.TextButtonCanvasItem):
             drawing_context.line_width = self.stroke_width
             drawing_context.stroke()
             drawing_context.begin_path()
-            # drawing_context.rect(0, 0, canvas_size.height, canvas_size.width)
-            # drawing_context.stroke_style = "#F00"
-            # drawing_context.line_width = 1.0
-            # drawing_context.stroke()
 
 
-class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
-
+class CharCell(ButtonCell):
     def __init__(self, char: str) -> None:
         super().__init__()
         self.__char = char
-        self.wants_mouse_events = True
-        self.__mouse_inside = False
-        self.__mouse_pressed = False
-        self.fill_style = "rgb(255, 255, 255)"
-        self.fill_style_pressed = "rgb(128, 128, 128)"
-        self.fill_style_disabled = "rgb(192, 192, 192)"
-        self.border_style = "rgb(192, 192, 192)"
-        self.border_style_pressed = "rgb(128, 128, 128)"
-        self.border_style_disabled = "rgb(192, 192, 192)"
-        self.stroke_style = "#000"
-        self.border_enabled = False
-        self.on_button_clicked : typing.Optional[typing.Callable[[], None]] = None
 
-    def close(self) -> None:
-        self.on_button_clicked = None
-        super().close()
-
-    def mouse_entered(self) -> bool:
-        self.__mouse_inside = True
-        self.update()
-        return True
-
-    def mouse_exited(self) -> bool:
-        self.__mouse_inside = False
-        self.update()
-        return True
-
-    def mouse_pressed(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        self.__mouse_pressed = True
-        self.update()
-        return True
-
-    def mouse_released(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        self.__mouse_pressed = False
-        self.update()
-        return True
-
-    def mouse_clicked(self, x: int, y: int, modifiers: UserInterface.KeyboardModifiers) -> bool:
-        if self.enabled:
-            if callable(self.on_button_clicked):
-                self.on_button_clicked()
-        return True
-
-    def _repaint(self, drawing_context: DrawingContext.DrawingContext) -> None:
-        canvas_size = self.canvas_size
-        if not canvas_size:
-            return
+    def _paint_cell(self, drawing_context: DrawingContext.DrawingContext, rect: Geometry.FloatRect, style: typing.Set[str]) -> None:
+        canvas_size = rect.size
+        enabled = "disabled" not in style
+        active = "active" in style
         with drawing_context.saver():
+            drawing_context.translate(rect.left, rect.top)
             center_x = int(canvas_size.width * 0.5)
             center_y = int(canvas_size.height * 0.5)
             drawing_context.begin_path()
             height = 18 if sys.platform == "win32" else 20
             text_base = 4 if sys.platform == "win32" else 6
             drawing_context.round_rect(center_x - 7.5, center_y - 9.5, 14.0, height, 2.0)
-            if self.enabled:
-                if self.__mouse_inside and self.__mouse_pressed:
+            if enabled:
+                if active:
                     if self.fill_style_pressed:
                         drawing_context.fill_style = self.fill_style_pressed
                         drawing_context.fill()
@@ -552,6 +465,116 @@ class CharButtonCanvasItem(CanvasItem.TextButtonCanvasItem):
             drawing_context.text_baseline = "bottom"
             drawing_context.fill_style = self.stroke_style
             drawing_context.fill_text(self.__char, center_x, center_y + text_base)
+
+
+class ButtonCellCanvasItem(CanvasItem.CellCanvasItem):
+
+    def __init__(self, button_cell: ButtonCell) -> None:
+        super().__init__(button_cell)
+        self.__button_cell = button_cell
+
+    @property
+    def fill_style(self) -> str:
+        return self.__button_cell.fill_style
+
+    @fill_style.setter
+    def fill_style(self, value: str) -> None:
+        if value != self.__button_cell.fill_style:
+            self.__button_cell.fill_style = value
+            self.update()
+
+    @property
+    def fill_style_pressed(self) -> str:
+        return self.__button_cell.fill_style_pressed
+
+    @fill_style_pressed.setter
+    def fill_style_pressed(self, value: str) -> None:
+        if value != self.__button_cell.fill_style_pressed:
+            self.__button_cell.fill_style_pressed = value
+            self.update()
+
+    @property
+    def fill_style_disabled(self) -> str:
+        return self.__button_cell.fill_style_disabled
+
+    @fill_style_disabled.setter
+    def fill_style_disabled(self, value: str) -> None:
+        if value != self.__button_cell.fill_style_disabled:
+            self.__button_cell.fill_style_disabled = value
+            self.update()
+
+    @property
+    def border_style(self) -> typing.Optional[str]:
+        return self.__button_cell.border_style
+
+    @border_style.setter
+    def border_style(self, value: typing.Optional[str]) -> None:
+        if value != self.__button_cell.border_style:
+            self.__button_cell.border_style = value
+            self.update()
+
+    @property
+    def border_style_pressed(self) -> typing.Optional[str]:
+        return self.__button_cell.border_style_pressed
+
+    @border_style_pressed.setter
+    def border_style_pressed(self, value: typing.Optional[str]) -> None:
+        if value != self.__button_cell.border_style_pressed:
+            self.__button_cell.border_style_pressed = value
+            self.update()
+
+    @property
+    def border_style_disabled(self) -> typing.Optional[str]:
+        return self.__button_cell.border_style_disabled
+
+    @border_style_disabled.setter
+    def border_style_disabled(self, value: typing.Optional[str]) -> None:
+        if value != self.__button_cell.border_style_disabled:
+            self.__button_cell.border_style_disabled = value
+            self.update()
+
+    @property
+    def stroke_style(self) -> str:
+        return self.__button_cell.stroke_style
+
+    @stroke_style.setter
+    def stroke_style(self, value: str) -> None:
+        if value != self.__button_cell.stroke_style:
+            self.__button_cell.stroke_style = value
+            self.update()
+
+    @property
+    def stroke_width(self) -> float:
+        return self.__button_cell.stroke_width
+
+    @stroke_width.setter
+    def stroke_width(self, value: float) -> None:
+        if value != self.__button_cell.stroke_width:
+            self.__button_cell.stroke_width = value
+            self.update()
+
+
+class IconCanvasItem(ButtonCellCanvasItem):
+
+    def __init__(self, icon_id: str) -> None:
+        super().__init__(IconCell(icon_id))
+        self.wants_mouse_events = True
+        self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18, 18)))
+
+
+class CharButtonCanvasItem(ButtonCellCanvasItem):
+
+    def __init__(self, char: str) -> None:
+        super().__init__(CharCell(char))
+        self.wants_mouse_events = True
+        self.fill_style = "rgb(255, 255, 255)"
+        self.fill_style_pressed = "rgb(128, 128, 128)"
+        self.fill_style_disabled = "rgb(192, 192, 192)"
+        self.border_style = "rgb(192, 192, 192)"
+        self.border_style_pressed = "rgb(128, 128, 128)"
+        self.border_style_disabled = "rgb(192, 192, 192)"
+        self.stroke_style = "#000"
+        self.border_enabled = False
 
 
 class CameraPanelDelegate:
