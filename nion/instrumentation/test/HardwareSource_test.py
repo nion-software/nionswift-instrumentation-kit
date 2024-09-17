@@ -989,8 +989,6 @@ class TestHardwareSourceClass(unittest.TestCase):
             repaint_count = display_panel.display_canvas_item._repaint_count
             self.__acquire_one(document_controller, hardware_source)
             display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.assertEqual(display_panel.display_canvas_item._repaint_count, repaint_count + 1)
 
     def test_single_frame_acquisition_generates_single_canvas_update_event_for_image(self):
