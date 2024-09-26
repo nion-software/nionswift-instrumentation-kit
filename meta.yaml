@@ -18,7 +18,7 @@ requirements:
     - pip
     - setuptools
   run:
-    - python >=3.9,!=3.9.7
+    - python >=3.11
     - niondata >=15.6.0,<16.0.0
     - nionswift >=16.11.0,<17.0.0
     - nionui >=7.1.0,<8.0.0
