@@ -1776,7 +1776,7 @@ class Framer:
         source_slice = data_stream_event.source_slice
         count = data_stream_event.count
 
-        if count is None:
+        if count is None or count == 1:
             # check to see if data has already been allocated. allocated it if not.
             data_metadata = copy.deepcopy(data_stream_event.data_metadata)
             # determine the start/stop indexes. then copy the source data into the destination using
@@ -1791,7 +1791,13 @@ class Framer:
                 index = self.__indexes.get(channel, 0)
             dest_slice = slice(index, index + source_count)
             assert index + source_count <= flat_shape[0], f"{index=} + {source_count=} <= {flat_shape[0]=}; {channel=}"
-            self.__data_channel.update_data(channel, data_stream_event.source_data, source_slice, dest_slice, data_metadata)
+            if count is None:
+                source_data = data_stream_event.source_data
+                source_slice = source_slice
+            else:
+                source_data = data_stream_event.source_data.reshape(data_stream_event.source_data.shape[1:])
+                source_slice = (slice(None), slice(None))
+            self.__data_channel.update_data(channel, source_data, source_slice, dest_slice, data_metadata)
             # proceed
             index = index + source_count
             self.__indexes[channel] = index

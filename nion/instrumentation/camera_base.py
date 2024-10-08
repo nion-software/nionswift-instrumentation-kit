@@ -2969,7 +2969,14 @@ class CameraDataStream(Acquisition.DataStream):
         return make_sequence_data_stream(self.__camera_hardware_source, self.__camera_frame_parameters, length)
 
     def _build_data_handler(self, data_handler: Acquisition.DataHandler) -> bool:
-        return False
+        # when the camera is directly connected to the data handler, which happens when doing a single frame
+        # acquisition, this stream will be connected to a null data handler, which will pass on packets to the
+        # data handler passed to this function, typically a frame data handler. the frame data handler has to be
+        # able to handle a packet that is a single frame with count == 1.
+        null_data_handler = Acquisition.NullDataHandler()
+        null_data_handler.connect_data_handler(data_handler)
+        self.connect_unprocessed_data_handler(null_data_handler)
+        return True
 
 
 class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
