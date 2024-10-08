@@ -1368,6 +1368,32 @@ class TestCameraControlClass(unittest.TestCase):
                  ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)
              ]),
 
+            # single camera image
+            # two data items will be created: the result and the view.
+            (make_camera_device, False, "ronchigram", make_basic_acquisition_method,
+             [
+                 ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+                 ((1024, 1024), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+             ]),
+
+            # single eels image
+            # three data items will be created: view image, camera image (image), camera image (spectrum)
+            (make_camera_device, True, "eels_image", make_basic_acquisition_method,
+             [
+                 ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+                 ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+                 ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata),
+             ]),
+
+            # single eels spectrum
+            # three data items will be created: view image, camera image (image), camera image (spectrum)
+            (make_camera_device, True, "eels_spectrum", make_basic_acquisition_method,
+             [
+                 ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata),
+                 ((128, 512), DataAndMetadata.DataDescriptor(False, 0, 2), ensure_camera_metadata),
+                 ((512,), DataAndMetadata.DataDescriptor(False, 0, 1), ensure_camera_metadata),
+             ]),
+
             # these acquisitions are not supported yet; there is no way to represent the results as data items.
 
             # make_synchronized_device, make_series_acquisition_method
