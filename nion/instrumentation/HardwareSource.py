@@ -1993,7 +1993,6 @@ class CalibrationProvider:
 
     def get_calibration_descriptions(self, data_metadata: DataAndMetadata.DataMetadata, **kwargs: typing.Any) -> typing.Sequence[CalibrationDescription]:
         dimensional_shape = data_metadata.dimensional_shape
-        intensity_calibration = data_metadata.intensity_calibration
         dimensional_calibrations = data_metadata.dimensional_calibrations
         metadata = data_metadata.metadata
         calibration_descriptions = list()
@@ -2014,8 +2013,8 @@ class CalibrationProvider:
                 (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
                 dimensional_calibrations)) == 1 and dimensional_calibrations[0].units == "rad":
             origin_px = [dimensional_calibration.convert_from_calibrated_value(0.0) for dimensional_calibration in dimensional_calibrations]
-            angular_scale = dimensional_calibrations[1].scale
-            image_width_px = dimensional_shape[1]
+            angular_scale = dimensional_calibrations[-1].scale
+            image_width_px = dimensional_shape[-1]
             if math.isfinite(angular_scale * image_width_px):
                 image_width_m = abs(defocus) * math.sin(angular_scale * image_width_px)
                 pixel_size_nm = 1e9 * image_width_m / image_width_px
@@ -2040,8 +2039,8 @@ class CalibrationProvider:
                 (dimensional_calibration.scale, dimensional_calibration.units) for dimensional_calibration in
                 dimensional_calibrations)) == 1 and dimensional_calibrations[0].units == "nm":
             origin_px = [dimensional_calibration.convert_from_calibrated_value(0.0) for dimensional_calibration in dimensional_calibrations]
-            pixel_size_nm = dimensional_calibrations[1].scale
-            image_width_px = dimensional_shape[1]
+            pixel_size_nm = dimensional_calibrations[-1].scale
+            image_width_px = dimensional_shape[-1]
             image_width_m = pixel_size_nm * image_width_px / 1e9
             if image_width_m / abs(defocus) < 1.0:
                 angular_scale = math.asin(image_width_m / abs(defocus)) / image_width_px

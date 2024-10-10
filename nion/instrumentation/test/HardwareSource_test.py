@@ -39,15 +39,29 @@ class SimpleAcquisitionTask(HardwareSource.AcquisitionTask):
         self.image = image if image is not None else numpy.zeros(256)
 
     def make_data_element(self):
+        # enable enough metadata on the data element to be able to test the calibration provider too.
+        # this includes spatial calibrations and instrument metadata. the data element format has a lot
+        # of historical baggage: some of the camera metadata appears inside the properties dictionary,
+        # some of it appears in the metadata dictionary, and the calibrations appear in the spatial_calibrations
+        # key.
         return {
             "version": 1,
             "data": self.image,
             "properties": {
                 "exposure": 0.5,
+                "counts_per_electron": 5.0,
                 "autostem": { "high_tension_v": 140000 },
                 "hardware_source_name": "hardware source",
-                "hardware_source_id": "simple_hardware_source"
-            }
+                "hardware_source_id": "simple_hardware_source",
+            },
+            "metadata": { "instrument": { "defocus": 1000e-9 } },
+            "intensity_calibration": { "offset": 0.0, "scale": 2.0, "units": "counts" },
+            "spatial_calibrations": [
+                {"offset": 0.0, "scale": 2.0, "units": "rad"},
+                {"offset": 0.0, "scale": 2.0, "units": "rad"}
+            ] if len(self.image.shape) > 1 else [
+                {"offset": 0.0, "scale": 2.0, "units": "nm"}
+            ]
         }
 
     def _acquire_data_elements(self):
@@ -1277,6 +1291,22 @@ class TestHardwareSourceClass(unittest.TestCase):
                 hardware_source.abort_playing(sync_timeout=3.0)
             enabled = False
             self.assertEqual(error_text, Notification._notification_source.notifications[0].text)
+
+    def test_calibration_provider_basics(self) -> None:
+        with self.__simple_test_context() as simple_test_context:
+            hardware_source = simple_test_context.hardware_source
+            hardware_source.image = numpy.ones((4, 4))
+            document_controller = simple_test_context.document_controller
+            document_model = simple_test_context.document_model
+            self.__acquire_one(document_controller, hardware_source)
+            data_item = document_model.data_items[0]
+            display_item = document_model.display_items[0]
+            self.assertEqual("rad", display_item.displayed_dimensional_calibrations[0].units)
+            self.assertEqual("counts", display_item.displayed_intensity_calibration.units)
+            display_item.calibration_style_id = "spatial"
+            display_item.intensity_calibration_style_id = "intensity-e"
+            self.assertEqual("nm", display_item.displayed_dimensional_calibrations[0].units)
+            self.assertEqual("e", display_item.displayed_intensity_calibration.units)
 
 
 if __name__ == '__main__':
