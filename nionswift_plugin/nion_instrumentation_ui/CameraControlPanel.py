@@ -113,7 +113,7 @@ class CameraControlStateController:
 
         self.__captured_xdatas_available_event: typing.Optional[Event.EventListener] = None
 
-        self.__camera_current = None
+        self.__camera_current: typing.Optional[float] = None
         self.__last_camera_current_time = 0.0
         self.__xdatas_available_event = self.__camera_hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
 
