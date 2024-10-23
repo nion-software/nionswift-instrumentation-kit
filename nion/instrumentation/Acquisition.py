@@ -3459,7 +3459,7 @@ class LinearSpace:
         self.stop = stop
         self.num = num
 
-    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None) -> numpy.typing.NDArray[typing.Any]:
+    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None, copy: typing.Optional[bool] = None) -> numpy.typing.NDArray[typing.Any]:
         return numpy.linspace(self.start, self.stop, self.num, dtype=dtype)
 
 
@@ -3471,7 +3471,7 @@ class MeshGrid:
         self.y_space = y_space
         self.x_space = x_space
 
-    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None) -> numpy.typing.NDArray[typing.Any]:
+    def __array__(self, dtype: typing.Optional[numpy.typing.DTypeLike] = None, copy: typing.Optional[bool] = None) -> numpy.typing.NDArray[typing.Any]:
         return numpy.stack(numpy.meshgrid(numpy.array(self.y_space), numpy.array(self.x_space), indexing='ij'), axis=-1)
 
 
