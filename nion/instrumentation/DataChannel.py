@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 # system imports
 import numpy
 import numpy.typing
@@ -52,11 +54,12 @@ class DataItemDataChannel(Acquisition.DataChannel):
 
     def prepare(self, channel_info_map: typing.Mapping[Acquisition.Channel, Acquisition.DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
+        acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
         for channel, data_stream_info in channel_info_map.items():
             if self.__title_base:
-                title = f"{self.__title_base} {self.__channel_names.get(channel, str(channel))}"
+                title = f"{self.__title_base} {self.__channel_names.get(channel, str(channel))} {acquisition_number}"
             else:
-                title = f"{self.__channel_names.get(channel, str(channel))}"
+                title = f"{self.__channel_names.get(channel, str(channel))} {acquisition_number}"
             data_item = self.__create_data_item(data_stream_info.data_metadata, title)
             self.__data_item_ref_map[channel] = DataItemReference(self.__document_model, data_item)
             if callable(self.on_display_data_item):
@@ -87,5 +90,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         data_item.title = title
         self.__document_model.append_data_item(data_item)
         data_item.reserve_data(data_shape=data_shape, data_dtype=numpy.dtype(numpy.float32), data_descriptor=data_descriptor)
-        data_item.session_metadata = ApplicationData.get_session_metadata_dict()
+        session_metadata_dict = ApplicationData.get_session_metadata_dict()
+        Acquisition.session_manager.update_session_metadata_dict(self.__document_model, session_metadata_dict)
+        data_item.session_metadata = session_metadata_dict
         return data_item

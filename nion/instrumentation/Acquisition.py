@@ -117,6 +117,7 @@ import gettext
 import logging
 import time
 import typing
+import uuid
 import weakref
 
 import numpy
@@ -127,10 +128,10 @@ from nion.data import DataAndMetadata
 from nion.data import xdata_1_0 as xd
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import stem_controller as STEMController
+from nion.swift.model import DocumentModel
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
-from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
@@ -144,6 +145,35 @@ SliceListType = typing.Sequence[SliceType]
 ChannelSegment = str
 
 _NDArray = numpy.typing.NDArray[typing.Any]
+
+
+class SessionManager:
+    def __init__(self) -> None:
+        self.__indexes = dict[uuid.UUID, int]()
+
+    def begin_acquisition(self, document_model: DocumentModel.DocumentModel) -> None:
+        document_model_uuid = document_model.uuid
+        self.__indexes[document_model_uuid] = self.__get_index(document_model) + 1
+
+    def update_session_metadata_dict(self, document_model: DocumentModel.DocumentModel, session_metadata_dict: typing.Dict[str, typing.Any]) -> None:
+        session_metadata_dict["project_acquisition_index"] = self.__get_index(document_model)
+
+    def get_project_acquisition_index(self, document_model: DocumentModel.DocumentModel) -> int:
+        return self.__get_index(document_model)
+
+    def __get_index(self, document_model: DocumentModel.DocumentModel) -> int:
+        # return the current index; but find it if document_model hasn't been indexed yet.
+        document_model_uuid = document_model.uuid
+        if not document_model_uuid in self.__indexes:
+            next_index = 0
+            for data_item in document_model.data_items:
+                data_item_index = data_item.session_data.get("project_acquisition_index")
+                next_index = max(data_item_index if data_item_index else 0, next_index)
+            self.__indexes[document_model_uuid] = next_index
+        return self.__indexes[document_model_uuid]
+
+
+session_manager = SessionManager()
 
 
 class Channel:

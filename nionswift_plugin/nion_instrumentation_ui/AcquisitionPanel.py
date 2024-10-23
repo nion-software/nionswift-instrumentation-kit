@@ -1838,6 +1838,8 @@ class AcquisitionController(Declarative.Handler):
         def handle_acquire_finished() -> None:
             self.__acquisition = None
 
+        Acquisition.session_manager.begin_acquisition(self.document_controller.document_model)
+
         self.__acquisition = Acquisition.start_acquire(data_stream,
                                                        data_stream.title or _("Acquire"),
                                                        data_stream.channel_names,
