@@ -513,11 +513,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
                 # Dark reference is desired: import from the file given, if
                 # the import does not succeed (file does not exist or no path
                 # was given), then set dark_ref_data to None
-                dark_ref_import = ImportExportManager.ImportExportManager().read_data_items(dark_file)
-                if dark_ref_import:
-                    dark_ref_data = dark_ref_import[0].data
-                else:
-                    dark_ref_data = None
+                dark_ref_data = ImportExportManager.ImportExportManager().read_data(dark_file)
             AcquireController().start_threaded_acquire_and_sum(
                 stem_controller,
                 eels_camera,
