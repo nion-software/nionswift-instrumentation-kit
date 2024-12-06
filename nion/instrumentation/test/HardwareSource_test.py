@@ -760,7 +760,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel = document_controller.selected_display_panel
             self.__acquire_one(document_controller, hardware_source)
             display_panel.set_display_panel_display_item(document_model.display_items[0])
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             document_model.get_invert_new(document_model.display_items[0], document_model.display_items[0].data_item)
             document_model.remove_data_item(document_model.data_items[1])
             document_model.data_items[0].set_data(numpy.zeros((4, 4)))
@@ -999,10 +999,10 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel = document_controller.selected_display_panel
             self.__acquire_one(document_controller, hardware_source)
             display_panel.set_display_panel_display_item(document_model.display_items[0])
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             repaint_count = display_panel.display_canvas_item._repaint_count
             self.__acquire_one(document_controller, hardware_source)
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.assertEqual(display_panel.display_canvas_item._repaint_count, repaint_count + 1)
 
     def test_single_frame_acquisition_generates_single_canvas_update_event_for_image(self):
@@ -1014,7 +1014,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel = document_controller.selected_display_panel
             self.__acquire_one(document_controller, hardware_source)
             display_panel.set_display_panel_display_item(document_model.display_items[0])
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.__acquire_one(document_controller, hardware_source)
             update_count = display_panel.display_canvas_item._update_count
             self.__acquire_one(document_controller, hardware_source)
@@ -1031,16 +1031,16 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel = document_controller.selected_display_panel
             self.__acquire_one(document_controller, hardware_source)
             display_panel.set_display_panel_display_item(document_model.display_items[0])
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             repaint_count = display_panel.display_canvas_item._repaint_count
             hardware_source.sleep = 0.03  # each partial will sleep for this long
             hardware_source.start_playing(sync_timeout=3.0)
             time.sleep(0.05)  # make sure we're in the 2nd partial
             document_controller.periodic()
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.assertEqual(display_panel.display_canvas_item._repaint_count, repaint_count + 2)
 
     def test_single_frame_acquisition_generates_single_canvas_update_event_for_line_plot(self):
@@ -1054,7 +1054,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel.set_display_panel_display_item(document_model.display_items[0])
             repaint_count = display_panel.display_canvas_item._repaint_count
             self.__acquire_one(document_controller, hardware_source)
-            display_panel.root_container.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
+            display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.assertEqual(display_panel.display_canvas_item._repaint_count, repaint_count + 1)
 
     def test_partial_frame_acquisition_avoids_unnecessary_merges(self):
