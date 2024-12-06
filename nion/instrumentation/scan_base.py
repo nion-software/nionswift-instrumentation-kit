@@ -1822,7 +1822,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             def handle_finished(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
                 callback_fn(data_promises)
 
-            self.start_recording(current_frame_time, finished_callback_fn=handle_finished)
+            self.start_recording(sync_timeout=max(current_frame_time * 4, 1.0), finished_callback_fn=handle_finished)
 
         self.__thread = threading.Thread(target=record_thread)
         self.__thread.start()
