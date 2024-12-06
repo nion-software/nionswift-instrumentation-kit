@@ -2532,6 +2532,10 @@ class SplittingDataHandler(DataHandler):
 
 
 class SerialDataHandler(DataHandler):
+    """A data handler that sends data to a list of handlers in sequence.
+
+    The data is not reshaped in any way.
+    """
     def __init__(self) -> None:
         super().__init__()
         self.__data_handlers = list[DataHandler]()
@@ -2543,13 +2547,17 @@ class SerialDataHandler(DataHandler):
         self.__counts.append(count)
 
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        # send the data to the appropriate data handler.
+        # the data handler will be determined by the index.
+        # update the indexes for handling the next packet.
         index = self.__indexes.get(packet.channel, 0)
+        current_index = index
         for i, count in enumerate(self.__counts):
-            if index < count:
+            if current_index < count:
                 self.__data_handlers[i].handle_data_available(packet)
                 self.__indexes[packet.channel] = (index + (packet.count or 1)) % sum(self.__counts)
                 break
-            index -= count
+            current_index -= count
 
 
 class CollectionDataHandler(DataHandler):
@@ -2859,6 +2867,10 @@ class FramedDataHandler(DataHandler):
 
 
 class StackedDataHandler(DataHandler):
+    """A data handler that stacks count sections into new data with a new index of size height.
+
+    Send 4x10x10 then 2x10x10 to get a 6x10x10 output.
+    """
     def __init__(self, count: int, height: int) -> None:
         super().__init__()
         self.__count = count
@@ -2872,7 +2884,7 @@ class StackedDataHandler(DataHandler):
             state = DataStreamStateEnum.PARTIAL
 
         if data_stream_event.state == DataStreamStateEnum.COMPLETE:
-            self.__index = (self.__indexes.get(data_stream_event.channel, 0) + 1) % self.__count
+            self.__indexes[data_stream_event.channel] = (self.__indexes.get(data_stream_event.channel, 0) + 1) % self.__count
 
         # print(f"{data_stream_event.state=} {self.__index=}/{self.__count=}")
 

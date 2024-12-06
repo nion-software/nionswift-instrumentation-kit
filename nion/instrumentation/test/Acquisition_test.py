@@ -830,3 +830,35 @@ class TestAcquisitionClass(unittest.TestCase):
         self.assertTrue(had_error)
         self.assertTrue(maker.is_error)
         self.assertAlmostEqual(1/8, collector.progress)
+
+    def test_serial_handler(self) -> None:
+
+        class CountingDataHandler(Acquisition.DataHandler):
+            def __init__(self) -> None:
+                super().__init__()
+                self.count = 0
+
+            def handle_data_available(self, packet: Acquisition.DataStreamEventArgs) -> None:
+                self.count += packet.count or 1
+
+        counter1 = CountingDataHandler()
+        counter2 = CountingDataHandler()
+
+        serial_handler = Acquisition.SerialDataHandler()
+        serial_handler.add_data_handler(counter1, 4)
+        serial_handler.add_data_handler(counter2, 4)
+
+        channel = Acquisition.Channel("0")
+        data_descriptor = DataAndMetadata.DataDescriptor(False, 0, 1)
+        data_metadata = DataAndMetadata.DataMetadata(((4,), float), data_descriptor=data_descriptor)
+        source_data = numpy.zeros((4, 1), dtype=float)
+
+        data_stream_event = Acquisition.DataStreamEventArgs(channel, data_metadata, source_data, 2, (slice(0, 2), slice(None)), Acquisition.DataStreamStateEnum.COMPLETE)
+
+        # send the data 2 rows at a time
+        for _ in range(4):
+            serial_handler.handle_data_available(data_stream_event)
+
+        # check the counts to ensure the data is sent to both handlers
+        self.assertEqual(4, counter1.count)
+        self.assertEqual(4, counter2.count)
