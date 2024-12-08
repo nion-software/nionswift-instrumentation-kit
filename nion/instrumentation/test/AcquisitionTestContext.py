@@ -1,8 +1,13 @@
 import gc
 import logging
+import math
 import typing
 import unittest
 
+import numpy
+
+from nion.data import Calibration
+from nion.data import DataAndMetadata
 from nion.instrumentation import camera_base
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
@@ -10,10 +15,45 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.swift.test import TestContext
 from nion.utils import Event
+from nion.utils import Geometry
 from nion.utils import Registry
-from nionswift_plugin.usim import CameraDevice
-from nionswift_plugin.usim import InstrumentDevice
-from nionswift_plugin.usim import ScanDevice
+from nion.device_kit import CameraDevice
+from nion.device_kit import InstrumentDevice
+from nion.device_kit import ScanDevice
+
+
+class ScanModule(scan_base.ScanModule):
+    def __init__(self, instrument: InstrumentDevice.Instrument) -> None:
+        self.stem_controller_id = instrument.instrument_id
+        self.device = ScanDevice.Device("usim_scan_device", "uSim Scan", instrument)
+        setattr(self.device, "priority", 20)
+        scan_modes = (
+            scan_base.ScanSettingsMode("Fast", "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.1)),
+            scan_base.ScanSettingsMode("Slow", "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.4)),
+            scan_base.ScanSettingsMode("Record", "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 1.0))
+        )
+        self.settings = scan_base.ScanSettings(scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
+
+class CameraSimulator:
+    def __init__(self, sensor_dimensions: typing.Optional[Geometry.IntSize]) -> None:
+        self.__data_value = 0
+        self.__sensor_dimensions = sensor_dimensions
+
+    def close(self) -> None:
+        pass
+
+    def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
+        dimensional_calibrations = [
+            Calibration.Calibration(),
+            Calibration.Calibration()
+        ]
+        return dimensional_calibrations
+
+    def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
+        self.__data_value += 1
+        shape = self.__sensor_dimensions if self.__sensor_dimensions else readout_area.size
+        data = numpy.random.randn(shape.height // binning_shape.height, shape.width // binning_shape.width) * exposure_s
+        return DataAndMetadata.new_data_and_metadata(data)
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
@@ -24,7 +64,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         HardwareSource.run()
         instrument = self.setup_stem_controller()
         DriftTracker.run()
-        ScanDevice.run(typing.cast(InstrumentDevice.Instrument, instrument))
+        Registry.register_component(ScanModule(instrument), {"scan_module"})
         scan_hardware_source = self.setup_scan_hardware_source(instrument)
         camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
         eels_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, True) if is_both_cameras else None
@@ -63,7 +103,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
         Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
         DriftTracker.stop()
-        ScanDevice.stop()
+        Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
         Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
         Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
         Registry.unregister_component(self.camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})
@@ -83,7 +123,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
 
     def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController) -> scan_base.ScanHardwareSource:
         instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
-        scan_module = ScanDevice.ScanModule(instrument)
+        scan_module = ScanModule(instrument)
         scan_device = scan_module.device
         scan_settings = scan_module.settings
         Registry.register_component(scan_device, {"scan_device"})
@@ -99,11 +139,9 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         camera_type = "ronchigram" if not is_eels else "eels"
         camera_name = "uSim Camera"
         camera_settings = CameraDevice.CameraSettings(camera_id)
-        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, instrument)
-        if getattr(camera_device, "camera_version", 2) == 3:
-            camera_hardware_source = camera_base.CameraHardwareSource3("usim_stem_controller", camera_device, camera_settings, None, None)
-        else:
-            camera_hardware_source = camera_base.CameraHardwareSource2("usim_stem_controller", camera_device, camera_settings, None, None)
+        sensor_dimensions = Geometry.IntSize(256, 1024) if is_eels else None
+        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, CameraSimulator(sensor_dimensions), instrument)
+        camera_hardware_source = camera_base.CameraHardwareSource3("usim_stem_controller", camera_device, camera_settings, None, None)
         if is_eels:
             camera_hardware_source.features["is_eels_camera"] = True
         camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
