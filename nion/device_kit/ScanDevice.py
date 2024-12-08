@@ -323,7 +323,8 @@ class Device(scan_base.ScanDevice):
         # Apply any rotation (context + subscan)
         if frame_parameters.subscan_rotation:
             total_rotation -= frame_parameters.subscan_rotation
-        return self.__instrument.generate_scan_data(size, used_fov_size_nm, total_rotation, center_nm)
+        scan_frame_parameters = ScanFrameParameters(size=size, pixel_time_us=frame_parameters.pixel_time_us, fov_nm=used_fov_size_nm[0], center_nm=center_nm, rotation_rad=total_rotation)
+        return self.__instrument.generate_scan_data(scan_frame_parameters)
 
     def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[typing.Dict[str, typing.Any]], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], typing.Optional[int], int]:
         """Read or continue reading a frame.
@@ -341,7 +342,7 @@ class Device(scan_base.ScanDevice):
 
         The 'data' keys in the list of dict's should contain a ndarray with the size of the full acquisition and each
         ndarray should be the same size. The 'properties' keys are dicts which must contain the frame parameters and
-        a 'channel_id' indicating the index of the channel (may be an int or float).
+        a 'channel_id' indicating the index of the channel.
         """
 
         if self.__frame is None:
