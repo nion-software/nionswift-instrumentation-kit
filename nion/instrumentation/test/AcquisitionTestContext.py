@@ -5,6 +5,8 @@ import typing
 import unittest
 
 import numpy
+import numpy.typing
+import scipy
 
 from nion.data import Calibration
 from nion.data import DataAndMetadata
@@ -34,6 +36,7 @@ class ScanModule(scan_base.ScanModule):
         )
         self.settings = scan_base.ScanSettings(scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
 
+
 class CameraSimulator:
     def __init__(self, sensor_dimensions: typing.Optional[Geometry.IntSize]) -> None:
         self.__data_value = 0
@@ -54,6 +57,34 @@ class CameraSimulator:
         shape = self.__sensor_dimensions if self.__sensor_dimensions else readout_area.size
         data = numpy.random.randn(shape.height // binning_shape.height, shape.width // binning_shape.width) * exposure_s
         return DataAndMetadata.new_data_and_metadata(data)
+
+
+class ScanDataGenerator:
+    def __init__(self) -> None:
+        random_state = numpy.random.get_state()
+        numpy.random.seed(100)
+        pattern = scipy.ndimage.zoom(numpy.abs(numpy.random.randn(40, 40)), 25) + scipy.ndimage.zoom(numpy.abs(numpy.random.randn(100, 100)), 10)
+        numpy.random.set_state(random_state)
+        self.__pattern = typing.cast(numpy.typing.NDArray[numpy.float32], pattern)
+
+    def generate_scan_data(self, instrument: InstrumentDevice.Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
+        pattern = self.__pattern
+        shift_nm = Geometry.FloatPoint(instrument.GetVal("CSH.y") * 1e9, instrument.GetVal("CSH.x") * 1e9)  # for drift tests
+        size = scan_frame_parameters.size
+        fov_size_nm = scan_frame_parameters.fov_size_nm
+        rotation = scan_frame_parameters.rotation_rad
+        center_nm = scan_frame_parameters.center_nm
+        y_start = (50 + center_nm.y + shift_nm.y - fov_size_nm.height / 2) / 100 * pattern.shape[0]
+        y_length = fov_size_nm.height / 100 * pattern.shape[0]
+        x_start = (50 + center_nm.x + shift_nm.x - fov_size_nm.width / 2) / 100 * pattern.shape[1]
+        x_length = fov_size_nm.width / 100 * pattern.shape[1]
+        iy, ix = numpy.meshgrid(numpy.arange(size.width), numpy.arange(size.height))
+        y = iy * y_length / size.height - y_length / 2
+        x = ix * x_length / size.width - x_length / 2
+        angle_sin = math.sin(-rotation)
+        angle_cos = math.cos(-rotation)
+        coordinates = [y_start + y_length / 2 + (x * angle_cos - y * angle_sin), x_start + x_length / 2 + (y * angle_cos + x * angle_sin)]
+        return typing.cast(numpy.typing.NDArray[numpy.float32], scipy.ndimage.map_coordinates(pattern, coordinates, order=1) + numpy.random.randn(*size) * 0.1)
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
@@ -117,7 +148,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         self.__exit_stack.append(ex)
 
     def setup_stem_controller(self) -> stem_controller.STEMController:
-        instrument = InstrumentDevice.Instrument("usim_stem_controller")
+        instrument = InstrumentDevice.Instrument("usim_stem_controller", ScanDataGenerator())
         Registry.register_component(instrument, {"stem_controller"})
         return instrument
 

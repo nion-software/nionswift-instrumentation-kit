@@ -3,12 +3,11 @@ from __future__ import annotations
 # standard libraries
 import copy
 import math
+import re
 import time
 import typing
-import re
 
 import numpy.typing
-import scipy
 
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller
@@ -19,6 +18,7 @@ from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
     from . import CameraDevice
+    from . import ScanDevice
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -26,10 +26,7 @@ WeightedInput = typing.Tuple["Variable", typing.Union[float, "Variable"]]
 
 
 class Variable:
-    """
-    Variables evaluate an expression plus a sum of input values.
-
-    """
+    """Evaluate an expression plus a sum of input values."""
 
     def __init__(self, name: str, weighted_inputs: typing.Optional[typing.List[WeightedInput]] = None):
         self.name = name
@@ -376,26 +373,9 @@ class DriftController:
                                    x=max_drift_x_m * math.sin((time.time() - self.__start_time + phase_x_rad) * 2 * math.pi / period_x_s))
 
 
-def generate_pattern() -> numpy.typing.NDArray[numpy.float32]:
-    random_state = numpy.random.get_state()
-    numpy.random.seed(100)
-    pattern = scipy.ndimage.zoom(numpy.abs(numpy.random.randn(40, 40)), 25) + scipy.ndimage.zoom(numpy.abs(numpy.random.randn(100, 100)), 10)
-    numpy.random.set_state(random_state)
-    return typing.cast(numpy.typing.NDArray[numpy.float32], pattern)
-
-
-def sample_scan_data(pattern: numpy.typing.NDArray[numpy.float32], size: Geometry.IntSize, fov_size_nm: Geometry.FloatSize, rotation: float, center_nm: Geometry.FloatPoint, shift_nm: Geometry.FloatPoint) -> numpy.typing.NDArray[numpy.float32]:
-    y_start = (50 + center_nm.y + shift_nm.y - fov_size_nm.height / 2) / 100 * pattern.shape[0]
-    y_length = fov_size_nm.height / 100 * pattern.shape[0]
-    x_start = (50 + center_nm.x + shift_nm.x - fov_size_nm.width / 2) / 100 * pattern.shape[1]
-    x_length = fov_size_nm.width / 100 * pattern.shape[1]
-    iy, ix = numpy.meshgrid(numpy.arange(size.width), numpy.arange(size.height))
-    y = iy * y_length / size.height - y_length / 2
-    x = ix * x_length / size.width - x_length / 2
-    angle_sin = math.sin(-rotation)
-    angle_cos = math.cos(-rotation)
-    coords = [y_start + y_length / 2 + (x * angle_cos - y * angle_sin), x_start + x_length / 2 + (y * angle_cos + x * angle_sin)]
-    return typing.cast(numpy.typing.NDArray[numpy.float32], scipy.ndimage.map_coordinates(pattern, coords, order=1) + numpy.random.randn(*size) * 0.1)
+class ScanDataGeneratorLike(typing.Protocol):
+    def generate_scan_data(self, instrument: Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
+        ...
 
 
 class Instrument(stem_controller.STEMController):
@@ -403,13 +383,13 @@ class Instrument(stem_controller.STEMController):
     TODO: add temporal supersampling for cameras (to produce blurred data when things are changing).
     """
 
-    def __init__(self, instrument_id: str) -> None:
+    def __init__(self, instrument_id: str, scan_data_generator: ScanDataGeneratorLike) -> None:
         super().__init__()
         self.priority = 20
         self.instrument_id = instrument_id
         self.property_changed_event = Event.Event()
 
-        self.__pattern = generate_pattern()
+        self.__scan_data_generator = scan_data_generator
 
         # define the STEM geometry limits
         self.stage_size_nm = 1000
@@ -527,9 +507,12 @@ class Instrument(stem_controller.STEMController):
         typing.cast(Variable, self.get_control("Order2MaxAngle")).set_expression("-1")
         typing.cast(Variable, self.get_control("Order3MaxAngle")).set_expression("-1")
 
-    def generate_scan_data(self, size: Geometry.IntSize, fov_size_nm: Geometry.FloatSize, rotation: float, center_nm: Geometry.FloatPoint) -> numpy.typing.NDArray[numpy.float32]:
-        shift = Geometry.FloatPoint(self.GetVal("CSH.y") * 1e9, self.GetVal("CSH.x") * 1e9)  # for drift tests
-        return sample_scan_data(self.__pattern, size, fov_size_nm, rotation, center_nm, shift)
+    @property
+    def scan_data_generator(self) -> ScanDataGeneratorLike:
+        return self.__scan_data_generator
+
+    def generate_scan_data(self, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
+        return self.__scan_data_generator.generate_scan_data(self, scan_frame_parameters)
 
     @property
     def live_probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
