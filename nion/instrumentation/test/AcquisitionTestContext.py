@@ -19,15 +19,108 @@ from nion.swift.test import TestContext
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+
+
+class AcquisitionTestContextConfigurationLike(typing.Protocol):
+    instrument_id: str
+    instrument: stem_controller.STEMController
+    scan_module: scan_base.ScanModule
+    ronchigram_camera_device_id: str
+    ronchigram_camera_device: camera_base.CameraDevice3
+    ronchigram_camera_settings: camera_base.CameraSettings
+    eels_camera_device_id: str
+    eels_camera_device: camera_base.CameraDevice3
+    eels_camera_settings: camera_base.CameraSettings
+
+
+class AcquisitionTestContext(TestContext.MemoryProfileContext):
+    def __init__(self, configuration: AcquisitionTestContextConfigurationLike, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False):
+        super().__init__()
+        assert not is_eels or not is_both_cameras
+        logging.getLogger("acquisition").setLevel(logging.ERROR)
+        HardwareSource.run()
+        DriftTracker.run()
+        Registry.register_component(configuration.instrument, {"stem_controller"})
+        Registry.register_component(configuration.scan_module, {"scan_module"})
+        Registry.register_component(configuration.scan_module.device, {"scan_device"})
+        HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
+        HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
+        HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
+        scan_hardware_source = self.setup_scan_hardware_source(configuration.instrument, configuration.scan_module.device, configuration.scan_module.settings)
+        self._ronchigram_camera_hardware_source = self.setup_camera_hardware_source(configuration.instrument_id, configuration.ronchigram_camera_device, configuration.ronchigram_camera_settings, camera_exposure, False)
+        self._eels_camera_hardware_source = self.setup_camera_hardware_source(configuration.instrument_id, configuration.eels_camera_device, configuration.eels_camera_settings, camera_exposure, True)
+        self.instrument = configuration.instrument
+        self.scan_hardware_source = scan_hardware_source
+        self.camera_hardware_source = self._eels_camera_hardware_source if is_eels else self._ronchigram_camera_hardware_source
+        self.camera_device_id = configuration.eels_camera_device_id if is_eels else configuration.ronchigram_camera_device_id
+        self.camera_type = "eels" if is_eels else "ronchigram"
+        self.eels_hardware_source = self._eels_camera_hardware_source if is_both_cameras else None
+        self.eels_camera_device_id = configuration.eels_camera_device_id if is_both_cameras else None
+        self.document_controller = self.create_document_controller(auto_close=False)
+        self.document_model = self.document_controller.document_model
+        stem_controller.register_event_loop(self.document_controller.event_loop)
+        self.__exit_stack: typing.List[typing.Any] = list()
+
+    def close(self) -> None:
+        gc.collect()  # allow acquisition objects to be garbage collected
+        self.document_controller.periodic()
+        self.document_controller.close()
+        for ex in self.__exit_stack:
+            ex.close()
+        stem_controller.unregister_event_loop()
+        self._ronchigram_camera_hardware_source.close()
+        self._eels_camera_hardware_source.close()
+        self.scan_hardware_source.close()
+        HardwareSource.HardwareSourceManager().unregister_hardware_source(self._ronchigram_camera_hardware_source)
+        HardwareSource.HardwareSourceManager().unregister_hardware_source(self._eels_camera_hardware_source)
+        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
+        DriftTracker.stop()
+        Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
+        Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
+        Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
+        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
+        Registry.unregister_component(self._ronchigram_camera_hardware_source, {"hardware_source", "camera_hardware_source", "ronchigram_camera_hardware_source"})
+        Registry.unregister_component(self._eels_camera_hardware_source, {"hardware_source", "camera_hardware_source", "eels_camera_hardware_source"})
+        HardwareSource.HardwareSourceManager()._close_instruments()
+        HardwareSource.stop()
+        super().close()
+
+    def push(self, ex: typing.Any) -> None:
+        self.__exit_stack.append(ex)
+
+    def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController, scan_device: scan_base.ScanDevice, scan_settings: scan_base.ScanSettingsProtocol) -> scan_base.ScanHardwareSource:
+        scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
+        setattr(scan_device, "hardware_source", scan_hardware_source)
+        Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller
+        HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
+        return scan_hardware_source
+
+    def setup_camera_hardware_source(self, instrument_id: str, camera_device: camera_base.CameraDevice3, camera_settings: camera_base.CameraSettings, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
+        camera_type = "eels" if is_eels else "ronchigram"
+        camera_hardware_source = camera_base.CameraHardwareSource3(instrument_id, camera_device, camera_settings, None, None)
+        if is_eels:
+            camera_hardware_source.features["is_eels_camera"] = True
+        camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
+            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
+        camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters(
+            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
+        camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters(
+            {"exposure_ms": camera_exposure * 1000 * 2, "binning": 1}))
+        camera_hardware_source.set_selected_profile_index(0)
+        Registry.register_component(camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})  # allows stem controller to find camera controller
+        HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
+        return camera_hardware_source
+
+
 from nion.device_kit import CameraDevice
 from nion.device_kit import InstrumentDevice
 from nion.device_kit import ScanDevice
 
 
 class ScanModule(scan_base.ScanModule):
-    def __init__(self, instrument: InstrumentDevice.Instrument) -> None:
+    def __init__(self, instrument: InstrumentDevice.Instrument, device_id: str) -> None:
         self.stem_controller_id = instrument.instrument_id
-        self.device = ScanDevice.Device("usim_scan_device", "uSim Scan", instrument)
+        self.device = ScanDevice.Device(device_id, "Scan", instrument)
         setattr(self.device, "priority", 20)
         scan_modes = (
             scan_base.ScanSettingsMode("Fast", "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.1)),
@@ -87,108 +180,24 @@ class ScanDataGenerator:
         return typing.cast(numpy.typing.NDArray[numpy.float32], scipy.ndimage.map_coordinates(pattern, coordinates, order=1) + numpy.random.randn(*size) * 0.1)
 
 
-class AcquisitionTestContext(TestContext.MemoryProfileContext):
-    def __init__(self, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False):
-        super().__init__()
-        assert not is_eels or not is_both_cameras
-        logging.getLogger("acquisition").setLevel(logging.ERROR)
-        HardwareSource.run()
-        instrument = self.setup_stem_controller()
-        DriftTracker.run()
-        Registry.register_component(ScanModule(instrument), {"scan_module"})
-        scan_hardware_source = self.setup_scan_hardware_source(instrument)
-        camera_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, is_eels)
-        eels_hardware_source = self.setup_camera_hardware_source(instrument, camera_exposure, True) if is_both_cameras else None
-        HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
-        HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
-        HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
-        self.instrument = instrument
-        self.scan_hardware_source = scan_hardware_source
-        self.camera_hardware_source = camera_hardware_source
-        self.eels_hardware_source = eels_hardware_source
-        HardwareSource.HardwareSourceManager().register_hardware_source(self.camera_hardware_source)
-        if self.eels_hardware_source:
-            HardwareSource.HardwareSourceManager().register_hardware_source(self.eels_hardware_source)
-        HardwareSource.HardwareSourceManager().register_hardware_source(self.scan_hardware_source)
-        self.document_controller = self.create_document_controller(auto_close=False)
-        self.document_model = self.document_controller.document_model
-        stem_controller.register_event_loop(self.document_controller.event_loop)
-        self.__exit_stack: typing.List[typing.Any] = list()
+class AcquisitionTestContextConfiguration(AcquisitionTestContextConfigurationLike):
+    def __init__(self) -> None:
+        self.instrument_id = "usim_stem_controller"
+        self.ronchigram_camera_device_id = "usim_ronchigram_camera"
+        self.eels_camera_device_id = "usim_eels_camera"
+        self.instrument = InstrumentDevice.Instrument(self.instrument_id, ScanDataGenerator())
+        self.scan_module = ScanModule(self.instrument, "usim_scan_device")
+        self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id)
+        self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id)
+        self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(Geometry.IntSize(256, 1024)), self.instrument)
 
-    def close(self) -> None:
-        gc.collect()  # allow acquisition objects to be garbage collected
-        self.document_controller.periodic()
-        self.document_controller.close()
-        for ex in self.__exit_stack:
-            ex.close()
-        stem_controller.unregister_event_loop()
-        camera_type = self.camera_hardware_source.camera.camera_type
-        eels_type = self.eels_hardware_source.camera.camera_type if self.eels_hardware_source else None
-        self.camera_hardware_source.close()
-        if self.eels_hardware_source:
-            self.eels_hardware_source.close()
-        self.scan_hardware_source.close()
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.camera_hardware_source)
-        if self.eels_hardware_source:
-            HardwareSource.HardwareSourceManager().unregister_hardware_source(self.eels_hardware_source)
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
-        Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
-        DriftTracker.stop()
-        Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
-        Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
-        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
-        Registry.unregister_component(self.camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})
-        if self.eels_hardware_source:
-            Registry.unregister_component(self.eels_hardware_source, {"hardware_source", "camera_hardware_source", eels_type + "_camera_hardware_source"})
-        HardwareSource.HardwareSourceManager()._close_instruments()
-        HardwareSource.stop()
-        super().close()
 
-    def push(self, ex) -> None:
-        self.__exit_stack.append(ex)
-
-    def setup_stem_controller(self) -> stem_controller.STEMController:
-        instrument = InstrumentDevice.Instrument("usim_stem_controller", ScanDataGenerator())
-        Registry.register_component(instrument, {"stem_controller"})
-        return instrument
-
-    def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController) -> scan_base.ScanHardwareSource:
-        instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
-        scan_module = ScanModule(instrument)
-        scan_device = scan_module.device
-        scan_settings = scan_module.settings
-        Registry.register_component(scan_device, {"scan_device"})
-        scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
-        setattr(scan_device, "hardware_source", scan_hardware_source)
-        Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller
-        HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
-        return scan_hardware_source
-
-    def setup_camera_hardware_source(self, stem_controller: stem_controller.STEMController, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
-        instrument = typing.cast(InstrumentDevice.Instrument, stem_controller)
-        camera_id = "usim_ronchigram_camera" if not is_eels else "usim_eels_camera"
-        camera_type = "ronchigram" if not is_eels else "eels"
-        camera_name = "uSim Camera"
-        camera_settings = CameraDevice.CameraSettings(camera_id)
-        sensor_dimensions = Geometry.IntSize(256, 1024) if is_eels else None
-        camera_device = CameraDevice.Camera(camera_id, camera_type, camera_name, CameraSimulator(sensor_dimensions), instrument)
-        camera_hardware_source = camera_base.CameraHardwareSource3("usim_stem_controller", camera_device, camera_settings, None, None)
-        if is_eels:
-            camera_hardware_source.features["is_eels_camera"] = True
-        camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
-        camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
-        camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000 * 2, "binning": 1}))
-        camera_hardware_source.set_selected_profile_index(0)
-        Registry.register_component(camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_device.camera_type + "_camera_hardware_source"})  # allows stem controller to find camera controller
-        HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
-        return camera_hardware_source
+acquisition_test_configuration_factory = AcquisitionTestContextConfiguration
 
 
 def test_context(*, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False) -> AcquisitionTestContext:
-    return AcquisitionTestContext(is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras)
+    return AcquisitionTestContext(acquisition_test_configuration_factory(), is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras)
 
 
 def begin_leaks() -> None:

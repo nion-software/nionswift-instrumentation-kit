@@ -74,7 +74,7 @@ class Camera(camera_base.CameraDevice3):
         # Also register the camera device and use a unique name for it so that we can directly access it
         camera_device_id = f"{camera_id}_device"
         if Registry.get_component(camera_device_id):
-            raise RuntimeError(f"Component 'camera_device_id' is already registered.")
+            raise RuntimeError(f"Component '{camera_device_id}' is already registered.")
         Registry.register_component(self, {camera_device_id})
 
         # TODO Define external trigger interface and the mechanism for aqcuiring multiple sequences
