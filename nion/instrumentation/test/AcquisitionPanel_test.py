@@ -35,9 +35,10 @@ class TestCameraControlClass(unittest.TestCase):
                 # simulate switching the hardware source to EELS via the combo box.
                 # setting channel_index to None will be done by the combo box as part of switching its list of items,
                 # Since it isn't connected, do it here.
+                self.assertEqual("ronchigram", camera_settings.camera_channel)
                 camera_settings.hardware_source_choice_model.hardware_source_choice.hardware_source_index_model.value = 1
                 camera_settings.channel_index = None
                 # check result
-                self.assertEqual("eels_spectrum", camera_settings.camera_channel)
+                self.assertEqual("ronchigram", camera_settings.camera_channel)
 
             camera_settings_scope()

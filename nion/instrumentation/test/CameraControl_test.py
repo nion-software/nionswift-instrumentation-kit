@@ -726,7 +726,7 @@ class TestCameraControlClass(unittest.TestCase):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             project = test_context.document_model._project
-            project._set_persistent_property_value("data_item_references", {"usim_eels_camera_summed": str(uuid.uuid4())})
+            project._set_persistent_property_value("data_item_references", {f"{test_context.eels_camera_device_id}_summed": str(uuid.uuid4())})
             hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, hardware_source)
 

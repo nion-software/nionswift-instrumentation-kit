@@ -14,7 +14,6 @@ from nion.instrumentation import stem_controller
 from nion.swift.model import Utility
 from nion.utils import Event
 from nion.utils import Geometry
-from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
     from . import CameraDevice
@@ -743,17 +742,15 @@ class Instrument(stem_controller.STEMController):
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
 
-        def parse_camera_values(p: str, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
-            camera_device: typing.Optional[CameraDevice.Camera] = Registry.get_component(f"usim_{p}_camera_device")
-            if camera_device:
-                if s == "y_offset":
-                    return True, camera_device.get_dimensional_calibrations(None, None)[0].offset
-                elif s == "x_offset":
-                    return True, camera_device.get_dimensional_calibrations(None, None)[1].offset
-                elif s == "y_scale":
-                    return True, camera_device.get_dimensional_calibrations(None, None)[0].scale
-                elif s == "x_scale":
-                    return True, camera_device.get_dimensional_calibrations(None, None)[1].scale
+        def parse_camera_values(camera_device: CameraDevice.Camera, p: str, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
+            if s == "y_offset":
+                return True, camera_device.get_dimensional_calibrations(None, None)[0].offset
+            elif s == "x_offset":
+                return True, camera_device.get_dimensional_calibrations(None, None)[1].offset
+            elif s == "y_scale":
+                return True, camera_device.get_dimensional_calibrations(None, None)[0].scale
+            elif s == "x_scale":
+                return True, camera_device.get_dimensional_calibrations(None, None)[1].scale
             return False, None
 
         if s == "EELS_MagneticShift_Offset":
@@ -764,9 +761,15 @@ class Instrument(stem_controller.STEMController):
         elif re.match(r"(\^C[1-5][0-6])(\.[auxbvy]|$)$", s):
             return True, 0.0
         elif s.startswith("ronchigram_"):
-            return parse_camera_values("ronchigram", s[len("ronchigram_"):])
+            ronchigram_camera = self.ronchigram_camera
+            if ronchigram_camera:
+                return parse_camera_values(typing.cast("CameraDevice.Camera", ronchigram_camera.camera), "ronchigram", s[len("ronchigram_"):])
+            return False, None
         elif s.startswith("eels_"):
-            return parse_camera_values("eels", s[len("eels_"):])
+            eels_camera = self.eels_camera
+            if eels_camera:
+                return parse_camera_values(typing.cast("CameraDevice.Camera", eels_camera.camera), "eels", s[len("eels_"):])
+            return False, None
         else:
             return self.__resolve_control_name(s)
 
