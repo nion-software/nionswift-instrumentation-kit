@@ -372,6 +372,16 @@ class DriftController:
                                    x=max_drift_x_m * math.sin((time.time() - self.__start_time + phase_x_rad) * 2 * math.pi / period_x_s))
 
 
+class AxisManagerLike(typing.Protocol):
+
+    @property
+    def supported_axis_descriptions(self) -> typing.Sequence[AxisDescription]:
+        raise NotImplementedError()
+
+    def axis_transform_point(self, point: Geometry.FloatPoint, from_axis: stem_controller.AxisDescription, to_axis: stem_controller.AxisDescription) -> Geometry.FloatPoint:
+        ...
+
+
 class ScanDataGeneratorLike(typing.Protocol):
     def generate_scan_data(self, instrument: Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
         ...
@@ -382,12 +392,13 @@ class Instrument(stem_controller.STEMController):
     TODO: add temporal supersampling for cameras (to produce blurred data when things are changing).
     """
 
-    def __init__(self, instrument_id: str, scan_data_generator: ScanDataGeneratorLike) -> None:
+    def __init__(self, instrument_id: str, axis_manager: AxisManagerLike, scan_data_generator: ScanDataGeneratorLike) -> None:
         super().__init__()
         self.priority = 20
         self.instrument_id = instrument_id
         self.property_changed_event = Event.Event()
 
+        self.__axis_manager = axis_manager
         self.__scan_data_generator = scan_data_generator
 
         # define the STEM geometry limits
@@ -862,7 +873,7 @@ class Instrument(stem_controller.STEMController):
 
     @property
     def axis_descriptions(self) -> typing.Sequence[stem_controller.AxisDescription]:
-        return AxisManager().supported_axis_descriptions
+        return self.__axis_manager.supported_axis_descriptions
 
     def get_reference_setting_index(self, settings_control: str) -> int:
         success, _ = self.TryGetVal(settings_control)
@@ -874,7 +885,7 @@ class Instrument(stem_controller.STEMController):
         return control.reference_index
 
     def axis_transform_point(self, point: Geometry.FloatPoint, from_axis: stem_controller.AxisDescription, to_axis: stem_controller.AxisDescription) -> Geometry.FloatPoint:
-        return AxisManager().axis_transform_point(point, from_axis, to_axis)
+        return self.__axis_manager.axis_transform_point(point, from_axis, to_axis)
 
     def change_stage_position(self, *, dy: typing.Optional[float] = None, dx: typing.Optional[float] = None) -> None:
         """Shift the stage by dx, dy (meters). Do not wait for confirmation."""

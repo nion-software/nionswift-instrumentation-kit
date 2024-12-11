@@ -50,7 +50,17 @@ class CameraSimulator:
         return DataAndMetadata.new_data_and_metadata(data)
 
 
-class ScanDataGenerator:
+class AxisManager(InstrumentDevice.AxisManagerLike):
+
+    @property
+    def supported_axis_descriptions(self) -> typing.Sequence[stem_controller.AxisDescription]:
+        return list()
+
+    def axis_transform_point(self, point: Geometry.FloatPoint, from_axis: stem_controller.AxisDescription, to_axis: stem_controller.AxisDescription) -> Geometry.FloatPoint:
+        return point
+
+
+class ScanDataGenerator(InstrumentDevice.ScanDataGeneratorLike):
     def __init__(self) -> None:
         random_state = numpy.random.get_state()
         numpy.random.seed(100)
@@ -83,7 +93,7 @@ class AcquisitionTestContextConfiguration:
         self.instrument_id = "test_stem_controller"
         self.ronchigram_camera_device_id = "test_ronchigram_camera"
         self.eels_camera_device_id = "test_eels_camera"
-        self.instrument = InstrumentDevice.Instrument(self.instrument_id, ScanDataGenerator())
+        self.instrument = InstrumentDevice.Instrument(self.instrument_id, AxisManager(), ScanDataGenerator())
         self.scan_module = ScanModule(self.instrument, "test_scan_device")
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id)
