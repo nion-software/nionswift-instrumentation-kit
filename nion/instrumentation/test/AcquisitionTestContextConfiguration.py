@@ -50,6 +50,47 @@ class CameraSimulator:
         return DataAndMetadata.new_data_and_metadata(data)
 
 
+class ValueManager(InstrumentDevice.ValueManagerLike):
+    def __init__(self) -> None:
+        self.__values = {
+            "EHT": 100000.0,
+            "C10": 5e-7,
+            "ronchigram_y_scale": 1.0,
+            "ronchigram_y_offset": 0.0,
+            "ronchigram_x_scale": 1.0,
+            "ronchigram_x_offset": 0.0,
+            "CSH.y": 0.0,
+            "CSH.x": 0.0,
+            "eels_x_scale": 1.0,
+            "eels_x_offset": 0.0,
+            "eels_y_scale": 1.0,
+            "eels_y_offset": 0.0,
+            "EELS_MagneticShift_Offset": -20.0
+        }
+
+    def get_value(self, name: str) -> typing.Optional[float]:
+        return self.__values.get(name)
+
+    def set_value(self, name: str, value: float) -> bool:
+        self.__values[name] = value
+        return True
+
+    def inform_value(self, name: str, value: float) -> bool:
+        return self.set_value(name, value)
+
+    def get_value_2d(self, name: str, default_value: typing.Optional[Geometry.FloatPoint] = None, *, axis: typing.Optional[stem_controller.AxisType] = None) -> Geometry.FloatPoint:
+        return Geometry.FloatPoint()
+
+    def set_value_2d(self, name: str, value: Geometry.FloatPoint, *, axis: typing.Optional[stem_controller.AxisType] = None) -> bool:
+        return True
+
+    def inform_control_2d(self, name: str, value: Geometry.FloatPoint, *, axis: stem_controller.AxisType) -> bool:
+        return True
+
+    def get_reference_setting_index(self, settings_control: str) -> int:
+        return 0
+
+
 class AxisManager(InstrumentDevice.AxisManagerLike):
 
     @property
@@ -93,7 +134,7 @@ class AcquisitionTestContextConfiguration:
         self.instrument_id = "test_stem_controller"
         self.ronchigram_camera_device_id = "test_ronchigram_camera"
         self.eels_camera_device_id = "test_eels_camera"
-        self.instrument = InstrumentDevice.Instrument(self.instrument_id, AxisManager(), ScanDataGenerator())
+        self.instrument = InstrumentDevice.Instrument(self.instrument_id, ValueManager(), AxisManager(), ScanDataGenerator())
         self.scan_module = ScanModule(self.instrument, "test_scan_device")
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id)
