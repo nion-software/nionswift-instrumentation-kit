@@ -87,11 +87,9 @@ class TestScanControlClass(unittest.TestCase):
         acquisition_test_context.push(state_controller)
         return state_controller
 
-    def __test_context(self) -> AcquisitionTestContext.AcquisitionTestContext:
-        return AcquisitionTestContext.test_context()
-
     def _test_context(self) -> AcquisitionTestContext.AcquisitionTestContext:
-        return self.__test_context()
+        # subclasses may override this to provide a different configuration
+        return AcquisitionTestContext.test_context()
 
     ## STANDARD ACQUISITION TESTS ##
 
@@ -99,84 +97,84 @@ class TestScanControlClass(unittest.TestCase):
     # standard acquisition test is added.
 
     def test_acquiring_frames_with_generator_produces_correct_frame_numbers(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_acquiring_frames_with_generator_produces_correct_frame_numbers(self, scan_hardware_source, document_controller)
 
     def test_acquire_multiple_frames_reuses_same_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_acquire_multiple_frames_reuses_same_data_item(self, scan_hardware_source, document_controller)
 
     def test_simple_hardware_start_and_stop_actually_stops_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_simple_hardware_start_and_stop_actually_stops_acquisition(self, scan_hardware_source, document_controller)
 
     def test_simple_hardware_start_and_abort_works_as_expected(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_simple_hardware_start_and_abort_works_as_expected(self, scan_hardware_source, document_controller)
 
     def test_record_only_acquires_one_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_record_only_acquires_one_item(self, scan_hardware_source, document_controller)
 
     def test_record_during_view_records_one_item_and_keeps_viewing(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_record_during_view_records_one_item_and_keeps_viewing(self, scan_hardware_source, document_controller)
 
     def test_abort_record_during_view_returns_to_view(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_abort_record_during_view_returns_to_view(self, scan_hardware_source, document_controller)
 
     def test_view_reuses_single_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_view_reuses_single_data_item(self, scan_hardware_source, document_controller)
 
     def test_get_next_data_elements_to_finish_returns_full_frames(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_get_next_data_elements_to_finish_returns_full_frames(self, scan_hardware_source, document_controller)
 
     def test_exception_during_view_halts_scan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_exception_during_view_halts_playback(self, scan_hardware_source, scan_hardware_source.get_current_frame_time())
 
     def test_exception_during_record_halts_scan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_selected_profile_index(2)
             HardwareSource_test._test_exception_during_record_halts_playback(self, scan_hardware_source, scan_hardware_source.get_current_frame_time())
 
     def test_able_to_restart_scan_after_exception_scan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_able_to_restart_view_after_exception(self, scan_hardware_source, scan_hardware_source.get_current_frame_time())
 
     def test_record_starts_and_finishes_in_reasonable_time(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             HardwareSource_test._test_record_starts_and_finishes_in_reasonable_time(self, scan_hardware_source, scan_hardware_source.get_current_frame_time() * 16)
 
     # End of standard acquisition tests.
 
     def test_start_playing_with_frame_parameters(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -194,7 +192,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(Geometry.IntSize(12, 12), document_controller.document_model.data_items[-1].data_shape)
 
     def test_record_followed_by_view_updates_display(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -216,7 +214,7 @@ class TestScanControlClass(unittest.TestCase):
             data_item_reference_changed_listener.close()
 
     def test_record_gets_correct_data_when_record_started_during_view(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -235,7 +233,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertNotEqual(document_model.data_items[0].dimensional_shape, document_model.data_items[1].dimensional_shape)
 
     def test_record_names_results_correctly(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -249,7 +247,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(len(document_model.data_items[3].title) > len(document_model.data_items[1].title))
 
     def test_enable_positioned_after_one_frame_acquisition_should_add_graphic(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -262,7 +260,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(display_item.graphics), 1)
 
     def test_disable_positioned_after_one_frame_acquisition_should_remove_graphic(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -276,7 +274,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(display_item.graphics), 0)
 
     def test_deleting_probe_graphic_after_one_frame_acquisition_should_disable_positioned(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -290,7 +288,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(scan_hardware_source.probe_position)
 
     def test_deleting_display_after_one_frame_acquisition_should_disable_positioned(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -306,7 +304,7 @@ class TestScanControlClass(unittest.TestCase):
     # TODO: test case where probe graphic should be removed when a channel is disabled
 
     def test_start_playing_after_stopping_should_remove_probe_position_graphic(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -322,7 +320,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing()
 
     def test_context_scan_attaches_required_metadata(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -358,7 +356,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual((256, 256), metadata_source.metadata["scan"]["scan_size"])
 
     def test_sub_scan_attaches_required_metadata(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -395,7 +393,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual((128, 128), metadata_source.metadata["scan"]["scan_size"])
 
     def test_acquiring_multiple_channels_attaches_common_scan_id(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -409,7 +407,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_id0, scan_id1)
 
     def test_acquiring_multiple_channels_twice_generates_different_scan_ids(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -428,7 +426,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_id10, scan_id11)
 
     def test_start_playing_with_no_channels_enabled_does_nothing(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_channel_enabled(0, False)
             frame_time = scan_hardware_source.get_current_frame_time()
@@ -443,7 +441,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_enabling_channel_during_acquisition_results_in_write_delayed_data_item(self):
         # this ensures that data items freshly created during acquisition don't write repeatedly to disk.
         # see also test_data_item_created_during_acquisition_is_write_delayed_during_and_not_after
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_channel_enabled(0, True)
             frame_time = scan_hardware_source.get_current_frame_time()
@@ -466,7 +464,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(test_context.document_model.data_items[1].is_write_delayed)
 
     def test_disabling_all_channels_during_play_stops_playback(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)  # throw out first scan, which can take longer due to initial conditions
@@ -488,7 +486,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(is_playing)
 
     def test_scan_and_record_button_disabled_when_no_channels_are_enabled(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_state_controller = self.__create_state_controller(test_context)
             scan_enabled_ref = [True]
@@ -511,7 +509,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(record_enabled_ref[0])
 
     def test_record_generates_a_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -521,7 +519,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 4)  # 1 view image (always acquired), 3 records
 
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -539,7 +537,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, (500, 500))
 
     def test_change_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             frame_parameters_0.size = Geometry.IntSize(300, 300)
@@ -555,7 +553,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.abort_playing()
 
     def test_mutating_current_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             frame_parameters_0.size = Geometry.IntSize(300, 300)
@@ -571,7 +569,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.abort_playing()
 
     def test_changing_frame_parameters_during_record_does_not_affect_recording(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             # verify that the frame parameters are applied to the _next_ frame.
             frame_parameters_2 = scan_hardware_source.get_frame_parameters(2)
@@ -591,7 +589,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (500, 500))
 
     def test_capturing_during_view_captures_new_data_items(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -613,7 +611,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 4)
 
     def test_capturing_during_view_captures_session(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -636,7 +634,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual("Ned Flanders", document_model.data_items[3].session_metadata["microscopist"])
 
     def test_ability_to_start_playing_with_custom_parameters(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -654,7 +652,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[1].dimensional_shape, (200, 200))
 
     def test_ability_to_start_recording_with_custom_parameters(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -673,7 +671,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(recorded_extended_data_list[1].data.shape, (200, 200))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_state_controller = self.__create_state_controller(test_context)
             frame_parameters_ref = [None]
@@ -684,7 +682,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNotNone(frame_parameters_ref[0])
 
     def test_changing_current_profiles_frame_parameters_updates_frame_parameters_in_ui(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_state_controller = self.__create_state_controller(test_context)
             frame_parameters_ref = [None]
@@ -698,7 +696,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(frame_parameters_ref[0].size, (200, 200))
 
     def test_changing_fov_updates_only_that_profile(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_selected_profile_index(0)
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
@@ -725,7 +723,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(frame_parameters_2.fov_nm, 30)
 
     def test_changing_size_is_reflected_in_new_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -740,7 +738,7 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_record_during_view_uses_record_mode(self):
         # NOTE: requires stages_per_frame == 2
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             frame_parameters_0.fov_nm = 10
@@ -769,7 +767,7 @@ class TestScanControlClass(unittest.TestCase):
         numpy.random.seed(999)
         random.seed(999)
         try:
-            with self.__test_context() as test_context:
+            with self._test_context() as test_context:
                 scan_hardware_source = test_context.scan_hardware_source
                 frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
                 frame_parameters_0.size = Geometry.IntSize(256, 256)
@@ -795,7 +793,7 @@ class TestScanControlClass(unittest.TestCase):
         numpy.random.seed(999)
         random.seed(999)
         try:
-            with self.__test_context() as test_context:
+            with self._test_context() as test_context:
                 scan_hardware_source = test_context.scan_hardware_source
                 frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
                 frame_parameters_0.size = Geometry.IntSize(256, 256)
@@ -815,7 +813,7 @@ class TestScanControlClass(unittest.TestCase):
             numpy.random.set_state(numpy_random_state)
 
     def test_changing_width_when_linked_changes_height_too(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -827,7 +825,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
 
     def test_changing_width_when_unlinked_does_not_change_height(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -840,7 +838,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, (256, 128))
 
     def test_obscenely_large_scan_does_not_crash(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             frame_parameters_0.size = Geometry.IntSize(32768, 32768)
@@ -850,7 +848,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.abort_playing()
 
     def test_big_scan_does_not_prevent_further_playing(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
             original_size = frame_parameters_0.size
@@ -868,7 +866,7 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_closing_display_panel_with_scan_controller_shuts_down_controller_correctly(self):
         # NOTE: this is a duplicate of test_closing_display_panel_with_display_controller_shuts_down_controller_correctly
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             ScanControlPanel.run()
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
@@ -896,7 +894,7 @@ class TestScanControlClass(unittest.TestCase):
             ScanControlPanel.stop()
 
     def test_probe_graphic_gets_closed(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -912,7 +910,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(probe_graphic._closed)
 
     def test_probe_appears_on_all_channels(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -932,7 +930,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(display_item1.graphics), 0)
 
     def test_probe_on_multiple_channels_shuts_down_properly(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -948,7 +946,7 @@ class TestScanControlClass(unittest.TestCase):
             # will output extraneous messages when it fails
 
     def test_probe_on_multiple_channels_deletes_properly(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -970,7 +968,7 @@ class TestScanControlClass(unittest.TestCase):
             # will output extraneous messages when it fails
 
     def test_probe_on_multiple_channels_sets_to_none_properly(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -989,7 +987,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(scan_hardware_source.probe_position)
 
     def test_setting_probe_position_updates_probe_graphic(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1007,7 +1005,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, probe_graphic.position)
 
     def test_setting_probe_graphic_updates_probe_position(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1026,7 +1024,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, scan_hardware_source._get_last_idle_position_for_test())
 
     def test_setting_probe_graphic_updates_probe_position_with_multiple_channels_enabled(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1047,7 +1045,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, scan_hardware_source._get_last_idle_position_for_test())
 
     def test_disabling_and_reenabling_probe_should_return_to_the_same_position(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1069,7 +1067,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller_.probe_position, Geometry.FloatPoint(y=0.4, x=0.6))
 
     def test_acquire_into_empty_scan_controlled_display_panel(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             ScanControlPanel.run()
             document_controller = test_context.document_controller
             stem_controller_ = test_context.instrument
@@ -1084,7 +1082,7 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_switch_windows_while_acquiring(self):
         # this intermittently would lead to dangling async routines. leaving this here in case it occurs again.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             ScanControlPanel.run()
             scan_hardware_source = test_context.scan_hardware_source
             document_controller = test_context.document_controller
@@ -1104,7 +1102,7 @@ class TestScanControlClass(unittest.TestCase):
             ScanControlPanel.stop()
 
     def test_subscan_state_goes_from_invalid_to_disabled_upon_first_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             self.assertEqual(stem_controller.SubscanState.INVALID, scan_hardware_source.subscan_state)
@@ -1112,7 +1110,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(stem_controller.SubscanState.DISABLED, scan_hardware_source.subscan_state)
 
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1134,7 +1132,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(0, len(display_item1.graphics))
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1153,7 +1151,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
     def test_removing_line_scan_graphic_disables_line_scan_when_acquisition_running(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1172,7 +1170,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(scan_hardware_source.line_scan_enabled)
 
     def test_removing_subscan_graphic_disables_subscan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1189,7 +1187,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_subscan_appears_on_display_items_for_additional_channels(self):
         # scan once, enable subscan, disable subscan. should be a graphic.
         # add channel. scan once. should be a graphic on both displays.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1211,7 +1209,7 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_subscan_appears_only_on_enabled_channel_display_items(self):
         # enable two channels, scan once, disable 2nd channel. enable subscan. should be a graphic on one, not the other.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1231,7 +1229,7 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_subscan_is_removed_when_channels_are_disabled(self):
         # enable two channels, scan once, enable subscan, disable 2nd channel. should be a graphic on one, not the other.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1255,7 +1253,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_subscan_is_added_when_channels_is_enabled(self):
         # enable two channels, scan once, disable 2nd channel, enable subscan. should be a graphic on one, not the other.
         # now enable 2nd channel again. should be a graphics on both.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1279,7 +1277,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(display_item2.graphics))
 
     def test_subscan_not_allowed_with_width_or_height_of_zero(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1294,7 +1292,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((1, 64), document_model.data_items[1].data_shape)
 
     def test_scan_context_updated_when_starting_playing(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             self.assertFalse(stem_controller_.scan_context.is_valid)
@@ -1305,7 +1303,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(stem_controller_.scan_context.is_valid)
 
     def test_scan_context_updated_when_changing_parameters(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             scan_hardware_source.start_playing()
@@ -1320,7 +1318,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertNotEqual(20, scan_context1.fov_nm)
 
     def test_scan_context_update_after_changing_parameters_during_subscan_and_disabling(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             scan_hardware_source.start_playing()
@@ -1344,7 +1342,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(20, scan_context4.fov_nm)
 
     def test_scan_context_cleared_after_changing_parameters_during_subscan_and_stopping(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             scan_hardware_source.start_playing()
@@ -1368,7 +1366,7 @@ class TestScanControlClass(unittest.TestCase):
     def test_scan_context_not_cleared_after_stopping_subscan(self):
         # this tests a failure mode where the current profile is updated during acquisition on
         # a signal from the device.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             scan_hardware_source.start_playing()
@@ -1396,7 +1394,7 @@ class TestScanControlClass(unittest.TestCase):
             (False, "pixel_time_us", 5, True),
         ]
         for param_in_context, param_name, param_value, expected_context_valid in test_cases:
-            with self.__test_context() as test_context:
+            with self._test_context() as test_context:
                 scan_hardware_source = test_context.scan_hardware_source
                 stem_controller_ = test_context.instrument
                 scan_hardware_source.start_playing(sync_timeout=3.0)
@@ -1419,7 +1417,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual(expected_context_valid, scan_context_after.is_valid)
 
     def test_changing_rotation_and_fov_update_device_parameters_immediately(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
@@ -1433,7 +1431,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(stem_controller_.scan_context.is_valid)
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1450,7 +1448,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertFalse(scan_hardware_source.subscan_enabled)
 
     def test_facade_view_task_with_multiple_channels(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.scan_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -1468,7 +1466,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertIsNotNone(data_and_metadata_list3[0].data)
 
     def test_facade_record_data_with_immediate_close(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(scan_hardware_source.hardware_source_id, "~1.0")
@@ -1485,7 +1483,7 @@ class TestScanControlClass(unittest.TestCase):
                 pass
 
     def test_enabling_subscan_changes_output_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1531,7 +1529,7 @@ class TestScanControlClass(unittest.TestCase):
                 scan_hardware_source.abort_playing()
 
     def test_restarting_with_subscan_enabled_changes_correct_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1572,7 +1570,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertLess(modified2, data_item2.modified)
 
     def test_restarting_with_subscan_disabled_after_stopping_with_enabled_changes_correct_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1615,7 +1613,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(modified2, data_item2.modified)
 
     def test_drift_rectangle_appears_when_setting_drift_region(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1632,7 +1630,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(display_item.graphics))
 
     def test_removing_drift_rectangle_disables_drift_correction(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             stem_controller_ = test_context.instrument
@@ -1649,7 +1647,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(stem_controller_.drift_region)
 
     def test_drift_enabled_when_clicking_checkbox(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             stem_controller_ = test_context.instrument
             scan_hardware_source = test_context.scan_hardware_source
@@ -1668,7 +1666,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(stem_controller_.drift_region)
 
     def test_subscan_has_proper_calibrations(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1681,7 +1679,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, document_model.data_items[1].dimensional_calibrations[1].units)
 
     def test_record_immediate_has_proper_calibrations(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1700,7 +1698,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
 
     def test_get_buffer_data_basic_functionality(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.start_playing(sync_timeout=3.0)
@@ -1730,7 +1728,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertTrue(next(iter(units)))  # confirm calibration is not empty
 
     def test_reloading_document_cleans_display_items(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1760,7 +1758,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(0, len(document_model.display_items[0].graphics))
 
     def test_reloading_document_cleans_only_acquisition_display_items(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1796,7 +1794,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(4, len(document_model.display_items[1].graphics))
 
     def test_graphics_are_enabled_when_switching_project(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1822,7 +1820,7 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(4, len(document_model.display_items[0].graphics))
 
     def test_subscan_graphic_is_created_after_creating_new_project(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
@@ -1871,7 +1869,7 @@ class TestScanControlClass(unittest.TestCase):
                 shutil.rmtree(dir)
 
     def test_scan_frame_parameters(self) -> None:
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.scan_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             # ensure it is initially dict-like
@@ -1912,7 +1910,7 @@ class TestScanControlClass(unittest.TestCase):
             json.dumps(frame_parameters.as_dict())
 
     def test_scan_immediate(self) -> None:
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.scan_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             frame_parameters.pixel_size = Geometry.IntSize(256, 256)
