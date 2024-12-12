@@ -164,9 +164,6 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertTrue(time.time() - start_time < TIMEOUT)
         document_controller.periodic()
 
-    def __test_context(self, is_eels: bool=False):
-        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=self.exposure)
-
     def __create_state_controller(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext, *,
                                   initialize: bool = True) -> CameraControlPanel.CameraControlStateController:
         state_controller = CameraControlPanel.CameraControlStateController(acquisition_test_context.camera_hardware_source,
@@ -178,7 +175,8 @@ class TestCameraControlClass(unittest.TestCase):
         return state_controller
 
     def _test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
-        return self.__test_context(is_eels=is_eels)
+        # subclasses may override this to provide a different configuration
+        return AcquisitionTestContext.test_context(is_eels=is_eels, camera_exposure=self.exposure)
 
     ## STANDARD ACQUISITION TESTS ##
 
@@ -186,55 +184,55 @@ class TestCameraControlClass(unittest.TestCase):
     # standard acquisition test is added.
 
     def test_acquiring_frames_with_generator_produces_correct_frame_numbers(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_acquiring_frames_with_generator_produces_correct_frame_numbers(self, hardware_source, document_controller)
 
     def test_acquire_multiple_frames_reuses_same_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_acquire_multiple_frames_reuses_same_data_item(self, hardware_source, document_controller)
 
     def test_simple_hardware_start_and_stop_actually_stops_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_simple_hardware_start_and_stop_actually_stops_acquisition(self, hardware_source, document_controller)
 
     def test_simple_hardware_start_and_abort_works_as_expected(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_simple_hardware_start_and_abort_works_as_expected(self, hardware_source, document_controller)
 
     def test_view_reuses_single_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_view_reuses_single_data_item(self, hardware_source, document_controller)
 
     def test_get_next_data_elements_to_finish_returns_full_frames(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_get_next_data_elements_to_finish_returns_full_frames(self, hardware_source, document_controller)
 
     def test_exception_during_view_halts_playback(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_exception_during_view_halts_playback(self, hardware_source, self.exposure)
 
     def test_able_to_restart_view_after_exception(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             HardwareSource_test._test_able_to_restart_view_after_exception(self, hardware_source, self.exposure)
 
     # End of standard acquisition tests.
 
     def test_view_generates_a_data_item(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -244,7 +242,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 1)
 
     def test_record_acquires_properly_binned_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             for binning in (1, 2):
                 hardware_source = test_context.camera_hardware_source
                 frame_parameters = hardware_source.get_frame_parameters(2)
@@ -258,7 +256,7 @@ class TestCameraControlClass(unittest.TestCase):
                     hardware_source.stop_recording(sync_timeout=3.0)
 
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -276,7 +274,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(1))
 
     def test_change_to_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             frame_parameters_0 = hardware_source.get_frame_parameters(0)
             frame_parameters_0.binning = 2
@@ -297,7 +295,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_changing_frame_parameters_during_view_does_not_affect_current_acquisition(self):
         # NOTE: this currently fails on Orca camera because changing binning will immediately stop acquisition and restart.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             # verify that the frame parameters are applied to the _next_ frame.
             profile_index = 0  # 1, 2 both have special cases that make this test fail.
@@ -333,7 +331,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing()
 
     def test_capturing_during_view_captures_new_data_items(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -351,7 +349,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 2)
 
     def test_capturing_during_view_captures_eels_2d(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -371,7 +369,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items[2].dimensional_shape), 2)
 
     def test_capturing_during_view_captures_eels_1d(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -391,7 +389,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items[2].dimensional_shape), 1)
 
     def test_capturing_during_view_captures_session(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -411,7 +409,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual("Ned Flanders", document_model.data_items[2].session_metadata["microscopist"])
 
     def test_ability_to_start_playing_with_custom_parameters(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -432,7 +430,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].dimensional_shape, hardware_source.get_expected_dimensions(4))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
@@ -445,7 +443,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertIsNotNone(frame_parameters_ref[0])
 
     def test_changing_current_profiles_frame_parameters_updates_frame_parameters_in_ui(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
             frame_parameters_ref = [None]
@@ -459,14 +457,14 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(frame_parameters_ref[0].binning, 4)
 
     def test_binning_values_are_not_empty(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             binning_values = hardware_source.binning_values
             self.assertTrue(len(binning_values) > 0)
             self.assertTrue(all(map(lambda x: isinstance(x, int), binning_values)))
 
     def test_changing_binning_is_reflected_in_new_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -478,7 +476,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
 
     def test_first_view_uses_correct_mode(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -498,7 +496,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
 
     def test_first_view_uses_correct_exposure(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -519,7 +517,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.abort_playing()
 
     def test_view_followed_by_frame_uses_correct_exposure(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
             long_exposure = 0.5
@@ -550,7 +548,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertTrue(elapsed > long_exposure)
 
     def test_exception_during_view_leaves_buttons_in_ready_state(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
@@ -588,7 +586,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_profile_initialized_correctly(self):
         # this once failed due to incorrect closure handling in __update_profile_index
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             state_controller = self.__create_state_controller(test_context, initialize=False)
             profile_ref = [None]
@@ -603,7 +601,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(profile_ref[0], "Run")
 
     def test_processed_data_is_produced_when_specified(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -629,7 +627,7 @@ class TestCameraControlClass(unittest.TestCase):
             processed_data_item_reference_changed_listener.close()
 
     def test_processed_data_is_reused(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -672,7 +670,7 @@ class TestCameraControlClass(unittest.TestCase):
             processed_data_item_reference_changed_listener.close()
 
     def test_processed_data_is_regenerated_if_necessary(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -689,7 +687,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 2)
 
     def test_deleting_processed_data_item_during_acquisition_recovers_correctly(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -712,7 +710,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_acquiring_eels_sets_signal_type_for_both_copies(self):
         # assumes EELS camera produces two data items
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -723,7 +721,7 @@ class TestCameraControlClass(unittest.TestCase):
     def test_acquiring_eels_with_existing_invalid_summed_reference_succeeds(self):
         # this tests a problem that occurred when the data reference of an old non-existent data item exists
         # and the EELS starts and tries to regenerate the data item.
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             project = test_context.document_model._project
             project._set_persistent_property_value("data_item_references", {f"{test_context.eels_camera_device_id}_summed": str(uuid.uuid4())})
@@ -732,7 +730,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_acquiring_ronchigram_sets_signal_type(self):
         # assumes EELS camera produces two data items
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -740,7 +738,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual("ronchigram", Metadata.get_metadata_value(document_model.data_items[0], "stem.signal_type"))
 
     def test_acquire_attaches_required_metadata(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -767,7 +765,7 @@ class TestCameraControlClass(unittest.TestCase):
         random.seed(999)
         try:
             self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
-            with self.__test_context() as test_context:
+            with self._test_context() as test_context:
                 hardware_source = test_context.camera_hardware_source
                 hardware_source.start_playing()
                 try:
@@ -785,7 +783,7 @@ class TestCameraControlClass(unittest.TestCase):
             numpy.random.set_state(numpy_random_state)
 
     def test_integrating_frames_updates_frame_count_by_integration_count(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             frame_parameters.integration_count = 4
@@ -800,7 +798,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.abort_playing(sync_timeout=TIMEOUT)
 
     def test_acquiring_attaches_timezone(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -808,7 +806,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertIsNotNone(document_model.data_items[0].timezone)
 
     def test_acquire_sequence_2d_calibrations(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             hardware_source.set_current_frame_parameters(frame_parameters)
@@ -820,7 +818,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(3, len(data_element["spatial_calibrations"]))
 
     def test_acquire_sequence_1d_calibrations(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             frame_parameters.processing = "sum_project"
@@ -833,7 +831,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(2, len(data_element["spatial_calibrations"]))
 
     def test_ronchigram_calibrations(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -842,7 +840,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual("rad", document_model.data_items[0].dimensional_calibrations[1].units)
 
     def test_eels_calibrations(self):
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -854,7 +852,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_acquire_with_probe_position(self):
         # used to test out the code path, but no specific asserts
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -866,7 +864,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_eels_acquire_with_probe_position(self):
         # used to test out the code path, but no specific asserts
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
@@ -877,7 +875,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertIsNotNone(document_model.data_items[0].timezone)
 
     def test_facade_frame_parameter_methods(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -890,7 +888,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source_facade.set_frame_parameters_for_profile_by_index(0, profile_frame_parameters)
 
     def test_facade_playback_stop(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -911,7 +909,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertFalse(hardware_source_facade.is_playing)
 
     def test_facade_playback_abort(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -932,7 +930,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertFalse(hardware_source_facade.is_playing)
 
     def test_facade_record(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -945,7 +943,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertTrue(record_task.is_finished)
 
     def test_facade_abort_record(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -959,7 +957,7 @@ class TestCameraControlClass(unittest.TestCase):
             # TODO: figure out a way to test whether abort actually aborts or just stops
 
     def test_facade_abort_record_and_return_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -968,7 +966,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertIsNotNone(data_and_metadata.data)
 
     def test_facade_view_task(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -983,7 +981,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertIsNotNone(data_and_metadata_list3[0].data)
 
     def test_facade_record_task(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -1000,7 +998,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertFalse(hardware_source_facade.is_recording)
 
     def test_facade_record_task_cancel(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -1015,7 +1013,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertFalse(hardware_source_facade.is_recording)
 
     def test_facade_grab_data(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             api = Facade.get_api("~1.0", "~1.0")
             hardware_source_facade = api.get_hardware_source_by_id(hardware_source.hardware_source_id, "~1.0")
@@ -1034,7 +1032,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertTrue(time.time() - start_time < TIMEOUT)
 
     def test_camera_frame_parameters(self) -> None:
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             # ensure it is initially dict-like
@@ -1070,7 +1068,7 @@ class TestCameraControlClass(unittest.TestCase):
             json.dumps(frame_parameters.as_dict())
 
     def test_acquisition_state_updates_during_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
@@ -1086,7 +1084,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(state_controller.acquisition_state_model.value, "stopped")
 
     def test_acquisition_state_after_exception_during_start(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             def raise_exception():
@@ -1104,7 +1102,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(state_controller.acquisition_state_model.value, "error")
 
     def test_acquisition_state_after_exception_during_execute(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             def raise_exception():
@@ -1123,7 +1121,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_acquisition_panel_sequence_acquisition(self):
         # this test is complicated to set up because it is testing the UI.
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             hardware_source = test_context.camera_hardware_source
             c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
@@ -1152,7 +1150,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(1, len(document_controller.document_model.data_items))
 
     def test_immediate_sequence_acquisition(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             acquisition_device = make_scan_device(test_context)
             acquisition_method = make_sequence_acquisition_method()
             stem_device_controller = stem_controller.STEMDeviceController()
@@ -1401,11 +1399,11 @@ class TestCameraControlClass(unittest.TestCase):
         ]
         for acquisition_device_fn, is_eels, camera_channeL, acquisition_method_fn, expected_count in tc:
             with self.subTest(acquisition_device_fn=acquisition_device_fn, acquisition_method_fn=acquisition_method_fn, expected_count=expected_count):
-                with self.__test_context(is_eels=is_eels) as test_context:
+                with self._test_context(is_eels=is_eels) as test_context:
                     self.__test_acq(test_context.document_controller, acquisition_device_fn(test_context, camera_channeL), acquisition_method_fn(), expected_count)
 
     def test_acquisition_panel_acquisition_restarts_view(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             acquisition_device = make_synchronized_device(test_context, None)
             acquisition_method = make_sequence_acquisition_method()
@@ -1424,7 +1422,7 @@ class TestCameraControlClass(unittest.TestCase):
                 test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
 
     def test_acquisition_panel_recovers_after_error_in_start_stream(self) -> None:
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             acquisition_device = make_camera_device(test_context, "ronchigram")
             acquisition_method = make_series_acquisition_method()
@@ -1453,7 +1451,7 @@ class TestCameraControlClass(unittest.TestCase):
                 test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
 
     def test_acquisition_panel_acquisition_runs_with_only_second_channel(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             test_context.scan_hardware_source.set_channel_enabled(0, False)
             test_context.scan_hardware_source.set_channel_enabled(1, True)
@@ -1463,7 +1461,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
 
     def test_acquisition_panel_scan_sequence_works_with_subscan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             # this is an unintuitive way to set the subscan region, but use it until it is cleaned up.
@@ -1476,7 +1474,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.__test_acq(document_controller, acquisition_device, acquisition_method, [])
 
     def test_acquisition_panel_scan_sequence_works_with_linescan(self):
-        with self.__test_context() as test_context:
+        with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             # this is an unintuitive way to set the subscan region, but use it until it is cleaned up.
@@ -1508,7 +1506,7 @@ class TestCameraControlClass(unittest.TestCase):
 
     def test_eels_summed_controller_is_recognized_when_dropping_data_into_display_panel(self):
         from nion.swift import DisplayPanel
-        with self.__test_context(is_eels=True) as test_context:
+        with self._test_context(is_eels=True) as test_context:
             hardware_source = test_context.camera_hardware_source
             display_panel_manager = DisplayPanel.DisplayPanelManager()
             display_panel_manager.register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraControlPanel.CameraDisplayPanelControllerFactory(hardware_source))
