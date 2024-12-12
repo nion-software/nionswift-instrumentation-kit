@@ -12,7 +12,7 @@ from nion.utils import Event
 from nion.utils import Geometry
 
 if typing.TYPE_CHECKING:
-    from . import ScanDevice
+    from nion.device_kit import ScanDevice
 
 
 _NDArray = numpy.typing.NDArray[typing.Any]
@@ -92,6 +92,14 @@ class Instrument(stem_controller.STEMController):
         if name in ("stage_size_nm", "max_defocus"):
             return setattr(self, name, value)
         raise AttributeError()
+
+    @property
+    def value_manager(self) -> ValueManagerLike:
+        return self.__value_manager
+
+    @property
+    def axis_manager(self) -> AxisManagerLike:
+        return self.__axis_manager
 
     @property
     def scan_data_generator(self) -> ScanDataGeneratorLike:

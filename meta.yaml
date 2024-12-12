@@ -27,6 +27,7 @@ requirements:
 
 test:
   imports:
+    - nion.device_kit
     - nion.instrumentation
     - nion.instrumentation.test
     - nionswift_plugin.nion_instrumentation_ui
