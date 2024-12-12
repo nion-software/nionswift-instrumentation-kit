@@ -442,7 +442,7 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
 
         assert len(axes_order) == len(data_shape)
 
-        data_shape = numpy.array(data_shape)[axes_order].tolist()
+        data_shape = typing.cast(list[int], numpy.array(data_shape)[axes_order].tolist())
         collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
         is_sequence = axes_descriptor.sequence_axes is not None
         if collection_dimension_count == 1:
@@ -521,7 +521,7 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
         axes_order, data_shape = self.__calculate_axes_order_and_data_shape(axes_descriptor, scan_shape, data.shape[len(tuple(scan_shape)):])
         assert len(axes_order) == data.ndim
         data = numpy.moveaxis(data, axes_order, list(range(data.ndim)))
-        dimensional_calibrations = numpy.array(dimensional_calibrations)[axes_order].tolist()
+        dimensional_calibrations = typing.cast(list[Calibration.Calibration], numpy.array(dimensional_calibrations)[axes_order].tolist())
         is_sequence = axes_descriptor.sequence_axes is not None
         collection_dimension_count = len(axes_descriptor.collection_axes) if axes_descriptor.collection_axes is not None else 0
         datum_dimension_count = len(axes_descriptor.data_axes) if axes_descriptor.data_axes is not None else 0

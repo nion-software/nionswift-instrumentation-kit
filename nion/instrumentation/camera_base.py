@@ -1132,7 +1132,7 @@ class Mask:
 
     def add_layer(self, graphic: Graphics.Graphic, value: typing.Union[float, _NDArray], inverted: bool = False) -> None:
         if isinstance(value, numpy.ndarray):
-            value = value.tolist()
+            value = typing.cast(typing.Any, value.tolist())  # ugh
         self._layers.append({"value": value, "inverted": inverted, "graphic_dict": graphic.mime_data_dict()})
 
     def to_dict(self) -> typing.Dict[str, typing.Any]:
