@@ -26,8 +26,8 @@ from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
 
 if typing.TYPE_CHECKING:
-    from . import InstrumentDevice
-    from . import ScanDevice
+    from nion.device_kit import InstrumentDevice
+    from nion.device_kit import ScanDevice
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -431,7 +431,7 @@ class CameraTask:
         return True, True, 0
 
 
-class CameraSettings:
+class CameraSettings(camera_base.CameraSettings):
 
     def __init__(self, camera_id: str):
         # these events must be defined

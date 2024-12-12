@@ -14,12 +14,9 @@ import threading
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.utils import Geometry
-from nion.utils import Registry
-from nion.data import DataAndMetadata
-from nion.data import Core
 
 if typing.TYPE_CHECKING:
-    from . import InstrumentDevice
+    from nion.device_kit import InstrumentDevice
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 _DataElementType = typing.Dict[str, typing.Any]
