@@ -433,7 +433,7 @@ class CameraTask:
 
 class CameraSettings(camera_base.CameraSettings):
 
-    def __init__(self, camera_id: str):
+    def __init__(self, camera_id: str, base_exposure: float = 0.1):
         # these events must be defined
         self.current_frame_parameters_changed_event = Event.Event()
         self.record_frame_parameters_changed_event = Event.Event()
@@ -456,9 +456,9 @@ class CameraSettings(camera_base.CameraSettings):
 
         # configure profiles
         self.__settings = [
-            camera_base.CameraFrameParameters({"exposure_ms": 100, "binning": 2}),
-            camera_base.CameraFrameParameters({"exposure_ms": 200, "binning": 2}),
-            camera_base.CameraFrameParameters({"exposure_ms": 500, "binning": 1}),
+            camera_base.CameraFrameParameters({"exposure_ms": 1 * 1000 * base_exposure, "binning": 2}),
+            camera_base.CameraFrameParameters({"exposure_ms": 2 * 1000 * base_exposure, "binning": 2}),
+            camera_base.CameraFrameParameters({"exposure_ms": 5 * 1000 * base_exposure, "binning": 1}),
         ]
 
         self.__current_settings_index = 0

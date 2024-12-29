@@ -3036,7 +3036,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                     last_progress = next_progress
                     last_progress_time = time.time()
                 assert time.time() - last_progress_time < TIMEOUT
-                time.sleep(0.05)  # play nice with other threads
+                time.sleep(0.005)  # play nice with other threads
             if data_stream.is_finished:
                 assert data_stream.progress == 1.0
         except Exception as e:
@@ -3110,7 +3110,7 @@ class Acquisition:
         start = time.time()
         while self.__task and not self.__task.done() and time.time() - start < timeout:
             on_periodic()
-            time.sleep(0.05)  # don't take all the CPU
+            time.sleep(0.005)  # don't take all the CPU
         on_periodic()  # one more periodic for clean up
 
     @property

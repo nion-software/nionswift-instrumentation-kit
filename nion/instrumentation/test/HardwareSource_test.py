@@ -73,7 +73,7 @@ class SimpleAcquisitionTask(HardwareSource.AcquisitionTask):
 
 class SimpleHardwareSource(HardwareSource.ConcreteHardwareSource):
 
-    def __init__(self, sleep=0.05):
+    def __init__(self, sleep=0.005):
         super().__init__("simple_hardware_source", "SimpleHardwareSource")
         self.add_data_channel()
         self.sleep = sleep
@@ -119,7 +119,7 @@ class LinePlotAcquisitionTask(HardwareSource.AcquisitionTask):
 
 class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
 
-    def __init__(self, shape, processed, sleep=0.05):
+    def __init__(self, shape, processed, sleep=0.005):
         super().__init__("described_hardware_source", "DescribedHardwareSource")
         self.add_data_channel()
         if processed:
@@ -137,7 +137,7 @@ class LinePlotHardwareSource(HardwareSource.ConcreteHardwareSource):
 
 class SummedHardwareSource(HardwareSource.ConcreteHardwareSource):
 
-    def __init__(self, sleep=0.05):
+    def __init__(self, sleep=0.005):
         super().__init__("summed_hardware_source", "SummedHardwareSource")
         self.add_data_channel()
         self.add_channel_processor(0, HardwareSource.SumProcessor())
@@ -242,7 +242,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
 class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
 
-    def __init__(self, sleep=0.02):
+    def __init__(self, sleep=0.005):
         super().__init__("scan_hardware_source", "ScanHardwareSource")
         self.add_data_channel("a", "A")
         self.add_data_channel("b", "B")
@@ -1258,9 +1258,9 @@ class TestHardwareSourceClass(unittest.TestCase):
             hardware_source = simple_test_context.hardware_source
             document_controller = simple_test_context.document_controller
             document_model = simple_test_context.document_model
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(0.6)
+                time.sleep(0.02)
                 document_controller.periodic()
                 self.assertEqual(1, len(document_model.data_items))
                 self.assertTrue(document_model.data_items[0].is_write_delayed)

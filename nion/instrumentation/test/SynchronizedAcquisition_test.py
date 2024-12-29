@@ -670,7 +670,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             while t.is_alive():
                 document_controller.periodic()
                 import time
-                time.sleep(0.1)
+                time.sleep(1/200)
             t.join()
             # ensure graphic is still the original one and hasn't flickered with a replacement
             self.assertEqual(drift_graphic, display_item.graphics[-1])
@@ -717,7 +717,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             while t.is_alive():
                 document_controller.periodic()
                 import time
-                time.sleep(0.1)
+                time.sleep(1/200)
             t.join()
             # ensure graphic is still the original one and hasn't flickered with a replacement
             self.assertEqual(drift_graphic, display_item.graphics[-1])
