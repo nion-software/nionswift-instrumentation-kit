@@ -144,7 +144,7 @@ class TestCameraControlClass(unittest.TestCase):
         AcquisitionTestContext.begin_leaks()
         self.app = Application.Application(TestUI.UserInterface(), set_global=False)
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
-        self.exposure = 0.04
+        self.exposure = 0.005
 
     def tearDown(self):
         AcquisitionTestContext.end_leaks(self)
@@ -1142,7 +1142,7 @@ class TestCameraControlClass(unittest.TestCase):
                         start_time = time.time()
                         while ac.is_acquiring_model.value:
                             document_controller.periodic()
-                            time.sleep(0.1)
+                            time.sleep(1/200)
                             self.assertTrue(time.time() - start_time < TIMEOUT)
                         self.assertFalse(ac.is_error)
             # only one data item will be created: the sequence. the view data item does not exist since acquiring
@@ -1220,7 +1220,7 @@ class TestCameraControlClass(unittest.TestCase):
                 if progress > last_progress:
                     last_progress = progress
                     last_progress_time = time.time()
-                time.sleep(0.05)
+                time.sleep(0.005)
             self.assertEqual(expected_error, acquisition.is_error)
             self.assertTrue(acquisition.is_finished)
             # useful for debugging

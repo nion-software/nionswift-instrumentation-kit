@@ -121,7 +121,7 @@ class CameraSimulator:
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
         self.__data_value += 1
         shape = self.__sensor_dimensions if self.__sensor_dimensions else readout_area.size
-        data = numpy.random.randn(shape.height // binning_shape.height, shape.width // binning_shape.width) * exposure_s
+        data = numpy.random.rand(shape.height // binning_shape.height, shape.width // binning_shape.width) * exposure_s
         return DataAndMetadata.new_data_and_metadata(data)
 
 
@@ -211,7 +211,7 @@ class AcquisitionTestContextConfiguration:
         self.eels_camera_device_id = "test_eels_camera"
         self.instrument = InstrumentDevice.Instrument(self.instrument_id, ValueManager(), AxisManager())
         self.scan_module = ScanModule(self.instrument, "test_scan_device", ScanDataGenerator())
-        self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id)
-        self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id)
+        self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id, 0.005)
+        self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id, 0.005)
         self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(Geometry.IntSize(256, 1024)), self.instrument)
