@@ -8,6 +8,3 @@ git+https://github.com/nion-software/nionui.git#egg=nionui
 git+https://github.com/nion-software/niondata.git#egg=niondata
 git+https://github.com/nion-software/nionswift.git#egg=nionswift
 git+https://github.com/nion-software/nionswift-io.git#egg=nionswift-io
-
-# handle nionswift-usim manually, otherwise it installs this package itself as a dependency.
-# git+https://github.com/nion-software/nionswift-usim.git#egg=nionswift-usim
