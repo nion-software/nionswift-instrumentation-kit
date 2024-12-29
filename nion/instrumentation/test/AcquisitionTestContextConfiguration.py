@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import math
+import threading
 import typing
 
 import numpy
@@ -15,10 +18,82 @@ from nion.instrumentation import stem_controller
 from nion.utils import Geometry
 
 
+class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
+    def __init__(self, scan_data_generator: ScanDevice.ScanDataGeneratorLike) -> None:
+        self.__scan_data_generator = scan_data_generator
+        self.__blanker_signal_condition = threading.Condition()
+        self.__advance_pixel_lock = threading.RLock()
+        self.__current_pixel_flat = 0
+        self.__scan_shape_pixels = Geometry.IntSize()
+        self.__pixel_size_nm = Geometry.FloatSize()
+        self.flyback_pixels = 2
+        self.__n_flyback_pixels = 0
+        self.__current_line = 0
+        self.external_clock = False
+
+    def reset_frame(self) -> None:
+        with self.__advance_pixel_lock:
+            self.__current_pixel_flat = 0
+            self.__current_line = 0
+            self.__n_flyback_pixels = 0
+
+    @property
+    def scan_shape_pixels(self) -> Geometry.IntSize:
+        return self.__scan_shape_pixels
+
+    @scan_shape_pixels.setter
+    def scan_shape_pixels(self, shape: typing.Union[Geometry.IntSize, Geometry.SizeIntTuple]) -> None:
+        self.__scan_shape_pixels = Geometry.IntSize.make(shape)
+
+    @property
+    def pixel_size_nm(self) -> Geometry.FloatSize:
+        return self.__pixel_size_nm
+
+    @pixel_size_nm.setter
+    def pixel_size_nm(self, size: typing.Union[Geometry.FloatSize, Geometry.SizeFloatTuple]) -> None:
+        self.__pixel_size_nm = Geometry.FloatSize.make(size)
+
+    @property
+    def probe_position_pixels(self) -> Geometry.IntPoint:
+        if self.__scan_shape_pixels.width != 0:
+            current_pixel_flat = self.__current_pixel_flat
+            return Geometry.IntPoint(y=current_pixel_flat // self.__scan_shape_pixels.width, x=current_pixel_flat % self.__scan_shape_pixels.width)
+        return Geometry.IntPoint()
+
+    @property
+    def current_pixel_flat(self) -> int:
+        return self.__current_pixel_flat
+
+    @property
+    def blanker_signal_condition(self) -> threading.Condition:
+        return self.__blanker_signal_condition
+
+    def _advance_pixel(self, n: int) -> None:
+        with self.__advance_pixel_lock:
+            next_line = (self.__current_pixel_flat + n) // self.__scan_shape_pixels.width
+            if next_line > self.__current_line:
+                self.__n_flyback_pixels = 0
+                self.__current_line = next_line
+                with self.__blanker_signal_condition:
+                    self.__blanker_signal_condition.notify_all()
+            if self.__n_flyback_pixels < self.flyback_pixels:
+                new_flyback_pixels = min(self.flyback_pixels - self.__n_flyback_pixels, n)
+                n -= new_flyback_pixels
+                self.__n_flyback_pixels += new_flyback_pixels
+            self.__current_pixel_flat += n
+
+    def advance_pixel(self) -> None:
+        if self.external_clock:
+            self._advance_pixel(1)
+
+    def generate_scan_data(self, instrument: InstrumentDevice.Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
+        return self.__scan_data_generator.generate_scan_data(instrument, scan_frame_parameters)
+
+
 class ScanModule(scan_base.ScanModule):
-    def __init__(self, instrument: InstrumentDevice.Instrument, device_id: str) -> None:
+    def __init__(self, instrument: InstrumentDevice.Instrument, device_id: str, scan_data_generator: ScanDevice.ScanDataGeneratorLike) -> None:
         self.stem_controller_id = instrument.instrument_id
-        self.device = ScanDevice.Device(device_id, "Scan", instrument)
+        self.device = ScanDevice.Device(device_id, "Scan", instrument, ScanBoxSimulator(scan_data_generator))
         setattr(self.device, "priority", 20)
         scan_modes = (
             scan_base.ScanSettingsMode("Fast", "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.1)),
@@ -101,7 +176,7 @@ class AxisManager(InstrumentDevice.AxisManagerLike):
         return point
 
 
-class ScanDataGenerator(InstrumentDevice.ScanDataGeneratorLike):
+class ScanDataGenerator(ScanDevice.ScanDataGeneratorLike):
     def __init__(self) -> None:
         random_state = numpy.random.get_state()
         numpy.random.seed(100)
@@ -134,8 +209,8 @@ class AcquisitionTestContextConfiguration:
         self.instrument_id = "test_stem_controller"
         self.ronchigram_camera_device_id = "test_ronchigram_camera"
         self.eels_camera_device_id = "test_eels_camera"
-        self.instrument = InstrumentDevice.Instrument(self.instrument_id, ValueManager(), AxisManager(), ScanDataGenerator())
-        self.scan_module = ScanModule(self.instrument, "test_scan_device")
+        self.instrument = InstrumentDevice.Instrument(self.instrument_id, ValueManager(), AxisManager())
+        self.scan_module = ScanModule(self.instrument, "test_scan_device", ScanDataGenerator())
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id)
         self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
