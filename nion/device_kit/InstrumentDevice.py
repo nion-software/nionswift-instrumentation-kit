@@ -52,17 +52,12 @@ class AxisManagerLike(typing.Protocol):
         ...
 
 
-class ScanDataGeneratorLike(typing.Protocol):
-    def generate_scan_data(self, instrument: Instrument, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
-        ...
-
-
 class Instrument(stem_controller.STEMController):
     """
     TODO: add temporal supersampling for cameras (to produce blurred data when things are changing).
     """
 
-    def __init__(self, instrument_id: str, value_manager: ValueManagerLike, axis_manager: AxisManagerLike, scan_data_generator: ScanDataGeneratorLike) -> None:
+    def __init__(self, instrument_id: str, value_manager: ValueManagerLike, axis_manager: AxisManagerLike) -> None:
         super().__init__()
         self.priority = 20
         self.instrument_id = instrument_id
@@ -70,7 +65,6 @@ class Instrument(stem_controller.STEMController):
 
         self.__value_manager = value_manager
         self.__axis_manager = axis_manager
-        self.__scan_data_generator = scan_data_generator
 
         # define the STEM geometry limits
         self.stage_size_nm = 1000
@@ -100,13 +94,6 @@ class Instrument(stem_controller.STEMController):
     @property
     def axis_manager(self) -> AxisManagerLike:
         return self.__axis_manager
-
-    @property
-    def scan_data_generator(self) -> ScanDataGeneratorLike:
-        return self.__scan_data_generator
-
-    def generate_scan_data(self, scan_frame_parameters: ScanDevice.ScanFrameParameters) -> numpy.typing.NDArray[numpy.float32]:
-        return self.__scan_data_generator.generate_scan_data(self, scan_frame_parameters)
 
     @property
     def live_probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
