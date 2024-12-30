@@ -283,7 +283,7 @@ class TestCameraControlClass(unittest.TestCase):
             frame_parameters_1.binning = 1
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(2))
                 time.sleep(self.exposure * 1.1)
@@ -306,7 +306,7 @@ class TestCameraControlClass(unittest.TestCase):
             frame_parameters = hardware_source.get_frame_parameters(profile_index)
             frame_parameters.binning = 4
             frame_time = frame_parameters.exposure_ms / 1000.0
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 # the time taken to start playing is unpredictable,
                 # so first make sure the camera is playing.
@@ -336,7 +336,7 @@ class TestCameraControlClass(unittest.TestCase):
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -354,7 +354,7 @@ class TestCameraControlClass(unittest.TestCase):
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -374,7 +374,7 @@ class TestCameraControlClass(unittest.TestCase):
             document_model = test_context.document_model
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -395,7 +395,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
             ApplicationData.get_session_metadata_model().microscopist = "Ned Flanders"
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -416,7 +416,7 @@ class TestCameraControlClass(unittest.TestCase):
             frame_parameters_0 = hardware_source.get_frame_parameters(0)
             frame_parameters_0.binning = 4
             hardware_source.set_current_frame_parameters(frame_parameters_0)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(10)
             finally:
@@ -483,7 +483,7 @@ class TestCameraControlClass(unittest.TestCase):
             state_controller = self.__create_state_controller(test_context)
             state_controller.handle_change_profile("Snap")
             state_controller.handle_binning_changed("4")
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 time.sleep(self.exposure * 0.5)
                 hardware_source.get_next_xdatas_to_finish()  # view again
@@ -505,11 +505,12 @@ class TestCameraControlClass(unittest.TestCase):
             state_controller.handle_change_profile("Snap")
             state_controller.handle_binning_changed("4")
             state_controller.handle_exposure_changed(long_exposure)
-            start = time.time()
-            hardware_source.start_playing()
+            start = time.perf_counter()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish()  # view again
-                elapsed = time.time() - start
+                time.sleep(0.001)  # try to avoid Windows timer low precision issues
+                elapsed = time.perf_counter() - start
                 document_controller.periodic()
                 self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
                 self.assertTrue(elapsed > long_exposure)
@@ -525,23 +526,19 @@ class TestCameraControlClass(unittest.TestCase):
             state_controller.handle_binning_changed("4")
             state_controller.handle_exposure_changed(long_exposure)
             state_controller.handle_change_profile("Run")
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 time.sleep(self.exposure * 0.5)
                 data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # view again
                 self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(2))
             finally:
-                hardware_source.stop_playing()
-            start_time = time.time()
-            while hardware_source.is_playing:
-                time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < TIMEOUT)
+                hardware_source.stop_playing(sync_timeout=3.0)
             state_controller.handle_change_profile("Snap")
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
-                start = time.time()
+                start = time.perf_counter()
                 data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # frame now
-                elapsed = time.time() - start
+                elapsed = time.perf_counter() - start
             finally:
                 hardware_source.abort_playing()
             self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(4))
@@ -564,7 +561,7 @@ class TestCameraControlClass(unittest.TestCase):
                     raise Exception("Error during acquisition")
             hardware_source._test_acquire_hook = raise_exception
             hardware_source._test_acquire_exception = lambda *args: None
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish()
                 document_controller.periodic()
@@ -613,7 +610,7 @@ class TestCameraControlClass(unittest.TestCase):
                 data_items[1] = state_controller.processed_data_item_reference.data_item
             data_item_reference_changed_listener = state_controller.data_item_reference.data_item_reference_changed_event.listen(display_data_item_changed)
             processed_data_item_reference_changed_listener = state_controller.processed_data_item_reference.data_item_reference_changed_event.listen(processed_data_item_changed)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 for _ in range(4):
                     hardware_source.get_next_xdatas_to_finish()
@@ -640,23 +637,18 @@ class TestCameraControlClass(unittest.TestCase):
             data_item_reference_changed_listener = state_controller.data_item_reference.data_item_reference_changed_event.listen(display_data_item_changed)
             processed_data_item_reference_changed_listener = state_controller.processed_data_item_reference.data_item_reference_changed_event.listen(processed_data_item_changed)
             # first acquisition
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 for _ in range(4):
                     hardware_source.get_next_xdatas_to_finish()
                     document_controller.periodic()
             finally:
-                hardware_source.abort_playing()
+                hardware_source.abort_playing(sync_timeout=3.0)
             document_model.recompute_all()
-            # make sure really stopped
-            start_time = time.time()
-            while hardware_source.is_playing:
-                time.sleep(self.exposure)
-                self.assertTrue(time.time() - start_time < TIMEOUT)
             self.assertEqual(len(document_model.data_items), 2)
             # second acquisition
             first_data_items = copy.copy(data_items)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 for _ in range(4):
                     hardware_source.get_next_xdatas_to_finish()
@@ -767,7 +759,7 @@ class TestCameraControlClass(unittest.TestCase):
             self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
             with self._test_context() as test_context:
                 hardware_source = test_context.camera_hardware_source
-                hardware_source.start_playing()
+                hardware_source.start_playing(sync_timeout=3.0)
                 try:
                     data = hardware_source.get_next_xdatas_to_finish()[0].data
                     last_hash = zlib.crc32(data)
@@ -788,7 +780,7 @@ class TestCameraControlClass(unittest.TestCase):
             frame_parameters = hardware_source.get_frame_parameters(0)
             frame_parameters.integration_count = 4
             hardware_source.set_current_frame_parameters(frame_parameters)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 frame0_integration_count = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["integration_count"]
                 frame1_integration_count = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["integration_count"]
@@ -1073,7 +1065,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
             self.assertEqual(state_controller.acquisition_state_model.value, "stopped")
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -1092,7 +1084,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source._test_start_hook = raise_exception
             hardware_source._test_acquire_exception = lambda *args: None
             state_controller = self.__create_state_controller(test_context)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -1110,7 +1102,7 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source._test_acquire_hook = raise_exception
             hardware_source._test_acquire_exception = lambda *args: None
             state_controller = self.__create_state_controller(test_context)
-            hardware_source.start_playing()
+            hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish(5)
                 document_controller.periodic()
@@ -1514,7 +1506,7 @@ class TestCameraControlClass(unittest.TestCase):
                 document_controller = test_context.document_controller
                 document_model = test_context.document_model
                 state_controller = self.__create_state_controller(test_context)
-                hardware_source.start_playing()
+                hardware_source.start_playing(sync_timeout=3.0)
                 try:
                     hardware_source.get_next_xdatas_to_finish(5)
                     state_controller.use_processed_data = True
