@@ -42,7 +42,7 @@ class Frame:
         self.complete = False
         self.bad = False
         self.data_count = 0
-        self.start_time = time.time()
+        self.start_time = time.perf_counter()
         self.scan_data: typing.Optional[typing.List[_NDArray]] = None
 
 
@@ -298,7 +298,7 @@ class Device(scan_base.ScanDevice):
                 pixels_remaining = min(total_pixels - current_frame.data_count, int(time_slice * 1e6 / frame_parameters.pixel_time_us) + 1)
                 pixel_wait = min(pixels_remaining * frame_parameters.pixel_time_us / 1E6, time_slice)
                 time.sleep(pixel_wait)
-                target_count = min(int((time.time() - current_frame.start_time) / (frame_parameters.pixel_time_us / 1E6)), total_pixels)
+                target_count = min(int((time.perf_counter() - current_frame.start_time) / (frame_parameters.pixel_time_us / 1E6)), total_pixels)
             if (new_pixels := target_count - self.__scan_simulator.current_pixel_flat) > 0:
                 self.__scan_simulator._advance_pixel(new_pixels)
 
