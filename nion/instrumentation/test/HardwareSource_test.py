@@ -1260,8 +1260,11 @@ class TestHardwareSourceClass(unittest.TestCase):
             document_model = simple_test_context.document_model
             hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(0.02)
-                document_controller.periodic()
+                start_time = time.time()
+                while len(document_model.data_items) == 0:
+                    time.sleep(0.001)
+                    document_controller.periodic()
+                    self.assertTrue(time.time() - start_time < 3.0)
                 self.assertEqual(1, len(document_model.data_items))
                 self.assertTrue(document_model.data_items[0].is_write_delayed)
             finally:
