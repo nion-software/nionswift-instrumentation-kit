@@ -509,7 +509,6 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.start_playing(sync_timeout=3.0)
             try:
                 hardware_source.get_next_xdatas_to_finish()  # view again
-                time.sleep(0.001)  # try to avoid Windows timer low precision issues
                 elapsed = time.perf_counter() - start
                 document_controller.periodic()
                 self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
