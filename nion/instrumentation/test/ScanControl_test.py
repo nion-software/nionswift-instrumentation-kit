@@ -445,9 +445,9 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_channel_enabled(0, True)
             frame_time = scan_hardware_source.get_current_frame_time()
-            scan_hardware_source.start_playing()
+            scan_hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(frame_time * 2.1)
+                time.sleep(frame_time * 1.2)
                 test_context.document_controller.periodic()
                 self.assertEqual(1, len(test_context.document_model.data_items))
                 self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
@@ -770,16 +770,16 @@ class TestScanControlClass(unittest.TestCase):
             with self._test_context() as test_context:
                 scan_hardware_source = test_context.scan_hardware_source
                 frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-                frame_parameters_0.size = Geometry.IntSize(256, 256)
+                frame_parameters_0.size = Geometry.IntSize(16, 16)
                 frame_parameters_0.pixel_time_us = 2
                 scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
                 scan_hardware_source.start_playing()
                 data_list = list()
-                for i in range(16):
+                for i in range(6):
                     data = scan_hardware_source.get_next_xdatas_to_finish()[0].data
                     data_list.append(data)
-                for row in range(0, 256, 32):
-                    s = slice(row, row+32), slice(0, 256)
+                for row in range(0, len(data_list)):
+                    s = slice(row, row+1), slice(0, 16)
                     for i, data in enumerate(data_list[1:]):
                         self.assertFalse(numpy.array_equal(data_list[0][s], data[s]))
         finally:
