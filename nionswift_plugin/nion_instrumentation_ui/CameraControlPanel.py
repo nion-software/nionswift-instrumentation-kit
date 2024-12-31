@@ -16,6 +16,7 @@ import typing
 
 # local libraries
 from nion.data import DataAndMetadata
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import HardwareSource
 from nion.swift import DataItemThumbnailWidget
@@ -305,6 +306,7 @@ class CameraControlStateController:
             if self.__captured_xdatas_available_event:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
+            Acquisition.session_manager.begin_acquisition(self.__document_model)  # bump the index
             for index, data_promise in enumerate(data_promises):
                 def add_data_item(data_item: DataItem.DataItem) -> None:
                     self.__document_model.append_data_item(data_item)
@@ -317,7 +319,11 @@ class CameraControlStateController:
                         data_item = DataItem.new_data_item(xdata)
                         display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                         display_name = display_name if display_name else _("Capture")
-                        data_item.title = display_name
+                        acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
+                        data_item_title = display_name
+                        if acquisition_number:
+                            data_item_title += f" Capture {acquisition_number}"
+                        data_item.title = data_item_title
                         data_item.session_metadata = ApplicationData.get_session_metadata_dict()
                         self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)
