@@ -575,18 +575,17 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters_2 = scan_hardware_source.get_frame_parameters(2)
             frame_parameters_2.size = Geometry.IntSize(500, 500)
             frame_time = frame_parameters_2.pixel_time_us * 500 * 500 / 1000000.0
-            scan_hardware_source.start_recording()
-            time.sleep(frame_time * 0.6)
+            recording_task = scan_hardware_source.start_recording(sync_timeout=3.0)
+            time.sleep(frame_time * 0.1)
             scan_hardware_source.set_frame_parameters(2, frame_parameters_2)
-            self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (1024, 1024))
-            start_time = time.time()
-            while scan_hardware_source.is_recording:
-                time.sleep(frame_time)
-                self.assertTrue(time.time() - start_time < 3.0)
+            recorded_xdatas = recording_task.grab_xdatas(timeout=3.0)
+            self.assertEqual(recorded_xdatas[0].data.shape, (1024, 1024))
+            scan_hardware_source.stop_recording(sync_timeout=3.0)
             # confirm that recording is done, then verify that the frame parameters are actually applied to the _next_ frame.
-            scan_hardware_source.start_recording()
-            time.sleep(frame_time * 0.6)
-            self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (500, 500))
+            recording_task = scan_hardware_source.start_recording(sync_timeout=3.0)
+            time.sleep(frame_time * 0.1)
+            recorded_xdatas = recording_task.grab_xdatas(timeout=3.0)
+            self.assertEqual(recorded_xdatas[0].data.shape, (500, 500))
 
     def test_capturing_during_view_captures_new_data_items(self):
         with self._test_context() as test_context:
@@ -652,7 +651,9 @@ class TestScanControlClass(unittest.TestCase):
             scan_state_controller.on_display_new_data_item = display_new_data_item
 
             # start playing and wait for one frame to finish
-            scan_hardware_source.start_playing(sync_timeout=3.0)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.pixel_time_us = 2.0
+            scan_hardware_source.start_playing(frame_parameters=scan_frame_parameters, sync_timeout=3.0)
             scan_hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
 
