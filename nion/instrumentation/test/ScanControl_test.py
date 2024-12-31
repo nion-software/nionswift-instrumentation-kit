@@ -638,6 +638,50 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual("Ned Flanders", document_model.data_items[3].session_metadata["microscopist"])
 
+    def test_changing_fov_during_capture_results_in_correct_calibration(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_state_controller = self.__create_state_controller(test_context)
+
+            def display_new_data_item(data_item: DataItem.DataItem) -> None:
+                document_model.append_data_item(data_item)
+
+            # set up capture handling
+            scan_state_controller.on_display_new_data_item = display_new_data_item
+
+            # start playing and wait for one frame to finish
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+
+            # ensure capture occurs during acquisition
+            time.sleep(scan_hardware_source.get_current_frame_time() / 4)
+
+            # trigger capture
+            scan_state_controller.handle_capture_clicked()
+
+            # change the fov during the capture
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertAlmostEqual(100.0, scan_frame_parameters.fov_nm)
+            scan_frame_parameters.fov_nm = 10.0
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+
+            # wait for the capture to finish
+            scan_hardware_source.get_next_xdatas_to_finish()
+
+            # stop playing
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+
+            # safety check
+            self.assertEqual(1, document_model.data_items[1].metadata["hardware_source"]["frame_index"])
+
+            # check fov
+            self.assertAlmostEqual(100.0, document_model.data_items[1].dimensional_calibrations[0].convert_to_calibrated_size(document_model.data_items[1].data_shape[0]))
+            self.assertEqual(100.0, document_model.data_items[1].metadata["scan"]["fov_nm"])
+
     def test_ability_to_start_playing_with_custom_parameters(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller

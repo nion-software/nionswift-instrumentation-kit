@@ -458,6 +458,7 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
         self.__frame_parameters = copy.copy(frame_parameters)
+        self.__frame_parameters_at_start_of_frame = copy.copy(frame_parameters)
         self.__acquisition_task_parameters = acquisition_task_parameters or ScanAcquisitionTaskParameters()
         self.__frame_number: typing.Optional[int] = None
         self.__scan_id: typing.Optional[uuid.UUID] = None
@@ -529,19 +530,21 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__scan_id = self.__fixed_scan_id
         self.__stem_controller._exit_scanning_state()
 
-    def _acquire_data_elements(self) -> typing.List[typing.Dict[str, typing.Any]]:
+    def __update_data_element_acquisition_progress(self, data_element: typing.MutableMapping[str, typing.Any], complete: bool, sub_area: typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], npdata: _NDArray) -> None:
+        data_element["data"] = npdata
+        if self.__acquisition_task_parameters.data_shape_override:
+            # data_shape of None is handled specially in DataChannel.update
+            data_element["data_shape"] = self.__acquisition_task_parameters.data_shape_override.as_tuple()
+        data_element["sub_area"] = sub_area
+        data_element["dest_sub_area"] = (Geometry.IntRect.make(sub_area) + (self.__acquisition_task_parameters.top_left_override if self.__acquisition_task_parameters.top_left_override else Geometry.IntPoint())).as_tuple()
+        data_element["state"] = self.__acquisition_task_parameters.state_override or "complete" if complete else "partial"
+        data_element["section_state"] = "complete" if complete else "partial"
+        data_element["metadata"].setdefault("hardware_source", dict())["valid_rows"] = sub_area[0][0] + sub_area[1][0]
+        data_element["metadata"].setdefault("scan", dict())["valid_rows"] = sub_area[0][0] + sub_area[1][0]
 
-        def update_data_element(data_element: typing.MutableMapping[str, typing.Any], complete: bool, sub_area: typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], npdata: _NDArray) -> None:
-            data_element["data"] = npdata
-            if self.__acquisition_task_parameters.data_shape_override:
-                # data_shape of None is handled specially in DataChannel.update
-                data_element["data_shape"] = self.__acquisition_task_parameters.data_shape_override.as_tuple()
-            data_element["sub_area"] = sub_area
-            data_element["dest_sub_area"] = (Geometry.IntRect.make(sub_area) + (self.__acquisition_task_parameters.top_left_override if self.__acquisition_task_parameters.top_left_override else Geometry.IntPoint())).as_tuple()
-            data_element["state"] = self.__acquisition_task_parameters.state_override or "complete" if complete else "partial"
-            data_element["section_state"] = "complete" if complete else "partial"
-            data_element["metadata"].setdefault("hardware_source", dict())["valid_rows"] = sub_area[0][0] + sub_area[1][0]
-            data_element["metadata"].setdefault("scan", dict())["valid_rows"] = sub_area[0][0] + sub_area[1][0]
+    def _acquire_data_elements(self) -> typing.List[typing.Dict[str, typing.Any]]:
+        if self.__pixels_to_skip == 0:
+            self.__frame_parameters_at_start_of_frame = copy.copy(self.__frame_parameters)
 
         _data_elements, complete, bad_frame, sub_area, self.__frame_number, self.__pixels_to_skip = self.__device.read_partial(self.__frame_number, self.__pixels_to_skip)
 
@@ -564,12 +567,12 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             _scan_properties = _data_element["properties"]
             scan_id = self.__scan_id
             channel_name = self.__device.get_channel_name(channel_index)
-            is_subscan = self.__frame_parameters.subscan_pixel_size and not self.__frame_parameters.subscan_type_partial
+            is_subscan = self.__frame_parameters_at_start_of_frame.subscan_pixel_size and not self.__frame_parameters_at_start_of_frame.subscan_type_partial
             # channel variant can be passed back from the acquisition device; but if it isn't, then subscan is
             # added if the subscan_pixel_size is set. the scan devices (modules) will still have a chance to modify
             # the channel specifier via the DataChannelDelegateProtocol.map_data_channel_specifier before the channel
             # specifier is used to send the data to a data channel.
-            channel_variant = self.__frame_parameters.channel_variant
+            channel_variant = self.__frame_parameters_at_start_of_frame.channel_variant
             channel_variant = channel_variant or ("subscan" if is_subscan else None)
             # create the 'data_element' in the format that must be returned from this method
             # '_data_element' is the format returned from the Device.
@@ -584,10 +587,10 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
             if "spatial_calibrations" in _data_element:
                 data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
             else:
-                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
-            update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.__display_name, self.__frame_parameters, scan_id, _scan_properties)
+                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters_at_start_of_frame, _data.shape, _scan_properties)
+            update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.__display_name, self.__frame_parameters_at_start_of_frame, scan_id, _scan_properties)
             update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.__display_name, _data.shape, self.__frame_number, channel_name, channel_id, _scan_properties)
-            update_data_element(data_element, complete, sub_area, _data)
+            self.__update_data_element_acquisition_progress(data_element, complete, sub_area, _data)
             data_elements.append(data_element)
 
         if complete or bad_frame:
