@@ -18,6 +18,7 @@ import typing
 
 # local libraries
 from nion.data import DataAndMetadata
+from nion.instrumentation import Acquisition
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -589,6 +590,7 @@ class ScanControlStateController:
             if self.__captured_xdatas_available_listener:
                 self.__captured_xdatas_available_listener.close()
                 self.__captured_xdatas_available_listener = None
+            Acquisition.session_manager.begin_acquisition(self.__document_model)  # bump the index
             for data_promise in data_promises:
                 def add_data_item(data_item: DataItem.DataItem) -> None:
                     if self.on_display_new_data_item:
@@ -599,7 +601,13 @@ class ScanControlStateController:
                     display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                     display_name = display_name if display_name else _("Capture")
                     channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
-                    data_item.title = "%s (%s)" % (display_name, channel_name) if channel_name else display_name
+                    acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
+                    data_item_title = display_name
+                    if channel_name:
+                        data_item_title += f" ({channel_name})"
+                    if acquisition_number:
+                        data_item_title += f" Capture {acquisition_number}"
+                    data_item.title = data_item_title
                     data_item.session_metadata = ApplicationData.get_session_metadata_dict()
                     self.queue_task(functools.partial(add_data_item, data_item))
             self.queue_task(self.__update_buttons)

@@ -347,6 +347,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.stop_playing(sync_timeout=TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
+            self.assertTrue(document_model.data_items[1].title.endswith(" Capture 1"))
 
     def test_capturing_during_view_captures_eels_2d(self):
         with self._test_context(is_eels=True) as test_context:

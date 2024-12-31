@@ -609,6 +609,11 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 4)
+            # check that the new data item titles are different
+            self.assertNotEqual(document_model.data_items[2], document_model.data_items[3])
+            # check that the new data item titles both have the same index
+            self.assertTrue(document_model.data_items[2].title.endswith(" Capture 1"))
+            self.assertTrue(document_model.data_items[3].title.endswith(" Capture 1"))
 
     def test_capturing_during_view_captures_session(self):
         with self._test_context() as test_context:
