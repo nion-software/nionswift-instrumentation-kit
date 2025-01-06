@@ -1,6 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.2.0 (2025-01-06)
+-------------------
+- Fix issue with serial data acquisition.
+- Fix #214. Ensure capture button produces a unique title.
+- Fix #131. Change capture to use frame parameters from start of acquisition for metadata/calibrations.
+
 23.1.0 (2024-10-27)
 -------------------
 - Add unique index to session metadata and use in acquisition output data items.
