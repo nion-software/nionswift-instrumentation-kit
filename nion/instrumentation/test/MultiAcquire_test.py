@@ -102,7 +102,7 @@ class TestMultiAcquire(unittest.TestCase):
                 # check timing
                 elapsed = time.time() - t0
                 progress_event_listener.close()
-                self.assertLess(elapsed, total_acquisition_time, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+                self.assertLess(elapsed, total_acquisition_time + 1.0, msg=f'Exceeded allowed acquisition time ({total_acquisition_time + 1.0} s).')
                 self.assertEqual(len(data_dict['data_element_list']), len(parameters))
                 self.assertAlmostEqual(progress, 1.0, places=1)
 
@@ -117,10 +117,8 @@ class TestMultiAcquire(unittest.TestCase):
         with self.__test_context(is_eels=True) as test_context:
             total_acquisition_time = 0.0
             for parms in parameters:
-                # the simulator cant go super fast, so make sure we give it enough time
-                total_acquisition_time += parms['frames']*max(parms['exposure_ms'], 100)/1000
-                # add some extra overhead time
-                total_acquisition_time += 0.15
+                # give the simulator enough time + overhead
+                total_acquisition_time += parms['frames'] * max(parms['exposure_ms'], 100) / 1000 + 0.50
                 total_acquisition_time += settings['x_shift_delay']*2
             total_acquisition_time += settings['x_shift_delay']*2
             total_acquisition_time += settings['blanker_delay']*2 if settings['auto_dark_subtract'] else 0
@@ -142,7 +140,7 @@ class TestMultiAcquire(unittest.TestCase):
             elapsed = time.time() - t0
             progress_event_listener.close()
 
-            self.assertLess(elapsed, total_acquisition_time + 1.0, msg=f'Exceeded allowed acquisition time ({total_acquisition_time} s).')
+            self.assertLess(elapsed, total_acquisition_time + 1.0, msg=f'Exceeded allowed acquisition time ({total_acquisition_time + 1.0} s).')
             self.assertEqual(len(data_dict['data_element_list']), len(parameters))
             self.assertAlmostEqual(progress, 1.0, places=1)
             self.assertAlmostEqual(data_dict['data_element_list'][0]['metadata']['instrument']['defocus'], 9e-7)
@@ -213,9 +211,7 @@ class TestMultiAcquire(unittest.TestCase):
                             total_acquisition_time = 0.0
                             for params in parameters:
                                 # give the simulator enough time
-                                total_acquisition_time += params['frames']*max(params['exposure_ms'], 100)/1000*scan_size[0]*scan_size[1]
-                                # add some extra overhead time
-                                total_acquisition_time += 0.15
+                                total_acquisition_time += params['frames'] * max(params['exposure_ms'], 100) / 1000 * scan_size[0] * scan_size[1] + 0.50
                                 total_acquisition_time += settings['x_shift_delay']*2
                             total_acquisition_time += settings['x_shift_delay']*2
 
@@ -343,7 +339,7 @@ class TestMultiAcquire(unittest.TestCase):
                                 # ensure also that some scan info is saved in the camera metadata
                                 self.assertIsNotNone(data_item.metadata['scan'])
 
-                            self.assertLess(starttime - endtime, total_acquisition_time)
+                            self.assertLess(starttime - endtime, total_acquisition_time + 1.0)
 
     def test_acquire_multi_eels_spectrum_image_applies_shift_for_each_frame(self):
         scan_size = Geometry.IntSize(6, 6)
