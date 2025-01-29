@@ -74,7 +74,7 @@ def make_scan_device(test_context: AcquisitionTestContext.test_context, *args: t
     return scan_base.ScanAcquisitionDevice(test_context.scan_hardware_source, test_context.scan_hardware_source.get_current_frame_parameters())
 
 
-def make_synchronized_device(test_context: AcquisitionTestContext.test_context, camera_channel: typing.Optional[str], *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
+def _make_synchronized_device(test_context: AcquisitionTestContext.test_context, camera_channel: typing.Optional[str], *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
@@ -84,6 +84,16 @@ def make_synchronized_device(test_context: AcquisitionTestContext.test_context, 
                                                        test_context.camera_hardware_source,
                                                        test_context.camera_hardware_source.get_frame_parameters(0),
                                                        camera_channel, False, 0, 0, None, None, 0.0)
+
+
+def make_synchronized_device(test_context: AcquisitionTestContext.test_context, camera_channel: typing.Optional[str], *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
+    return _make_synchronized_device(test_context, camera_channel)
+
+
+def make_slow_synchronized_device(test_context: AcquisitionTestContext.test_context, camera_channel: typing.Optional[str], *args: typing.Any) -> Acquisition.AcquisitionDeviceLike:
+    # update period gets set to 0
+    setattr(test_context.camera_hardware_source, "_update_period_for_testing", 0.0)
+    return _make_synchronized_device(test_context, camera_channel)
 
 
 def make_sequence_acquisition_method() -> Acquisition.AcquisitionMethodLike:
@@ -1325,6 +1335,15 @@ class TestCameraControlClass(unittest.TestCase):
             # single spectrum image
             # three data items will be created: the haadf, the spectrum image, amd the scan view.
             (make_synchronized_device, True, "eels_spectrum", make_basic_acquisition_method,
+             [
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+                 ((6, 4, 512), DataAndMetadata.DataDescriptor(False, 2, 1), ensure_camera_metadata),
+                 ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+             ]),
+
+            # single spectrum image
+            # three data items will be created: the haadf, the spectrum image, amd the scan view.
+            (make_slow_synchronized_device, True, "eels_spectrum", make_basic_acquisition_method,
              [
                  ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
                  ((6, 4, 512), DataAndMetadata.DataDescriptor(False, 2, 1), ensure_camera_metadata),

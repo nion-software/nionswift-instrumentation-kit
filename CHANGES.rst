@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.2.1 (UNRELESAED)
+-------------------
+- Fix #203. Ensure case where a single camera frame at a time in synchronized acquisition is handled properly.
+
 23.2.0 (2025-01-06)
 -------------------
 - Fix issue with serial data acquisition.

@@ -1825,8 +1825,8 @@ class Framer:
                 source_data = data_stream_event.source_data
                 source_slice = source_slice
             else:
-                source_data = data_stream_event.source_data.reshape(data_stream_event.source_data.shape[1:])
-                source_slice = (slice(None), slice(None))
+                source_data = data_stream_event.source_data[source_slice].reshape(data_stream_event.source_data.shape[1:])
+                source_slice = data_stream_event.source_slice[1:]
             self.__data_channel.update_data(channel, source_data, source_slice, dest_slice, data_metadata)
             # proceed
             index = index + source_count

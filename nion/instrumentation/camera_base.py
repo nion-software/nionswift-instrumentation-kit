@@ -2042,6 +2042,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__current_frame_parameters_changed_event_listener = self.__camera_settings.current_frame_parameters_changed_event.listen(self.__current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
 
+        self._update_period_for_testing: typing.Optional[float] = None
+
         # add optional support for settings. to enable auto settings handling, the camera settings object must define
         # a settings_id property (which can just be the camera id), an apply_settings method which takes a settings
         # dict read from the config file and applies it as the settings, and a settings_changed_event which must be
@@ -2307,6 +2309,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
+        update_period = self._update_period_for_testing if self._update_period_for_testing is not None else update_period
         return self.__camera.acquire_synchronized_continue(update_period=update_period)
 
     def acquire_synchronized_end(self) -> None:
