@@ -179,7 +179,7 @@ class Camera(camera_base.CameraDevice3):
     def acquire_image(self) -> ImportExportManager.DataElementType:
         return self.__acquire_image(direct=False)
 
-    def __acquire_image(self, *, direct: bool, index: int = 0) -> ImportExportManager.DataElementType:
+    def __acquire_image(self, *, direct: bool, do_sync: bool = False) -> ImportExportManager.DataElementType:
         """Acquire the most recent data.
 
         The direct parameter is a shortcut to optimize the speed during sequence acquisition. When
@@ -192,7 +192,7 @@ class Camera(camera_base.CameraDevice3):
         integration_count = self.__integration_count or 1
         for frame_number in range(integration_count):
             if direct:
-                self.__direct_acquire(self.__cancel_sequence_event, index == 0)
+                self.__direct_acquire(self.__cancel_sequence_event, do_sync)
             else:
                 if not self.__has_data_event.wait(self.__exposure * 200) and not self.__thread.is_alive():
                     raise Exception("No simulator thread.")
@@ -237,7 +237,8 @@ class Camera(camera_base.CameraDevice3):
             for index in range(n):
                 if self.__cancel_sequence_event.is_set():
                     return None
-                frame_data_element = self.__acquire_image(direct=True, index=index)
+                do_sync = index == 0 and n > 1  # n > 1 avoids race where scan is disabled on last frame but still asking for only 1 frame
+                frame_data_element = self.__acquire_image(direct=True, do_sync=do_sync)
                 frame_data = frame_data_element["data"]
                 if self.__processing == "sum_project" and len(frame_data.shape) > 1:
                     data_shape = (n,) + frame_data.shape[1:]
