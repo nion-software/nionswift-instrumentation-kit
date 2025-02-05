@@ -39,9 +39,9 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
-        scan_hardware_source = self.setup_scan_hardware_source(configuration.instrument, configuration.scan_module.device, configuration.scan_module.settings)
-        self._ronchigram_camera_hardware_source = self.setup_camera_hardware_source(configuration.instrument_id, configuration.ronchigram_camera_device, configuration.ronchigram_camera_settings, camera_exposure, False)
-        self._eels_camera_hardware_source = self.setup_camera_hardware_source(configuration.instrument_id, configuration.eels_camera_device, configuration.eels_camera_settings, camera_exposure, True)
+        scan_hardware_source = self.__setup_scan_hardware_source(configuration.instrument, configuration.scan_module.device, configuration.scan_module.settings)
+        self._ronchigram_camera_hardware_source = self.__setup_camera_hardware_source(configuration.instrument_id, configuration.ronchigram_camera_device, configuration.ronchigram_camera_settings, camera_exposure, False)
+        self._eels_camera_hardware_source = self.__setup_camera_hardware_source(configuration.instrument_id, configuration.eels_camera_device, configuration.eels_camera_settings, camera_exposure, True)
         self.instrument = configuration.instrument
         self.scan_hardware_source = scan_hardware_source
         self.camera_hardware_source = self._eels_camera_hardware_source if is_eels else self._ronchigram_camera_hardware_source
@@ -81,14 +81,14 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
     def push(self, ex: typing.Any) -> None:
         self.__exit_stack.append(ex)
 
-    def setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController, scan_device: scan_base.ScanDevice, scan_settings: scan_base.ScanSettingsProtocol) -> scan_base.ScanHardwareSource:
+    def __setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController, scan_device: scan_base.ScanDevice, scan_settings: scan_base.ScanSettingsProtocol) -> scan_base.ScanHardwareSource:
         scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
         setattr(scan_device, "hardware_source", scan_hardware_source)
         Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller
         HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
         return scan_hardware_source
 
-    def setup_camera_hardware_source(self, instrument_id: str, camera_device: camera_base.CameraDevice3, camera_settings: camera_base.CameraSettings, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
+    def __setup_camera_hardware_source(self, instrument_id: str, camera_device: camera_base.CameraDevice3, camera_settings: camera_base.CameraSettings, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
         camera_type = "eels" if is_eels else "ronchigram"
         camera_hardware_source = camera_base.CameraHardwareSource3(instrument_id, camera_device, camera_settings, None, None)
         if is_eels:
