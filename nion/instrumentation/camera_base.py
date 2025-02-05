@@ -3491,6 +3491,7 @@ def run(configuration_location: pathlib.Path) -> None:
             camera_hardware_source = component.hardware_source
             Registry.unregister_component(camera_hardware_source)
             HardwareSource.HardwareSourceManager().unregister_hardware_source(camera_hardware_source)
+            camera_hardware_source.close()
 
     global _component_registered_listener
     global _component_unregistered_listener
