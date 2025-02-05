@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import math
+import pathlib
+import shutil
 import threading
 import typing
 
@@ -16,6 +19,7 @@ from nion.device_kit import ScanDevice
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.utils import Geometry
+from nion.utils import Registry
 
 
 class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
@@ -206,6 +210,11 @@ class ScanDataGenerator(ScanDevice.ScanDataGeneratorLike):
 
 class AcquisitionTestContextConfiguration:
     def __init__(self) -> None:
+        configuration_location = pathlib.Path.cwd() / "test_data"
+        if configuration_location.exists():
+            shutil.rmtree(configuration_location)
+        pathlib.Path.mkdir(configuration_location, exist_ok=True)
+        self.configuration_location = configuration_location
         self.instrument_id = "test_stem_controller"
         self.ronchigram_camera_device_id = "test_ronchigram_camera"
         self.eels_camera_device_id = "test_eels_camera"
@@ -215,3 +224,22 @@ class AcquisitionTestContextConfiguration:
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id, 0.005)
         self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(Geometry.IntSize(256, 1024)), self.instrument)
+
+    def run(self) -> None:
+        logging.disable(logging.CRITICAL)
+        try:
+            Registry.register_component(self.instrument, {"instrument_controller", "stem_controller"})
+            component_types = {"camera_module"}  # the set of component types that this component represents
+            setattr(self.ronchigram_camera_device, "camera_panel_type", "ronchigram")
+            Registry.register_component(CameraDevice.CameraModule("test_stem_controller", self.ronchigram_camera_device, self.ronchigram_camera_settings), component_types)
+            setattr(self.eels_camera_device, "camera_panel_type", "eels")
+            Registry.register_component(CameraDevice.CameraModule("test_stem_controller", self.eels_camera_device, self.eels_camera_settings), component_types)
+            Registry.register_component(self.scan_module, {"scan_module"})
+        finally:
+            logging.disable(logging.NOTSET)
+
+    def stop(self) -> None:
+        for component in Registry.get_components_by_type("camera_module"):
+            Registry.unregister_component(component, {"camera_module"})
+        Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
+        Registry.unregister_component(Registry.get_component("stem_controller"), {"instrument_controller", "stem_controller"})
