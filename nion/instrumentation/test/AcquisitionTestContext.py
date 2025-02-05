@@ -15,6 +15,7 @@ from nion.utils import Registry
 
 
 class AcquisitionTestContextConfigurationLike(typing.Protocol):
+    configuration_location: str
     instrument_id: str
     instrument: stem_controller.STEMController
     scan_module: scan_base.ScanModule
@@ -25,23 +26,27 @@ class AcquisitionTestContextConfigurationLike(typing.Protocol):
     eels_camera_device: camera_base.CameraDevice3
     eels_camera_settings: camera_base.CameraSettings
 
+    def run(self) -> None: ...
+
+    def stop(self) -> None: ...
+
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
     def __init__(self, configuration: AcquisitionTestContextConfigurationLike, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False):
         super().__init__()
         assert not is_eels or not is_both_cameras
         logging.getLogger("acquisition").setLevel(logging.ERROR)
-        HardwareSource.run()
-        DriftTracker.run()
-        Registry.register_component(configuration.instrument, {"stem_controller"})
-        Registry.register_component(configuration.scan_module, {"scan_module"})
-        Registry.register_component(configuration.scan_module.device, {"scan_device"})
+        from nionswift_plugin import nion_instrumentation_ui
+        nion_instrumentation_ui.configuration_location = configuration.configuration_location
+        nion_instrumentation_ui.run()
         HardwareSource.HardwareSourceManager()._hardware_source_list_model.clear_items()
         HardwareSource.HardwareSourceManager().hardware_source_added_event = Event.Event()
         HardwareSource.HardwareSourceManager().hardware_source_removed_event = Event.Event()
-        scan_hardware_source = self.__setup_scan_hardware_source(configuration.instrument, configuration.scan_module.device, configuration.scan_module.settings)
-        self._ronchigram_camera_hardware_source = self.__setup_camera_hardware_source(configuration.instrument_id, configuration.ronchigram_camera_device, configuration.ronchigram_camera_settings, camera_exposure, False)
-        self._eels_camera_hardware_source = self.__setup_camera_hardware_source(configuration.instrument_id, configuration.eels_camera_device, configuration.eels_camera_settings, camera_exposure, True)
+        configuration.run()
+        scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.scan_module.device.scan_device_id)
+        self._ronchigram_camera_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.ronchigram_camera_device_id)
+        self._eels_camera_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.eels_camera_device_id)
+        self.configuration = configuration
         self.instrument = configuration.instrument
         self.scan_hardware_source = scan_hardware_source
         self.camera_hardware_source = self._eels_camera_hardware_source if is_eels else self._ronchigram_camera_hardware_source
@@ -61,20 +66,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         for ex in self.__exit_stack:
             ex.close()
         stem_controller.unregister_event_loop()
-        self._ronchigram_camera_hardware_source.close()
-        self._eels_camera_hardware_source.close()
-        self.scan_hardware_source.close()
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self._ronchigram_camera_hardware_source)
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self._eels_camera_hardware_source)
-        HardwareSource.HardwareSourceManager().unregister_hardware_source(self.scan_hardware_source)
-        DriftTracker.stop()
-        Registry.unregister_component(Registry.get_component("scan_device"), {"scan_device"})
-        Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
-        Registry.unregister_component(Registry.get_component("stem_controller"), {"stem_controller"})
-        Registry.unregister_component(Registry.get_component("scan_hardware_source"), {"hardware_source", "scan_hardware_source"})
-        Registry.unregister_component(self._ronchigram_camera_hardware_source, {"hardware_source", "camera_hardware_source", "ronchigram_camera_hardware_source"})
-        Registry.unregister_component(self._eels_camera_hardware_source, {"hardware_source", "camera_hardware_source", "eels_camera_hardware_source"})
-        HardwareSource.HardwareSourceManager()._close_instruments()
+        self.configuration.stop()
+        HardwareSource.HardwareSourceManager().close()
         HardwareSource.stop()
         super().close()
 
