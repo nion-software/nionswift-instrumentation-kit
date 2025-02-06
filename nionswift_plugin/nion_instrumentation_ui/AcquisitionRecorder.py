@@ -14,6 +14,7 @@ import numpy
 # local libraries
 from nion.data import Calibration
 from nion.data import DataAndMetadata
+from nion.instrumentation import Acquisition
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.swift.model import DataItem
@@ -86,6 +87,10 @@ class Controller:
         self.progress_model.value = 0
         frame_count = self.frame_count_model.value or 0
         was_playing = hardware_source.is_playing
+
+        document_model = document_controller.document_model
+
+        Acquisition.session_manager.begin_acquisition(document_model)  # bump the index
 
         xdata_group_list: typing.List[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]] = list()
 
@@ -188,9 +193,15 @@ class Controller:
                     data_item.set_xdata(xdata)
                     channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
                     channel_ext = (" (" + channel_name + ")") if channel_name else ""
-                    data_item.title = _("Recording of ") + hardware_source.display_name + channel_ext
-                    document_controller.document_model.append_data_item(data_item)
-                    display_item = document_controller.document_model.get_display_item_for_data_item(data_item)
+
+                    acquisition_number = Acquisition.session_manager.get_project_acquisition_index(document_model)
+                    data_item_title = f"{hardware_source.display_name} Recording ({channel_ext})"
+                    if acquisition_number:
+                        data_item_title += f" {acquisition_number}"
+                    data_item.title = data_item_title
+
+                    document_model.append_data_item(data_item)
+                    display_item = document_model.get_display_item_for_data_item(data_item)
                     if display_item:
                         document_controller.show_display_item(display_item)
 
