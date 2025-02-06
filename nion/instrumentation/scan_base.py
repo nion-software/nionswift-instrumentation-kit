@@ -2802,7 +2802,7 @@ def run(configuration_location: pathlib.Path) -> None:
             scan_module = typing.cast(ScanModule, component)
             stem_controller = find_stem_controller(scan_module.stem_controller_id)
             if not stem_controller:
-                print("STEM Controller (" + component.stem_controller_id + ") for (" + component.scan_device_id + ") not found. Using proxy.")
+                print("STEM Controller (" + component.stem_controller_id + ") for (" + component.device.scan_device_id + ") not found. Using proxy.")
                 stem_controller = STEMController.STEMController()
             scan_hardware_source = ConcreteScanHardwareSource(stem_controller, scan_module.device, scan_module.settings, configuration_location, scan_module.panel_type)
             if scan_module.data_channel_delegate:
