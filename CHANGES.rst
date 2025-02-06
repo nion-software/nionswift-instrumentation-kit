@@ -3,6 +3,7 @@ Changelog (nionswift-instrumentation)
 
 23.2.1 (UNRELESAED)
 -------------------
+- Fix #225. Ensure unique acquisition index when using Spectrum Imaging / 4D panel.
 - Fix #203. Ensure case where a single camera frame at a time in synchronized acquisition is handled properly.
 
 23.2.0 (2025-01-06)

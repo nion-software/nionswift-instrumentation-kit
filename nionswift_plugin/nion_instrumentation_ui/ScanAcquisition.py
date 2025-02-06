@@ -170,6 +170,8 @@ class ScanAcquisitionController:
 
         self.acquisition_state_changed_event.fire(SequenceState.scanning)
 
+        Acquisition.session_manager.begin_acquisition(document_model)  # bump the index
+
         self.__scan_acquisition.acquire_async(event_loop=event_loop, on_completion=finish_grab_async)
 
     def cancel(self) -> None:

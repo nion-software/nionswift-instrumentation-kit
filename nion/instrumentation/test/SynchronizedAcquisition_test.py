@@ -882,8 +882,10 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                                     Facade.HardwareSource(scan_hardware_source),
                                                                                     Facade.HardwareSource(camera_hardware_source),
                                                                                     scan_specifier)
+            self.assertEqual(0, Acquisition.session_manager.get_project_acquisition_index(document_model))
             scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, False))
             scan_acquisition_controller._wait()
+            self.assertEqual(1, Acquisition.session_manager.get_project_acquisition_index(document_model))
             document_controller.periodic()
             # ensure extra data items are not created
             self.assertEqual(3, len(document_model.data_items))
