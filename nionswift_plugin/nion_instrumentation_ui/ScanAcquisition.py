@@ -567,7 +567,8 @@ class PanelDelegate:
 
         exposure_precision = camera_hardware_source.exposure_precision
 
-        exposure_time_ms_value_binding = Binding.PropertyBinding(self.__exposure_time_ms_value_model, "value", converter=Converter.FloatToStringConverter("{0:." + str(exposure_precision) + "f}"))
+        value_format = "{0:." + str(max(1, -exposure_precision - 3)) + "f}"
+        exposure_time_ms_value_binding = Binding.PropertyBinding(self.__exposure_time_ms_value_model, "value", converter=Converter.FloatToStringConverter(value_format))
 
         def eels_profile_parameters_changed(profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
             if profile_index == 0 and isinstance(camera_hardware_source, camera_base.CameraHardwareSource):
