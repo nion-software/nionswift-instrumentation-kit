@@ -594,53 +594,67 @@ PreferencesDialog.PreferencesManager().register_preference_pane(video_preference
 hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
 hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None
 
+hardware_control_panels = dict()
+
+
+def register_video_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    if hardware_source.features.get("is_video", False):
+        panel_id = "video-control-panel-" + hardware_source.hardware_source_id
+        hardware_control_panels[hardware_source.hardware_source_id] = panel_id
+
+        class HardwareDisplayPanelControllerFactory:
+            def __init__(self) -> None:
+                self.priority = 1
+
+            def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
+                # return a list of actions that have been added to the menu.
+                def switch_to_live_controller(hardware_source: HardwareSource.HardwareSource) -> None:
+                    assert isinstance(hardware_source, video_base.VideoHardwareSource)
+                    d = {"type": "image", "controller_type": VideoDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
+                    if selected_display_panel:
+                        selected_display_panel.change_display_panel_content(d)
+
+                action = display_type_menu.add_menu_item(hardware_source.display_name or _("Unknown"), functools.partial(switch_to_live_controller, hardware_source))
+                display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
+                action.checked = isinstance(display_panel_controller, VideoDisplayPanelController) and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
+                return [action]
+
+            def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[VideoDisplayPanelController]:
+                # make a new display panel controller, typically called to restore contents of a display panel.
+                # controller_type will match the type property of the display panel controller when it was saved.
+                # d is the dictionary that is saved when the display panel controller closes.
+                hardware_source_id = d.get("hardware_source_id")
+                if controller_type == VideoDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
+                    return VideoDisplayPanelController(display_panel, hardware_source_id)
+                return None
+
+            def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
+                if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, document_model, data_item):
+                    return {"controller_type": VideoDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
+                return None
+
+        DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id, HardwareDisplayPanelControllerFactory())
+
+def unregister_video_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    if hardware_source.features.get("is_video", False):
+        DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id)
+
+
 def run() -> None:
     global hardware_source_added_event_listener, hardware_source_removed_event_listener
-    hardware_control_panels = dict()
-
-    def register_hardware_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        if hardware_source.features.get("is_video", False):
-            panel_id = "video-control-panel-" + hardware_source.hardware_source_id
-            hardware_control_panels[hardware_source.hardware_source_id] = panel_id
-
-            class HardwareDisplayPanelControllerFactory:
-                def __init__(self) -> None:
-                    self.priority = 1
-
-                def build_menu(self, display_type_menu: UserInterface.Menu, selected_display_panel: typing.Optional[DisplayPanel.DisplayPanel]) -> typing.Sequence[UserInterface.MenuAction]:
-                    # return a list of actions that have been added to the menu.
-                    def switch_to_live_controller(hardware_source: HardwareSource.HardwareSource) -> None:
-                        assert isinstance(hardware_source, video_base.VideoHardwareSource)
-                        d = {"type": "image", "controller_type": VideoDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
-                        if selected_display_panel:
-                            selected_display_panel.change_display_panel_content(d)
-
-                    action = display_type_menu.add_menu_item(hardware_source.display_name or _("Unknown"), functools.partial(switch_to_live_controller, hardware_source))
-                    display_panel_controller = selected_display_panel.display_panel_controller if selected_display_panel else None
-                    action.checked = isinstance(display_panel_controller, VideoDisplayPanelController) and display_panel_controller.hardware_source_id == hardware_source.hardware_source_id
-                    return [action]
-
-                def make_new(self, controller_type: str, display_panel: DisplayPanel.DisplayPanel, d: Persistence.PersistentDictType) -> typing.Optional[VideoDisplayPanelController]:
-                    # make a new display panel controller, typically called to restore contents of a display panel.
-                    # controller_type will match the type property of the display panel controller when it was saved.
-                    # d is the dictionary that is saved when the display panel controller closes.
-                    hardware_source_id = d.get("hardware_source_id")
-                    if controller_type == VideoDisplayPanelController.type and hardware_source_id == hardware_source.hardware_source_id:
-                        return VideoDisplayPanelController(display_panel, hardware_source_id)
-                    return None
-
-                def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
-                    if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, None, document_model, data_item):
-                        return {"controller_type": VideoDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id}
-                    return None
-
-            DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id, HardwareDisplayPanelControllerFactory())
-
-    def unregister_hardware_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        if hardware_source.features.get("is_video", False):
-            DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("video-live-" + hardware_source.hardware_source_id)
-
-    hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_hardware_panel)
-    hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_hardware_panel)
+    hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_video_panel)
+    hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_video_panel)
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
-        register_hardware_panel(hardware_source)
+        register_video_panel(hardware_source)
+
+
+def stop() -> None:
+    global hardware_source_added_event_listener, hardware_source_removed_event_listener, scan_control_panels
+    if hardware_source_added_event_listener:
+        hardware_source_added_event_listener.close()
+        hardware_source_added_event_listener = None
+    if hardware_source_removed_event_listener:
+        hardware_source_removed_event_listener.close()
+        hardware_source_removed_event_listener = None
+    for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
+        unregister_video_panel(hardware_source)

@@ -1286,42 +1286,56 @@ class CameraDisplayPanelControllerFactory:
         return None
 
 
+camera_control_panels = dict()
+
+
+def register_camera_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    """Called when a hardware source is added to the hardware source manager."""
+
+    # check to see if we handle this hardware source.
+    is_camera = hardware_source.features.get("is_camera", False)
+    if is_camera:
+
+        panel_id = "camera-control-panel-" + hardware_source.hardware_source_id
+        name = hardware_source.display_name + " " + _("Camera Control")
+        camera_control_panels[hardware_source.hardware_source_id] = panel_id
+
+        DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraDisplayPanelControllerFactory(hardware_source))
+
+        panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
+
+        camera_panel_type = hardware_source.features.get("camera_panel_type")
+        if not camera_panel_type:
+            Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
+        else:
+            panel_properties["camera_panel_type"] = camera_panel_type
+            Workspace.WorkspaceManager().register_panel(typing.cast(typing.Type[typing.Any], create_camera_panel), panel_id, name, ["left", "right"], "left", panel_properties)
+
+def unregister_camera_panel(hardware_source: HardwareSource.HardwareSource) -> None:
+    """Called when a hardware source is removed from the hardware source manager."""
+    is_camera = hardware_source.features.get("is_camera", False)
+    if is_camera:
+        DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
+        panel_id = camera_control_panels.get(hardware_source.hardware_source_id)
+        if panel_id:
+            Workspace.WorkspaceManager().unregister_panel(panel_id)
+
+
 def run() -> None:
     global hardware_source_added_event_listener, hardware_source_removed_event_listener
-    camera_control_panels = dict()
-
-    def register_camera_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        """Called when a hardware source is added to the hardware source manager."""
-
-        # check to see if we handle this hardware source.
-        is_camera = hardware_source.features.get("is_camera", False)
-        if is_camera:
-
-            panel_id = "camera-control-panel-" + hardware_source.hardware_source_id
-            name = hardware_source.display_name + " " + _("Camera Control")
-            camera_control_panels[hardware_source.hardware_source_id] = panel_id
-
-            DisplayPanel.DisplayPanelManager().register_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id, CameraDisplayPanelControllerFactory(hardware_source))
-
-            panel_properties = {"hardware_source_id": hardware_source.hardware_source_id}
-
-            camera_panel_type = hardware_source.features.get("camera_panel_type")
-            if not camera_panel_type:
-                Workspace.WorkspaceManager().register_panel(CameraControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
-            else:
-                panel_properties["camera_panel_type"] = camera_panel_type
-                Workspace.WorkspaceManager().register_panel(typing.cast(typing.Type[typing.Any], create_camera_panel), panel_id, name, ["left", "right"], "left", panel_properties)
-
-    def unregister_camera_panel(hardware_source: HardwareSource.HardwareSource) -> None:
-        """Called when a hardware source is removed from the hardware source manager."""
-        is_camera = hardware_source.features.get("is_camera", False)
-        if is_camera:
-            DisplayPanel.DisplayPanelManager().unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
-            panel_id = camera_control_panels.get(hardware_source.hardware_source_id)
-            if panel_id:
-                Workspace.WorkspaceManager().unregister_panel(panel_id)
-
     hardware_source_added_event_listener = HardwareSource.HardwareSourceManager().hardware_source_added_event.listen(register_camera_panel)
     hardware_source_removed_event_listener = HardwareSource.HardwareSourceManager().hardware_source_removed_event.listen(unregister_camera_panel)
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
         register_camera_panel(hardware_source)
+
+
+def stop() -> None:
+    global hardware_source_added_event_listener, hardware_source_removed_event_listener, scan_control_panels
+    if hardware_source_added_event_listener:
+        hardware_source_added_event_listener.close()
+        hardware_source_added_event_listener = None
+    if hardware_source_removed_event_listener:
+        hardware_source_removed_event_listener.close()
+        hardware_source_removed_event_listener = None
+    for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
+        unregister_camera_panel(hardware_source)

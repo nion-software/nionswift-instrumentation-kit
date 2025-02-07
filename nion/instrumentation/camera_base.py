@@ -3501,3 +3501,14 @@ def run(configuration_location: pathlib.Path) -> None:
 
     for component in Registry.get_components_by_type("camera_module"):
         component_registered(component, {"camera_module"})
+
+
+def stop() -> None:
+    global _component_registered_listener
+    global _component_unregistered_listener
+    if _component_registered_listener:
+        _component_registered_listener.close()
+    if _component_unregistered_listener:
+        _component_unregistered_listener.close()
+    _component_registered_listener = None
+    _component_unregistered_listener = None
