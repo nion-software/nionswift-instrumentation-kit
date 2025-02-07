@@ -67,8 +67,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
             ex.close()
         stem_controller.unregister_event_loop()
         self.configuration.stop()
-        HardwareSource.HardwareSourceManager().close()
-        HardwareSource.stop()
+        from nionswift_plugin import nion_instrumentation_ui
+        nion_instrumentation_ui.stop()
         super().close()
 
     def push(self, ex: typing.Any) -> None:

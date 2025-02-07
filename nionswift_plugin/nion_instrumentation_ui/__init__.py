@@ -56,3 +56,19 @@ def run() -> None:
         ScanControlPanel.run()
         MultipleShiftEELSAcquire.run()
         VideoControlPanel.run()
+
+
+def stop() -> None:
+    global configuration_location
+    if configuration_location:
+        VideoControlPanel.stop()
+        MultipleShiftEELSAcquire.stop()
+        ScanControlPanel.stop()
+        CameraControlPanel.stop()
+        video_base.stop()
+        scan_base.stop()
+        camera_base.stop()
+        DriftTracker.stop()
+        HardwareSource.stop()
+        HardwareSource.HardwareSourceManager().close()
+        configuration_location = None
