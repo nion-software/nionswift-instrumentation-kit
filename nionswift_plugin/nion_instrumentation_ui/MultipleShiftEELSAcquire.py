@@ -579,3 +579,8 @@ def run() -> None:
                                      disp_name,
                                      ["left", "right"],
                                      "left")
+
+
+def stop() -> None:
+    workspace_manager = Workspace.WorkspaceManager()
+    workspace_manager.unregister_panel(name+"-control-panel")
