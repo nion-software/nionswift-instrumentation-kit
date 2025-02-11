@@ -1,7 +1,7 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-23.2.1 (UNRELESAED)
+23.2.1 (2025-02-11)
 -------------------
 - Fix #225. Use unique acquisition index when using Spectrum Imaging / 4D panel.
 - Fix #226. Use unique acquisition index when using Scan Recorder panel.
