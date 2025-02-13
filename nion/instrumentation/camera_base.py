@@ -3048,8 +3048,9 @@ class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
 
 
 def get_instrument_calibration_value(instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
-    if key + "_control" in calibration_controls:
-        valid, value = instrument_controller.TryGetVal(typing.cast(str, calibration_controls[key + "_control"]))
+    control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
+    if control_name:
+        valid, value = instrument_controller.TryGetVal(control_name)
         if valid:
             return value
     if key + "_value" in calibration_controls:
@@ -3197,8 +3198,9 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         return x_calibration.scale
 
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
-        if key + "_control" in calibration_controls:
-            valid, value = instrument_controller.TryGetVal(typing.cast(str, calibration_controls[key + "_control"]))
+        control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
+        if control_name:
+            valid, value = instrument_controller.TryGetVal(control_name)
             if valid:
                 return value
         if key + "_value" in calibration_controls:

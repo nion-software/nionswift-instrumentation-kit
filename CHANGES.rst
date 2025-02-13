@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.2.2 (UNRELEASED)
+-------------------
+- Fix #228. Ensure control name is valid when getting camera calibrations.
+
 23.2.1 (2025-02-11)
 -------------------
 - Fix #225. Use unique acquisition index when using Spectrum Imaging / 4D panel.
