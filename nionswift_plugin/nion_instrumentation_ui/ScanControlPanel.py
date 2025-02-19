@@ -36,7 +36,6 @@ from nion.ui import UserInterface
 from nion.ui import Declarative
 from nion.ui import Widgets
 from nion.ui import PreferencesDialog
-from nion.ui.CanvasItem import ComposerCache, BaseComposer
 from nion.utils import Converter
 from nion.utils import Geometry
 from nion.utils import Model
@@ -162,10 +161,10 @@ class ScanControlStateController:
 
     profiles = { _("Puma"): 0, _("Rabbit"): 1, _("Frame"): 2 }
 
-    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, queue_task: typing.Callable[[typing.Callable[[], None]], None], document_model: DocumentModel.DocumentModel, channel_id: typing.Optional[str]) -> None:
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, document_controller: DocumentController.DocumentController, channel_id: typing.Optional[str]) -> None:
+        self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
-        self.queue_task = queue_task
-        self.__document_model = document_model
+        self.queue_task = document_controller.queue_task
         self.__channel_id = channel_id
         self.__linked = True
         self.__profile_changed_event_listener: typing.Optional[Event.EventListener] = None
@@ -202,6 +201,8 @@ class ScanControlStateController:
         self.acquisition_state_model = Model.PropertyModel[typing.Dict[str, typing.Optional[str]]](dict())
 
         self.__captured_xdatas_available_listener: typing.Optional[Event.EventListener] = None
+
+        document_model = document_controller.document_model
 
         self.data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, self.__channel_id))
 
@@ -402,16 +403,23 @@ class ScanControlStateController:
         """ Call this when the user clicks the play/pause button. """
         if self.__scan_hardware_source:
             if self.is_playing:
-                self.__scan_hardware_source.stop_playing()
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+                self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
             else:
                 frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
-                self.__scan_hardware_source.start_playing(frame_parameters=frame_parameters)
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+                action_context.parameters["frame_parameters"] = frame_parameters.as_dict()
+                self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
 
     # must be called on ui thread
     def handle_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
         if self.__scan_hardware_source:
-            self.__scan_hardware_source.abort_playing()
+            action_context = self.__document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+            self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
 
     # must be called on ui thread
     def handle_record_clicked(self, callback_fn: typing.Callable[[DataItem.DataItem], None]) -> None:
@@ -590,7 +598,8 @@ class ScanControlStateController:
             if self.__captured_xdatas_available_listener:
                 self.__captured_xdatas_available_listener.close()
                 self.__captured_xdatas_available_listener = None
-            Acquisition.session_manager.begin_acquisition(self.__document_model)  # bump the index
+            document_model = self.__document_controller.document_model
+            Acquisition.session_manager.begin_acquisition(document_model)  # bump the index
             for data_promise in data_promises:
                 def add_data_item(data_item: DataItem.DataItem) -> None:
                     if self.on_display_new_data_item:
@@ -601,7 +610,7 @@ class ScanControlStateController:
                     display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                     display_name = display_name if display_name else _("Capture")
                     channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
-                    acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
+                    acquisition_number = Acquisition.session_manager.get_project_acquisition_index(document_model)
                     data_item_title = display_name
                     if channel_name:
                         data_item_title += f" ({channel_name})"
@@ -924,7 +933,7 @@ class ArrowSliderCanvasItemComposer(CanvasItem.BaseComposer):
         self.stroke_style = "#000"
         self.border_enabled = False
 
-    def _repaint(self, drawing_context: DrawingContext.DrawingContext, canvas_bounds: Geometry.IntRect, composer_cache: ComposerCache) -> None:
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext, canvas_bounds: Geometry.IntRect, composer_cache: CanvasItem.ComposerCache) -> None:
         with drawing_context.saver():
             drawing_context.translate(canvas_bounds.left, canvas_bounds.top)
             center_x = int(canvas_bounds.width * 0.5)
@@ -1040,7 +1049,7 @@ class ArrowSliderCanvasItem(CanvasItem.AbstractCanvasItem):
             MouseTrackingCanvasItem.start_mouse_tracker(self.ui, self.__event_loop, canvas_item, mouse_position_changed_by, global_pos, Geometry.IntSize(20, 80))
         return True
 
-    def _get_composer(self, composer_cache: ComposerCache) -> typing.Optional[BaseComposer]:
+    def _get_composer(self, composer_cache: CanvasItem.ComposerCache) -> typing.Optional[CanvasItem.BaseComposer]:
         return ArrowSliderCanvasItemComposer(self, self.layout_sizing, composer_cache, self.enabled, self.__mouse_inside and self.__mouse_pressed)
 
 
@@ -1049,7 +1058,7 @@ class LinkedCheckBoxCanvasItemComposer(CanvasItem.BaseComposer):
         super().__init__(canvas_item, layout_sizing, composer_cache)
         self.__check_state = check_state
 
-    def _repaint(self, drawing_context: DrawingContext.DrawingContext, canvas_bounds: Geometry.IntRect, composer_cache: ComposerCache) -> None:
+    def _repaint(self, drawing_context: DrawingContext.DrawingContext, canvas_bounds: Geometry.IntRect, composer_cache: CanvasItem.ComposerCache) -> None:
         with drawing_context.saver():
             drawing_context.translate(canvas_bounds.left, canvas_bounds.top)
             drawing_context.begin_path()
@@ -1125,7 +1134,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.document_controller = document_controller
 
-        self.__state_controller = ScanControlStateController(scan_controller, document_controller.queue_task, document_controller.document_model, None)
+        self.__state_controller = ScanControlStateController(scan_controller, document_controller, None)
 
         self.__shift_click_state: typing.Optional[str] = None
 
@@ -1801,7 +1810,7 @@ class ScanDisplayPanelController:
         self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__playback_controls_composition)
 
         # configure the hardware source state controller
-        self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model, data_channel_id)
+        self.__state_controller = ScanControlStateController(hardware_source, display_panel.document_controller, data_channel_id)
 
         def update_display_name() -> None:
             new_text = "%s (%s)" % (self.__display_name, self.__channel_name)

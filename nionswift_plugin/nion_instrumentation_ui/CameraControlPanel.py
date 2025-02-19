@@ -88,12 +88,12 @@ class CameraControlStateController:
         on_log_messages(messages, data_elements)
     """
 
-    def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, queue_task: typing.Callable[[typing.Callable[[], None]], None], document_model: DocumentModel.DocumentModel) -> None:
+    def __init__(self, camera_hardware_source: camera_base.CameraHardwareSource, document_controller: DocumentController.DocumentController) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__has_processed_channel = typing.cast(bool, camera_hardware_source.features.get("has_processed_channel", False))
         self.use_processed_data = False
-        self.queue_task = queue_task
-        self.__document_model = document_model
+        self.queue_task = document_controller.queue_task
+        self.__document_controller = document_controller
         self.__profile_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
@@ -117,6 +117,8 @@ class CameraControlStateController:
         self.__camera_current: typing.Optional[float] = None
         self.__last_camera_current_time = 0.0
         self.__xdatas_available_event = self.__camera_hardware_source.xdatas_available_event.listen(self.__receive_new_xdatas)
+
+        document_model = document_controller.document_model
 
         self.data_item_reference = document_model.get_data_item_reference(self.__camera_hardware_source.hardware_source_id)
         self.processed_data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(self.__camera_hardware_source.hardware_source_id, "summed"))
@@ -244,14 +246,20 @@ class CameraControlStateController:
         """ Call this when the user clicks the play/pause button. """
         if self.__camera_hardware_source:
             if self.is_playing:
-                self.__camera_hardware_source.stop_playing()
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
+                self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
             else:
-                self.__camera_hardware_source.start_playing()
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
+                self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
 
     def handle_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
         if self.__camera_hardware_source:
-            self.__camera_hardware_source.abort_playing()
+            action_context = self.__document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
+            self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
 
     # must be called on ui thread
     def handle_settings_button_clicked(self, api_broker: typing.Any) -> None:
@@ -306,10 +314,11 @@ class CameraControlStateController:
             if self.__captured_xdatas_available_event:
                 self.__captured_xdatas_available_event.close()
                 self.__captured_xdatas_available_event = None
-            Acquisition.session_manager.begin_acquisition(self.__document_model)  # bump the index
+            document_model = self.__document_controller.document_model
+            Acquisition.session_manager.begin_acquisition(document_model)  # bump the index
             for index, data_promise in enumerate(data_promises):
                 def add_data_item(data_item: DataItem.DataItem) -> None:
-                    self.__document_model.append_data_item(data_item)
+                    document_model.append_data_item(data_item)
                     if callable(self.on_display_new_data_item):
                         self.on_display_new_data_item(data_item)
 
@@ -319,7 +328,7 @@ class CameraControlStateController:
                         data_item = DataItem.new_data_item(xdata)
                         display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
                         display_name = display_name if display_name else _("Capture")
-                        acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
+                        acquisition_number = Acquisition.session_manager.get_project_acquisition_index(document_model)
                         data_item_title = display_name
                         if acquisition_number:
                             data_item_title += f" Capture {acquisition_number}"
@@ -644,7 +653,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         self.document_controller = document_controller
 
-        self.__state_controller = CameraControlStateController(camera_hardware_source, document_controller.queue_task, document_controller.document_model)
+        self.__state_controller = CameraControlStateController(camera_hardware_source, document_controller)
 
         self.__delegate: typing.Optional[CameraPanelDelegate] = None
 
@@ -1058,7 +1067,7 @@ class CameraDisplayPanelController:
         self.__hardware_source_id = hardware_source_id
 
         # configure the hardware source state controller
-        self.__state_controller = CameraControlStateController(camera_hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model)
+        self.__state_controller = CameraControlStateController(camera_hardware_source, display_panel.document_controller)
 
         # configure the user interface
         self.__display_name = str()

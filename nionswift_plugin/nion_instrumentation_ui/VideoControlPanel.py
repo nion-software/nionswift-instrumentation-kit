@@ -76,10 +76,10 @@ class VideoSourceStateController:
         on_abort_button_state_changed(visible, enabled)
     """
 
-    def __init__(self, hardware_source: video_base.VideoHardwareSource, queue_task: typing.Callable[[typing.Callable[[], None]], None], document_model: DocumentModel.DocumentModel) -> None:
+    def __init__(self, hardware_source: video_base.VideoHardwareSource, document_controller: DocumentController.DocumentController) -> None:
         self.__hardware_source = hardware_source
-        self.queue_task = queue_task
-        self.__document_model = document_model
+        self.__document_controller = document_controller
+        self.queue_task = document_controller.queue_task
         self.__acquisition_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.__data_channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed: typing.Optional[typing.Callable[[str], None]] = None
@@ -88,6 +88,8 @@ class VideoSourceStateController:
         self.on_display_new_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
 
         self.acquisition_state_model = Model.PropertyModel[str]("stopped")
+
+        document_model = document_controller.document_model
 
         self.data_item_reference = document_model.get_data_item_reference(self.__hardware_source.hardware_source_id)
 
@@ -149,9 +151,13 @@ class VideoSourceStateController:
         """ Call this when the user clicks the play/pause button. """
         if self.__hardware_source:
             if self.is_playing:
-                self.__hardware_source.stop_playing()
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__hardware_source.hardware_source_id
+                self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
             else:
-                self.__hardware_source.start_playing()
+                action_context = self.__document_controller._get_action_context()
+                action_context.parameters["hardware_source_id"] = self.__hardware_source.hardware_source_id
+                self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
 
     def handle_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
@@ -214,7 +220,7 @@ class VideoDisplayPanelController:
         self.__hardware_source_id = hardware_source_id
 
         # configure the hardware source state controller
-        self.__state_controller = VideoSourceStateController(hardware_source, display_panel.document_controller.queue_task, display_panel.document_controller.document_model)
+        self.__state_controller = VideoSourceStateController(hardware_source, display_panel.document_controller)
 
         # configure the user interface
         self.__play_button_enabled = False
@@ -324,7 +330,7 @@ class VideoSourceWidget(Widgets.CompositeWidgetBase):
 
         self.document_controller = document_controller
 
-        self.__state_controller = VideoSourceStateController(hardware_source, document_controller.queue_task, document_controller.document_model)
+        self.__state_controller = VideoSourceStateController(hardware_source, document_controller)
 
         ui = document_controller.ui
 
