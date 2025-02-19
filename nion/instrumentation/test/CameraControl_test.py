@@ -177,8 +177,7 @@ class TestCameraControlClass(unittest.TestCase):
     def __create_state_controller(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext, *,
                                   initialize: bool = True) -> CameraControlPanel.CameraControlStateController:
         state_controller = CameraControlPanel.CameraControlStateController(acquisition_test_context.camera_hardware_source,
-                                                                           acquisition_test_context.document_controller.queue_task,
-                                                                           acquisition_test_context.document_model)
+                                                                           acquisition_test_context.document_controller)
         if initialize:
             state_controller.initialize_state()
         acquisition_test_context.push(state_controller)

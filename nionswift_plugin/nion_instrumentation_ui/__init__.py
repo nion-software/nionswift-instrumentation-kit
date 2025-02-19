@@ -5,12 +5,13 @@ import pathlib
 import typing
 
 from . import AcquisitionPanel
-from . import CameraControlPanel
-from . import ScanControlPanel
-from . import ScanAcquisition
 from . import AcquisitionRecorder
+from . import CameraControlPanel
+from . import HardwareSourceActions
 from . import MultiAcquirePanel
 from . import MultipleShiftEELSAcquire
+from . import ScanControlPanel
+from . import ScanAcquisition
 from . import VideoControlPanel
 
 from nion.instrumentation import camera_base

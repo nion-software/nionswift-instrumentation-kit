@@ -80,8 +80,7 @@ class TestScanControlClass(unittest.TestCase):
     def __create_state_controller(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext,
                                   channel_id: typing.Optional[str] = None) -> ScanControlPanel.ScanControlStateController:
         state_controller = ScanControlPanel.ScanControlStateController(acquisition_test_context.scan_hardware_source,
-                                                                       acquisition_test_context.document_controller.queue_task,
-                                                                       acquisition_test_context.document_model,
+                                                                       acquisition_test_context.document_controller,
                                                                        channel_id)
         state_controller.initialize_state()
         acquisition_test_context.push(state_controller)
