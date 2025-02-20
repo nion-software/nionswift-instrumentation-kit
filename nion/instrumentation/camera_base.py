@@ -13,6 +13,7 @@ import logging
 import math
 import os
 import pathlib
+import threading
 import time
 import typing
 import traceback
@@ -1458,15 +1459,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 with open(config_file) as f:
                     settings_dict = json.load(f)
                 self.__camera_settings.apply_settings(settings_dict)
-
-            def settings_changed(settings_dict: typing.Mapping[str, typing.Any]) -> None:
-                # atomically overwrite
-                temp_filepath = config_file.with_suffix(".temp")
-                with open(temp_filepath, "w") as fp:
-                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
-                os.replace(temp_filepath, config_file)
-
-            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
+            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(functools.partial(settings_changed, config_file))
 
         self.__instrument_controller_id = instrument_controller_id
         self.__instrument_controller: typing.Optional[InstrumentController] = None
@@ -2026,6 +2019,18 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__camera_settings.open_configuration_interface(api_broker)
 
 
+configuration_lock = threading.RLock()
+
+
+def settings_changed(config_file: pathlib.Path, settings_dict: typing.Mapping[str, typing.Any]) -> None:
+    # atomically overwrite
+    with configuration_lock:
+        temp_filepath = config_file.with_suffix(".temp")
+        with temp_filepath.open("w") as fp:
+            json.dump(settings_dict, fp, skipkeys=True, indent=4)
+        os.replace(temp_filepath, config_file)
+
+
 class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
     """Construct hardware source from the device.
 
@@ -2056,15 +2061,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 with open(config_file) as f:
                     settings_dict = json.load(f)
                 self.__camera_settings.apply_settings(settings_dict)
-
-            def settings_changed(settings_dict: typing.Mapping[str, typing.Any]) -> None:
-                # atomically overwrite
-                temp_filepath = config_file.with_suffix(".temp")
-                with open(temp_filepath, "w") as fp:
-                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
-                os.replace(temp_filepath, config_file)
-
-            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(settings_changed)
+            self.__settings_changed_event_listener = self.__camera_settings.settings_changed_event.listen(functools.partial(settings_changed, config_file))
 
         self.__instrument_controller_id = instrument_controller_id
         self.__instrument_controller: typing.Optional[InstrumentController] = None
