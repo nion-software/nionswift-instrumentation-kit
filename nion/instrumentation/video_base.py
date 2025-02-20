@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import threading
 import typing
 
 # typing
@@ -140,6 +141,7 @@ class VideoConfiguration:
 
     def __init__(self) -> None:
         self.__config_file: typing.Optional[pathlib.Path] = None
+        self.__config_file_lock = threading.RLock()
 
         # the active video sources (hardware sources). this list is updated when a video camera device is registered or
         # unregistered with the hardware source manager.
@@ -209,10 +211,11 @@ class VideoConfiguration:
     def __save(self) -> None:
         # atomically overwrite
         if self.__config_file:
-            temp_filepath = self.__config_file.with_suffix(".temp")
-            with open(temp_filepath, "w") as fp:
-                json.dump([instance.settings for instance in self.__instances], fp, skipkeys=True, indent=4)
-            os.replace(temp_filepath, self.__config_file)
+            with self.__config_file_lock:
+                temp_filepath = self.__config_file.with_suffix(".temp")
+                with open(temp_filepath, "w") as fp:
+                    json.dump([instance.settings for instance in self.__instances], fp, skipkeys=True, indent=4)
+                os.replace(temp_filepath, self.__config_file)
 
     def get_settings_model(self, hardware_source: VideoHardwareSource) -> typing.Optional[StructuredModel.ModelLike]:
         for instance in self.__instances:

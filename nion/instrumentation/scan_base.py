@@ -1131,6 +1131,18 @@ class ScanSettings(ScanSettingsProtocol):
             self.__open_configuration_dialog_fn(api_broker)
 
 
+configuration_lock = threading.RLock()
+
+
+def settings_changed(config_file: pathlib.Path, settings_dict: typing.Mapping[str, typing.Any]) -> None:
+    # atomically overwrite
+    with configuration_lock:
+        temp_filepath = config_file.with_suffix(".temp")
+        with temp_filepath.open("w") as fp:
+            json.dump(settings_dict, fp, skipkeys=True, indent=4)
+        os.replace(temp_filepath, config_file)
+
+
 class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHardwareSource):
 
     def __init__(self, stem_controller_: STEMController.STEMController, device: ScanDevice, settings: ScanSettingsProtocol, configuration_location: typing.Optional[pathlib.Path], panel_type: typing.Optional[str] = None) -> None:
@@ -1154,15 +1166,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 with open(config_file) as f:
                     settings_dict = json.load(f)
                 self.__settings.apply_settings(settings_dict)
-
-            def settings_changed(settings_dict: typing.Mapping[str, typing.Any]) -> None:
-                # atomically overwrite
-                temp_filepath = config_file.with_suffix(".temp")
-                with open(temp_filepath, "w") as fp:
-                    json.dump(settings_dict, fp, skipkeys=True, indent=4)
-                os.replace(temp_filepath, config_file)
-
-            self.__settings_changed_event_listener = self.__settings.settings_changed_event.listen(settings_changed)
+            self.__settings_changed_event_listener = self.__settings.settings_changed_event.listen(functools.partial(settings_changed, config_file))
 
         self.features["is_scanning"] = True
         if panel_type:
