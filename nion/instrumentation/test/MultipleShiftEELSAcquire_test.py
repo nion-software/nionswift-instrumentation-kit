@@ -2,11 +2,15 @@ import logging
 import time
 import unittest
 
-from nion.swift import Application
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.swift import Application
+from nion.swift import Facade
 from nion.ui import TestUI
 
 from nionswift_plugin.nion_instrumentation_ui import MultipleShiftEELSAcquire
+
+
+Facade.initialize()
 
 
 class TestMultiAcquire(unittest.TestCase):
@@ -57,6 +61,10 @@ class TestMultiAcquire(unittest.TestCase):
             while not is_finished:
                 test_context.document_controller.periodic()
                 time.sleep(0.01)
+
+            # finish off the last computation, to prevent leaks
+            test_context.document_controller.document_model.recompute_all()
+            test_context.document_controller.periodic()
 
 
 if __name__ == '__main__':
