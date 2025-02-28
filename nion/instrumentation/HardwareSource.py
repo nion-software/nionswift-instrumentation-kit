@@ -2043,7 +2043,7 @@ class CalibrationProvider:
             image_width_px = dimensional_shape[-1]
             image_width_m = pixel_size_nm * image_width_px / 1e9
             if image_width_m / abs(defocus) < 1.0:
-                angular_scale = math.asin(image_width_m / abs(defocus)) / image_width_px
+                angular_scale = math.asin(image_width_m / abs(defocus)) / image_width_px if image_width_px > 0 else 0.0
                 offsets = [-origin * angular_scale for origin in origin_px]
                 return [Calibration.Calibration(offset=offset, scale=angular_scale, units="rad") for _, offset in zip(dimensional_shape, offsets)]
         return None
