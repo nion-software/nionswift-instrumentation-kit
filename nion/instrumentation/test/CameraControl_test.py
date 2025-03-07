@@ -1543,6 +1543,42 @@ class TestCameraControlClass(unittest.TestCase):
             finally:
                 display_panel_manager.unregister_display_panel_controller_factory("camera-live-" + hardware_source.hardware_source_id)
 
+    def test_camera_action_with_frame_parameters(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.exposure_ms = 14
+            action_context = document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = hardware_source.hardware_source_id
+            action_context.parameters["frame_parameters"] = frame_parameters.as_dict()
+            document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+            start = time.time()
+            while not hardware_source.is_playing:
+                time.sleep(0.01)  # 10 msec
+                assert time.time() - start < 3.0
+            hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(14/1000, document_model.data_items[0].metadata["hardware_source"]["exposure"])
+
+    def test_camera_action_with_no_frame_parameters(self) -> None:
+        # essentially just testing that acquisition works.
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            action_context = document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = hardware_source.hardware_source_id
+            document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+            start = time.time()
+            while not hardware_source.is_playing:
+                time.sleep(0.01)  # 10 msec
+                assert time.time() - start < 3.0
+            hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+            self.assertEqual(1, len(document_model.data_items))
+
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
 

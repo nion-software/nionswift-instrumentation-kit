@@ -1304,11 +1304,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__device
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        if "frame_parameters" in kwargs:
-            if hasattr(kwargs["frame_parameters"], "as_dict"):
-                frame_parameters = self.__settings.get_frame_parameters_from_dict(typing.cast(ParametersBase, kwargs["frame_parameters"]).as_dict())
+        frame_parameters = kwargs.get("frame_parameters", None)
+        if frame_parameters:
+            if hasattr(frame_parameters, "as_dict"):
+                frame_parameters = self.__settings.get_frame_parameters_from_dict(typing.cast(ParametersBase, frame_parameters).as_dict())
             else:
-                frame_parameters = self.__settings.get_frame_parameters_from_dict(typing.cast(typing.Dict[str, typing.Any], kwargs["frame_parameters"]))
+                frame_parameters = self.__settings.get_frame_parameters_from_dict(typing.cast(typing.Dict[str, typing.Any], frame_parameters))
             self.set_current_frame_parameters(frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
             # positional argument handling is only for backward compatibility and could be removed.
