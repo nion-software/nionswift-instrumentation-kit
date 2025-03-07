@@ -1562,9 +1562,9 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 self.log_messages_event.fire(messages, data_elements)
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
-        if "frame_parameters" in kwargs:
-            camera_frame_parameters = typing.cast(CameraFrameParameters, kwargs["frame_parameters"])
+        camera_frame_parameters = typing.cast(CameraFrameParameters | None, kwargs.get("frame_parameters", None))
+        if camera_frame_parameters:
+            # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
             camera_frame_parameters.processing = None
             self.set_current_frame_parameters(camera_frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
@@ -2182,9 +2182,9 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 self.log_messages_event.fire(messages, data_elements)
 
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
-        if "frame_parameters" in kwargs:
-            camera_frame_parameters = typing.cast(CameraFrameParameters, kwargs["frame_parameters"])
+        camera_frame_parameters = typing.cast(CameraFrameParameters | None, kwargs.get("frame_parameters", None))
+        if camera_frame_parameters:
+            # note: sum_project has been mishandled in the past. it is not valid for view modes. clear it here.
             camera_frame_parameters.processing = None
             self.set_current_frame_parameters(camera_frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
