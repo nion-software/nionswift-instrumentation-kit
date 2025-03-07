@@ -407,6 +407,8 @@ class ScanControlStateController:
                 action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
                 self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
             else:
+                # the 'enabled channel indexes' implementation is incomplete, so, for now, explicitly add them to the
+                # frame parameters so that they can be recorded when logging the start playing action.
                 frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
                 frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
                 action_context = self.__document_controller._get_action_context()
