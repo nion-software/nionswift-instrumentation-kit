@@ -408,6 +408,7 @@ class ScanControlStateController:
                 self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
             else:
                 frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+                frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
                 action_context = self.__document_controller._get_action_context()
                 action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
                 action_context.parameters["frame_parameters"] = frame_parameters.as_dict()

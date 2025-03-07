@@ -29,7 +29,8 @@ class StartPlayingAction(Window.Action):
             frame_parameters_d = context.parameters.get("frame_parameters")
             if hardware_source:
                 frame_parameters = hardware_source.get_frame_parameters_from_dict(frame_parameters_d) if frame_parameters_d else None
-                hardware_source.start_playing(frame_parameters)
+                # frame parameters object must be passed by keyword, not positional.
+                hardware_source.start_playing(frame_parameters=frame_parameters)
         return Window.ActionResult(Window.ActionStatus.FINISHED)
 
     def get_action_summary(self, context: Window.ActionContext) -> str:

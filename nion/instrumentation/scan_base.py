@@ -1311,6 +1311,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 frame_parameters = self.__settings.get_frame_parameters_from_dict(typing.cast(typing.Dict[str, typing.Any], kwargs["frame_parameters"]))
             self.set_current_frame_parameters(frame_parameters)
         elif len(args) == 1 and isinstance(args[0], dict):
+            # positional argument handling is only for backward compatibility and could be removed.
             frame_parameters = self.__settings.get_frame_parameters_from_dict(args[0])
             self.set_current_frame_parameters(frame_parameters)
         super().start_playing(*args, **kwargs)
