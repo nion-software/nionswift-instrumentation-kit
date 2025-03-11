@@ -2868,7 +2868,7 @@ class CameraDataStream(Acquisition.DataStream):
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
+        data_metadata = DataAndMetadata.DataMetadata(data_shape=data_shape, data_dtype=numpy.float32)
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
@@ -2938,14 +2938,14 @@ class CameraDataStream(Acquisition.DataStream):
                 assert data_channel_data_dtype is not None
                 channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
                 data_metadata = DataAndMetadata.DataMetadata(
-                    (tuple(data_channel_data_metadata.datum_dimension_shape), data_channel_data_dtype),
-                    xdata.intensity_calibration,
-                    xdata.dimensional_calibrations[-len(data_channel_data_metadata.datum_dimension_shape):],
-                    xdata.metadata,
-                    xdata.timestamp,
-                    DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
-                    xdata.timezone,
-                    xdata.timezone_offset)
+                    data_shape=tuple(data_channel_data_metadata.datum_dimension_shape), data_dtype=data_channel_data_dtype,
+                    intensity_calibration=xdata.intensity_calibration,
+                    dimensional_calibrations=xdata.dimensional_calibrations[-len(data_channel_data_metadata.datum_dimension_shape):],
+                    metadata=xdata.metadata,
+                    timestamp=xdata.timestamp,
+                    data_descriptor=DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
+                    timezone=xdata.timezone,
+                    timezone_offset=xdata.timezone_offset)
                 # data_count is the total for the data provided by the child data stream. some data streams will
                 # provide a slice into a chunk of data representing the entire stream; whereas others will provide
                 # smaller chunks.

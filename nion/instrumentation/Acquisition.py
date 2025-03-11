@@ -602,7 +602,7 @@ class DataStream:
         return self._get_info(channel)
 
     def _get_info(self, channel: Channel) -> DataStreamInfo:
-        return DataStreamInfo(DataAndMetadata.DataMetadata(((), float)), 0.0)
+        return DataStreamInfo(DataAndMetadata.DataMetadata(data_shape=(), data_dtype=float), 0.0)
 
     def prepare_device_state(self) -> DeviceState:
         """Prepares the device state (a dict of entries to restore state)."""
@@ -839,14 +839,15 @@ class CollectedDataStream(DataStream):
         data_dtype = data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (self.__collection_shape + data_metadata.data_shape, data_dtype),
-            data_metadata.intensity_calibration,
-            list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
-            data_metadata.metadata,
-            data_metadata.timestamp,
-            self._get_new_data_descriptor(data_metadata),
-            data_metadata.timezone,
-            data_metadata.timezone_offset
+            data_shape=self.__collection_shape + data_metadata.data_shape,
+            data_dtype=data_dtype,
+            intensity_calibration=data_metadata.intensity_calibration,
+            dimensional_calibrations=list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
+            metadata=data_metadata.metadata,
+            timestamp=data_metadata.timestamp,
+            data_descriptor=self._get_new_data_descriptor(data_metadata),
+            timezone=data_metadata.timezone,
+            timezone_offset=data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, count * data_stream_info.duration)
 
@@ -967,14 +968,15 @@ class CollectedDataStream(DataStream):
         # create a new data metadata object
         dtype = data_metadata.data_dtype
         assert dtype is not None
-        new_data_metadata = DataAndMetadata.DataMetadata((new_shape, dtype),
-                                                         data_metadata.intensity_calibration,
-                                                         new_dimensional_calibrations,
-                                                         data_metadata.metadata,
-                                                         data_metadata.timestamp,
-                                                         new_data_descriptor,
-                                                         data_metadata.timezone,
-                                                         data_metadata.timezone_offset)
+        new_data_metadata = DataAndMetadata.DataMetadata(data_shape=new_shape,
+                                                         data_dtype=dtype,
+                                                         intensity_calibration=data_metadata.intensity_calibration,
+                                                         dimensional_calibrations=new_dimensional_calibrations,
+                                                         metadata=data_metadata.metadata,
+                                                         timestamp=data_metadata.timestamp,
+                                                         data_descriptor=new_data_descriptor,
+                                                         timezone=data_metadata.timezone,
+                                                         timezone_offset=data_metadata.timezone_offset)
 
         # index for channel should be mod collection_count. the index is allowed to be equal
         # to collection_count to signal that the channel is complete. this fact is used to
@@ -1142,14 +1144,15 @@ class SequenceDataStream(CollectedDataStream):
             data_stream_info = super()._get_info(Channel(*channel.segments[:-1]))
             data_metadata = data_stream_info.data_metadata
             return DataStreamInfo(DataAndMetadata.DataMetadata(
-                (data_metadata.data_shape[1:], data_metadata.data_dtype),
-                data_metadata.intensity_calibration,
-                data_metadata.dimensional_calibrations[1:],
-                data_metadata.metadata,
-                data_metadata.timestamp,
-                DataAndMetadata.DataDescriptor(False, data_metadata.collection_dimension_count, data_metadata.datum_dimension_count),
-                data_metadata.timezone,
-                data_metadata.timezone_offset
+                data_shape=data_metadata.data_shape[1:],
+                data_dtype=data_metadata.data_dtype,
+                intensity_calibration=data_metadata.intensity_calibration,
+                dimensional_calibrations=data_metadata.dimensional_calibrations[1:],
+                metadata=data_metadata.metadata,
+                timestamp=data_metadata.timestamp,
+                data_descriptor=DataAndMetadata.DataDescriptor(False, data_metadata.collection_dimension_count, data_metadata.datum_dimension_count),
+                timezone=data_metadata.timezone,
+                timezone_offset=data_metadata.timezone_offset
             ), 0)
         else:
             return super()._get_info(channel)
@@ -1639,14 +1642,15 @@ class StackedDataStreamOperator(DataStreamOperator):
             dtype = data_metadata.data_dtype
             assert dtype is not None
             data_metadata = DataAndMetadata.DataMetadata(
-                ((operator_count, ) + data_metadata.data_shape, dtype),
-                data_metadata.intensity_calibration,
-                [Calibration.Calibration()] + list(data_metadata.dimensional_calibrations),
-                data_metadata.metadata,
-                data_metadata.timestamp,
-                data_descriptor,
-                data_metadata.timezone,
-                data_metadata.timezone_offset
+                data_shape=(operator_count, ) + data_metadata.data_shape,
+                data_dtype=dtype,
+                intensity_calibration=data_metadata.intensity_calibration,
+                dimensional_calibrations=[Calibration.Calibration()] + list(data_metadata.dimensional_calibrations),
+                metadata=data_metadata.metadata,
+                timestamp=data_metadata.timestamp,
+                data_descriptor=data_descriptor,
+                timezone=data_metadata.timezone,
+                timezone_offset=data_metadata.timezone_offset
             )
             data_stream_info = DataStreamInfo(data_metadata, duration)
         return data_stream_info
@@ -1666,25 +1670,26 @@ class StackedDataStreamOperator(DataStreamOperator):
                 data_metadata = data_list[0].data_metadata
                 dtype = data_metadata.data_dtype
                 assert dtype is not None
-                data_metadata = DataAndMetadata.DataMetadata(((), dtype), data_metadata.intensity_calibration, [],
-                                                             data_metadata.metadata, data_metadata.timestamp,
-                                                             DataAndMetadata.DataDescriptor(False, 0, 0),
-                                                             data_metadata.timezone, data_metadata.timezone_offset)
+                data_metadata = DataAndMetadata.DataMetadata(data_shape=(), data_dtype=dtype, intensity_calibration=data_metadata.intensity_calibration,
+                                                             dimensional_calibrations=None,
+                                                             metadata=data_metadata.metadata, timestamp=data_metadata.timestamp,
+                                                             data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                             timezone=data_metadata.timezone, timezone_offset=data_metadata.timezone_offset)
             else:
                 # not sure if this special case is needed...? it is only different in that it produces
                 # slightly different data_metadata.
                 # concatenate the numpy arrays to keep the dtype the same. xdata promotes to float64.
-                new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)  # type: ignore
+                new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)
                 data_metadata = data_list[0].data_metadata
-                data_metadata = DataAndMetadata.DataMetadata(((new_data.shape), new_data.dtype),
-                                                             data_metadata.intensity_calibration,
-                                                             [Calibration.Calibration()] + list(data_metadata.dimensional_calibrations[:-1]),
-                                                             data_metadata.metadata, data_metadata.timestamp,
-                                                             DataAndMetadata.DataDescriptor(False, 0, 1),
-                                                             data_metadata.timezone, data_metadata.timezone_offset)
+                data_metadata = DataAndMetadata.DataMetadata(data_shape=new_data.shape, data_dtype=new_data.dtype,
+                                                             intensity_calibration=data_metadata.intensity_calibration,
+                                                             dimensional_calibrations=[Calibration.Calibration()] + list(data_metadata.dimensional_calibrations[:-1]),
+                                                             metadata=data_metadata.metadata, timestamp=data_metadata.timestamp,
+                                                             data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 1),
+                                                             timezone=data_metadata.timezone, timezone_offset=data_metadata.timezone_offset)
         else:
             # concatenate the numpy arrays to keep the dtype the same. xdata promotes to float64.
-            new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)  # type: ignore
+            new_data = numpy.concatenate([data_and_metadata.data for data_and_metadata in data_list], axis=-1)
             data_metadata = data_list[0].data_metadata
         new_data_and_metadata = DataAndMetadata.new_data_and_metadata(new_data,
                                                                       data_metadata.intensity_calibration,
@@ -2008,14 +2013,14 @@ class FramedDataStream(DataStream):
         data_dtype = data_and_metadata.data_dtype
         assert data_dtype is not None
         new_data_metadata = DataAndMetadata.DataMetadata(
-            (data_and_metadata.data_shape[1:], data_dtype),
-            data_and_metadata.intensity_calibration,
-            data_and_metadata.dimensional_calibrations[1:],
-            data_and_metadata.metadata,
-            data_and_metadata.timestamp,
-            new_data_descriptor,
-            data_and_metadata.timezone,
-            data_and_metadata.timezone_offset)
+            data_shape=data_and_metadata.data_shape[1:], data_dtype=data_dtype,
+            intensity_calibration=data_and_metadata.intensity_calibration,
+            dimensional_calibrations=data_and_metadata.dimensional_calibrations[1:],
+            metadata=data_and_metadata.metadata,
+            timestamp=data_and_metadata.timestamp,
+            data_descriptor=new_data_descriptor,
+            timezone=data_and_metadata.timezone,
+            timezone_offset=data_and_metadata.timezone_offset)
         new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
         data = data_and_metadata.data
         assert data is not None
@@ -2077,14 +2082,14 @@ class SumOperator(DataStreamOperator):
         data_dtype = data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(new_shape), data_dtype),
-            data_metadata.intensity_calibration,
-            new_dimensional_calibrations,
-            data_metadata.metadata,
-            data_metadata.timestamp,
-            data_descriptor,
-            data_metadata.timezone,
-            data_metadata.timezone_offset
+            data_shape=tuple(new_shape), data_dtype=data_dtype,
+            intensity_calibration=data_metadata.intensity_calibration,
+            dimensional_calibrations=new_dimensional_calibrations,
+            metadata=data_metadata.metadata,
+            timestamp=data_metadata.timestamp,
+            data_descriptor=data_descriptor,
+            timezone=data_metadata.timezone,
+            timezone_offset=data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, data_stream_info.duration)
 
@@ -2129,14 +2134,14 @@ class MaskedSumOperator(DataStreamOperator):
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         data_metadata = data_stream_info.data_metadata
         data_metadata = DataAndMetadata.DataMetadata(
-            ((), numpy.float32),
-            data_metadata.intensity_calibration,
-            [],
-            data_metadata.metadata,
-            data_metadata.timestamp,
-            DataAndMetadata.DataDescriptor(False, 0, 0),
-            data_metadata.timezone,
-            data_metadata.timezone_offset
+            data_shape=(), data_dtype=numpy.float32,
+            intensity_calibration=data_metadata.intensity_calibration,
+            dimensional_calibrations=None,
+            metadata=data_metadata.metadata,
+            timestamp=data_metadata.timestamp,
+            data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
+            timezone=data_metadata.timezone,
+            timezone_offset=data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, data_stream_info.duration)
 
@@ -2175,14 +2180,14 @@ class MoveAxisDataStreamOperator(DataStreamOperator):
             data_dtype = data_metadata.data_dtype
             assert data_dtype is not None
             data_metadata = DataAndMetadata.DataMetadata(
-                (tuple(new_shape), data_dtype),
-                data_metadata.intensity_calibration,
-                new_dimensional_calibrations,
-                data_metadata.metadata,
-                data_metadata.timestamp,
-                data_descriptor,
-                data_metadata.timezone,
-                data_metadata.timezone_offset
+                data_shape=tuple(new_shape), data_dtype=data_dtype,
+                intensity_calibration=data_metadata.intensity_calibration,
+                dimensional_calibrations=new_dimensional_calibrations,
+                metadata=data_metadata.metadata,
+                timestamp=data_metadata.timestamp,
+                data_descriptor=data_descriptor,
+                timezone=data_metadata.timezone,
+                timezone_offset=data_metadata.timezone_offset
             )
             return DataStreamInfo(data_metadata, data_stream_info.duration)
         else:
@@ -2434,14 +2439,14 @@ class AccumulatedDataStream(ContainerDataStream):
         data_dtype = old_data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(old_data_metadata.data_shape[1:]), data_dtype),
-            old_data_metadata.intensity_calibration,
-            old_data_metadata.dimensional_calibrations[1:],
-            old_data_metadata.metadata,
-            old_data_metadata.timestamp,
-            data_descriptor,
-            old_data_metadata.timezone,
-            old_data_metadata.timezone_offset
+            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
+            intensity_calibration=old_data_metadata.intensity_calibration,
+            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
+            metadata=old_data_metadata.metadata,
+            timestamp=old_data_metadata.timestamp,
+            data_descriptor=data_descriptor,
+            timezone=old_data_metadata.timezone,
+            timezone_offset=old_data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, data_stream_info.duration)
 
@@ -2457,14 +2462,14 @@ class AccumulatedDataStream(ContainerDataStream):
         data_dtype = old_data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(old_data_metadata.data_shape[1:]), data_dtype),
-            old_data_metadata.intensity_calibration,
-            old_data_metadata.dimensional_calibrations[1:],
-            old_data_metadata.metadata,
-            old_data_metadata.timestamp,
-            data_descriptor,
-            old_data_metadata.timezone,
-            old_data_metadata.timezone_offset
+            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
+            intensity_calibration=old_data_metadata.intensity_calibration,
+            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
+            metadata=old_data_metadata.metadata,
+            timestamp=old_data_metadata.timestamp,
+            data_descriptor=data_descriptor,
+            timezone=old_data_metadata.timezone,
+            timezone_offset=old_data_metadata.timezone_offset
         )
         channel = data_stream_event.channel
         dest_count = expand_shape(data_metadata.data_shape)
@@ -2581,14 +2586,14 @@ class CollectionDataHandler(DataHandler):
         data_dtype = data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (self.__collection_shape + data_metadata.data_shape, data_dtype),
-            data_metadata.intensity_calibration,
-            list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
-            data_metadata.metadata,
-            data_metadata.timestamp,
-            self._get_new_data_descriptor(data_metadata),
-            data_metadata.timezone,
-            data_metadata.timezone_offset
+            data_shape=self.__collection_shape + data_metadata.data_shape, data_dtype=data_dtype,
+            intensity_calibration=data_metadata.intensity_calibration,
+            dimensional_calibrations=list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
+            metadata=data_metadata.metadata,
+            timestamp=data_metadata.timestamp,
+            data_descriptor=self._get_new_data_descriptor(data_metadata),
+            timezone=data_metadata.timezone,
+            timezone_offset=data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, count * data_stream_info.duration)
 
@@ -2658,14 +2663,14 @@ class CollectionDataHandler(DataHandler):
         # create a new data metadata object
         dtype = data_metadata.data_dtype
         assert dtype is not None
-        new_data_metadata = DataAndMetadata.DataMetadata((new_shape, dtype),
-                                                         data_metadata.intensity_calibration,
-                                                         new_dimensional_calibrations,
-                                                         data_metadata.metadata,
-                                                         data_metadata.timestamp,
-                                                         new_data_descriptor,
-                                                         data_metadata.timezone,
-                                                         data_metadata.timezone_offset)
+        new_data_metadata = DataAndMetadata.DataMetadata(data_shape=new_shape, data_dtype=dtype,
+                                                         intensity_calibration=data_metadata.intensity_calibration,
+                                                         dimensional_calibrations=new_dimensional_calibrations,
+                                                         metadata=data_metadata.metadata,
+                                                         timestamp=data_metadata.timestamp,
+                                                         data_descriptor=new_data_descriptor,
+                                                         timezone=data_metadata.timezone,
+                                                         timezone_offset=data_metadata.timezone_offset)
 
         collection_rank = len(self.__collection_shape)
         collection_row_length = expand_shape(self.__collection_shape[1:])
@@ -2850,14 +2855,14 @@ class FramedDataHandler(DataHandler):
         data_dtype = data_and_metadata.data_dtype
         assert data_dtype is not None
         new_data_metadata = DataAndMetadata.DataMetadata(
-            (data_and_metadata.data_shape[1:], data_dtype),
-            data_and_metadata.intensity_calibration,
-            data_and_metadata.dimensional_calibrations[1:],
-            data_and_metadata.metadata,
-            data_and_metadata.timestamp,
-            new_data_descriptor,
-            data_and_metadata.timezone,
-            data_and_metadata.timezone_offset)
+            data_shape=data_and_metadata.data_shape[1:], data_dtype=data_dtype,
+            intensity_calibration=data_and_metadata.intensity_calibration,
+            dimensional_calibrations=data_and_metadata.dimensional_calibrations[1:],
+            metadata=data_and_metadata.metadata,
+            timestamp=data_and_metadata.timestamp,
+            data_descriptor=new_data_descriptor,
+            timezone=data_and_metadata.timezone,
+            timezone_offset=data_and_metadata.timezone_offset)
         new_source_slice = (slice(0, count),) + (slice(None),) * len(data_and_metadata.data_shape[1:])
         data = data_and_metadata.data
         assert data is not None
@@ -2955,14 +2960,14 @@ class AccumulatedDataHandler(DataHandler):
         data_dtype = old_data_metadata.data_dtype
         assert data_dtype is not None
         data_metadata = DataAndMetadata.DataMetadata(
-            (tuple(old_data_metadata.data_shape[1:]), data_dtype),
-            old_data_metadata.intensity_calibration,
-            old_data_metadata.dimensional_calibrations[1:],
-            old_data_metadata.metadata,
-            old_data_metadata.timestamp,
-            data_descriptor,
-            old_data_metadata.timezone,
-            old_data_metadata.timezone_offset
+            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
+            intensity_calibration=old_data_metadata.intensity_calibration,
+            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
+            metadata=old_data_metadata.metadata,
+            timestamp=old_data_metadata.timestamp,
+            data_descriptor=data_descriptor,
+            timezone=old_data_metadata.timezone,
+            timezone_offset=old_data_metadata.timezone_offset
         )
         channel = data_stream_event.channel
         dest_count = expand_shape(data_metadata.data_shape)

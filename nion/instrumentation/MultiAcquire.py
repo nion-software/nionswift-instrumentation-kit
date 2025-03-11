@@ -375,9 +375,9 @@ class ScanDataChannel:
             metadata = dict(data_and_metadata.metadata)
             metadata["MultiAcquire.settings"] = self.__multi_acquire_settings.as_dict()
             metadata["MultiAcquire.parameters"] = self.__multi_acquire_parameters.as_dict()
-            data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
-                                                         intensity_calibration,
-                                                         dimensional_calibrations,
+            data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype=data_shape_and_dtype,
+                                                         intensity_calibration=intensity_calibration,
+                                                         dimensional_calibrations=dimensional_calibrations,
                                                          metadata=data_and_metadata.metadata,
                                                          data_descriptor=data_descriptor)
             src_slice: typing.Tuple[typing.Union[slice, int, ellipsis]] = (Ellipsis,)
@@ -607,9 +607,9 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
 
                 metadata.setdefault("MultiAcquire.stack", dict())[key_path[-1]] = copy.deepcopy(self.__stack_values)
 
-        data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype,
-                                                     intensity_calibration,
-                                                     dimensional_calibrations,
+        data_metadata = DataAndMetadata.DataMetadata(data_shape_and_dtype=data_shape_and_dtype,
+                                                     intensity_calibration=intensity_calibration,
+                                                     dimensional_calibrations=dimensional_calibrations,
                                                      metadata=metadata,
                                                      data_descriptor=data_descriptor)
 

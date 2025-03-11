@@ -2152,7 +2152,7 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         data_shape = tuple(self.__scan_frame_parameters.scan_size)
-        data_metadata = DataAndMetadata.DataMetadata((data_shape, numpy.float32))
+        data_metadata = DataAndMetadata.DataMetadata(data_shape=data_shape, data_dtype=numpy.float32)
         return Acquisition.DataStreamInfo(data_metadata, 3.0)
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
@@ -2319,7 +2319,7 @@ class ScanDataStream(Acquisition.DataStream):
         return self.__scan_size
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata(((), numpy.float32)), 0.0)
+        return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata(data_shape=(), data_dtype=numpy.float32), 0.0)
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
         if self.__scan_hardware_source.is_playing:
@@ -2402,14 +2402,14 @@ class ScanDataStream(Acquisition.DataStream):
                         stop = self.__section_rect.width * available_rows
                         data_dtype = scan_data.data_dtype
                         assert data_dtype is not None
-                        data_metadata = DataAndMetadata.DataMetadata(((), data_dtype),
-                                                                     scan_data.intensity_calibration,
-                                                                     (),
-                                                                     scan_data.metadata,
-                                                                     scan_data.timestamp,
-                                                                     DataAndMetadata.DataDescriptor(False, 0, 0),
-                                                                     scan_data.timezone,
-                                                                     scan_data.timezone_offset)
+                        data_metadata = DataAndMetadata.DataMetadata(data_shape=(), data_dtype=data_dtype,
+                                                                     intensity_calibration=scan_data.intensity_calibration,
+                                                                     dimensional_calibrations=None,
+                                                                     metadata=scan_data.metadata,
+                                                                     timestamp=scan_data.timestamp,
+                                                                     data_descriptor=DataAndMetadata.DataDescriptor(False, 0, 0),
+                                                                     timezone=scan_data.timezone,
+                                                                     timezone_offset=scan_data.timezone_offset)
                         source_slice = (slice(start, stop),)
                         scan_data_data = scan_data.data
                         assert scan_data_data is not None
