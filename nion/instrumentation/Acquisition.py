@@ -3002,7 +3002,7 @@ class MakerDataStream(ContainerDataStream):
         return self.__framer.get_data(channel)
 
 
-def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
+def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> Exception | None:
     """Perform an acquire. This is the main acquisition loop. It runs on a thread.
 
     Performs consistency checks on progress and data.
@@ -3044,6 +3044,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 time.sleep(0.005)  # play nice with other threads
             if data_stream.is_finished:
                 assert data_stream.progress == 1.0
+            return None
         except Exception as e:
             data_stream.is_error = True
             data_stream.abort_stream()
@@ -3058,6 +3059,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
         else:
             import traceback
             traceback.print_exc()
+        return e
 
 
 class Acquisition:
@@ -3085,9 +3087,9 @@ class Acquisition:
 
     def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
-            acquire(self.__data_stream, error_handler=error_handler)
+            e = acquire(self.__data_stream, error_handler=error_handler)
             self.__is_aborted = self.__data_stream.is_aborted
-            self.__is_error = self.__data_stream.is_error
+            self.__is_error = self.__data_stream.is_error or e is not None
             self.__is_finished = True
         finally:
             self.__data_stream = typing.cast(typing.Any, None)
