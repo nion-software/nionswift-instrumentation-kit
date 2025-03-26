@@ -113,6 +113,9 @@ class ComboBoxHandler(Declarative.Handler):
                  filter: typing.Optional[ListModel.Filter], id_getter: typing.Callable[[typing.Any], str],
                  selection_storage_model: Model.PropertyModel[str]) -> None:
         super().__init__()
+
+        self.__id_getter = id_getter
+
         # create a filtered list model with the sort key and filter key.
         self.sorted_items = ListModel.FilteredListModel(container=container, items_key=items_key)
         self.sorted_items.sort_key = sort_key
@@ -172,6 +175,13 @@ class ComboBoxHandler(Declarative.Handler):
     def current_item(self) -> typing.Any:
         index = self.selected_index_model.value or 0
         return self.sorted_items.items[index]
+
+    def _set_item_by_id(self, item_id: str) -> None:
+        # set the selected item by id.
+        for index, item in enumerate(self.sorted_items.items or list()):
+            if self.__id_getter(item) == item_id:
+                self.selected_index_model.value = index
+                break
 
 
 class ComponentComboBoxHandler(Declarative.Handler):
@@ -312,6 +322,7 @@ class AcquisitionMethodComponentHandler(ComponentHandler):
     Define a _get_time_space_usage method that subclasses can override to return the time/space usage specific to this
     acquisition method.
     """
+    component_id: str
 
     def __init__(self, display_name: str, configuration: Schema.Entity) -> None:
         super().__init__(display_name)
@@ -1601,6 +1612,26 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
                                                            scan_hardware_source.drift_rotation
                                                            )
 
+    def _set_scan_hardware_source(self, hardware_source_id: str, scan_width: int) -> None:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self.__scan_hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        for index, hardware_source in enumerate(hardware_sources):
+            if hardware_source_id == hardware_source.hardware_source_id:
+                self.__scan_hardware_source_choice_model.hardware_source_choice.hardware_source_index_model.value = index
+                self.scan_width.value = scan_width
+                break
+
+    def _set_camera_hardware_source(self, hardware_source_id: str, channel_id: str, exposure: float) -> None:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        for index, hardware_source in enumerate(hardware_sources):
+            if hardware_source_id == hardware_source.hardware_source_id:
+                self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_source_index_model.value = index
+                self._camera_settings_model.exposure_time = exposure
+                for channel_index, channel_description in enumerate(self._camera_settings_model.channel_descriptions):
+                    if channel_description.channel_id == channel_id:
+                        self._camera_settings_model.channel_index = channel_index
+                        break
+                break
+
 
 @dataclasses.dataclass
 class CameraFrameParametersAndReadoutArea:
@@ -1730,6 +1761,36 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
         return camera_base.CameraAcquisitionDevice(camera_hardware_source, camera_frame_parameters, camera_channel)
 
+    def _set_camera_hardware_source(self, hardware_source_id: str, channel_id: str, exposure: float) -> None:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        for index, hardware_source in enumerate(hardware_sources):
+            if hardware_source_id == hardware_source.hardware_source_id:
+                self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_source_index_model.value = index
+                self._camera_settings_model.exposure_time = exposure
+                for channel_index, channel_description in enumerate(self._camera_settings_model.channel_descriptions):
+                    if channel_description.channel_id == channel_id:
+                        self._camera_settings_model.channel_index = channel_index
+                        break
+                break
+
+    def _get_camera_hardware_source_channel_id_list(self, hardware_source_id: str) -> typing.Sequence[str]:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        for index, hardware_source in enumerate(hardware_sources):
+            if hardware_source_id == hardware_source.hardware_source_id:
+                # self._camera_settings_model.channel_descriptions
+                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
+                if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
+                    return(["ronchigram"])
+                elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
+                    return(["eels_spectrum", "eels_image"])
+                else:
+                    return(["image"])
+        raise RuntimeError("Camera hardware source not found")
+
+    def _get_camera_hardware_source_id_list(self) -> typing.Sequence[str]:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        return [hardware_source.hardware_source_id for hardware_source in hardware_sources]
+
 
 class ScanFrameParametersStream(Stream.ValueStream[scan_base.ScanFrameParameters]):
     """Define a stream of scan frame parameters (extended with enabled channels)."""
@@ -1838,6 +1899,16 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
 
         return scan_base.ScanAcquisitionDevice(scan_hardware_source, scan_frame_parameters)
 
+    def _set_scan_hardware_source(self, hardware_source_id: str) -> None:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self.__scan_hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        for index, hardware_source in enumerate(hardware_sources):
+            if hardware_source_id == hardware_source.hardware_source_id:
+                self.__scan_hardware_source_choice_model.hardware_source_choice.hardware_source_index_model.value = index
+                break
+
+    def _get_scan_hardware_source_id_list(self) -> typing.Sequence[str]:
+        hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self.__scan_hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
+        return [hardware_source.hardware_source_id for hardware_source in hardware_sources]
 
 # register each component as an acquisition device component factory.
 Registry.register_component(SynchronizedScanAcquisitionDeviceComponentHandler, {"acquisition-device-component-factory"})
@@ -2177,6 +2248,8 @@ class AcquisitionController(Declarative.Handler):
             CameraAcquisitionDeviceComponentHandler(find_component_configuration("camera"), acquisition_preferences)
         ]
 
+        self.__device_component_handlers = device_component_handlers
+
         # create a list of handlers to be returned from create_handler. this is an experimental system for components.
         self.__handlers: typing.Dict[str, HandlerEntry] = dict()
         self.__handlers["acquisition-method-component"] = HandlerEntry(self.__acquisition_method_component)
@@ -2299,6 +2372,44 @@ class AcquisitionController(Declarative.Handler):
         self.__handlers.clear()
         super().close()
 
+    @property
+    def _method_component_id(self) -> str:
+        method_component_handler = typing.cast(AcquisitionMethodComponentHandler | None, self.__acquisition_method_component.selected_item_value_stream.value)
+        assert method_component_handler
+        return method_component_handler.component_id
+
+    @_method_component_id.setter
+    def _method_component_id(self, value: str) -> None:
+        for index, method_component_handler in enumerate(self.__acquisition_method_component._combo_box_handler.sorted_items.items):
+            if method_component_handler.component_id == value:
+                self.__acquisition_method_component._combo_box_handler.selected_index_model.value = index
+                break
+
+    def _get_method_component_handler(self, value: str) -> AcquisitionMethodComponentHandler | None:
+        for index, method_component_handler in enumerate(self.__acquisition_method_component._combo_box_handler.sorted_items.items):
+            if method_component_handler.component_id == value:
+                return typing.cast(AcquisitionMethodComponentHandler, method_component_handler)
+        return None
+
+    @property
+    def _device_component_id(self) -> str:
+        device_component_handler = typing.cast(AcquisitionDeviceComponentHandler | None, self.__device_component_stream.value)
+        assert device_component_handler
+        return device_component_handler.component_id
+
+    @_device_component_id.setter
+    def _device_component_id(self, value: str) -> None:
+        for index, device_component_handler in enumerate(self.__device_component_handlers):
+            if device_component_handler.component_id == value:
+                self.acquisition_mode_model.value = device_component_handler.component_id
+                break
+
+    def _get_device_component_handler(self, value: str) -> AcquisitionDeviceComponentHandler | None:
+        for index, device_component_handler in enumerate(self.__device_component_handlers):
+            if device_component_handler.component_id == value:
+                return typing.cast(AcquisitionDeviceComponentHandler, device_component_handler)
+        return None
+
     def handle_button(self, widget: UserInterfaceModule.Widget) -> None:
         # handle acquire button, which can either start or stop acquisition.
         if self.__acquisition and not self.__acquisition.is_finished:
@@ -2368,6 +2479,28 @@ class AcquisitionController(Declarative.Handler):
         return None
 
 
+@dataclasses.dataclass
+class ControlValues:
+    count: int
+    start_value: float
+    step_value: float
+
+
+@dataclasses.dataclass
+class MultipleAcquireEntry:
+    offset: float
+    exposure: float
+    count: int
+    include_sum: bool
+
+
+def find_component(acquisition_configuration: AcquisitionConfiguration, component_key: str, component_id: str) -> Schema.Entity:
+    for component_entity_ in typing.cast(typing.Sequence[Schema.Entity], acquisition_configuration._get_array_items(component_key)):
+        if component_entity_.entity_type.entity_id == component_id:
+            return component_entity_
+    raise RuntimeError(f"Component not found: {component_key} {component_id}")
+
+
 class AcquisitionPanel(Panel.Panel):
     """The acquisition panel holds the declarative component acquisition controller."""
 
@@ -2377,9 +2510,134 @@ class AcquisitionPanel(Panel.Panel):
             assert acquisition_configuration
             acquisition_preferences = AcquisitionPreferences.acquisition_preferences
             assert acquisition_preferences
-            self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences))
+            acquisition_controller = AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
+            self.widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, acquisition_controller)
+            self._acquisition_controller = acquisition_controller
         else:
             self.widget = document_controller.ui.create_column_widget()
+            self._acquisition_controller = typing.cast(typing.Any, None)
+
+    @property
+    def _method_component_id(self) -> str:
+        assert self._acquisition_controller
+        return self._acquisition_controller._method_component_id
+
+    @_method_component_id.setter
+    def _method_component_id(self, value: str) -> None:
+        assert self._acquisition_controller
+        self._acquisition_controller._method_component_id = value
+
+    @property
+    def _device_component_id(self) -> str:
+        assert self._acquisition_controller
+        return self._acquisition_controller._device_component_id
+
+    @_device_component_id.setter
+    def _device_component_id(self, value: str) -> None:
+        assert self._acquisition_controller
+        self._acquisition_controller._device_component_id = value
+
+    def _activate_basic_acquire(self) -> None:
+        self._method_component_id = "basic-acquire"
+
+    def _activate_sequence_acquire(self, count: int) -> None:
+        assert acquisition_configuration
+        self._method_component_id = "sequence-acquire"
+        component_entity_ = find_component(acquisition_configuration, "acquisition_method_components", "acquisition_method_component_sequence_acquire")
+        component_entity_.count = count
+
+    def _activate_series_acquire(self, control_id: str, control_values: ControlValues) -> None:
+        assert acquisition_configuration
+        self._method_component_id = "series-acquire"
+        method_component_handler = typing.cast(SeriesAcquisitionMethodComponentHandler | None, self._acquisition_controller._get_method_component_handler("series-acquire"))
+        assert method_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_method_components", "acquisition_method_component_series_acquire")
+        method_component_handler._control_combo_box_handler._set_item_by_id(control_id)
+        for control_values_entity_ in typing.cast(typing.Sequence[Schema.Entity], component_entity_._get_array_items("control_values_list")):
+            if control_values_entity_.control_id == control_id:
+                control_values_entity_.count = control_values.count
+                control_values_entity_.start_value = control_values.start_value
+                control_values_entity_.step_value = control_values.step_value
+                break
+
+    def _activate_tableau_acquire(self, control_id: str, axis_id: str, x_control_values: ControlValues, y_control_values: ControlValues) -> None:
+        assert acquisition_configuration
+        self._method_component_id = "tableau-acquire"
+        method_component_handler = typing.cast(TableauAcquisitionMethodComponentHandler | None, self._acquisition_controller._get_method_component_handler("tableau-acquire"))
+        assert method_component_handler
+        stem_controller = typing.cast(STEMController.STEMController | None, Registry.get_component("stem_controller"))
+        assert stem_controller
+        component_entity_ = find_component(acquisition_configuration, "acquisition_method_components", "acquisition_method_component_tableau_acquire")
+        method_component_handler._control_combo_box_handler._set_item_by_id(control_id)
+        method_component_handler._axis_combo_box_handler._set_item_by_id(axis_id)
+        for control_values_entity_ in typing.cast(typing.Sequence[Schema.Entity], component_entity_._get_array_items("x_control_values_list")):
+            if control_values_entity_.control_id == control_id:
+                control_values_entity_.count = x_control_values.count
+                control_values_entity_.start_value = x_control_values.start_value
+                control_values_entity_.step_value = x_control_values.step_value
+                break
+        for control_values_entity_ in typing.cast(typing.Sequence[Schema.Entity], component_entity_._get_array_items("y_control_values_list")):
+            if control_values_entity_.control_id == control_id:
+                control_values_entity_.count = y_control_values.count
+                control_values_entity_.start_value = y_control_values.start_value
+                control_values_entity_.step_value = y_control_values.step_value
+                break
+
+    def _activate_multiple_acquire(self, sections: typing.Sequence[MultipleAcquireEntry]) -> None:
+        assert acquisition_configuration
+        self._method_component_id = "multiple-acquire"
+        method_component_handler = typing.cast(MultipleAcquisitionMethodComponentHandler | None, self._acquisition_controller._get_method_component_handler("multiple-acquire"))
+        assert method_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_method_components", "acquisition_method_component_multiple_acquire")
+        component_entity_._remove_all_items("sections")
+        for section in sections:
+            component_entity_._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": section.offset, "exposure": section.exposure, "count": section.count, "include_sum": section.include_sum}))
+
+    def _activate_scan_acquire(self, scan_hardware_source_id: str) -> None:
+        assert acquisition_configuration
+        self._device_component_id = "scan"
+        device_component_handler = typing.cast(ScanAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("scan"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_scan")
+        device_component_handler._set_scan_hardware_source(scan_hardware_source_id)
+
+    def _activate_camera_acquire(self, camera_hardware_source_id: str, channel_id: str, exposure: float) -> None:
+        assert acquisition_configuration
+        self._device_component_id = "camera"
+        device_component_handler = typing.cast(CameraAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("camera"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_camera")
+        device_component_handler._set_camera_hardware_source(camera_hardware_source_id, channel_id, exposure)
+
+    def _activate_synchronized_acquire(self, scan_hardware_source_id: str, scan_width: int, camera_hardware_source_id: str, channel_id: str, exposure: float) -> None:
+        assert acquisition_configuration
+        self._device_component_id = "synchronized-scan"
+        device_component_handler = typing.cast(SynchronizedScanAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("synchronized-scan"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_synchronized_scan")
+        device_component_handler._set_scan_hardware_source(scan_hardware_source_id, scan_width)
+        device_component_handler._set_camera_hardware_source(camera_hardware_source_id, channel_id, exposure)
+
+    def _get_camera_acquire_camera_device_id_list(self) -> typing.Sequence[str]:
+        assert acquisition_configuration
+        device_component_handler = typing.cast(CameraAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("camera"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_camera")
+        return device_component_handler._get_camera_hardware_source_id_list()
+
+    def _get_camera_hardware_source_channel_id_list(self, hardware_source_id: str) -> typing.Sequence[str]:
+        assert acquisition_configuration
+        device_component_handler = typing.cast(CameraAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("camera"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_camera")
+        return device_component_handler._get_camera_hardware_source_channel_id_list(hardware_source_id)
+
+    def _get_scan_acquire_scan_device_id_list(self) -> typing.Sequence[str]:
+        assert acquisition_configuration
+        device_component_handler = typing.cast(ScanAcquisitionDeviceComponentHandler | None, self._acquisition_controller._get_device_component_handler("scan"))
+        assert device_component_handler
+        component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_scan")
+        return device_component_handler._get_scan_hardware_source_id_list()
 
 
 class AcquisitionPreferencePanel:
