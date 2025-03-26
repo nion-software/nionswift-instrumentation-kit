@@ -1204,7 +1204,7 @@ class TestCameraControlClass(unittest.TestCase):
                 with contextlib.closing(h):
                     h2 = AcquisitionPanel.SequenceAcquisitionMethodComponentHandler(c2, acquisition_preferences)
                     with contextlib.closing(h2):
-                        ac.start_acquisition(h, h2)
+                        ac.start_acquisition(h, h2, AcquisitionPanel.DataChannelProvider(document_controller), lambda: None, None)
                         start_time = time.time()
                         while ac.is_acquiring_model.value:
                             document_controller.periodic()
@@ -1247,7 +1247,7 @@ class TestCameraControlClass(unittest.TestCase):
                 # minimizing extra copies where possible.
 
                 # define a callback method to display the data item.
-                def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
+                def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem, channel: Acquisition.Channel) -> None:
                     Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
 
                 data_item_data_channel = DataChannel.DataItemDataChannel(self.__document_controller.document_model, title_base, channel_names)

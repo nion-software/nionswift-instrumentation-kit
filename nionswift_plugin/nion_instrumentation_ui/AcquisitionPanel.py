@@ -2196,6 +2196,26 @@ class HandlerEntry:
     used: bool = False
 
 
+class DataChannelProvider(Acquisition.DataChannelProviderLike):
+    def __init__(self, document_controller: DocumentController.DocumentController) -> None:
+        self.__document_controller = document_controller
+        self._data_item_map = dict[Acquisition.Channel, DataItem.DataItem]()
+
+    def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
+        # create a data item data channel for converting data streams to data items, using partial updates and
+        # minimizing extra copies where possible.
+
+        # define a callback method to display the data item.
+        def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem, channel: Acquisition.Channel) -> None:
+            Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
+            self._data_item_map[channel] = data_item
+
+        data_item_data_channel = DataChannel.DataItemDataChannel(self.__document_controller.document_model, title_base, channel_names)
+        data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller)
+
+        return data_item_data_channel
+
+
 class AcquisitionController(Declarative.Handler):
     """The acquisition controller is the top level declarative component handler for the acquisition panel UI.
 
@@ -2421,29 +2441,19 @@ class AcquisitionController(Declarative.Handler):
             method_component = self.__acquisition_method_component.current_item
             assert method_component
 
-            self.start_acquisition(device_component, method_component)
+            def handle_acquire_finished() -> None:
+                self.__acquisition = None
 
-    def start_acquisition(self, device_component: AcquisitionDeviceComponentHandler, method_component: AcquisitionMethodComponentHandler) -> None:
+            self.__acquisition = self.start_acquisition(device_component, method_component, DataChannelProvider(self.document_controller), handle_acquire_finished, None)
 
+    def start_acquisition(self,
+                          device_component: AcquisitionDeviceComponentHandler,
+                          method_component: AcquisitionMethodComponentHandler,
+                          data_channel_provider: Acquisition.DataChannelProviderLike,
+                          finished_callback_fn: typing.Callable[[], None],
+                          error_handler: typing.Callable[[Exception], None] | None) -> Acquisition.Acquisition:
         # starting acquisition means building the device data stream using the acquisition device component and
         # then wrapping the device data stream using the acquisition method component.
-
-        class DataChannelProvider(Acquisition.DataChannelProviderLike):
-            def __init__(self, document_controller: DocumentController.DocumentController) -> None:
-                self.__document_controller = document_controller
-
-            def get_data_channel(self, title_base: str, channel_names: typing.Mapping[Acquisition.Channel, str], **kwargs: typing.Any) -> Acquisition.DataChannel:
-                # create a data item data channel for converting data streams to data items, using partial updates and
-                # minimizing extra copies where possible.
-
-                # define a callback method to display the data item.
-                def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
-                    Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
-
-                data_item_data_channel = DataChannel.DataItemDataChannel(self.__document_controller.document_model, title_base, channel_names)
-                data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller)
-
-                return data_item_data_channel
 
         stem_device_controller = STEMController.STEMDeviceController()
 
@@ -2455,20 +2465,18 @@ class AcquisitionController(Declarative.Handler):
         drift_tracker = stem_device_controller.stem_controller.drift_tracker
         drift_logger = DriftTracker.DriftLogger(self.document_controller.document_model, drift_tracker, self.document_controller.event_loop) if drift_tracker else None
 
-        def handle_acquire_finished() -> None:
-            self.__acquisition = None
-
         Acquisition.session_manager.begin_acquisition(self.document_controller.document_model)
 
-        self.__acquisition = Acquisition.start_acquire(data_stream,
-                                                       data_stream.title or _("Acquire"),
-                                                       data_stream.channel_names,
-                                                       DataChannelProvider(self.document_controller),
-                                                       drift_logger,
-                                                       self.progress_value_model,
-                                                       self.is_acquiring_model,
-                                                       self.document_controller.event_loop,
-                                                       handle_acquire_finished)
+        return Acquisition.start_acquire(data_stream,
+                                         data_stream.title or _("Acquire"),
+                                         data_stream.channel_names,
+                                         data_channel_provider,
+                                         drift_logger,
+                                         self.progress_value_model,
+                                         self.is_acquiring_model,
+                                         self.document_controller.event_loop,
+                                         finished_callback_fn,
+                                         error_handler=error_handler)
 
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
@@ -2477,6 +2485,40 @@ class AcquisitionController(Declarative.Handler):
             self.__handlers[component_id].used = True
             return self.__handlers[component_id].handler
         return None
+
+    async def _acquire(self) -> _AcquireResult:
+        device_component = self.__device_component_stream.value
+        assert device_component
+
+        method_component = self.__acquisition_method_component.current_item
+        assert method_component
+
+        data_channel_provider = DataChannelProvider(self.document_controller)
+
+        is_finished = False
+
+        def handle_acquire_finished() -> None:
+            nonlocal is_finished
+            is_finished = True
+
+        self.__acquisition = self.start_acquisition(device_component, method_component, data_channel_provider, handle_acquire_finished, None)
+
+        # wait for the acquisition to finish. use this technique instead of looking at the acquisition.is_finished
+        # since it may set slightly earlier.
+        while not is_finished:
+            await asyncio.sleep(0.1)
+
+        await asyncio.sleep(0.1)  # give the acquisition a chance to cleanup
+
+        success = not self.__acquisition.is_error
+
+        acquire_result = _AcquireResult(success, data_channel_provider._data_item_map)
+
+        self.__acquisition = typing.cast(typing.Any, None)
+
+        data_channel_provider = typing.cast(typing.Any, None)  # release the reference to the data channel provider so it garbage collects
+
+        return acquire_result
 
 
 @dataclasses.dataclass
@@ -2499,6 +2541,18 @@ def find_component(acquisition_configuration: AcquisitionConfiguration, componen
         if component_entity_.entity_type.entity_id == component_id:
             return component_entity_
     raise RuntimeError(f"Component not found: {component_key} {component_id}")
+
+
+class _AcquireResult:
+    """The result of an acquisition. This is used to pass data between the acquisition controller and the acquisition panel."""
+
+    def __init__(self, success: bool, data_item_map: dict[Acquisition.Channel, DataItem.DataItem]) -> None:
+        self.success = success
+        self.data_item_map = data_item_map
+
+    def summarize(self) -> None:
+        data_item_summary = {k: (v.data_shape, v.data_descriptor) for k, v in self.data_item_map.items()}
+        print(f"Acquisition result: {self.success} {data_item_summary}")
 
 
 class AcquisitionPanel(Panel.Panel):
@@ -2638,6 +2692,9 @@ class AcquisitionPanel(Panel.Panel):
         assert device_component_handler
         component_entity_ = find_component(acquisition_configuration, "acquisition_device_components", "acquisition_device_component_scan")
         return device_component_handler._get_scan_hardware_source_id_list()
+
+    async def _acquire(self) -> _AcquireResult:
+        return await self._acquisition_controller._acquire()
 
 
 class AcquisitionPreferencePanel:
