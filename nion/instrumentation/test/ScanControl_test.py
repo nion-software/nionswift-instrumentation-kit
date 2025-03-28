@@ -23,6 +23,7 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
@@ -40,9 +41,10 @@ class TestScanControlClass(unittest.TestCase):
 
     def setUp(self):
         AcquisitionTestContext.begin_leaks()
-        self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+        self._test_setup = TestContext.TestSetup()
 
     def tearDown(self) -> None:
+        self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller, hardware_source):

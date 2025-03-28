@@ -7,6 +7,7 @@ from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionLibrary
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift import Application
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 
@@ -15,9 +16,10 @@ class TestAcquisitionClass(unittest.TestCase):
 
     def setUp(self) -> None:
         AcquisitionTestContext.begin_leaks()
-        self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+        self._test_setup = TestContext.TestSetup()
 
     def tearDown(self) -> None:
+        self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
     def __test_context(self, is_eels: bool=False) -> AcquisitionTestContext.AcquisitionTestContext:

@@ -3,6 +3,7 @@ import copy
 import datetime
 import threading
 import time
+import typing
 import unittest
 
 import numpy
@@ -518,11 +519,12 @@ class TestHardwareSourceClass(unittest.TestCase):
 
     def setUp(self):
         AcquisitionTestContext.begin_leaks()
-        self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+        self._test_setup = TestContext.TestSetup()
         HardwareSource.HardwareSourceManager()._reset()
 
     def tearDown(self):
         HardwareSource.HardwareSourceManager().close()
+        self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
     def __acquire_one(self, document_controller, hardware_source):

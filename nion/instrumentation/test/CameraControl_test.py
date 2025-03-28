@@ -32,6 +32,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
+from nion.swift.test import TestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Model
@@ -152,11 +153,12 @@ class TestCameraControlClass(unittest.TestCase):
 
     def setUp(self):
         AcquisitionTestContext.begin_leaks()
-        self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+        self._test_setup = TestContext.TestSetup()
         self.source_image = numpy.random.randn(1024, 1024).astype(numpy.float32)
         self.exposure = 0.005
 
     def tearDown(self):
+        self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
     def _acquire_one(self, document_controller: DocumentController.DocumentController, hardware_source: camera_base.CameraHardwareSource) -> None:

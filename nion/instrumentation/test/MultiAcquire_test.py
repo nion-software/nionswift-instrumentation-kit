@@ -7,6 +7,7 @@ import time
 from nion.instrumentation import camera_base
 from nion.swift import Application
 from nion.swift import Facade
+from nion.swift.test import TestContext
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.ui import TestUI
 from nion.utils import Geometry
@@ -22,9 +23,10 @@ class TestMultiAcquire(unittest.TestCase):
 
     def setUp(self):
         AcquisitionTestContext.begin_leaks()
-        self.app = Application.Application(TestUI.UserInterface(), set_global=False)
+        self._test_setup = TestContext.TestSetup()
 
     def tearDown(self):
+        self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
     def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
