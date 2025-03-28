@@ -2520,7 +2520,7 @@ class CameraFrameParameters:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         d: typing.Dict[str, typing.Any] = dict()
         assert not args or isinstance(args[0], dict)
-        if isinstance(args[0], dict):
+        if args and isinstance(args[0], dict):
             d.update(args[0])
         d.update(kwargs)
         self.exposure_ms: float = d.pop("exposure_ms", 125)
