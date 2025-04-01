@@ -1,0 +1,728 @@
+[
+  {
+    "title": "Ronchigram (View)",
+    "procedure": {
+      "type": "view",
+      "duration": 5.0,
+      "detector": {
+        "device_type_id": "ronchigram_camera",
+        "device_parameters": {
+          "binning": 2,
+          "exposure_ms": 10
+        },
+        "channels": [
+          {
+            "channel_type": "primary"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "title": "EELS (View)",
+    "procedure": {
+      "type": "view",
+      "duration": 5.0,
+      "detector": {
+        "device_type_id": "eels_camera",
+        "device_parameters": {
+          "binning": 1,
+          "exposure_ms": 10
+        },
+        "channels": [
+          {
+            "channel_type": "primary"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "title": "Scan (View)",
+    "procedure": {
+      "type": "view",
+      "duration": 5.0,
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [512, 512],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detector": {
+        "device_type_id": "scan_controller",
+        "channels": [
+          {
+            "channel_index": 0
+          }
+        ]
+      }
+    }
+  },
+  {
+    "title": "Scan/2Ch (View)",
+    "procedure": {
+      "type": "view",
+      "duration": 5.0,
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [512, 512],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detector": {
+        "device_type_id": "scan_controller",
+        "channels": [
+          {
+            "channel_index": 0
+          },
+          {
+            "channel_index": 1
+          }
+        ]
+      }
+    }
+  },
+  {
+    "title": "Ronchigram (Single)",
+    "procedure": {
+      "type": "acquire",
+      "detectors": [
+        {
+          "device_type_id": "ronchigram_camera",
+          "device_parameters": {
+            "binning": 2,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Single/Spectra)",
+    "procedure": {
+      "type": "acquire",
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Single/Image)",
+    "procedure": {
+      "type": "acquire",
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Scan (Single)",
+    "procedure": {
+      "type": "acquire",
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [8, 8],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Scan (Single/Subscan)",
+    "procedure": {
+      "type": "acquire",
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [20, 20],
+        "subscan_pixel_size": [10, 10],
+        "subscan_fractional_center": [0.5, 0.5],
+        "subscan_fractional_size": [0.5, 0.5],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Spectrum Image (Single)",
+    "procedure": {
+      "type": "acquire",
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [8, 8],
+        "clock": {
+          "type": "external",
+          "device_type_id": "eels_camera"
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        },
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Spectrum Image (Single/Subscan)",
+    "procedure": {
+      "type": "acquire",
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [20, 20],
+        "subscan_pixel_size": [10, 10],
+        "subscan_fractional_center": [0.5, 0.5],
+        "subscan_fractional_size": [0.5, 0.5],
+        "clock": {
+          "type": "external",
+          "device_type_id": "eels_camera"
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        },
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Ronchigram (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "detectors": [
+        {
+          "device_type_id": "ronchigram_camera",
+          "device_parameters": {
+            "binning": 2,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Sequence/Spectra)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Sequence/Images)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Scan (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [8, 8],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Scan/2Ch (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [8, 8],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            },
+            {
+              "channel_index": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Subscan (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [20, 20],
+        "subscan_pixel_size": [10, 10],
+        "subscan_fractional_center": [0.5, 0.5],
+        "subscan_fractional_size": [0.5, 0.5],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Subscan/2Ch (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [20, 20],
+        "subscan_pixel_size": [10, 10],
+        "subscan_fractional_center": [0.5, 0.5],
+        "subscan_fractional_size": [0.5, 0.5],
+        "clock": {
+          "type": "internal",
+          "pixel_time_us": 10
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            },
+            {
+              "channel_index": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Spectrum Image (Sequence)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "sequence",
+        "count": 4
+      },
+      "magnification": {
+        "fov_nm": 100.0
+      },
+      "scan": {
+        "pixel_size": [8, 8],
+        "clock": {
+          "type": "external",
+          "device_type_id": "eels_camera"
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "scan_controller",
+          "channels": [
+            {
+              "channel_index": 0
+            }
+          ]
+        },
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Ronchigram (Series/defocus)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "series",
+        "control_id": "defocus",
+        "control_values": {
+          "count": 4,
+          "start": 0e-9,
+          "step": 5e-9
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "ronchigram_camera",
+          "device_parameters": {
+            "binning": 2,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Series/Spectra/energy_offset)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "series",
+        "control_id": "energy_offset",
+        "control_values": {
+          "count": 6,
+          "start": 0,
+          "step": 20
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Series/Images/energy_offset)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "series",
+        "control_id": "energy_offset",
+        "control_values": {
+          "count": 6,
+          "start": 0,
+          "step": 20
+        }
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "Ronchigram (Multi)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "multiple-series",
+        "sections": [
+          {
+            "offset": 0,
+            "exposure_ms": 25,
+            "count": 4,
+            "include_sum": true
+          },
+          {
+            "offset": 5,
+            "exposure_ms": 50,
+            "count": 2
+          }
+        ]
+      },
+      "detectors": [
+        {
+          "device_type_id": "ronchigram_camera",
+          "device_parameters": {
+            "binning": 2,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Multi/Spectra)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "multiple-series",
+        "sections": [
+          {
+            "offset": 0,
+            "exposure_ms": 25,
+            "count": 4,
+            "include_sum": true
+          },
+          {
+            "offset": 5,
+            "exposure_ms": 50,
+            "count": 2
+          }
+        ]
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_id": "summed"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "title": "EELS (Multi/Images)",
+    "procedure": {
+      "type": "acquire",
+      "iteration": {
+        "type": "multiple-series",
+        "sections": [
+          {
+            "offset": 0,
+            "exposure_ms": 25,
+            "count": 4,
+            "include_sum": true
+          },
+          {
+            "offset": 5,
+            "exposure_ms": 50,
+            "count": 2
+          }
+        ]
+      },
+      "detectors": [
+        {
+          "device_type_id": "eels_camera",
+          "device_parameters": {
+            "binning": 1,
+            "exposure_ms": 10
+          },
+          "channels": [
+            {
+              "channel_type": "primary"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
