@@ -588,6 +588,25 @@ class TestScanControlClass(unittest.TestCase):
             recorded_xdatas = recording_task.grab_xdatas(timeout=3.0)
             self.assertEqual(recorded_xdatas[0].data.shape, (500, 500))
 
+    def test_changing_frame_parameters_during_sequence_does_not_affect_sequence(self):
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
+            frame_parameters_0.size = Geometry.IntSize(300, 300)
+            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+            frame_parameters_1 = scan_hardware_source.get_frame_parameters(0)
+            frame_parameters_1.size = Geometry.IntSize(500, 500)
+            scan_hardware_source.set_selected_profile_index(0)
+            frame_count = 10
+            scan_hardware_source.prepare_sequence_mode(frame_parameters_0, frame_count)
+            scan_hardware_source.start_sequence_mode(frame_parameters_0, frame_count)
+            try:
+                self.assertEqual(scan_hardware_source.get_next_xdatas_to_start()[0].data.shape, (300, 300))
+                scan_hardware_source.set_frame_parameters(0, frame_parameters_1)
+                self.assertEqual(scan_hardware_source.get_next_xdatas_to_start()[0].data.shape, (300, 300))
+            finally:
+                scan_hardware_source.finish_sequence_mode()
+
     def test_capturing_during_view_captures_new_data_items(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
