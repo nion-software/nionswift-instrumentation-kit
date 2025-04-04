@@ -1151,7 +1151,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__settings = settings
         self.__settings.initialize(configuration_location=configuration_location, event_loop=asyncio.get_event_loop())
 
-        self.__current_frame_parameters_changed_event_listener = self.__settings.current_frame_parameters_changed_event.listen(self.__set_current_frame_parameters)
+        self.__current_frame_parameters_changed_event_listener = self.__settings.current_frame_parameters_changed_event.listen(self.__handle_current_frame_parameters_changed)
         self.__record_frame_parameters_changed_event_listener = self.__settings.record_frame_parameters_changed_event.listen(self.__set_record_frame_parameters)
 
         # add optional support for settings. to enable auto settings handling, the camera settings object must define
@@ -1212,6 +1212,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         self.__frame_parameters = self.__settings.get_current_frame_parameters()
         self.__record_parameters = self.__settings.get_record_frame_parameters()
+
+        # used for avoiding parameter changes during acquisition procedures. not perfect yet.
+        self.__in_sequence_mode = False
 
         self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
@@ -1723,14 +1726,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.set_sequence_buffer_size(count)
 
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
+        self.__in_sequence_mode = True
         assert not self.__device.is_scanning
         self.set_current_frame_parameters(scan_frame_parameters)
         self.start_playing()
 
     def finish_sequence_mode(self) -> None:
+        self.__in_sequence_mode = False
         self.set_sequence_buffer_size(0)
 
     def abort_sequence_mode(self) -> None:
+        self.__in_sequence_mode = False
         self.abort_playing(sync_timeout=5.0)
 
     def get_sequence_buffer_count(self) -> int:
@@ -1773,6 +1779,15 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
+
+    def __handle_current_frame_parameters_changed(self, frame_parameters: ScanFrameParameters) -> None:
+        # this method is called when the frame parameters are changed in the settings via a profile change. if the
+        # scan is recording or doing a sequence, do nothing since parameters shouldn't change during those
+        # activities. this can happen if a scan is started from the acquisition panel but the parameters do not match
+        # the current profile; then the low level will report a change and the scan settings will try to update the
+        # current settings. prevent that here. this needs rework eventually.
+        if not self.is_recording and not self.__in_sequence_mode:
+            self.__set_current_frame_parameters(frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
         return copy.copy(self.__frame_parameters)
