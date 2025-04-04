@@ -1599,6 +1599,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         assert scan_context_description
         scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
         scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+        assert scan_frame_parameters.pixel_size.width > 0 and scan_frame_parameters.pixel_size.height > 0
         return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source,
                                                            scan_frame_parameters,
                                                            camera_hardware_source,
