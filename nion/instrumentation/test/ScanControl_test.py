@@ -439,6 +439,17 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing()
             self.assertFalse(is_playing)
 
+    def test_start_recording_with_no_channels_enabled_does_nothing(self):
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.set_channel_enabled(0, False)
+            frame_time = scan_hardware_source.get_current_frame_time()
+            recording_task = scan_hardware_source.start_recording(sync_timeout=3.0)
+            recording_task.grab_xdatas(timeout=3.0)
+            scan_hardware_source.stop_recording(sync_timeout=3.0)
+            self.assertFalse(scan_hardware_source.is_recording)
+            self.assertFalse(scan_hardware_source.is_playing)
+
     def test_enabling_channel_during_acquisition_results_in_write_delayed_data_item(self):
         # this ensures that data items freshly created during acquisition don't write repeatedly to disk.
         # see also test_data_item_created_during_acquisition_is_write_delayed_during_and_not_after

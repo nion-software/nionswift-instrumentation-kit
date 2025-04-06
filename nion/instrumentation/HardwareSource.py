@@ -397,6 +397,7 @@ class AcquisitionTask:
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
         self.start_event = Event.Event()
         self.stop_event = Event.Event()
+        self.abort_event = Event.Event()
         self.data_elements_changed_event = Event.Event()
         self.finished_callback_fn: typing.Optional[_FinishedCallbackType] = None
         self.activity: typing.Optional[Activity.Activity] = None
@@ -491,6 +492,7 @@ class AcquisitionTask:
     def abort(self) -> None:
         self.__aborted = True
         self._request_abort_acquisition()
+        self.abort_event.fire()
 
     # called from the hardware source
     def stop(self) -> None:
@@ -877,6 +879,12 @@ class RecordingTask(typing.Protocol):
 
 
 class HardwareSource(typing.Protocol):
+    """Source of data. It can be a camera, a scan, or any other device that generates data.
+
+    The abort_event is fired when the hardware source is aborted. The is_aborted property is set to True when the
+    hardware source is aborted. After listening for abort_event, the caller should check whether the hardware source is
+    already aborted to prevent race conditions.
+    """
 
     # methods
 
@@ -920,6 +928,10 @@ class HardwareSource(typing.Protocol):
 
     @property
     def is_recording(self) -> bool:
+        return False
+
+    @property
+    def is_aborted(self) -> bool:
         return False
 
     # private. do not use outside instrumentation-kit.
@@ -1107,7 +1119,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__data_channel_manager = DataChannelManager(hardware_source_id, weak_partial(ConcreteHardwareSource.__map_data_channel_specifier, self))
         self.__features: typing.Dict[str, typing.Any] = dict()
         self.xdatas_available_event = Event.Event()
+        self.__is_aborted = False
         self.abort_event = Event.Event()
+        self.__view_abort_event_listener: Event.EventListener | None = None
+        self.__record_abort_event_listener: Event.EventListener | None = None
         self.acquisition_state_changed_event = Event.Event()
         self.data_channel_updated_event = Event.Event()
         self.data_channel_start_event = Event.Event()
@@ -1196,7 +1211,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     # abort the task, but execute one last time to make sure stop
                     # gets called.
                     task.abort()
-                    self.abort_event.fire()
                 try:
                     for suspend_task_id in suspend_task_id_list:
                         suspend_task = self.__tasks.get(suspend_task_id)
@@ -1205,7 +1219,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     task.execute()
                 except Exception as e:
                     task.abort()
-                    self.abort_event.fire()
                     if callable(self._test_acquire_exception):
                         self._test_acquire_exception(e)
                     else:
@@ -1348,7 +1361,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         task = self.__tasks.get(task_id)
         assert task is not None
         task.abort()
-        self.abort_event.fire()
 
     # call this to stop acquisition gracefully
     # not thread safe
@@ -1369,6 +1381,14 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             view_task = self._create_acquisition_view_task()
             view_task._test_start_hook = self._test_start_hook
             view_task._test_acquire_hook = self._test_acquire_hook
+
+            def handle_abort_event() -> None:
+                self.__is_aborted = True
+                self.abort_event.fire()
+
+            self.__is_aborted = False
+            self.__view_abort_event_listener = view_task.abort_event.listen(handle_abort_event)
+
             self._view_task_updated(view_task)
             self.start_task('view', view_task)
         if "sync_timeout" in kwargs:
@@ -1383,6 +1403,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         if self.is_playing:
             self.abort_task('view')
             self._view_task_updated(None)
+        self.__view_abort_event_listener = None
         if sync_timeout is not None:
             start = time.time()
             while self.is_playing or self.is_task_running('view') or self.is_task_running('record'):
@@ -1395,6 +1416,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         if self.is_playing:
             self.stop_task('view')
             self._view_task_updated(None)
+        self.__view_abort_event_listener = None
         if sync_timeout is not None:
             start = time.time()
             while self.is_playing:
@@ -1417,6 +1439,13 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         record_task._test_start_hook = self._test_start_hook
         record_task._test_acquire_hook = self._test_acquire_hook
 
+        def handle_abort_event() -> None:
+            self.__is_aborted = True
+            self.abort_event.fire()
+
+        self.__is_aborted = False
+        self.__record_abort_event_listener = record_task.abort_event.listen(handle_abort_event)
+
         old_finished_callback_fn = record_task.finished_callback_fn
 
         # support receiving the data
@@ -1426,6 +1455,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         def finished(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
             new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
             new_data_event.set()
+            self.__record_abort_event_listener = None
             if callable(old_finished_callback_fn):
                 old_finished_callback_fn(data_promises)
             if callable(finished_callback_fn):
@@ -1480,13 +1510,18 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     self.__new_data_event.set()
 
                 with contextlib.closing(self.__hardware_source.abort_event.listen(abort)):
-                    # wait for the current frame to finish
-                    if not new_data_event.wait(timeout):
-                        raise Exception("Could not start data_source " + str(self.__hardware_source.hardware_source_id))
+                    # wait for the current frame to finish. check first if already aborted.
+                    if not self.__hardware_source.is_aborted:
+                        if not new_data_event.wait(timeout):
+                            raise Exception("Could not start data_source " + str(self.__hardware_source.hardware_source_id))
 
                 return self.__new_xdatas
 
         return RecordingTaskImpl(self, record_task, new_data_event, new_xdatas)
+
+    @property
+    def is_aborted(self) -> bool:
+        return self.__is_aborted
 
     # call this to stop acquisition immediately
     # not thread safe
@@ -1525,9 +1560,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
         with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
             with contextlib.closing(self.abort_event.listen(abort)):
-                # wait for the current frame to finish
-                if not new_data_event.wait(timeout):
-                    raise Exception("Could not start data_source " + str(self.hardware_source_id))
+                # wait for the current frame to finish. check first if already aborted.
+                if not self.is_aborted:
+                    if not new_data_event.wait(timeout):
+                        raise Exception("Could not start data_source " + str(self.hardware_source_id))
 
                 return new_xdatas
 
@@ -1544,14 +1580,17 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
         with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
             with contextlib.closing(self.abort_event.listen(abort)):
-                # wait for the current frame to finish
-                if not new_data_event.wait(timeout):
-                    raise Exception("Could not start data_source " + str(self.hardware_source_id))
+                # wait for the current frame to finish. check first if already aborted.
+                if not self.is_aborted:
+                    if not new_data_event.wait(timeout):
+                        raise Exception("Could not start data_source " + str(self.hardware_source_id))
 
                 new_data_event.clear()
 
-                if len(new_xdatas) > 0:
-                    new_data_event.wait(timeout)
+                # check again for aborted in case it was aborted before entering this method.
+                if not self.is_aborted:
+                    if len(new_xdatas) > 0:
+                        new_data_event.wait(timeout)
 
                 return new_xdatas
 
