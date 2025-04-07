@@ -1224,6 +1224,7 @@ class TestCameraControlClass(unittest.TestCase):
                     last_progress = progress
                     last_progress_time = time.time()
                 time.sleep(0.005)
+            document_controller.periodic()
             self.assertEqual(expected_error, acquisition.is_error)
             self.assertTrue(acquisition.is_finished)
             # useful for debugging

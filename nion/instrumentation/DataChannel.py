@@ -51,6 +51,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         self.on_display_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
 
     def prepare(self, channel_info_map: typing.Mapping[Acquisition.Channel, Acquisition.DataStreamInfo]) -> None:
+        print(f"prepare {self}")
         # prepare will be called on the main thread.
         acquisition_number = Acquisition.session_manager.get_project_acquisition_index(self.__document_model)
         for channel, data_stream_info in channel_info_map.items():
@@ -62,6 +63,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
             self.__data_item_ref_map[channel] = DataItemReference(self.__document_model, data_item)
             if callable(self.on_display_data_item):
                 self.on_display_data_item(data_item)
+        print(f"prepare done {self}")
 
     def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data_item_ref_map[channel].data_item.data_and_metadata
@@ -72,6 +74,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         return self.__data_item_ref_map[channel].data_item
 
     def update_data(self, channel: Acquisition.Channel, source_data: _NDArray, source_slice: Acquisition.SliceType, dest_slice: slice, data_metadata: DataAndMetadata.DataMetadata) -> None:
+        print(f"update_data {self}")
         data_item_ref = self.__data_item_ref_map.get(channel, None)
         if data_item_ref:
             source_data_and_metadata = DataAndMetadata.new_data_and_metadata(source_data, data_descriptor=data_metadata.data_descriptor)
@@ -79,6 +82,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
             assert len(dest_slice_lists) == 1  # otherwise we need to break up the source slices too. skipping until needed.
             for dest_slices in dest_slice_lists:
                 self.__document_model.update_data_item_partial(data_item_ref.data_item, data_metadata, source_data_and_metadata, source_slice, dest_slices)
+            print(f"update_data {data_item_ref.data_item.data_shape=}")
 
     def __create_data_item(self, data_metadata: DataAndMetadata.DataMetadata, title: str) -> DataItem.DataItem:
         data_shape = data_metadata.data_shape
