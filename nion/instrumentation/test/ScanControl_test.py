@@ -2044,6 +2044,34 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.periodic()
             self.assertEqual((256, 256), document_model.data_items[0].data_shape)
 
+    def test_scan_frame_parameters_are_updated_when_channels_are_changed(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.set_channel_enabled(0, True)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                self.assertEqual([0], scan_hardware_source.get_enabled_channel_indexes())
+                self.assertEqual([0], scan_hardware_source.get_current_frame_parameters().enabled_channel_indexes)
+                scan_hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+                self.assertEqual(1, len(document_controller.document_model.data_items))
+                scan_hardware_source.set_channel_enabled(1, True)
+                self.assertEqual([0, 1], scan_hardware_source.get_enabled_channel_indexes())
+                self.assertEqual([0, 1], scan_hardware_source.get_current_frame_parameters().enabled_channel_indexes)
+                scan_hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+                self.assertEqual(2, len(document_controller.document_model.data_items))
+                scan_hardware_source.set_channel_enabled(0, False)
+                self.assertEqual([1], scan_hardware_source.get_enabled_channel_indexes())
+                self.assertEqual([1], scan_hardware_source.get_current_frame_parameters().enabled_channel_indexes)
+                scan_hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+            finally:
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+                scan_hardware_source.set_channel_enabled(0, True)
+                scan_hardware_source.set_channel_enabled(1, False)
+
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded
     # stem values are recorded

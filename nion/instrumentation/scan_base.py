@@ -1831,6 +1831,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         changed = self.__device.set_channel_enabled(channel_index, enabled)
         if changed:
+            # keep the channels up to date with the device.
+            self.__frame_parameters.enabled_channel_indexes = self.get_enabled_channel_indexes()
             self.__channel_states_changed([self.get_channel_state(i) for i in range(self.channel_count)])
 
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
