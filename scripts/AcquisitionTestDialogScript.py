@@ -856,14 +856,25 @@ class AcquisitionTestHandler(Declarative.Handler):
         self.elapsed_time_converter = Converter.PhysicalValueToStringConverter("s", 1, "{:.1f}")
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_row(
+            # u.create_check_box(enabled="@binding(is_stopped_model.value)", style="minimal", width=24),
             u.create_label(text="@binding(acquisition_test.status_stream.value)", width=18),
             u.create_label(text=acquisition_test.title, tool_tip="@binding(acquisition_test.tooltip.value)"),
             u.create_stretch(),
             u.create_label(text="@binding(acquisition_test.elapsed_time, converter=elapsed_time_converter)", width=48),
-            u.create_push_button(text="Run", enabled="@binding(is_stopped_model.value)", on_clicked="handle_run_clicked", style="minimal"),
-            u.create_push_button(text="Delete", enabled="@binding(acquisition_test.has_result)", on_clicked="handle_delete_clicked", style="minimal"),
+            {"type": "nionswift.text_push_button",
+             "text": "\u23F5",
+             "enabled": "@binding(is_stopped_model.value)",
+             "tool_tip": "Run test.",
+             "on_clicked": "handle_run_clicked"},
+            {"type": "nionswift.text_push_button",
+             "text": "\N{N-ARY CIRCLED TIMES OPERATOR}",
+             "enabled": "@binding(acquisition_test.has_result)",
+             "tool_tip": "Delete results.",
+             "on_clicked": "handle_delete_clicked"},
+            # u.create_push_button(text="Run", enabled="@binding(is_stopped_model.value)", on_clicked="handle_run_clicked", style="minimal"),
+            # u.create_push_button(text="Delete", enabled="@binding(acquisition_test.has_result)", on_clicked="handle_delete_clicked", style="minimal"),
             spacing=8,
-            margin=8
+            margin_horizontal=8
         )
 
     def handle_run_clicked(self, widget: Declarative.UIWidget) -> None:
@@ -901,7 +912,7 @@ class AcquisitionTestDialog(Declarative.Handler):
 
         u = Declarative.DeclarativeUI()
         ui_view = u.create_column(
-            u.create_column(items="acquisition_tests", item_component_id="acquisition_test"),
+            u.create_scroll_area(u.create_column(items="acquisition_tests", item_component_id="acquisition_test", margin_vertical=4), width=480, height=400),
             u.create_row(
                 u.create_stretch(),
                 u.create_push_button(text="Reset", enabled="@binding(is_stopped_model.value)", on_clicked="handle_reset_clicked", style="minimal"),
