@@ -209,7 +209,7 @@ class ScanSpecifier:
     scan_context_valid = False
     scan_count = 1
     size: typing.Optional[typing.Tuple[int, int]] = None
-    scan_size = Geometry.IntSize()
+    scan_size: Geometry.IntSize | None = None
     scan_pixel_count = 0
     drift_interval_lines = 0
     drift_interval_scans = 0
@@ -223,7 +223,7 @@ class ScanSpecifier:
         self.scan_context_valid = False
         self.scan_count = 1
         self.size = None
-        self.scan_size = Geometry.IntSize()
+        self.scan_size = None
         self.scan_pixel_count = 0
         self.drift_interval_lines = 0
         self.drift_interval_scans = 0
