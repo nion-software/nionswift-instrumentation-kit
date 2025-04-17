@@ -301,6 +301,26 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(len(document_model.data_items), 0)
             self.assertIsNone(scan_hardware_source.probe_position)
 
+    def test_deleting_data_item_during_acquisition_recovers_correctly(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.scan_hardware_source
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()
+                data_item_reference = document_model.get_data_item_reference("test_scan_device_a")
+                data_item_reference._test_delay = 0.05
+                document_controller.periodic()
+                hardware_source.get_next_xdatas_to_finish()
+                document_model.remove_data_item(document_model.data_items[0])
+                document_controller.periodic()
+                hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=3.0)
+            document_controller.periodic()
+
     # TODO: test case where one of two displays is deleted, what happens to probe graphic on other one?
     # TODO: test case where probe graphic should be removed when a channel is disabled
 

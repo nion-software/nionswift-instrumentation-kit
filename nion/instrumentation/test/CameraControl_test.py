@@ -689,6 +689,22 @@ class TestCameraControlClass(unittest.TestCase):
             document_model.recompute_all()
             self.assertEqual(len(document_model.data_items), 2)
 
+    def test_deleting_data_item_during_acquisition_recovers_correctly(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.start_playing(sync_timeout=TIMEOUT)
+            try:
+                hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+                document_model.remove_data_item(document_model.data_items[0])
+                hardware_source.get_next_xdatas_to_start()
+                document_controller.periodic()
+            finally:
+                hardware_source.stop_playing(sync_timeout=TIMEOUT)
+            document_controller.periodic()
+
     def test_deleting_processed_data_item_during_acquisition_recovers_correctly(self):
         with self._test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
