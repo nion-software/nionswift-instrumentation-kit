@@ -324,7 +324,7 @@ class TestScanControlClass(unittest.TestCase):
     # TODO: test case where one of two displays is deleted, what happens to probe graphic on other one?
     # TODO: test case where probe graphic should be removed when a channel is disabled
 
-    def test_start_playing_after_stopping_should_remove_probe_position_graphic(self):
+    def test_start_playing_after_stopping_should_change_probe_position_graphic_to_gray(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
@@ -334,10 +334,12 @@ class TestScanControlClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
             self.assertEqual(len(display_item.graphics), 1)
+            self.assertEqual("#F80", display_item.graphics[-1].stroke_color)
             scan_hardware_source.start_playing()
             scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
             document_controller.periodic()
-            self.assertEqual(len(display_item.graphics), 0)
+            self.assertEqual(len(display_item.graphics), 1)
+            self.assertEqual("#888", display_item.graphics[-1].stroke_color)
             scan_hardware_source.stop_playing()
 
     def test_context_scan_attaches_required_metadata(self):
