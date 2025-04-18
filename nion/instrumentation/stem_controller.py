@@ -1090,7 +1090,7 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
 
     def __update_probe_state(self, probe_state: str, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if probe_state != "scanning" and probe_position is not None:
+        if probe_position is not None:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
             self.__graphic_set.remove_all_graphics()
@@ -1131,6 +1131,8 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
         probe_position = self.__stem_controller.probe_position
         if probe_position and graphic.position != probe_position:
             graphic.position = probe_position
+        is_scanning = self.__stem_controller.probe_state == "scanning"
+        graphic.stroke_color = "#F80" if not is_scanning else "#888"
 
     def _graphic_property_changed(self, graphic: Graphics.Graphic, name: str) -> None:
         if name == "position":
