@@ -118,21 +118,16 @@ class AxisDescription(typing.Protocol):
 
 
 class ScanContext:
-    def __init__(self) -> None:
-        self.size: typing.Optional[Geometry.IntSize] = None
-        self.center_nm: typing.Optional[Geometry.FloatPoint] = None
-        self.fov_nm: typing.Optional[float] = None
-        self.rotation_rad: typing.Optional[float] = None
+    def __init__(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
+        self.size = size
+        self.center_nm = center_nm
+        self.fov_nm = fov_nm
+        self.rotation_rad = rotation_rad
 
     def __repr__(self) -> str:
-        if self.fov_nm and self.size and self.rotation_rad is not None:
-            return f"{self.size} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg"
-        else:
-            return "NO CONTEXT"
+        return f"{self.size} {self.fov_nm}nm {math.degrees(self.rotation_rad)}deg"
 
     def __eq__(self, other: typing.Any) -> bool:
-        if other is None:
-            return False
         if not isinstance(other, self.__class__):
             return False
         if other.size != self.size:
@@ -146,24 +141,7 @@ class ScanContext:
         return True
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ScanContext:
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        result.size = self.size
-        result.center_nm = self.center_nm
-        result.fov_nm = self.fov_nm
-        result.rotation_rad = self.rotation_rad
-        return result
-
-    @property
-    def is_valid(self) -> bool:
-        return self.size is not None and self.fov_nm is not None and self.rotation_rad is not None and self.center_nm is not None
-
-    def clear(self) -> None:
-        self.size = None
-        self.center_nm = None
-        self.fov_nm = None
-        self.rotation_rad = None
+        return self.__class__(self.size, self.center_nm, self.fov_nm, self.rotation_rad)
 
     def update(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
         self.size = Geometry.IntSize.make(size)
@@ -193,7 +171,6 @@ class ScanSpecifier:
     """Describe a scan, including status messages.
 
     scan_context is a ScanContext describing the current scan context.
-    scan_context_valid is True if the context is valid.
     scan_count is the number of scans for the acquisition.
     size is a tuple of the scan size.
     scan_size is an IntSize of the scan size.
@@ -205,10 +182,9 @@ class ScanSpecifier:
     context_description is a string explaining the current scan context.
     scan_description is a string explaining the planned scan.
     """
-    scan_context: typing.Optional[ScanContext] = None
-    scan_context_valid = False
+    scan_context: ScanContext | None = None
     scan_count = 1
-    size: typing.Optional[typing.Tuple[int, int]] = None
+    size: tuple[int, int] | None = None
     scan_size = Geometry.IntSize()
     scan_pixel_count = 0
     drift_interval_lines = 0
@@ -219,8 +195,7 @@ class ScanSpecifier:
     scan_description = str()
 
     def clear(self) -> None:
-        self.scan_context = ScanContext()
-        self.scan_context_valid = False
+        self.scan_context = None
         self.scan_count = 1
         self.size = None
         self.scan_size = Geometry.IntSize()
@@ -235,7 +210,7 @@ class ScanSpecifier:
     def update(self, scan_hardware_source: scan_base.ScanHardwareSource, exposure_ms: float, scan_width: int, scan_count: int, drift_correction_enabled: bool) -> None:
         scan_context = scan_hardware_source.scan_context
         scan_context_size = scan_context.size
-        if scan_context.is_valid and scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
+        if scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
             assert scan_context_size
             calibration = scan_context.calibration
             start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
@@ -261,7 +236,7 @@ class ScanSpecifier:
             self.drift_interval_lines = 0
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
-        elif scan_context.is_valid and scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
+        elif scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
             assert scan_context_size
             calibration = scan_context.calibration
             width = scan_hardware_source.subscan_region.width * scan_context_size.width
@@ -289,7 +264,7 @@ class ScanSpecifier:
             self.drift_interval_lines = drift_lines
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
-        elif scan_context.is_valid:
+        else:
             assert scan_context_size
             calibration = scan_context.calibration
             width = scan_context_size.width
@@ -317,8 +292,6 @@ class ScanSpecifier:
             self.drift_interval_lines = drift_lines
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
-        else:
-            self.clear()
 
 
 class STEMController(Observable.Observable):
@@ -345,7 +318,7 @@ class STEMController(Observable.Observable):
         self.__last_probe_position = Geometry.FloatPoint(0.5, 0.5)
         self.__probe_state_stack = list()  # parked, or scanning
         self.__probe_state_stack.append("parked")
-        self.__scan_context = ScanContext()
+        self.__scan_context = ScanContext(Geometry.IntSize(256, 256), Geometry.FloatPoint(0.0, 0.0), 100.0, 0.0)
         self.probe_state_changed_event = Event.Event()
         self.__subscan_state = SubscanState.INVALID
         self.__subscan_region: typing.Optional[Geometry.FloatRect] = None
@@ -371,7 +344,7 @@ class STEMController(Observable.Observable):
         self.__last_probe_position = Geometry.FloatPoint(y=0.5, x=0.5)
         self.__probe_state_stack.clear()
         self.__probe_state_stack.append("parked")
-        self.__scan_context.clear()
+        self.__scan_context.update(Geometry.IntSize(256, 256), Geometry.FloatPoint(0.0, 0.0), 100.0, 0.0)
         self.__subscan_state = SubscanState.INVALID
         self.__subscan_region = None
         self.__subscan_rotation = 0.0
@@ -561,24 +534,6 @@ class STEMController(Observable.Observable):
         self.__scan_context.update(size, center_nm, fov_nm, rotation_rad)
         if old_context != self.scan_context:
             self.scan_context_changed_event.fire()
-
-    def _clear_scan_context(self) -> None:
-        old_context = copy.deepcopy(self.scan_context)
-        self.__scan_context.clear()
-        if old_context != self.scan_context:
-            self.scan_context_changed_event.fire()
-
-    def _confirm_scan_context(self, size: Geometry.IntSize, center_nm: Geometry.FloatPoint, fov_nm: float, rotation_rad: float) -> None:
-        new_context = copy.deepcopy(self.scan_context)
-        new_context.update(size, center_nm, fov_nm, rotation_rad)
-        new_aspect_ratio = size.aspect_ratio
-        current_aspect_ratio = self.scan_context.size.aspect_ratio if self.scan_context.size else 0.0
-
-        if new_context.fov_nm != self.scan_context.fov_nm or new_context.center_nm != self.scan_context.center_nm or new_context.rotation_rad != self.scan_context.rotation_rad or new_aspect_ratio != current_aspect_ratio:
-            self._clear_scan_context()
-        else:
-            # ensure size is updated
-            self.scan_context.update(size, center_nm, fov_nm, rotation_rad)
 
     @property
     def probe_position(self) -> typing.Optional[Geometry.FloatPoint]:
