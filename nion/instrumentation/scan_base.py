@@ -1507,15 +1507,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         scan_context = self.scan_context
-        if scan_context.is_valid:
-            scan_context_size = scan_context.size
-            scan_context_center_nm = scan_context.center_nm
-            assert scan_context_size
-            assert scan_context_center_nm
-            frame_parameters.pixel_size = scan_context_size
-            frame_parameters.center_nm = scan_context_center_nm
-            frame_parameters.fov_nm = scan_context.fov_nm or 8.0
-            frame_parameters.rotation_rad = scan_context.rotation_rad or 0.0
+        scan_context_size = scan_context.size
+        scan_context_center_nm = scan_context.center_nm
+        assert scan_context_size
+        assert scan_context_center_nm
+        frame_parameters.pixel_size = scan_context_size
+        frame_parameters.center_nm = scan_context_center_nm
+        frame_parameters.fov_nm = scan_context.fov_nm or 8.0
+        frame_parameters.rotation_rad = scan_context.rotation_rad or 0.0
         self.__apply_subscan_parameters(frame_parameters, size)
 
     def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> None:
@@ -1760,23 +1759,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         self.__set_current_frame_parameters(scan_frame_parameters)
 
-    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, update_task: bool = True) -> None:
+    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         frame_parameters = copy.copy(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, ScanAcquisitionTask):
-            if update_task:
-                acquisition_task.set_frame_parameters(frame_parameters)
-            if not self.subscan_enabled:
-                self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
-            else:
-                # subscan is active, decide if the changed frame parameters should clear the scan context
-                self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
-        elif update_task:
+            acquisition_task.set_frame_parameters(frame_parameters)
+        else:
             # handle case where current profile has been changed but scan is not running.
             device_frame_parameters = copy.copy(frame_parameters)
             self.__device.set_frame_parameters(device_frame_parameters)
-            self.__stem_controller._confirm_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
+        self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
 

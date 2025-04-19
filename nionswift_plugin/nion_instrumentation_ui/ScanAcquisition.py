@@ -289,9 +289,6 @@ class PanelDelegate:
             self.__scan_label_widget.text = self.__scan_specifier.scan_description
             self.__scan_pixels = self.__scan_specifier.scan_pixel_count
 
-            # focus will be on the SI data, so enable if scanning
-            self.__acquire_button._widget.enabled = scan_context.is_valid or (self.__acquisition_state == SequenceState.scanning)
-
             self.__scan_count_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_count)
 
             self.__scan_width_widget.text = Converter.IntegerToStringConverter().convert(self.__scan_width)

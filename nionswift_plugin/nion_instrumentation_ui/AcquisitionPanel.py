@@ -1224,10 +1224,10 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # it is used to enable the acquire button. but to do so, this stream must be read from the enclosing
         # declarative component handler. this stream is not used within this class. perhaps there is a better way to
         # do this.
-        self.acquire_valid_value_stream = Stream.MapStream[STEMController.ScanSpecifier, bool](
-            self.__scan_context_description_value_stream,
-            lambda x: x.scan_context_valid if x is not None else False
-        ).add_ref()
+        def is_scan_specifier_valid(scan_specifier: STEMController.ScanSpecifier | None) -> bool:
+            return scan_specifier.scan_context is not None if scan_specifier is not None else False
+
+        self.acquire_valid_value_stream = Stream.MapStream[STEMController.ScanSpecifier, bool](self.__scan_context_description_value_stream, is_scan_specifier_valid).add_ref()
 
         u = Declarative.DeclarativeUI()
 
