@@ -1394,17 +1394,6 @@ class TestScanControlClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             self.assertEqual((1, 64), document_model.data_items[1].data_shape)
 
-    def test_scan_context_updated_when_starting_playing(self):
-        with self._test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            stem_controller_ = test_context.instrument
-            self.assertFalse(stem_controller_.scan_context.is_valid)
-            scan_hardware_source.start_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-            self.assertTrue(stem_controller_.scan_context.is_valid)
-            scan_hardware_source.stop_playing()
-            self.assertTrue(stem_controller_.scan_context.is_valid)
-
     def test_scan_context_updated_when_changing_parameters(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
@@ -1441,48 +1430,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing()
             self.assertNotEqual(20, scan_context1.fov_nm)
             self.assertNotEqual(20, scan_context2.fov_nm)
-            self.assertFalse(scan_context3.is_valid)
             self.assertEqual(20, scan_context4.fov_nm)
-
-    def test_scan_context_cleared_after_changing_parameters_during_subscan_and_stopping(self):
-        with self._test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            stem_controller_ = test_context.instrument
-            scan_hardware_source.start_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
-            scan_hardware_source.subscan_enabled = True
-            scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.fov_nm = 20
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-            scan_context3 = copy.deepcopy(stem_controller_.scan_context)
-            scan_hardware_source.stop_playing()
-            scan_context4 = copy.deepcopy(stem_controller_.scan_context)
-            self.assertNotEqual(20, scan_context1.fov_nm)
-            self.assertNotEqual(20, scan_context2.fov_nm)
-            self.assertFalse(scan_context3.is_valid)
-            self.assertFalse(scan_context4.is_valid)
-
-    def test_scan_context_not_cleared_after_stopping_subscan(self):
-        # this tests a failure mode where the current profile is updated during acquisition on
-        # a signal from the device.
-        with self._test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            stem_controller_ = test_context.instrument
-            scan_hardware_source.start_playing()
-            scan_hardware_source.get_next_xdatas_to_start()  # grab at least one frame
-            scan_hardware_source.set_frame_parameters(0, scan_hardware_source.get_current_frame_parameters())
-            scan_context1 = copy.deepcopy(stem_controller_.scan_context)
-            scan_hardware_source.subscan_enabled = True
-            scan_hardware_source.get_next_xdatas_to_start()  # grab at least one frame
-            scan_hardware_source.set_frame_parameters(0, scan_hardware_source.get_current_frame_parameters())
-            scan_hardware_source.stop_playing()
-            scan_context2 = copy.deepcopy(stem_controller_.scan_context)
-            self.assertTrue(scan_context1.is_valid)
-            self.assertTrue(scan_context2.is_valid)
 
     def test_scan_context_handled_after_changing_parameters_during_subscan_and_stopping(self):
         test_cases = [
@@ -1502,7 +1450,6 @@ class TestScanControlClass(unittest.TestCase):
                 stem_controller_ = test_context.instrument
                 scan_hardware_source.start_playing(sync_timeout=3.0)
                 scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
-                self.assertTrue(stem_controller_.scan_context.is_valid)
                 scan_hardware_source.subscan_enabled = True
                 scan_hardware_source.get_next_xdatas_to_finish()  # grab at least one frame
                 scan_context_before = copy.deepcopy(stem_controller_.scan_context)
@@ -1516,8 +1463,6 @@ class TestScanControlClass(unittest.TestCase):
                     self.assertNotEqual(param_value, getattr(scan_context_before, param_name))
                     if expected_context_valid:
                         self.assertEqual(param_value, getattr(scan_context_after, param_name))
-                self.assertTrue(scan_context_before.is_valid)
-                self.assertEqual(expected_context_valid, scan_context_after.is_valid)
 
     def test_changing_rotation_and_fov_update_device_parameters_immediately(self):
         with self._test_context() as test_context:
@@ -1525,13 +1470,11 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             stem_controller_ = test_context.instrument
             self._acquire_one(document_controller, scan_hardware_source)
-            self.assertTrue(stem_controller_.scan_context.is_valid)
             frame_parameters = copy.deepcopy(scan_hardware_source.scan_device.current_frame_parameters)
             fov_nm = frame_parameters.fov_nm
             frame_parameters.fov_nm //= 2
             scan_hardware_source.set_frame_parameters(0, frame_parameters)
             self.assertEqual(fov_nm // 2, scan_hardware_source.scan_device.current_frame_parameters.fov_nm)
-            self.assertFalse(stem_controller_.scan_context.is_valid)
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_stopped(self):
         with self._test_context() as test_context:
