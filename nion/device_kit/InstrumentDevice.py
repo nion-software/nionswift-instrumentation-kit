@@ -72,7 +72,6 @@ class Instrument(stem_controller.STEMController):
 
         self.__ronchigram_shape = Geometry.IntSize(2048, 2048)
         self.__eels_shape = Geometry.IntSize(256, 1024)
-        self.__scan_context = stem_controller.ScanContext()
         self.__probe_position: typing.Optional[Geometry.FloatPoint] = None
         self.__live_probe_position: typing.Optional[Geometry.FloatPoint] = None
         self._is_synchronized = False
@@ -105,7 +104,6 @@ class Instrument(stem_controller.STEMController):
         self.property_changed_event.fire("live_probe_position")
 
     def _set_scan_context_probe_position(self, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
-        self.__scan_context = copy.deepcopy(scan_context)
         self.__probe_position = probe_position
 
     def _enter_synchronized_state(self, scan_controller: HardwareSource.HardwareSource, *, camera: typing.Optional[HardwareSource.HardwareSource] = None) -> None:
