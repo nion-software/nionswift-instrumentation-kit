@@ -907,6 +907,9 @@ class ScanSettingsProtocol(typing.Protocol):
     settings_changed_event: Event.Event
     settings_id: str
 
+    # probe position
+    probe_position: Geometry.FloatPoint | None
+
     def close(self) -> None:
         ...
 
@@ -988,6 +991,7 @@ class ScanSettings(ScanSettingsProtocol):
     """
 
     def __init__(self,
+                 settings_id: str,
                  scan_modes: typing.Sequence[ScanSettingsMode],
                  frame_parameters_factory: ScanFrameParametersFactory,
                  current_settings_index: int = 0,
@@ -1010,7 +1014,7 @@ class ScanSettings(ScanSettingsProtocol):
         # will call apply_settings to initialize settings and then expect settings_changed_event
         # to be fired when settings change.
         self.settings_changed_event = Event.Event()
-        self.settings_id = str()
+        self.settings_id = settings_id
 
         # scan specific
         self.__scan_modes = tuple(scan_modes)
@@ -1023,6 +1027,8 @@ class ScanSettings(ScanSettingsProtocol):
         # dialogs
         self.__open_configuration_dialog_fn = open_configuration_dialog_fn
 
+        self.__probe_position: Geometry.FloatPoint | None = None
+
     def close(self) -> None:
         pass
 
@@ -1031,7 +1037,8 @@ class ScanSettings(ScanSettingsProtocol):
 
     def apply_settings(self, settings_dict: typing.Mapping[str, typing.Any]) -> None:
         """Initialize the settings with the settings_dict."""
-        pass
+        probe_position_d = settings_dict.get("probe_position", None)
+        self.__probe_position = Geometry.FloatPoint.make(probe_position_d) if probe_position_d else None
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         """Return camera frame parameters from dict."""
@@ -1125,6 +1132,18 @@ class ScanSettings(ScanSettingsProtocol):
     def set_mode(self, mode: str) -> None:
         """Set the current mode (named version of current settings index)."""
         self.set_selected_profile_index(self.modes.index(mode))
+
+    @property
+    def probe_position(self) -> Geometry.FloatPoint | None:
+        return self.__probe_position
+
+    @probe_position.setter
+    def probe_position(self, value: Geometry.FloatPoint | None) -> None:
+        self.__probe_position = value
+        settings_d = dict()
+        if value:
+            settings_d["probe_position"] = value.as_tuple()
+        self.settings_changed_event.fire(settings_d)
 
     def open_configuration_interface(self, api_broker: typing.Any) -> None:
         if callable(self.__open_configuration_dialog_fn):
@@ -1226,6 +1245,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         # synchronized acquisition
         self.acquisition_state_changed_event = Event.Event()
+
+        self.probe_position = self.__settings.probe_position
 
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
@@ -2027,6 +2048,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 # pass magic value to position to default position which may be top left or center depending on configuration.
                 self.__device.set_idle_position_by_percentage(-1.0, -1.0)
             self.__last_idle_position = Geometry.FloatPoint(x=-1.0, y=-1.0)
+        self.__settings.probe_position = probe_position
 
     def _get_last_idle_position_for_test(self) -> typing.Optional[Geometry.FloatPoint]:
         return self.__last_idle_position

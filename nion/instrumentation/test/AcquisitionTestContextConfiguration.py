@@ -104,7 +104,7 @@ class ScanModule(scan_base.ScanModule):
             scan_base.ScanSettingsMode("Slow", "slow", ScanDevice.ScanFrameParameters(pixel_size=(512, 512), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.4)),
             scan_base.ScanSettingsMode("Record", "record", ScanDevice.ScanFrameParameters(pixel_size=(1024, 1024), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 1.0))
         )
-        self.settings = scan_base.ScanSettings(scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
+        self.settings = scan_base.ScanSettings(device_id, scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
 
 
 class CameraSimulator:
