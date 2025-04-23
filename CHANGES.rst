@@ -1,9 +1,16 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-23.2.2 (UNRELEASED)
+23.3.0 (2025-04-23)
 -------------------
+- Display probe position during scanning to allow adjustment upon stop.
+- Change so a context scan is not required (but still recommended) before acquisition panel procedures.
+- Make probe position and whether enabled be persistent between launches.
 - Fix #228. Ensure control name is valid when getting camera calibrations.
+- Fix issues with thumbnails in scan and camera panels.
+- Fix issues when acquisition parameters changed during acquisition panel procedure.
+- Fix issues when deleting acquisition data items during live view.
+- Ensure angular calibration doesn't fail in case of zero height image.
 
 23.2.1 (2025-02-11)
 -------------------
