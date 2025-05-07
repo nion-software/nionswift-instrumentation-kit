@@ -708,6 +708,11 @@ async def test_eels_image_multi(ap: AcquisitionPanel.AcquisitionPanel, stem_cont
         return make_not_available_result("EELS camera not found.")
 
 
+# tests progress timeout
+# sequence 2, scan enabled, signals: haadf, eels spectra (100ms), scan size 32x32
+# single SI, 16x16, 500ms camera, tests timeout
+
+
 def acquisition_test_state_to_string(state: AcquisitionTestState | None) -> str:
     if state == AcquisitionTestState.NOT_STARTED:
         return "\N{WHITE CIRCLE}"
