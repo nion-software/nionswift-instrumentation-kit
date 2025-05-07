@@ -3031,6 +3031,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                     if data_stream_ := data_stream_ref():
                         if not data_stream_.is_finished and not data_stream_.is_aborted:
                             data_stream_.send_raw_data_stream_event_to_data_handler(raw_data_stream_event)
+                            last_progress_time = time.time()
                 data_stream.process_raw_stream_events(raw_data_stream_events)
                 post_progress = data_stream.progress
                 data_stream.advance_stream()
