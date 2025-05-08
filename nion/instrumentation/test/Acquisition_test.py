@@ -45,17 +45,12 @@ class ScanDataStream(Acquisition.DataStream):
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs) -> None:
         self.prepare_count += 1
 
-    @property
-    def _progress(self) -> float:
-        return ((self.__frame_index + (self.__partial_index / self.__scan_length)) / self.__frame_count)
-
     def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
         raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         assert self.__frame_index < self.__frame_count
         assert self.__partial_index < self.__scan_length
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         data_descriptor = DataAndMetadata.DataDescriptor(False, 0, 0)
-        data_metadata = DataAndMetadata.DataMetadata(((), typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         start_index = self.__partial_index
         stop_index = min(start_index + self.__partial_length, self.__scan_length)
@@ -68,6 +63,7 @@ class ScanDataStream(Acquisition.DataStream):
                 if self.__error_after == 0:
                     new_count = 0  # this will trigger an exception in send data
                 self.__error_after -= 1
+            data_metadata = DataAndMetadata.DataMetadata(((), self.data[channel].dtype), data_descriptor=data_descriptor)
             data_stream_event = Acquisition.DataStreamEventArgs(channel, data_metadata,
                                                                 self.data[channel][self.__frame_index],
                                                                 new_count, source_data_slice, Acquisition.DataStreamStateEnum.COMPLETE)
@@ -116,10 +112,6 @@ class SingleFrameDataStream(Acquisition.DataStream):
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
         return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype)), 0.1)
-
-    @property
-    def _progress(self) -> float:
-        return self.__partial_index / self.__frame_shape[0]
 
     def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
         raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
@@ -184,6 +176,7 @@ class MultiFrameDataStream(Acquisition.DataStream):
         return (self.__channel,)
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
+        # this is a hack - it ignores 'do_processing' since that will be handled by the operator
         return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype)), 0.1)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs) -> None:
@@ -197,10 +190,10 @@ class MultiFrameDataStream(Acquisition.DataStream):
         # data metadata describes the data being sent from this stream: shape, data type, and descriptor
         if self.__do_processing:
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape) - 1)
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape[1:], typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape[1:], self.data.dtype), data_descriptor=data_descriptor)
         else:
             data_descriptor = DataAndMetadata.DataDescriptor(False, 0, len(self.__frame_shape))
-            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, typing.cast(numpy.dtype, float)), data_descriptor=data_descriptor)
+            data_metadata = DataAndMetadata.DataMetadata((self.__frame_shape, self.data.dtype), data_descriptor=data_descriptor)
         # update the index to be used in the data slice
         if self.__counts:
             count = self.__counts[self.__counts_index]

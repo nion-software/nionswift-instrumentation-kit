@@ -2219,10 +2219,6 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
         self.__is_aborted = True
         self.__scan_hardware_source.abort_sequence_mode()
 
-    @property
-    def _progress(self) -> float:
-        return self.__sent_count / self.__count
-
     def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
         raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
         start_time = time.time()
@@ -2412,10 +2408,6 @@ class ScanDataStream(Acquisition.DataStream):
 
     def _abort_stream(self) -> None:
         self.__scan_hardware_source.abort_recording()
-
-    @property
-    def _progress(self) -> float:
-        return sum(self.__sent_rows.values()) / self.__scan_size[0] / len(self.channels)
 
     def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]:
         raw_data_stream_events = list[typing.Tuple[weakref.ReferenceType[Acquisition.DataStream], Acquisition.DataStreamEventArgs]]()
