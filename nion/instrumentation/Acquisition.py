@@ -433,8 +433,28 @@ class DataStreamEventArgs:
         # frame reset trigger. used to tell frames that data is being resent for the same frame.
         self.reset_frame = False
 
+        # whether to count frame for progress. used in accumulated frames so data doesn't get counted multiple times towards progress.
+        self.count_frame = True
+
         # the type of update
         self.update_in_place = update_in_place
+
+    @property
+    def total_bytes(self) -> int:
+        """Return the total bytes contained in this packet."""
+        data_dtype = self.data_metadata.data_dtype
+        assert data_dtype
+        itemsize = numpy.dtype(data_dtype).itemsize
+        if self.count:
+            return expand_shape(self.data_metadata.data_shape) * self.count * itemsize
+        else:
+            total_bytes = itemsize
+            for i, s in enumerate(self.source_slice):
+                if s.start is not None and s.stop is not None:
+                    total_bytes *= s.stop - s.start
+                else:
+                    total_bytes *= self.data_metadata.data_shape[i]
+            return total_bytes
 
 
 @dataclasses.dataclass
@@ -549,6 +569,12 @@ class DataStream:
         # optional advisory fields
         self.channel_names: typing.Mapping[Channel, str] = dict()
         self.title: typing.Optional[str] = None
+        # used for progress tracking. total bytes is calculated in prepare_stream. and the attached data handler
+        # is used to count the bytes sent to the data handler. _attached_data_handler is a weak reference to the
+        # data handler and is set when the data handler is attached to the stream. in practice, only the top level
+        # data stream has a valid progress value.
+        self.__total_bytes = 0
+        self._attached_data_handler: weakref.ref[DataHandler] | None = None
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
@@ -582,8 +608,23 @@ class DataStream:
         return False
 
     def attach_root_data_handler(self, framed_data_handler: FramedDataHandler) -> None:
+        assert not self._attached_data_handler
         if not self.build_data_handler(framed_data_handler):
             raise RuntimeError(f"{type(self)} cannot build data handler.")
+        self._attached_data_handler = weakref.ref(framed_data_handler)
+
+    @property
+    def progress(self) -> float:
+        """Return the progress of the data stream.
+
+        Progress is calculated as the number of bytes sent to the data handler divided by the total bytes calculated
+        in prepare_stream. The current calculation assumes all top level data is the same shape, which will not
+        always be the case going forward.
+        """
+        assert self._attached_data_handler
+        data_handler = self._attached_data_handler()
+        assert isinstance(data_handler, FramedDataHandler)
+        return data_handler.sent_bytes / self.__total_bytes if self.__total_bytes else 0.0
 
     @property
     def channels(self) -> typing.Tuple[Channel, ...]:
@@ -631,16 +672,8 @@ class DataStream:
         return self.__sequence_indexes.get(channel, 0) == self.__sequence_counts.get(channel, self.__sequence_count)
 
     @property
-    def progress(self) -> float:
-        if not self.is_finished:
-            progress = self._progress
-            assert 0 <= progress <= 1.0, f"{self}"
-            return progress
-        return 1.0
-
-    @property
-    def _progress(self) -> float:
-        return 0.0
+    def _total_bytes(self) -> int:
+        return self.__total_bytes
 
     def abort_stream(self) -> None:
         """Abort the stream. Called to stop the stream. Also called during exceptions."""
@@ -678,6 +711,7 @@ class DataStream:
                     for processed_data_stream_event in processed_data_stream_events:
                         self.handle_data_available(processed_data_stream_event)
                         data_stream_events.append(processed_data_stream_event)
+
         return data_stream_events
 
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
@@ -706,6 +740,13 @@ class DataStream:
         512x512 acquisition.
         """
         self._prepare_stream(stream_args, index_stack, **kwargs)
+
+        # calculate total bytes for progress handling.
+        self.__total_bytes = 0
+        for channel in self.channels:
+            data_stream_info = self.get_info(channel)
+            data_stream_data_metadata = data_stream_info.data_metadata
+            self.__total_bytes += expand_shape(data_stream_data_metadata.data_shape) * numpy.dtype(data_stream_data_metadata.data_dtype).itemsize
 
     def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
         """Prepare a sequence of acquisitions.
@@ -850,19 +891,6 @@ class CollectedDataStream(DataStream):
             timezone_offset=data_metadata.timezone_offset
         )
         return DataStreamInfo(data_metadata, count * data_stream_info.duration)
-
-    @property
-    def _progress(self) -> float:
-        # count is the number of frames in this collection
-        count = expand_shape(self.__collection_shape)
-        # if all channels are complete, return 0.0 by convention. progress will be called at the start of the next
-        # section, so we want it to be 0.0 at the start of the next section. bad design.
-        incomplete_indexes = list(self.__indexes.get(c, 0) for c in self.channels if self.__indexes.get(c, 0) != count)
-        if not incomplete_indexes:
-            return 0.0
-        # sum progress for each channel and average.
-        progress_list = list(self.__indexes.get(c, 0) / count for c in self.channels)
-        return sum(progress_list) / len(self.channels)
 
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
@@ -1215,11 +1243,6 @@ class CombinedDataStream(DataStream):
     def is_finished(self) -> bool:
         return all(data_stream.is_finished for data_stream in self.__data_streams)
 
-    @property
-    def _progress(self) -> float:
-        # return the average of combined streams progress
-        return sum(data_stream.progress for data_stream in self.__data_streams) / len(self.__data_streams)
-
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         data_stream_events = list[DataStreamEventArgs]()
         for data_stream in self.__data_streams:
@@ -1321,13 +1344,6 @@ class StackedDataStream(DataStream):
     @property
     def is_finished(self) -> bool:
         return self.__current_index == len(self.__data_streams)
-
-    @property
-    def _progress(self) -> float:
-        # return the average of combined streams progress
-        if self.__sequence_count:
-            return (self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count
-        return 0.0
 
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_streams[self.__current_index].process_raw_stream_events(raw_data_stream_events)
@@ -1441,11 +1457,6 @@ class SequentialDataStream(DataStream):
     @property
     def is_finished(self) -> bool:
         return self.__current_index == len(self.__data_streams)
-
-    @property
-    def _progress(self) -> float:
-        # return the average of combined streams progress
-        return ((self.__sequence_index + (self.__current_index + self.__data_streams[self.__current_index].progress) / len(self.__data_streams)) / self.__sequence_count) if self.__sequence_count > 0 else .0
 
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_streams[self.__current_index].process_raw_stream_events(raw_data_stream_events)
@@ -1920,10 +1931,6 @@ class FramedDataStream(DataStream):
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
 
-    @property
-    def _progress(self) -> float:
-        return self.__data_stream.progress
-
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
 
@@ -2134,7 +2141,7 @@ class MaskedSumOperator(DataStreamOperator):
     def transform_data_stream_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
         data_metadata = data_stream_info.data_metadata
         data_metadata = DataAndMetadata.DataMetadata(
-            data_shape=(), data_dtype=numpy.float32,
+            data_shape=(), data_dtype=data_metadata.data_dtype,
             intensity_calibration=data_metadata.intensity_calibration,
             dimensional_calibrations=None,
             metadata=data_metadata.metadata,
@@ -2239,10 +2246,6 @@ class ContainerDataStream(DataStream):
     @property
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
-
-    @property
-    def _progress(self) -> float:
-        return self.__data_stream.progress
 
     def _abort_stream(self) -> None:
         self.__data_stream.abort_stream()
@@ -2396,10 +2399,6 @@ class MonitorDataStream(DataStream):
     @property
     def is_finished(self) -> bool:
         return self.__data_stream.is_finished
-
-    @property
-    def _progress(self) -> float:
-        return self.__data_stream.progress
 
     def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
         return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
@@ -2791,11 +2790,15 @@ class FramedDataHandler(DataHandler):
         super().__init__()
         self.__framer = framer
         self.__operator = operator or NullDataStreamOperator()
+        self.sent_bytes = 0
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
 
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
+        if packet.count_frame:
+            # count the bytes in the packet, for progress tracking.
+            self.sent_bytes += packet.total_bytes
         self.__framer.data_available(packet, typing.cast(FrameCallbacks, self))
 
     def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]:
@@ -2947,6 +2950,12 @@ class AccumulatedDataHandler(DataHandler):
         self.__data_channel = DataAndMetadataDataChannel()
         self.__dest_indexes = dict[Channel, int]()
         self.__do_rename = do_rename
+        # handle the count_frame state. the first pass through the first frame should be counted. subsequent frames
+        # should not be counted. since the first frame is only indicated by the slice start being 0, we need to keep
+        # count_frame on until another "first slice" is received. use these two dictionaries to track that state per
+        # channel.
+        self.__first_pass = dict[Channel, bool]()
+        self.__had_first_slice = dict[Channel, bool]()
 
     def handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
         count = data_stream_event.count
@@ -2989,17 +2998,29 @@ class AccumulatedDataHandler(DataHandler):
                                                     data_channel_data, None, new_source_slice,
                                                     data_stream_event.state)
         new_data_stream_event.reset_frame = dest_slice.start == 0
+        if dest_slice.start == 0 and self.__had_first_slice.get(channel, False):
+            self.__first_pass[channel] = False
+        new_data_stream_event.count_frame = self.__first_pass.get(channel, True)
+        self.__had_first_slice[channel] = True
         self.send_packet(new_data_stream_event)
 
 
 class MakerDataStream(ContainerDataStream):
+    """A utility data stream to allow access to acquired data during tests."""
+
     def __init__(self, data_stream: DataStream) -> None:
         super().__init__(data_stream)
         self.__framer = Framer(DataAndMetadataDataChannel())
-        data_stream.attach_root_data_handler(FramedDataHandler(self.__framer))
+        self.__framed_data_handler = FramedDataHandler(self.__framer)
+        data_stream.attach_root_data_handler(self.__framed_data_handler)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
+
+    @property
+    def progress(self) -> float:
+        # override progress to use the internal frame data handler instead of the attached one (which won't be attached during tests).
+        return self.__framed_data_handler.sent_bytes / self._total_bytes if self._total_bytes else 1.0
 
 
 def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
@@ -3044,7 +3065,10 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 assert time.time() - last_progress_time < TIMEOUT
                 time.sleep(0.005)  # play nice with other threads
             if data_stream.is_finished:
-                assert data_stream.progress == 1.0
+                # ensure that the data stream is finished. when things go wrong here, it is usually because a stream
+                # is reporting the wrong total number of bytes, the wrong number of bytes was received,
+                # or the counting logic is wrong.
+                assert data_stream.progress == 1.0, f"{data_stream.progress=}"
         except Exception as e:
             data_stream.is_error = True
             data_stream.abort_stream()

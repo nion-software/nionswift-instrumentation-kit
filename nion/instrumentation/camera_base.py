@@ -2880,10 +2880,6 @@ class CameraDataStream(Acquisition.DataStream):
             self.__camera_hardware_source.abort_playing(sync_timeout=60.0)
             device_state.add_state("restart_camera", functools.partial(restart_camera, self.__camera_hardware_source, self.__camera_hardware_source.get_current_frame_parameters()))
 
-    @property
-    def _progress(self) -> float:
-        return self.__progress
-
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         assert self.__camera_device_stream_delegate
         # bookkeeping for timing and progress
