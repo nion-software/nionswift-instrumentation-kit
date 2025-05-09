@@ -100,8 +100,12 @@ class ScanAcquisitionController:
         for c in scan_hardware_source.get_enabled_channel_indexes():
             channel_state = scan_hardware_source.get_channel_state(c)
             channel_index_segment = str(scan_hardware_source.get_channel_index(channel_state.channel_id))
-            channel_names[Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)] = channel_state.name
-        channel_names[Acquisition.Channel(camera_hardware_source.hardware_source_id)] = camera_hardware_source.get_signal_name(camera_frame_parameters)
+            channel = Acquisition.Channel(scan_hardware_source.hardware_source_id, channel_index_segment)
+            channel_names[channel] = channel_state.name
+            channel_names[channel.join_segment("sum")] = channel_state.name + _(" (Summed)")
+        channel = Acquisition.Channel(camera_hardware_source.hardware_source_id)
+        channel_names[channel] = camera_hardware_source.get_signal_name(camera_frame_parameters)
+        channel_names[channel.join_segment("sum")] = camera_hardware_source.get_signal_name(camera_frame_parameters) + _(" (Summed)")
 
         document_model = document_window.library._document_model
         event_loop = document_window._document_window.event_loop

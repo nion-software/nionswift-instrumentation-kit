@@ -2614,14 +2614,7 @@ def make_synchronized_scan_data_stream(
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed
-        if include_raw and include_summed:
-            # AccumulateDataStream sums the successive frames in each channel
-            monitor = Acquisition.MonitorDataStream(collector, "raw")
-            collector = Acquisition.AccumulatedDataStream(collector)
-            collector = Acquisition.CombinedDataStream([collector, monitor])
-        elif include_summed:
-            collector = Acquisition.AccumulatedDataStream(collector)
-        # include_raw is the default behavior
+        collector = Acquisition.AccumulatedDataStream(collector, include_raw, include_summed)
     return collector
 
 

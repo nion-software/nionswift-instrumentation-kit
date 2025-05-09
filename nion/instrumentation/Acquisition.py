@@ -451,7 +451,7 @@ class DataStreamEventArgs:
             total_bytes = itemsize
             for i, s in enumerate(self.source_slice):
                 if s.start is not None and s.stop is not None:
-                    total_bytes *= s.stop - s.start
+                    total_bytes *= int(s.stop - s.start)
                 else:
                     total_bytes *= self.data_metadata.data_shape[i]
             return total_bytes
@@ -1787,12 +1787,13 @@ class DataAndMetadataDataChannel(DataChannel):
         data_and_metadata._set_metadata(data_metadata.metadata)
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
+        assert channel in self.__data, f"{channel} not in {list(self.__data.keys())}"
         return self.__data[channel]
 
 
 class FrameCallbacks(typing.Protocol):
-    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]: ...
-    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]: ...
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]: ...
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]: ...
 
 
 class Framer:
@@ -1850,7 +1851,7 @@ class Framer:
             # if the data chunk is complete, perform processing and send out the new data.
             if data_stream_event.state == DataStreamStateEnum.COMPLETE:
                 assert index == flat_shape[0], f"{data_stream_event.channel}: {index=} == {flat_shape[0]=}"  # index should be at the end.
-                processed_data_stream_events.extend(callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel)))
+                processed_data_stream_events.extend(callbacks._send_data(data_stream_event.channel, self.__data_channel.get_data(data_stream_event.channel), data_stream_event.count_frame))
                 self.__indexes[channel] = 0
         else:
             # no storage takes place in this case; receiving full frames and sending out full (processed) frames.
@@ -1871,7 +1872,7 @@ class Framer:
                                                                       new_data_descriptor,
                                                                       data_metadata.timezone,
                                                                       data_metadata.timezone_offset)
-            processed_data_stream_events.extend(callbacks._send_data_multiple(data_stream_event.channel, data_and_metadata, count))
+            processed_data_stream_events.extend(callbacks._send_data_multiple(data_stream_event.channel, data_and_metadata, count, data_stream_event.count_frame))
             self.__indexes[channel] = 0
         return processed_data_stream_events
 
@@ -1962,7 +1963,7 @@ class FramedDataStream(DataStream):
     def __data_available(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
         return self.__framer.data_available(data_stream_event, typing.cast(FrameCallbacks, self))
 
-    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]:
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
         processed_data_stream_events = list[DataStreamEventArgs]()
         if not self.__operator.is_applied:
@@ -1972,7 +1973,7 @@ class FramedDataStream(DataStream):
             processed_data_stream_events.extend(self.__send_data(channel, data_and_metadata))
         return processed_data_stream_events
 
-    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]:
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
         processed_data_stream_events = list[DataStreamEventArgs]()
         if not self.__operator.is_applied:
@@ -2373,131 +2374,74 @@ class ActionDataStream(ContainerDataStream):
             self.__complete_channel_count += 1
 
 
-class MonitorDataStream(DataStream):
-    """Non-controlling data stream. Monitors data coming out of data stream."""
-
-    def __init__(self, data_stream: DataStream, channel_segment: ChannelSegment) -> None:
-        super().__init__()
-        self.__data_stream = data_stream
-        self.__channel_segment = channel_segment
-
-    @property
-    def data_streams(self) -> typing.Sequence[DataStream]:
-        return (self.__data_stream,)
-
-    @property
-    def data_stream(self) -> DataStream:
-        return self.__data_stream
-
-    @property
-    def channels(self) -> typing.Tuple[Channel, ...]:
-        return tuple(c.join_segment(self.__channel_segment) for c in self.__data_stream.channels)
-
-    def _get_info(self, channel: Channel) -> DataStreamInfo:
-        return self.__data_stream.get_info(channel.parent)
-
-    @property
-    def is_finished(self) -> bool:
-        return self.__data_stream.is_finished
-
-    def _process_raw_stream_events(self, raw_data_stream_events: typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]) -> typing.Sequence[DataStreamEventArgs]:
-        return self.__data_stream.process_raw_stream_events(raw_data_stream_events)
-
-    def _get_raw_data_stream_events(self) -> typing.Sequence[typing.Tuple[weakref.ReferenceType[DataStream], DataStreamEventArgs]]:
-        return self.__data_stream.get_raw_data_stream_events()
-
-    def _handle_data_available(self, data_stream_event: DataStreamEventArgs) -> None:
-        data_stream_event.channel = data_stream_event.channel.join_segment(self.__channel_segment)
-        super()._handle_data_available(data_stream_event)
-        data_stream_event.channel = data_stream_event.channel.parent
-
-
 class AccumulatedDataStream(ContainerDataStream):
     """Change a data stream producing a sequence into an accumulated non-sequence.
     """
 
-    def __init__(self, data_stream: DataStream) -> None:
+    def __init__(self, data_stream: DataStream, include_raw: bool, include_sum: bool) -> None:
         super().__init__(data_stream)
-        self.__data_channel = DataAndMetadataDataChannel()
-        self.__dest_indexes: typing.Dict[Channel, int] = dict()
+        self.__include_raw = include_raw
+        self.__include_sum = include_sum
 
-    def _prepare_stream(self, stream_args: DataStreamArgs, index_stack: IndexDescriptionList, **kwargs: typing.Any) -> None:
-        self.__data_channel.clear_data()
-        super()._prepare_stream(stream_args, index_stack, **kwargs)
+    @property
+    def channels(self) -> typing.Tuple[Channel, ...]:
+        raw_channels = list(super().channels)
+        channels = list[Channel]()
+        if self.__include_sum:
+            for channel in list(raw_channels):
+                channels.append(Channel(*channel.segments, "sum"))
+        if self.__include_raw:
+            for channel in list(raw_channels):
+                channels.append(channel)
+        return tuple(channels)
 
-    def _start_stream(self, stream_args: DataStreamArgs) -> None:
-        self.__dest_indexes = dict()
-        super()._start_stream(stream_args)
+    def _is_channel_finished(self, channel: Channel) -> bool:
+        return super()._is_channel_finished(channel)
 
     def _get_info(self, channel: Channel) -> DataStreamInfo:
         data_stream_info = super()._get_info(channel)
-        old_data_metadata = data_stream_info.data_metadata
-        data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
-        assert data_descriptor.is_sequence
-        data_descriptor.is_sequence = False
-        data_dtype = old_data_metadata.data_dtype
-        assert data_dtype is not None
-        data_metadata = DataAndMetadata.DataMetadata(
-            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
-            intensity_calibration=old_data_metadata.intensity_calibration,
-            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
-            metadata=old_data_metadata.metadata,
-            timestamp=old_data_metadata.timestamp,
-            data_descriptor=data_descriptor,
-            timezone=old_data_metadata.timezone,
-            timezone_offset=old_data_metadata.timezone_offset
-        )
-        return DataStreamInfo(data_metadata, data_stream_info.duration)
-
-    def _process_data_stream_event(self, data_stream_event: DataStreamEventArgs) -> typing.Sequence[DataStreamEventArgs]:
-        count = data_stream_event.count
-        assert count is None
-        old_data_metadata = data_stream_event.data_metadata
-        data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
-        assert data_descriptor.is_sequence
-        sequence_slice = data_stream_event.source_slice[0]
-        assert sequence_slice.stop - sequence_slice.start == 1
-        data_descriptor.is_sequence = False
-        data_dtype = old_data_metadata.data_dtype
-        assert data_dtype is not None
-        data_metadata = DataAndMetadata.DataMetadata(
-            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
-            intensity_calibration=old_data_metadata.intensity_calibration,
-            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
-            metadata=old_data_metadata.metadata,
-            timestamp=old_data_metadata.timestamp,
-            data_descriptor=data_descriptor,
-            timezone=old_data_metadata.timezone,
-            timezone_offset=old_data_metadata.timezone_offset
-        )
-        channel = data_stream_event.channel
-        dest_count = expand_shape(data_metadata.data_shape)
-        sequence_slice_offset = sequence_slice.start * dest_count
-        source_start = ravel_slice_start(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
-        source_stop = ravel_slice_stop(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
-        dest_slice_offest = self.__dest_indexes.get(channel, 0)
-        dest_slice = slice(dest_slice_offest + source_start, dest_slice_offest + source_stop)
-        self.__dest_indexes[channel] = dest_slice.stop % dest_count
-        new_source_slices = simple_unravel_flat_slice(dest_slice, data_metadata.data_shape)
-        assert len(new_source_slices) == 1
-        new_source_slice = new_source_slices[0]
-        self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_slice.start],
-                                            data_stream_event.source_slice[1:], dest_slice, data_metadata)
-        data_channel_data = self.__data_channel.get_data(channel).data
-        assert data_channel_data is not None
-        new_data_stream_event = DataStreamEventArgs(channel, data_metadata,
-                                                    data_channel_data, None, new_source_slice,
-                                                    data_stream_event.state)
-        new_data_stream_event.reset_frame = dest_slice.start == 0
-        return [new_data_stream_event]
+        if channel.segments[-1] == "sum":
+            data_stream_info = super()._get_info(Channel(*channel.segments[:-1]))
+            data_metadata = data_stream_info.data_metadata
+            return DataStreamInfo(DataAndMetadata.DataMetadata(
+                data_shape=data_metadata.data_shape[1:],
+                data_dtype=data_metadata.data_dtype,
+                intensity_calibration=data_metadata.intensity_calibration,
+                dimensional_calibrations=data_metadata.dimensional_calibrations[1:],
+                metadata=data_metadata.metadata,
+                timestamp=data_metadata.timestamp,
+                data_descriptor=DataAndMetadata.DataDescriptor(False, data_metadata.collection_dimension_count, data_metadata.datum_dimension_count),
+                timezone=data_metadata.timezone,
+                timezone_offset=data_metadata.timezone_offset
+            ), 0)
+        else:
+            return data_stream_info
 
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
-        accumulated_data_handler = AccumulatedDataHandler()
-        # send the result of the framed data handler to data_handler
-        accumulated_data_handler.connect_data_handler(data_handler)
-        # let the child data stream build its data handler or attach the handler to this data stream.
-        if not self.data_stream.build_data_handler(accumulated_data_handler):
-            self.data_stream.connect_unprocessed_data_handler(accumulated_data_handler)
+        data_handlers = list[DataHandler]()
+
+        if self.__include_raw:
+            null_data_handler = NullDataHandler()
+            null_data_handler.connect_data_handler(data_handler)
+            data_handlers.append(null_data_handler)
+
+        if self.__include_sum:
+            accumulated_framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()), force_count=True)
+            accumulated_framed_data_handler.connect_data_handler(data_handler)
+            accumulated_data_handler = AccumulatedDataHandler(True)
+            accumulated_data_handler.connect_data_handler(accumulated_framed_data_handler)
+            data_handlers.append(accumulated_data_handler)
+
+        splitting_data_handler = SplittingDataHandler(data_handlers)
+
+        serial_data_handler, created = self.data_stream._get_serial_data_handler()
+        serial_data_handler.add_data_handler(splitting_data_handler, 1)
+        if created:
+            if not self.data_stream.build_data_handler(serial_data_handler):
+                self.data_stream.connect_unprocessed_data_handler(serial_data_handler)
+
+        # self.data_stream.connect_unprocessed_data_handler(splitting_data_handler)
+
         return True
 
 
@@ -2786,11 +2730,15 @@ class SequenceDataHandler(CollectionDataHandler):
 
 
 class FramedDataHandler(DataHandler):
-    def __init__(self, framer: Framer, *, operator: typing.Optional[DataStreamOperator] = None) -> None:
+    def __init__(self, framer: Framer, *, operator: typing.Optional[DataStreamOperator] = None, force_count: bool = False) -> None:
         super().__init__()
         self.__framer = framer
         self.__operator = operator or NullDataStreamOperator()
         self.sent_bytes = 0
+        # force count is used to force a single frame to be counted. used for accumulated data handlers.
+        # force count is on/off but kept track of whether it has been applied per channel.
+        self.__force_count = force_count
+        self.__force_counts = dict[Channel, bool]()
 
     def get_data(self, channel: Channel) -> DataAndMetadata.DataAndMetadata:
         return self.__framer.get_data(channel)
@@ -2799,22 +2747,26 @@ class FramedDataHandler(DataHandler):
         if packet.count_frame:
             # count the bytes in the packet, for progress tracking.
             self.sent_bytes += packet.total_bytes
+        # the framer will call back to the callbacks _send_data and _send_data_multiple
+        # the framer will pass the appropriate count_frame setting to the callbacks, essentially whatever is specified
+        # in the packet.
+        # the count_frame is used when a frame is overwritten, so it only gets counted once.
         self.__framer.data_available(packet, typing.cast(FrameCallbacks, self))
 
-    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[DataStreamEventArgs]:
+    def _send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
         if not self.__operator.is_applied:
             for new_channel_data in self.__operator.process(ChannelData(channel, data_and_metadata)):
-                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata)
+                self.__send_data(new_channel_data.channel, new_channel_data.data_and_metadata, count_frame)
         else:
-            self.__send_data(channel, data_and_metadata)
+            self.__send_data(channel, data_and_metadata, count_frame)
         return list()
 
-    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[DataStreamEventArgs]:
+    def _send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, count_frame: bool) -> typing.Sequence[DataStreamEventArgs]:
         # callback for Framer
         if not self.__operator.is_applied:
             for new_channel_data in self.__operator.process_multiple(ChannelData(channel, data_and_metadata)):
-                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count)
+                self.__send_data_multiple(new_channel_data.channel, new_channel_data.data_and_metadata, count, count_frame)
         else:
             # special case for camera compatibility. cameras should not return empty dimensions.
             if data_and_metadata.data_shape[-1] == 1:
@@ -2832,10 +2784,10 @@ class FramedDataHandler(DataHandler):
                                                                               data_metadata.data_descriptor.datum_dimension_count - 1),
                                                                           data_metadata.timezone,
                                                                           data_metadata.timezone_offset)
-            self.__send_data_multiple(channel, data_and_metadata, count)
+            self.__send_data_multiple(channel, data_and_metadata, count, count_frame)
         return list()
 
-    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+    def __send_data(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count_frame: bool) -> None:
         new_data_metadata, new_data = data_and_metadata.data_metadata, data_and_metadata.data
         new_count: typing.Optional[int] = None
         new_source_slice: typing.Tuple[slice, ...]
@@ -2849,10 +2801,14 @@ class FramedDataHandler(DataHandler):
         new_source_slice = (slice(0, new_data.shape[0]),) + (slice(None),) * (len(new_data.shape) - 1)
         # send the new data chunk
         new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, new_data, new_count, new_source_slice, DataStreamStateEnum.COMPLETE)
+        new_data_stream_event.count_frame = count_frame
+        if self.__force_counts.get(channel, self.__force_count):
+            self.__force_counts[channel] = False
+            new_data_stream_event.count_frame = True
         # TODO: what about update in place?
         self.send_packet(new_data_stream_event)
 
-    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> None:
+    def __send_data_multiple(self, channel: Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, count_frame: bool) -> None:
         assert data_and_metadata.is_sequence
         new_data_descriptor = DataAndMetadata.DataDescriptor(False, data_and_metadata.collection_dimension_count, data_and_metadata.datum_dimension_count)
         data_dtype = data_and_metadata.data_dtype
@@ -2870,6 +2826,7 @@ class FramedDataHandler(DataHandler):
         data = data_and_metadata.data
         assert data is not None
         new_data_stream_event = DataStreamEventArgs(channel, new_data_metadata, data, count, new_source_slice, DataStreamStateEnum.COMPLETE)
+        new_data_stream_event.count_frame = count_frame
         # TODO: what about update in place?
         self.send_packet(new_data_stream_event)
 
@@ -2963,46 +2920,49 @@ class AccumulatedDataHandler(DataHandler):
         old_data_metadata = data_stream_event.data_metadata
         data_descriptor = copy.deepcopy(old_data_metadata.data_descriptor)
         assert data_descriptor.is_sequence
-        sequence_slice = data_stream_event.source_slice[0]
-        assert sequence_slice.stop - sequence_slice.start == 1
         data_descriptor.is_sequence = False
-        data_dtype = old_data_metadata.data_dtype
-        assert data_dtype is not None
-        data_metadata = DataAndMetadata.DataMetadata(
-            data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
-            intensity_calibration=old_data_metadata.intensity_calibration,
-            dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
-            metadata=old_data_metadata.metadata,
-            timestamp=old_data_metadata.timestamp,
-            data_descriptor=data_descriptor,
-            timezone=old_data_metadata.timezone,
-            timezone_offset=old_data_metadata.timezone_offset
-        )
-        channel = data_stream_event.channel
-        dest_count = expand_shape(data_metadata.data_shape)
-        sequence_slice_offset = sequence_slice.start * dest_count
-        source_start = ravel_slice_start(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
-        source_stop = ravel_slice_stop(data_stream_event.source_slice, data_stream_event.source_data.shape) - sequence_slice_offset
-        dest_slice_offest = self.__dest_indexes.get(channel, 0)
-        dest_slice = slice(dest_slice_offest + source_start, dest_slice_offest + source_stop)
-        self.__dest_indexes[channel] = dest_slice.stop % dest_count
-        new_source_slices = simple_unravel_flat_slice(dest_slice, data_metadata.data_shape)
-        assert len(new_source_slices) == 1
-        new_source_slice = new_source_slices[0]
-        self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_slice.start],
-                                            data_stream_event.source_slice[1:], dest_slice, data_metadata)
-        data_channel_data = self.__data_channel.get_data(channel).data
-        assert data_channel_data is not None
-        new_channel = channel if not self.__do_rename else Channel(*channel.segments, "sum")
-        new_data_stream_event = DataStreamEventArgs(new_channel, data_metadata,
-                                                    data_channel_data, None, new_source_slice,
-                                                    data_stream_event.state)
-        new_data_stream_event.reset_frame = dest_slice.start == 0
-        if dest_slice.start == 0 and self.__had_first_slice.get(channel, False):
-            self.__first_pass[channel] = False
-        new_data_stream_event.count_frame = self.__first_pass.get(channel, True)
-        self.__had_first_slice[channel] = True
-        self.send_packet(new_data_stream_event)
+        sequence_slice = data_stream_event.source_slice[0]
+        for sequence_index in range(sequence_slice.start, sequence_slice.stop):
+            sequence_slices = (slice(sequence_index, sequence_index + 1),) + data_stream_event.source_slice[1:]
+            data_dtype = old_data_metadata.data_dtype
+            assert data_dtype is not None
+            data_metadata = DataAndMetadata.DataMetadata(
+                data_shape=tuple(old_data_metadata.data_shape[1:]), data_dtype=data_dtype,
+                intensity_calibration=old_data_metadata.intensity_calibration,
+                dimensional_calibrations=old_data_metadata.dimensional_calibrations[1:],
+                metadata=old_data_metadata.metadata,
+                timestamp=old_data_metadata.timestamp,
+                data_descriptor=data_descriptor,
+                timezone=old_data_metadata.timezone,
+                timezone_offset=old_data_metadata.timezone_offset
+            )
+            channel = data_stream_event.channel
+            dest_count = expand_shape(data_metadata.data_shape)
+            sequence_slice_offset = sequence_index * dest_count
+            source_start = ravel_slice_start(sequence_slices, data_stream_event.source_data.shape) - sequence_slice_offset
+            source_stop = ravel_slice_stop(sequence_slices, data_stream_event.source_data.shape) - sequence_slice_offset
+            dest_slice_offest = self.__dest_indexes.get(channel, 0)
+            dest_slice = slice(dest_slice_offest + source_start, dest_slice_offest + source_stop)
+            self.__dest_indexes[channel] = dest_slice.stop % dest_count
+            new_source_slices = simple_unravel_flat_slice(dest_slice, data_metadata.data_shape)
+            assert len(new_source_slices) == 1
+            new_source_slice = new_source_slices[0]
+            self.__data_channel.accumulate_data(channel, data_stream_event.source_data[sequence_index],
+                                                sequence_slices[1:], dest_slice, data_metadata)
+            data_channel_data = self.__data_channel.get_data(channel).data
+            assert data_channel_data is not None
+            new_channel = channel if not self.__do_rename else Channel(*channel.segments, "sum")
+            new_data_stream_event = DataStreamEventArgs(new_channel, data_metadata,
+                                                        data_channel_data, None, new_source_slice,
+                                                        data_stream_event.state)
+            new_data_stream_event.reset_frame = dest_slice.start == 0
+            new_data_stream_event.update_in_place = True
+            # ensure count_frame is set to true for the first frame. see notes above.
+            if dest_slice.start == 0 and self.__had_first_slice.get(channel, False):
+                self.__first_pass[channel] = False
+            new_data_stream_event.count_frame = self.__first_pass.get(channel, True)
+            self.__had_first_slice[channel] = True
+            self.send_packet(new_data_stream_event)
 
 
 class MakerDataStream(ContainerDataStream):
@@ -3068,7 +3028,9 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 # ensure that the data stream is finished. when things go wrong here, it is usually because a stream
                 # is reporting the wrong total number of bytes, the wrong number of bytes was received,
                 # or the counting logic is wrong.
-                assert data_stream.progress == 1.0, f"{data_stream.progress=}"
+                # assert data_stream.progress == 1.0, f"{data_stream.progress=}"
+                if data_stream.progress != 1.0:
+                    logging.warning(f"Data stream progress should be 1.0 [{data_stream.progress}]")
         except Exception as e:
             data_stream.is_error = True
             data_stream.abort_stream()

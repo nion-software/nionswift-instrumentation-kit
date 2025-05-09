@@ -432,11 +432,11 @@ class DriftUpdaterDataStream(Acquisition.ContainerDataStream):
             self.__framer.data_available(data_stream_event, typing.cast(Acquisition.FrameCallbacks, self))
         super()._handle_data_available(data_stream_event)
 
-    def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+    def _send_data(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count_frame: bool) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         self.__drift_tracker.submit_image(data_and_metadata, self.__drift_rotation)
         return list()
 
-    def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
+    def _send_data_multiple(self, channel: Acquisition.Channel, data_and_metadata: DataAndMetadata.DataAndMetadata, count: int, count_frame: bool) -> typing.Sequence[Acquisition.DataStreamEventArgs]:
         return list()
 
 

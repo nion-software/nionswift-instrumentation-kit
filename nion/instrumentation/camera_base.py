@@ -2680,7 +2680,7 @@ class CameraDeviceSynchronizedStreamDelegate(CameraDeviceStreamInterface):
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
         self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape, index_stack=index_stack)
-        return numpy.prod(collection_shape, dtype=numpy.uint64)  # type: ignore
+        return int(numpy.prod(collection_shape, dtype=numpy.uint64))  # type: ignore
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
@@ -2945,7 +2945,7 @@ class CameraDataStream(Acquisition.DataStream):
                 # data_count is the total for the data provided by the child data stream. some data streams will
                 # provide a slice into a chunk of data representing the entire stream; whereas others will provide
                 # smaller chunks.
-                data_count = numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64)
+                data_count = int(numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64))
                 data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
                 source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
                 data_stream_event = Acquisition.DataStreamEventArgs(channel,
@@ -3336,14 +3336,7 @@ def make_sequence_data_stream(
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
     if count > 1:
         assert include_raw or include_summed
-        if include_raw and include_summed:
-            # AccumulateDataStream sums the successive frames in each channel
-            monitor = Acquisition.MonitorDataStream(sequence, "raw")
-            sequence = Acquisition.AccumulatedDataStream(sequence)
-            sequence = Acquisition.CombinedDataStream([sequence, monitor])
-        elif include_summed:
-            sequence = Acquisition.AccumulatedDataStream(sequence)
-        # include_raw is the default behavior
+        sequence = Acquisition.AccumulatedDataStream(sequence, include_raw, include_summed)
     return sequence
 
 

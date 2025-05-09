@@ -1116,6 +1116,58 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((256, 256), metadata["scan"]["scan_context_size"])  # the synchronized scan is the context
             self.assertEqual((4, 4), metadata["scan"]["scan_size"])
 
+    def test_scan_acquisition_controller_with_raw_and_summed(self):
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_specifier = STEMControllerModule.ScanSpecifier()
+            scan_specifier.scan_count = 2
+            scan_specifier.scan_context = copy.deepcopy(scan_hardware_source.scan_context)
+            scan_specifier.size = 4, 4
+            scan_acquisition_controller = ScanAcquisition.ScanAcquisitionController(Facade.get_api("~1.0", "~1.0"),
+                                                                                    Facade.DocumentWindow(document_controller),
+                                                                                    Facade.HardwareSource(scan_hardware_source),
+                                                                                    Facade.HardwareSource(camera_hardware_source),
+                                                                                    scan_specifier)
+            scan_acquisition_controller.start(ScanAcquisition.ScanAcquisitionProcessing.SUM_PROJECT, ScanAcquisition.ScanProcessing(True, True), section_height_override=2)
+            scan_acquisition_controller._wait()
+            document_controller.periodic()
+            self.assertEqual(5, len(document_model.data_items))
+            si_data_item = None
+            si_haadf_data_item = None
+            si_sum_data_item = None
+            si_haadf_sum_data_item = None
+            scan_data_item = None
+            for data_item in document_model.data_items:
+                if "Spectrum Image" in data_item.title and "EELS" in data_item.title:
+                    if "Summed" in data_item.title:
+                        si_sum_data_item = data_item
+                    else:
+                        si_data_item = data_item
+                if "Spectrum Image" in data_item.title and "HAADF" in data_item.title:
+                    if "Summed" in data_item.title:
+                        si_haadf_sum_data_item = data_item
+                    else:
+                        si_haadf_data_item = data_item
+                if "Scan" in data_item.title:
+                    scan_data_item = data_item
+            self.assertIsNotNone(si_data_item)
+            self.assertIsNotNone(si_haadf_data_item)
+            self.assertIsNotNone(si_sum_data_item)
+            self.assertIsNotNone(si_haadf_sum_data_item)
+            self.assertIsNotNone(scan_data_item)
+            self.assertEqual((2, 4, 4, 512), si_data_item.data_shape)
+            self.assertEqual((2, 4, 4), si_haadf_data_item.data_shape)
+            self.assertEqual((4, 4, 512), si_sum_data_item.data_shape)
+            self.assertEqual((4, 4), si_haadf_sum_data_item.data_shape)
+            self.assertEqual((4, 4), scan_data_item.data_shape)
+            self.assertTrue(numpy.array_equal(numpy.sum(si_data_item.data, axis=0), si_sum_data_item.data))
+            self.assertTrue(numpy.array_equal(numpy.sum(si_haadf_data_item.data, axis=0), si_haadf_sum_data_item.data))
+
     def test_scan_acquisition_controller_with_subscan_4d(self):
         with self.__test_context(is_eels=True) as test_context:
             document_controller = test_context.document_controller
@@ -1241,6 +1293,43 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # another acquisition. verify it is calibrated.
             self._acquire_one(document_controller, test_context.camera_hardware_source)
             self.assertEqual("eV", document_controller.document_model.data_items[0].dimensional_calibrations[-1].units)
+
+    def test_grab_sequence_basic_eels_sum(self):
+        with self.__test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            # perform a sequence acquisition. ensure get camera frame parameters are restored.
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=False, include_summed=True)
+            maker = Acquisition.MakerDataStream(data_stream)
+            Acquisition.acquire(maker)
+            self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
+            maker = None
+
+    def test_grab_sequence_basic_eels_raw(self):
+        with self.__test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            # perform a sequence acquisition. ensure get camera frame parameters are restored.
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=False)
+            maker = Acquisition.MakerDataStream(data_stream)
+            Acquisition.acquire(maker)
+            self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
+            maker = None
+
+    def test_grab_sequence_basic_eels_sum_and_raw(self):
+        with self.__test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            # perform a sequence acquisition. ensure get camera frame parameters are restored.
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=True)
+            maker = Acquisition.MakerDataStream(data_stream)
+            Acquisition.acquire(maker)
+            self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
+            self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
+            maker = None
 
     # TODO: check for counts per electron
 
