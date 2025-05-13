@@ -333,6 +333,7 @@ class STEMController(Observable.Observable):
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
 
     def close(self) -> None:
@@ -376,6 +377,17 @@ class STEMController(Observable.Observable):
 
     def set_eels_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_eels_camera", False)
+        self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
+
+    @property
+    def slit_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
+        if self.__slit_camera:
+            return self.__slit_camera
+        return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
+                           Registry.get_component("slit_camera_hardware_source"))
+
+    def set_slit_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        assert camera is None or camera.features.get("is_slit_camera", False)
         self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
