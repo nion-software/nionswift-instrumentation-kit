@@ -1,6 +1,13 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Fix issue where summed acquisition would work from SI/4D panel.
+- Fix issue where summed acquisitions could spuriously time out.
+- Improve granularity of progress bar during acquisition procedures.
+- Fix issue where disabling drift correction would not actually disable it.
+
 23.3.0 (2025-04-23)
 -------------------
 - Display probe position during scanning to allow adjustment upon stop.

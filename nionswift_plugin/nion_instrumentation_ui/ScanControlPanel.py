@@ -1366,9 +1366,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             return drift_settings
 
         def handle_drift_enabled(enabled: bool) -> None:
-            if enabled:
-                scan_controller.drift_settings = get_drift_settings()
-                self.__state_controller.handle_drift_enabled(enabled)
+            scan_controller.drift_settings = get_drift_settings()
+            self.__state_controller.handle_drift_enabled(enabled)
 
         def drift_value_edited(text: str) -> None:
             scan_controller.drift_settings = get_drift_settings()
