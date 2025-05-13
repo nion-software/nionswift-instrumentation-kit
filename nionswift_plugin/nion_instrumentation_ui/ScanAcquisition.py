@@ -248,6 +248,8 @@ class PanelDelegate:
         self.__scan_hardware_source_choice: typing.Optional[HardwareSourceChoice.HardwareSourceChoice] = None
         self.__camera_hardware_source_choice_model: typing.Optional[Model.PropertyModel[str]] = None
         self.__camera_hardware_source_choice: typing.Optional[HardwareSourceChoice.HardwareSourceChoice] = None
+        self.__scan_hardware_source_stream: HardwareSourceChoice.HardwareSourceChoiceStream | None = None
+        self.__camera_hardware_source_stream: HardwareSourceChoice.HardwareSourceChoiceStream | None = None
         self.__styles_list_model: typing.Optional[ListModel.ListModel[ScanAcquisitionProcessing]] = None
         self.__styles_list_property_model: typing.Optional[ListModel.ListPropertyModel] = None
         self.__scan_count = 1
@@ -267,8 +269,8 @@ class PanelDelegate:
         self.__camera_hardware_source_choice_model = ui._ui.create_persistent_string_model("scan_acquisition_camera_hardware_source_id")
         self.__camera_hardware_source_choice = HardwareSourceChoice.HardwareSourceChoice(self.__camera_hardware_source_choice_model, lambda hardware_source: hardware_source.features.get("is_camera", False))
 
-        self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice).add_ref()
-        self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice).add_ref()
+        self.__scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice)
+        self.__camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__camera_hardware_source_choice)
 
         def clear_scan_context_fields() -> None:
             self.__scan_specifier.clear()
@@ -596,43 +598,19 @@ class PanelDelegate:
             self.__exposure_time_ms_value_model = None
 
     def close(self) -> None:
-        if self.__eels_frame_parameters_changed_event_listener:
-            self.__eels_frame_parameters_changed_event_listener.close()
-            self.__eels_frame_parameters_changed_event_listener = None
-        if self.__camera_hardware_changed_event_listener:
-            self.__camera_hardware_changed_event_listener.close()
-            self.__camera_hardware_changed_event_listener = None
-        if self.__scan_hardware_changed_event_listener:
-            self.__scan_hardware_changed_event_listener.close()
-            self.__scan_hardware_changed_event_listener = None
-        if self.__scan_hardware_source_choice:
-            self.__scan_hardware_source_choice.close()
-            self.__scan_hardware_source_choice = None
-        if self.__scan_hardware_source_choice_model:
-            self.__scan_hardware_source_choice_model.close()
-            self.__scan_hardware_source_choice_model = None
-        if self.__camera_hardware_source_choice:
-            self.__camera_hardware_source_choice.close()
-            self.__camera_hardware_source_choice = None
-        if self.__camera_hardware_source_choice_model:
-            self.__camera_hardware_source_choice_model.close()
-            self.__camera_hardware_source_choice_model = None
-        if self.__stem_controller_property_listener:
-            self.__stem_controller_property_listener.close()
-            self.__stem_controller_property_listener = None
-        if self.__scan_context_changed_listener:
-            self.__scan_context_changed_listener.close()
-            self.__scan_context_changed_listener = None
-        if self.__scan_hardware_source_stream:
-            self.__scan_hardware_source_stream.remove_ref()
-        if self.__camera_hardware_source_stream:
-            self.__camera_hardware_source_stream.remove_ref()
-        if self.__styles_list_model:
-            self.__styles_list_model.close()
-            self.__styles_list_model = None
-        if self.__styles_list_property_model:
-            self.__styles_list_property_model.close()
-            self.__styles_list_property_model = None
+        self.__eels_frame_parameters_changed_event_listener = None
+        self.__camera_hardware_changed_event_listener = None
+        self.__scan_hardware_changed_event_listener = None
+        self.__scan_hardware_source_choice = None
+        self.__scan_hardware_source_choice_model = None
+        self.__camera_hardware_source_choice = None
+        self.__camera_hardware_source_choice_model = None
+        self.__stem_controller_property_listener = None
+        self.__scan_context_changed_listener = None
+        self.__scan_hardware_source_stream = None
+        self.__camera_hardware_source_stream = None
+        self.__styles_list_model = None
+        self.__styles_list_property_model = None
 
 
 class ScanAcquisitionExtension:

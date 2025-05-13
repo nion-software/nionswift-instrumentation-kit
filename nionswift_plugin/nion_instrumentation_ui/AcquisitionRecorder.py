@@ -343,18 +343,10 @@ class PanelDelegate:
     def close(self) -> None:
         # close anything created in `create_panel_widget`.
         # called when the panel closes, not when the delegate closes.
-        if self.__scan_hardware_changed_event_listener:
-            self.__scan_hardware_changed_event_listener.close()
-            self.__scan_hardware_changed_event_listener = None
-        if self.__state_changed_listener:
-            self.__state_changed_listener.close()
-            self.__state_changed_listener = None
-        if self.__scan_hardware_source_choice:
-            self.__scan_hardware_source_choice.close()
-            self.__scan_hardware_source_choice = None
-        if self.__scan_hardware_source_choice_model:
-            self.__scan_hardware_source_choice_model.close()
-            self.__scan_hardware_source_choice_model = None
+        self.__scan_hardware_changed_event_listener = None
+        self.__state_changed_listener = None
+        self.__scan_hardware_source_choice = None
+        self.__scan_hardware_source_choice_model = None
         if self.__controller:
             self.__controller.close()
             self.__controller = None

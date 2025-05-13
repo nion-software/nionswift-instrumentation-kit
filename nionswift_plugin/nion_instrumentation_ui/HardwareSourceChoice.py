@@ -48,14 +48,6 @@ class HardwareSourceChoice:
 
         self.__property_changed_event_listener = self.hardware_source_index_model.property_changed_event.listen(weak_partial(HardwareSourceChoice.__update_current_hardware_source, self))
 
-    def close(self) -> None:
-        self.__hardware_source_added_event_listener.close()
-        self.__hardware_source_added_event_listener = typing.cast(typing.Any, None)
-        self.__hardware_source_removed_event_listener.close()
-        self.__hardware_source_removed_event_listener = typing.cast(typing.Any, None)
-        self.__property_changed_event_listener.close()
-        self.__property_changed_event_listener = typing.cast(typing.Any, None)
-
     @property
     def hardware_source_count(self) -> int:
         hardware_sources = self.hardware_sources_model.value or list()

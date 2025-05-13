@@ -334,7 +334,6 @@ class STEMController(Observable.Observable):
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
-        self.__drift_tracker: typing.Optional[DriftTracker.DriftTracker] = None
 
     def close(self) -> None:
         pass
@@ -399,8 +398,6 @@ class STEMController(Observable.Observable):
 
     @property
     def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
-        if self.__drift_tracker:
-            return self.__drift_tracker
         return typing.cast(typing.Optional["DriftTracker.DriftTracker"], Registry.get_component("drift_tracker"))
 
     # end configuration methods

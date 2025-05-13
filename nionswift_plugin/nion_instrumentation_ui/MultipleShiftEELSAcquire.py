@@ -480,9 +480,7 @@ class MultipleShiftEELSAcquireControlView(Panel.Panel):
         self.__workspace_controller = None
 
     def close(self) -> None:
-        self.__eels_camera_choice.close()
         self.__eels_camera_choice = typing.cast(typing.Any, None)
-        self.__eels_camera_choice_model.close()
         self.__eels_camera_choice_model = typing.cast(typing.Any, None)
         super().close()
 

@@ -748,13 +748,9 @@ class HardwareSourceChoiceModel(Observable.Observable):
         self.__listener = self.__hardware_source_choice.hardware_sources_model.property_changed_event.listen(weak_partial(property_changed, self))
 
     def close(self) -> None:
-        self.__listener.close()
         self.__listener = typing.cast(typing.Any, None)
-        self.ui_enabled_model.close()
         self.ui_enabled_model = typing.cast(typing.Any, None)
-        self.__hardware_source_choice.close()
         self.__hardware_source_choice = typing.cast(typing.Any, None)
-        self.__hardware_source_choice_model.close()
         self.__hardware_source_choice_model = typing.cast(typing.Any, None)
 
     @property
