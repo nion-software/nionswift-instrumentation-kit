@@ -99,29 +99,6 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
     def push(self, ex: typing.Any) -> None:
         self.__exit_stack.append(ex)
 
-    def __setup_scan_hardware_source(self, stem_controller: stem_controller.STEMController, scan_device: scan_base.ScanDevice, scan_settings: scan_base.ScanSettingsProtocol) -> scan_base.ScanHardwareSource:
-        scan_hardware_source = scan_base.ConcreteScanHardwareSource(stem_controller, scan_device, scan_settings, None)
-        setattr(scan_device, "hardware_source", scan_hardware_source)
-        Registry.register_component(scan_hardware_source, {"hardware_source", "scan_hardware_source"})  # allows stem controller to find scan controller
-        HardwareSource.HardwareSourceManager().register_hardware_source(scan_hardware_source)
-        return scan_hardware_source
-
-    def __setup_camera_hardware_source(self, instrument_id: str, camera_device: camera_base.CameraDevice3, camera_settings: camera_base.CameraSettings, camera_exposure: float, is_eels: bool) -> camera_base.CameraHardwareSource:
-        camera_type = "eels" if is_eels else "ronchigram"
-        camera_hardware_source = camera_base.CameraHardwareSource3(instrument_id, camera_device, camera_settings, None, None)
-        if is_eels:
-            camera_hardware_source.features["is_eels_camera"] = True
-        camera_hardware_source.set_frame_parameters(0, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
-        camera_hardware_source.set_frame_parameters(1, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000, "binning": 2}))
-        camera_hardware_source.set_frame_parameters(2, camera_base.CameraFrameParameters(
-            {"exposure_ms": camera_exposure * 1000 * 2, "binning": 1}))
-        camera_hardware_source.set_selected_profile_index(0)
-        Registry.register_component(camera_hardware_source, {"hardware_source", "camera_hardware_source", camera_type + "_camera_hardware_source"})  # allows stem controller to find camera controller
-        HardwareSource.HardwareSourceManager().register_hardware_source(camera_hardware_source)
-        return camera_hardware_source
-
 
 def test_context(configuration: typing.Optional[AcquisitionTestContextConfigurationLike] = None, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False, is_app: bool = False) -> AcquisitionTestContext:
     configuration_ = configuration or AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration()
