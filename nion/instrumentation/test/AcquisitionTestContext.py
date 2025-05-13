@@ -26,9 +26,34 @@ class AcquisitionTestContextConfigurationLike(typing.Protocol):
     eels_camera_device: camera_base.CameraDevice3
     eels_camera_settings: camera_base.CameraSettings
 
-    def run(self) -> None: ...
+    def run(self) -> None:
+        """Register the instrument and cameras with the registry.
 
-    def stop(self) -> None: ...
+        The instrument should be registered with the type "instrument_controller" and "stem_controller".
+
+        The cameras should be registered with the type "camera_module".
+
+        The scan devices should be registered with the type "scan_module".
+
+        The camera device objects themselves should already be registered with the type "{camera_id}_device" when
+        this method is called. That would typically be done when this object is constructed.
+        """
+        ...
+
+    def stop(self) -> None:
+        """Unregister the instrument and cameras from the registry.
+
+        The camera modules should be unregistered with the type "camera_module".
+
+        The scan devices should be unregistered with the type "scan_module".
+
+        The instrument should be unregistered with the type "instrument_controller" and "stem_controller".
+
+        The camera device objects should be unregistered in their close method, which will be called when the module
+        is unloaded. The camera device objects should be registered with the type "{camera_id}_device" when this
+        method is called. That would typically be done when this object is constructed.
+        """
+        ...
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
