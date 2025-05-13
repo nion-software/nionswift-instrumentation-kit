@@ -10,7 +10,6 @@ import gettext
 import logging
 import operator
 import typing
-import uuid
 
 # local libraries
 from nion.instrumentation import Acquisition
@@ -29,10 +28,9 @@ from nion.ui import UserInterface as UserInterfaceModule
 from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Event
-from nion.utils import Geometry
 from nion.utils import ListModel
 from nion.utils import Model
-from nion.utils.ReferenceCounting import weak_partial
+from nion.utils import ReferenceCounting
 from nion.utils import Registry
 
 from . import HardwareSourceChoice
@@ -114,7 +112,7 @@ class ScanAcquisitionController:
             Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
 
         data_item_data_channel = DataChannel.DataItemDataChannel(document_model, _("Spectrum Image"), channel_names)
-        data_item_data_channel.on_display_data_item = weak_partial(display_data_item, self.__document_controller._document_controller)
+        data_item_data_channel.on_display_data_item = ReferenceCounting.weak_partial(display_data_item, self.__document_controller._document_controller)
 
         drift_correction_functor: typing.Optional[Acquisition.DataStreamFunctor] = None
         section_height = section_height_override
@@ -280,13 +278,12 @@ class PanelDelegate:
 
         def update_context() -> None:
             assert self.__scan_hardware_source_choice
-            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice.hardware_source)
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource | None, self.__scan_hardware_source_choice.hardware_source)
             if not scan_hardware_source:
                 clear_scan_context_fields()
                 self.__acquire_button._widget.enabled = self.__acquisition_state == SequenceState.scanning  # focus will be on the SI data, so enable if scanning
                 return
 
-            scan_context = scan_hardware_source.scan_context
             exposure_ms = self.__exposure_time_ms_value_model.value or 0.0 if self.__exposure_time_ms_value_model else 0.0
 
             self.__scan_specifier.update(scan_hardware_source, exposure_ms, self.__scan_width, self.__scan_count, scan_hardware_source.drift_enabled)
