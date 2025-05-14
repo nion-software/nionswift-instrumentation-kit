@@ -389,7 +389,7 @@ class STEMController(Observable.Observable):
 
     def set_slit_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_slit_camera", False)
-        self.__eels_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
+        self.__slit_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
