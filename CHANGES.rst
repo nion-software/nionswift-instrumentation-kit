@@ -7,6 +7,7 @@ UNRELEASED
 - Fix issue where summed acquisitions could spuriously time out.
 - Improve granularity of progress bar during acquisition procedures.
 - Fix issue where disabling drift correction would not actually disable it.
+- Fix issue where dropping subscan data item on display panel would restore non-subscan controller.
 
 23.3.0 (2025-04-23)
 -------------------

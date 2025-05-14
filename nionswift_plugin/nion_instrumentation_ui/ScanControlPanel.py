@@ -2073,6 +2073,9 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
                     channel_id_ = hardware_source.get_channel_id(channel_index) or str()
                     for channel_id in (channel_id_, channel_id_ + "_subscan", "drift"):
                         if HardwareSource.matches_hardware_source(hardware_source.hardware_source_id, channel_id, document_model, data_item):
+                            if frame_parameters := hardware_source.get_frame_parameters_from_metadata(data_item.metadata):
+                                if frame_parameters.subscan_pixel_size:
+                                    channel_id = channel_id_ + "_subscan"
                             return {"controller_type": ScanDisplayPanelController.type, "hardware_source_id": hardware_source.hardware_source_id, "channel_id": channel_id}
                 return None
 
