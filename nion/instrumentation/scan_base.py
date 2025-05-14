@@ -430,7 +430,6 @@ def update_detector_metadata(detector_metadata: typing.MutableMapping[str, typin
     detector_metadata["line_time_us"] = line_time_us
 
 
-
 @dataclasses.dataclass
 class ScanAcquisitionTaskParameters(HardwareSource.AcquisitionTaskParameters):
     scan_id: typing.Optional[uuid.UUID] = None
@@ -829,6 +828,15 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
 
     def get_view_data_channel_specifiers(self) -> typing.Optional[typing.Sequence[HardwareSource.DataChannelSpecifier]]: ...
+
+    def get_frame_parameters_from_metadata(self, metadata: typing.Mapping[str, typing.Any]) -> ScanFrameParameters | None:
+        """Return camera frame parameters from high-level metadata.
+
+        High-level metadata means the metadata stored at the data item level.
+
+        Subclasses may override this method to provide a custom subclass of ScanFrameParameters.
+        """
+        ...
 
     record_index: int
     priority: int = 100
@@ -1475,6 +1483,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 xdata_group.append(xdata)
             xdata_group_list.append(xdata_group)
         return xdata_group_list
+
+    def get_frame_parameters_from_metadata(self, metadata: typing.Mapping[str, typing.Any]) -> ScanFrameParameters | None:
+        scan_d = metadata.get("scan")
+        if scan_d is not None:
+            scan_device_parameters_d = scan_d.get("scan_device_parameters")
+            if scan_device_parameters_d is not None:
+                return self.__settings.get_frame_parameters_from_dict(scan_device_parameters_d)
+        return None
 
     @property
     def subscan_state(self) -> STEMController.SubscanState:
