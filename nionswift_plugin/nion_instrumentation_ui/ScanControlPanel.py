@@ -2068,6 +2068,9 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
                 return None
 
             def match(self, document_model: DocumentModel.DocumentModel, data_item: DataItem.DataItem) -> typing.Optional[Persistence.PersistentDictType]:
+                # determine whether the given data item represents a live view item that could be controlled by this display
+                # panel controller. if so, return a dictionary that can be used to restore the display panel controller.
+                # checks for the scan device channel and whether it is a subscan or drift channel.
                 assert isinstance(hardware_source, scan_base.ScanHardwareSource)
                 for channel_index in range(hardware_source.channel_count):
                     channel_id_ = hardware_source.get_channel_id(channel_index) or str()
