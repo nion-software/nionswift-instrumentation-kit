@@ -1433,11 +1433,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         framed_data_handler = Acquisition.FramedDataHandler(framer)
         synchronized_scan_data_stream.attach_root_data_handler(framed_data_handler)
         scan_acquisition = Acquisition.Acquisition(synchronized_scan_data_stream, framer)
+        scan_acquisition.save_device_state()
         results: GrabSynchronizedResult = None
         self.__scan_acquisition = scan_acquisition
         try:
             scan_acquisition.prepare_acquire()
             scan_acquisition.acquire()
+            scan_acquisition.restore_device_state()
             if scan_acquisition.is_error:
                 raise RuntimeError("grab_synchronized failed.")
             if not scan_acquisition.is_aborted:
