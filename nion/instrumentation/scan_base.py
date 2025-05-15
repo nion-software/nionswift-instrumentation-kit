@@ -2352,13 +2352,16 @@ class ScanDataStream(Acquisition.DataStream):
         return Acquisition.DataStreamInfo(DataAndMetadata.DataMetadata(data_shape=(), data_dtype=numpy.float32), 0.0)
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
-        if self.__scan_hardware_source.is_playing:
-            def restart_scan(scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
-                scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+        was_playing = self.__scan_hardware_source.is_playing
+        def unprepare(scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            if was_playing:
                 scan_hardware_source.start_playing()
+            else:
+                scan_hardware_source.stop_playing()
 
-            self.__scan_hardware_source.abort_playing(sync_timeout=60.0)
-            device_state.add_state("restart_scan", functools.partial(restart_scan, self.__scan_hardware_source, self.__scan_hardware_source.get_current_frame_parameters()))
+        self.__scan_hardware_source.abort_playing(sync_timeout=60.0)
+        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source, self.__scan_hardware_source.get_current_frame_parameters()))
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
