@@ -336,24 +336,21 @@ class STEMController(Observable.Observable):
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
 
-    def close(self) -> None:
-        pass
+        # very ugly solution to synchronizing the scan context with the scan controller. this is necessary since scan
+        # state is stored both in the scan controller and the stem controller. this is a bit of a hack, but it works.
 
-    def reset(self) -> None:
-        self.__probe_position = None
-        self.__last_probe_position = Geometry.FloatPoint(y=0.5, x=0.5)
-        self.__probe_state_stack.clear()
-        self.__probe_state_stack.append("parked")
-        self.__scan_context.update(Geometry.IntSize(256, 256), Geometry.FloatPoint(0.0, 0.0), 100.0, 0.0)
-        self.__subscan_state = SubscanState.INVALID
-        self.__subscan_region = None
-        self.__subscan_rotation = 0.0
-        self.__line_scan_state = LineScanState.INVALID
-        self.__line_scan_vector = None
-        self.__drift_channel_id = None
-        self.__drift_region = None
-        self.__drift_rotation = 0.0
-        self.__drift_settings = DriftCorrectionSettings()
+        def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
+            if "scan_hardware_source" in component_types:
+                scan_controller = self.scan_controller
+                if scan_controller and not self.__scan_controller:  # not manually registered?
+                    # update initial scan context
+                    scan_frame_parameters = scan_controller.get_current_frame_parameters()
+                    self._update_scan_context(scan_frame_parameters.pixel_size, scan_frame_parameters.center_nm, scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
+
+        self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
+
+    def close(self) -> None:
+        self.__component_registered_listener = typing.cast(typing.Any, None)
 
     # configuration methods
 
@@ -407,6 +404,11 @@ class STEMController(Observable.Observable):
 
     def set_scan_controller(self, scan_controller: typing.Optional[HardwareSource.HardwareSource]) -> None:
         self.__scan_controller = typing.cast(typing.Optional["scan_base.ScanHardwareSource"], scan_controller)
+        if self.__scan_controller:
+            # update initial scan context
+            scan_frame_parameters = self.__scan_controller.get_current_frame_parameters()
+            self._update_scan_context(scan_frame_parameters.pixel_size, scan_frame_parameters.center_nm,
+                                      scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
     @property
     def drift_tracker(self) -> typing.Optional[DriftTracker.DriftTracker]:
