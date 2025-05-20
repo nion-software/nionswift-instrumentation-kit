@@ -3133,16 +3133,20 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
 
     The config mapping should have the following keys:
 
-    (optional) calibrationModeIndexControl: name of control to use as index to other controls. substituted into <<n>> below if 1+
-    (required) calibXScaleControl<<n>>: name of control to be used for x-scale; <<nn>> should be empty or 1+
-    (required) calibXOffsetControl<<n>>: name of control to be used for x-offset; <<nn>> should be empty or 1+
-    (required) calibXUnits<<n>>: x-unit string; <<nn>> should be empty or 1+
-    (required) calibYScaleControl<<n>>: name of control to be used for y-scale; <<nn>> should be empty or 1+
-    (required) calibYOffsetControl<<n>>: name of control to be used for y-offset; <<nn>> should be empty or 1+
-    (required) calibYUnits<<n>>: y-unit string; <<nn>> should be empty or 1+
-    (required) calibIntensityScaleControl<<n>>: name of control to be used for intensity-scale; <<nn>> should be empty or 1+
-    (required) calibIntensityOffsetControl<<n>>: name of control to be used for intensity-offset; <<nn>> should be empty or 1+
-    (required) calibIntensityUnits<<n>>: intensity-unit string; <<nn>> should be empty or 1+
+    (optional) calibrationModeIndexControl: name of control to use as index to other controls.
+    (required) calibXScaleControl<<n>>: name of control to be used for x-scale;
+    (required) calibXOffsetControl<<n>>: name of control to be used for x-offset;
+    (required) calibXUnits<<n>>: x-unit string;
+    (required) calibYScaleControl<<n>>: name of control to be used for y-scale;
+    (required) calibYOffsetControl<<n>>: name of control to be used for y-offset;
+    (required) calibYUnits<<n>>: y-unit string;
+    (required) calibIntensityScaleControl<<n>>: name of control to be used for intensity-scale;
+    (required) calibIntensityOffsetControl<<n>>: name of control to be used for intensity-offset;
+    (required) calibIntensityUnits<<n>>: intensity-unit string;
+
+    Backwards compatible behavior only substituted <<n>> when index > 0. New behavior is to always substitute <<n>> with index.
+
+    Backwards compatible behavior required lowercase config keys. New behavior uses case-sensitive config keys.
 
     If calibration control for a particular index is empty, the appropriate default value will be used (scale=1.0, offset=0.0, units='').
 
@@ -3155,27 +3159,31 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__config = config
 
     def __construct_suffix(self) -> str:
-        control = self.__config.get("calibrationModeIndexControl".lower(), None)
+        control = self.__config.get("calibrationModeIndexControl", self.__config.get("calibrationModeIndexControl".lower(), None))
         if control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
-            if valid and value:
-                return str(int(value))
+            if valid:
+                return str(int(value or 0))
         return str()
 
     def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
         scale = None
-        scale_control = self.__config.get((prefix + "ScaleControl" + suffix).lower(), None)
+        suffix_nz = suffix if suffix != "0" else ""  # for backwards compatibility, empty if '0'
+        scale_control_base_key = prefix + "ScaleControl"
+        scale_control = self.__config.get(scale_control_base_key + suffix, self.__config.get((scale_control_base_key + suffix_nz).lower(), None))
         if scale_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
             if valid:
                 scale = value
         offset = None
-        offset_control = self.__config.get((prefix + "OffsetControl" + suffix).lower(), None)
+        offset_control_base_key = prefix + "OffsetControl"
+        offset_control = self.__config.get(offset_control_base_key + suffix, self.__config.get((offset_control_base_key + suffix_nz).lower(), None))
         if offset_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
             if valid:
                 offset = value
-        units = self.__config.get((prefix + "Units" + suffix).lower(), None)
+        units_base_key = prefix + "Units" + suffix
+        units = self.__config.get(units_base_key + suffix, self.__config.get((units_base_key + suffix_nz).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
         if is_center_origin and scale is not None and data_len:
             offset = -scale * data_len * 0.5
