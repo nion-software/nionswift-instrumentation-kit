@@ -7,7 +7,14 @@ All choices in the UI are persistent. The code supporting persistence is written
 the persistent behavior to be profile- or project- based. It is currently file based. The persistence code is
 based on schema/entity from nionswift. This closely ties this panel to nionswift schema/entity behavior, which
 is still evolving.
-"""
+
+The time/space usage is calculated based on the acquisition method and the device used. The device method watches for
+changed parameters and fires an event when the time/space usage changes. The acquisition method listens to the device
+time/space usage changed event and its own parameters, and then calculates its own time/space usage based on the
+device time/space usage, and then fires its event. The UI watches for the acquisition method time/space usage changed
+event and updates the UI accordingly. The acquisition method must be able to ask the device for its time/space usage
+based on exposure time since the acquisition method may modify the low level exposure time as it implements its
+method."""
 
 from __future__ import annotations
 
@@ -193,6 +200,10 @@ class ComponentComboBoxHandler(Declarative.Handler):
         # create a list model for the component handlers
         self.__components = ListModel.ListModel[ComponentHandler]()
 
+        # create a map of component id's to component handlers. used for looking up components by id for the
+        # acquisition method component stream, used in time/space usage calculation.
+        self._component_handler_map = dict[str, AcquisitionMethodComponentHandler]()
+
         # and a model to store the selected component id. this is a property model based on observing
         # the component_id_key of the configuration entity.
         self.__selected_component_id_model = Model.PropertyChangedPropertyModel[str](configuration, component_id_key)
@@ -217,6 +228,7 @@ class ComponentComboBoxHandler(Declarative.Handler):
                     configuration._append_item(components_key, component_entity)
             component = component_factory(component_entity, preferences)
             self.__components.append_item(component)
+            self._component_handler_map[component.component_id] = component
 
         def sort_key(o: typing.Any) -> typing.Any:
             return "Z" + o.display_name if o.display_name != "None" else "A"
@@ -286,7 +298,54 @@ class ComponentComboBoxHandler(Declarative.Handler):
 
 
 class AcquisitionMethodComponentHandler(ComponentHandler):
-    """Define methods for acquisition method components."""
+    """Define methods for acquisition method components.
+
+    Also, define a time/space usage event that can be used to notify the UI of changes in the time/space usage.
+
+    Track the device component, listen to its time space usage changed event, and fire the time space usage event
+    for this object when it changes.
+
+    Define a _fire_time_space_usage_changed_event that can be fired by subclasses when they detect a change in
+    time/space usage.
+
+    Define a _get_time_space_usage method that subclasses can override to return the time/space usage specific to this
+    acquisition method.
+    """
+
+    def __init__(self, display_name: str, configuration: Schema.Entity) -> None:
+        super().__init__(display_name)
+        self.__device_component: AcquisitionDeviceComponentHandler | None = None
+        self.__time_space_usage_changed_event_listener: Event.EventListener | None = None
+        self.time_space_usage_changed_event = Event.Event()
+
+    def set_device_component(self, device_component: AcquisitionDeviceComponentHandler | None) -> None:
+        # set the device component for this acquisition method. called by TimeSpaceUsageStream, which tracks the
+        # method/device required for time/space usage. this is needed because the acquisition method may use the
+        # device to know the unit of time/space usage being rolled into the time/space usage for the method.
+        self.__device_component = device_component
+        if device_component:
+            self.__time_space_usage_changed_event_listener = device_component.time_space_usage_changed_event.listen(weak_partial(AcquisitionMethodComponentHandler.__time_space_usage_changed, self))
+            self.time_space_usage_changed_event.fire()
+        else:
+            self.__time_space_usage_changed_event_listener = None
+            self.time_space_usage_changed_event.fire()
+
+    def __time_space_usage_changed(self) -> None:
+        # when the device's time space usage changes, fire the same event from this handler.
+        self.time_space_usage_changed_event.fire()
+
+    def get_time_space_usage(self) -> TimeSpaceUsage:
+        device_component = self.__device_component
+        if device_component:
+            return self._get_time_space_usage(device_component)
+        else:
+            return TimeSpaceUsage(None, None)
+
+    def _fire_time_space_usage_changed_event(self) -> None:
+        self.time_space_usage_changed_event.fire()
+
+    def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
+        return device_component.get_time_space_usage()
 
     def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         # build the device.
@@ -302,7 +361,7 @@ class BasicAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
     component_id = "basic-acquire"
 
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
-        super().__init__(_("None"))
+        super().__init__(_("None"), configuration)
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             spacing=8
@@ -323,9 +382,15 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
     component_id = "sequence-acquire"
 
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
-        super().__init__(_("Sequence"))
+        super().__init__(_("Sequence"), configuration)
         self.configuration = configuration
+
+        # the sequence listens for the count property of the configuration and fires a time space usage changed event
+        # when the count changes.
+        self.__configuration_property_changed_event_listener = configuration.property_changed_event.listen(weak_partial(SequenceAcquisitionMethodComponentHandler.__handle_configuration_property_changed, self))
+
         self.count_converter = Converter.IntegerToStringConverter()
+
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_row(
@@ -336,6 +401,15 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
             ),
             spacing=8
         )
+
+    def __handle_configuration_property_changed(self, name: str) -> None:
+        if name == "count":
+            self._fire_time_space_usage_changed_event()
+
+    def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
+        unit_time_space_usage = device_component.get_time_space_usage()
+        return TimeSpaceUsage(unit_time_space_usage.time * self.configuration.count,
+                              unit_time_space_usage.space * self.configuration.count)
 
     def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         length = max(1, self.configuration.count) if self.configuration.count else 1
@@ -422,14 +496,18 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
     component_id = "series-acquire"
 
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
-        super().__init__(_("1D Ramp"))
+        super().__init__(_("1D Ramp"), configuration)
         self.configuration = configuration
         # the control UI is constructed as a stack with one item for each control_id.
         # the control_handlers is a map from the control_id to the SeriesControlHandler
         # for the control.
-        self.__control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
+        self.__control_handlers = dict[str, SeriesControlHandler]()
+        # listen to the control handler property changed events so that we can fire the time space usage changed event
+        self.__control_handler_property_changed_event_listeners = dict[str, Event.EventListener]()
         # the selection storage model is a property model made by observing the control_id in the configuration.
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
+        # update time space usage when the selection changes
+        self.__selection_storage_model_listener = self.__selection_storage_model.property_changed_event.listen(weak_partial(SeriesAcquisitionMethodComponentHandler.__handle_control_values_property_changed, self))
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 1d controls are presented.
         def filter_1d_control_customizations(control_customization: AcquisitionPreferences.ControlCustomization) -> bool:
@@ -467,9 +545,10 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
         )
 
     def close(self) -> None:
-        self.__selection_storage_model.close()
+        self.__selection_storage_model_listener = typing.cast(typing.Any, None)
         self.__selection_storage_model = typing.cast(typing.Any, None)
         self.__control_handlers = typing.cast(typing.Any, None)
+        self.__control_handler_property_changed_event_listeners = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
@@ -485,8 +564,28 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             assert control_id not in self.__control_handlers
             control_values = get_control_values(self.configuration, "control_values_list", control_customization)
             self.__control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, None)
+            # messy bit to listen to control_values
+            self.__control_handler_property_changed_event_listeners[control_id] = control_values.property_changed_event.listen(weak_partial(SeriesAcquisitionMethodComponentHandler.__handle_control_values_property_changed, self))
             return self.__control_handlers[control_id]
         return None
+
+    def __handle_control_values_property_changed(self, name: str) -> None:
+        self._fire_time_space_usage_changed_event()
+
+    def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
+        unit_time_space_usage = device_component.get_time_space_usage()
+        item = self._control_combo_box_handler.selected_item_value_stream.value
+        if item:
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            control_values = get_control_values(self.configuration, "control_values_list", control_customization)
+            count = control_values.count
+            unit_time = unit_time_space_usage.time
+            unit_space = unit_time_space_usage.space
+            if count > 0 and unit_time is not None and unit_time > 0.0 and unit_space is not None and unit_space > 0:
+                OVERHEAD: typing.Final[float] = 0.2  # overhead time for setting the control values
+                unit_time = unit_time + OVERHEAD
+                return TimeSpaceUsage(unit_time * count, unit_space * count)
+        return TimeSpaceUsage(None, None)
 
     def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         # given a acquisition data stream, wrap this acquisition method around the acquisition data stream.
@@ -516,15 +615,19 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
     component_id = "tableau-acquire"
 
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
-        super().__init__(_("2D Ramp"))
+        super().__init__(_("2D Ramp"), configuration)
         self.configuration = configuration
         # the control UIs are constructed as a stack with one item for each control_id.
         # the control_handlers is a map from the control_id to the SeriesControlHandler
         # for the control.
         self.__x_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
         self.__y_control_handlers: typing.Dict[str, SeriesControlHandler] = dict()
+        self.__x_control_handler_property_changed_event_listeners = dict[str, Event.EventListener]()
+        self.__y_control_handler_property_changed_event_listeners = dict[str, Event.EventListener]()
         # the selection storage model is a property model made by observing the control_id in the configuration.
         self.__selection_storage_model = Model.PropertyChangedPropertyModel[str](self.configuration, "control_id")
+        # update time space usage when the selection changes
+        self.__selection_storage_model_listener = self.__selection_storage_model.property_changed_event.listen(weak_partial(TableauAcquisitionMethodComponentHandler.__handle_control_values_property_changed, self))
         # the control combo box handler gives a choice of which control to use. in this case, the controls are iterated
         # by looking at control customizations. only 2d controls are presented.
         def filter_2d_control_customizations(control_customization: AcquisitionPreferences.ControlCustomization) -> bool:
@@ -581,8 +684,12 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
         )
 
     def close(self) -> None:
-        self.__selection_storage_model.close()
+        self.__selection_storage_model_listener = typing.cast(typing.Any, None)
         self.__selection_storage_model = typing.cast(typing.Any, None)
+        self.__x_control_handlers = typing.cast(typing.Any, None)
+        self.__y_control_handlers = typing.cast(typing.Any, None)
+        self.__x_control_handler_property_changed_event_listeners = typing.cast(typing.Any, None)
+        self.__y_control_handler_property_changed_event_listeners = typing.cast(typing.Any, None)
         super().close()
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
@@ -600,6 +707,8 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
             assert control_id not in self.__y_control_handlers
             control_values = get_control_values(self.configuration, "y_control_values_list", control_customization, 0)
             self.__y_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "Y")
+            # messy bit to listen to control_values
+            self.__y_control_handler_property_changed_event_listeners[control_id] = control_values.property_changed_event.listen(weak_partial(TableauAcquisitionMethodComponentHandler.__handle_control_values_property_changed, self))
             return self.__y_control_handlers[control_id]
         if component_id == "x-control":
             # make a SeriesControlHandler for each x-control and store it into the control_handlers map.
@@ -610,8 +719,30 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
             assert control_id not in self.__x_control_handlers
             control_values = get_control_values(self.configuration, "x_control_values_list", control_customization, 1)
             self.__x_control_handlers[control_id] = SeriesControlHandler(control_customization, control_values, "X")
+            # messy bit to listen to control_values
+            self.__x_control_handler_property_changed_event_listeners[control_id] = control_values.property_changed_event.listen(weak_partial(TableauAcquisitionMethodComponentHandler.__handle_control_values_property_changed, self))
             return self.__x_control_handlers[control_id]
         return None
+
+    def __handle_control_values_property_changed(self, name: str) -> None:
+        self._fire_time_space_usage_changed_event()
+
+    def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
+        unit_time_space_usage = device_component.get_time_space_usage()
+        item = self._control_combo_box_handler.selected_item_value_stream.value
+        if item:
+            control_customization = typing.cast(AcquisitionPreferences.ControlCustomization, item)
+            y_control_values = get_control_values(self.configuration, "y_control_values_list", control_customization, 0)
+            x_control_values = get_control_values(self.configuration, "x_control_values_list", control_customization, 1)
+            x_count = x_control_values.count
+            y_count = y_control_values.count
+            unit_time = unit_time_space_usage.time
+            unit_space = unit_time_space_usage.space
+            if x_count > 0 and y_count > 0 and unit_time is not None and unit_time > 0.0 and unit_space is not None and unit_space > 0:
+                OVERHEAD: typing.Final[float] = 0.2  # overhead time for setting the control values
+                unit_time = unit_time + OVERHEAD
+                return TimeSpaceUsage(unit_time * x_count * y_count, unit_space * x_count * y_count)
+        return TimeSpaceUsage(None, None)
 
     def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         # given an acquisition data stream, wrap this acquisition method around the acquisition data stream.
@@ -667,12 +798,22 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
     component_id = "multiple-acquire"
 
     def __init__(self, configuration: Schema.Entity, preferences: Observable.Observable):
-        super().__init__(_("Multiple"))
+        super().__init__(_("Multiple"), configuration)
         self.configuration = configuration
         # ensure that there are always a few example sections.
         if len(self.configuration.sections) == 0:
             self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 0.0, "exposure": 0.001, "count": 2}))
             self.configuration._append_item("sections", MultipleAcquireEntrySchema.create(None, {"offset": 10.0, "exposure": 0.01, "count": 3}))
+
+        # track sections inserted/removed for time/space usage calculation
+        self.__item_inserted_listener = self.configuration.item_inserted_event.listen(weak_partial(MultipleAcquisitionMethodComponentHandler.__handle_section_inserted, self))
+        self.__item_removed_listener = self.configuration.item_removed_event.listen(weak_partial(MultipleAcquisitionMethodComponentHandler.__handle_section_removed, self))
+
+        self.__section_property_changed_listeners = list[Event.EventListener]()
+
+        for index, section in enumerate(self.configuration.sections):
+            self.__handle_section_inserted("sections", section, index)
+
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_row(
@@ -691,6 +832,43 @@ class MultipleAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
                 spacing=8
             ),
         )
+
+    def __handle_section_inserted(self, key: str, value: Schema.Entity, index: int) -> None:
+        # this is called when a section is inserted into the configuration.
+        # it is used to update the time/space usage.
+        if key == "sections":
+            self.__section_property_changed_listeners.insert(index, self.configuration.sections[index].property_changed_event.listen(weak_partial(MultipleAcquisitionMethodComponentHandler.__handle_section_property_changed, self)))
+            self._fire_time_space_usage_changed_event()
+
+    def __handle_section_removed(self, key: str, value: Schema.Entity, index: int) -> None:
+        # this is called when a section is inserted into the configuration.
+        # it is used to update the time/space usage.
+        if key == "sections":
+            self.__section_property_changed_listeners.pop(index)
+            self._fire_time_space_usage_changed_event()
+
+    def __handle_section_property_changed(self, name: str) -> None:
+        # this is called when a section is changed in the configuration.
+        # it is used to update the time/space usage.
+        if name == "include_sum" or name == "count":
+            self._fire_time_space_usage_changed_event()
+
+    def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
+        unit_time_space_usage = device_component.get_time_space_usage()
+        unit_time = unit_time_space_usage.time
+        unit_space = unit_time_space_usage.space
+        if unit_time is not None and unit_time > 0.0 and unit_space is not None and unit_space > 0:
+            time = 0.0
+            space = 0
+            for section in self.configuration.sections:
+                count = section.count
+                if count > 0:
+                    time += unit_time * count
+                    space += unit_space * count
+                if section.include_sum:
+                    space += unit_space
+            return TimeSpaceUsage(time, space)
+        return TimeSpaceUsage(None, None)
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         # this is called to construct contained declarative component handlers within this handler.
@@ -800,11 +978,26 @@ class HardwareSourceChoiceHandler(Declarative.Handler):
         super().close()
 
 
+@dataclasses.dataclass
+class TimeSpaceUsage:
+    """A class to define the time and space requirements of a component."""
+    time: float | None
+    space: int | None
+
+
 class AcquisitionDeviceComponentHandler(ComponentHandler):
     """Define methods for acquisition device components."""
+
     component_id: str
 
     acquire_valid_value_stream: Stream.AbstractStream[bool]
+
+    # subclasses must fire this event when the time or space requirements of the device component change.
+    time_space_usage_changed_event: Event.Event
+
+    def get_time_space_usage(self, camera_exposure_time: float | None = None) -> TimeSpaceUsage:
+        # get the time and space requirements of the device component.
+        raise NotImplementedError()
 
     def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device.
@@ -1086,6 +1279,19 @@ class CameraSettingsModel(DeviceSettingsModel):
         if channel_descriptions_changed:
             self.notify_property_changed("channel_descriptions")
 
+    def get_byte_dimensions(self, camera_size: tuple[int, int]) -> tuple[int, ...]:
+        camera_hardware_source = self.camera_hardware_source
+        item_size = numpy.dtype(numpy.float32).itemsize
+        if camera_hardware_source:
+            if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
+                return (camera_size[0], camera_size[1], item_size)
+            elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
+                return (camera_size[1], item_size) if self.channel_index == 0 else (camera_size[0], camera_size[1], item_size)
+            else:
+                return (camera_size[0], camera_size[1], item_size)
+        else:
+            return (camera_size[0], camera_size[1], item_size)
+
     @property
     def exposure_time(self) -> typing.Optional[float]:
         return self.__exposure_time
@@ -1225,6 +1431,46 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
 
         self.acquire_valid_value_stream = Stream.MapStream[STEMController.ScanSpecifier, bool](self.__scan_context_description_value_stream, is_scan_specifier_valid).add_ref()
 
+        # for this component, the time space usage changed event is fired when the extended camera frame parameters (
+        # includes readout area) or the extended scan frame parameters (includes enabled channels) change.
+        self.time_space_usage_changed_event = Event.Event()
+
+        camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self._camera_settings_model.hardware_source_choice_model.hardware_source_choice)
+
+        scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice)
+
+        self.__camera_hardware_source_stream = camera_hardware_source_stream
+
+        self.__camera_frame_parameters_stream = CameraFrameParametersStream(camera_hardware_source_stream)
+
+        def camera_frame_parameters_changed(camera_frame_parameters: CameraFrameParametersAndReadoutArea | None) -> None:
+            self.time_space_usage_changed_event.fire()
+
+        self.__camera_frame_parameters_stream_listener = self.__camera_frame_parameters_stream.value_stream.listen(camera_frame_parameters_changed)
+
+        def camera_settings_property_changed(key: str) -> None:
+            if key in ("exposure_time", "channel_index"):
+                self.time_space_usage_changed_event.fire()
+
+        self.__camera_settings_listener = self._camera_settings_model.property_changed_event.listen(camera_settings_property_changed)
+
+        def scan_frame_parameters_changed(scan_frame_parameters: scan_base.ScanFrameParameters | None) -> None:
+            self.time_space_usage_changed_event.fire()
+
+        self.__scan_hardware_source_stream = scan_hardware_source_stream
+
+        self.__scan_frame_parameters_stream = ScanFrameParametersStream(scan_hardware_source_stream)
+
+        self.__scan_frame_parameters_stream_listener = self.__scan_frame_parameters_stream.value_stream.listen(scan_frame_parameters_changed)
+
+        scan_frame_parameters_changed(self.__scan_frame_parameters_stream.value)
+
+        def scan_width_property_changed(key: str) -> None:
+            if key in ("value"):
+                self.time_space_usage_changed_event.fire()
+
+        self.__scan_width_listener = self.scan_width.property_changed_event.listen(scan_width_property_changed)
+
         u = Declarative.DeclarativeUI()
 
         column_items = list()
@@ -1294,6 +1540,39 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             return CameraDetailsHandler(self._camera_settings_model)
         return None
 
+    def get_time_space_usage(self, camera_exposure_time: float | None = None) -> TimeSpaceUsage:
+        camera_hardware_source_stream = self.__camera_hardware_source_stream
+        camera_hardware_source = camera_hardware_source_stream.value
+        camera_frame_parameters = self._camera_settings_model.camera_frame_parameters
+        total_frame_bytes: int | None = None
+        camera_frame_time: float | None = None
+        camera_frame_bytes: int | None = None
+        if isinstance(camera_hardware_source, camera_base.CameraHardwareSource) and camera_frame_parameters:
+            camera_size = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+            camera_dimensions = self._camera_settings_model.get_byte_dimensions(camera_size)
+            camera_frame_bytes = int(numpy.prod(camera_dimensions, dtype=numpy.int64))
+            camera_frame_time = camera_exposure_time if camera_exposure_time is not None else camera_frame_parameters.exposure
+        scan_hardware_source_stream = self.__scan_hardware_source_stream
+        scan_frame_parameters = self.__scan_frame_parameters_stream.value
+        scan_hardware_source = scan_hardware_source_stream.value
+        scan_frame_time: float | None = None
+        if isinstance(scan_hardware_source,
+                      scan_base.ScanHardwareSource) and scan_frame_parameters and camera_frame_parameters:
+            scan_context_description = self.__scan_context_description_value_stream.value
+            assert scan_context_description
+            scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int],
+                                                                                               scan_context_description.scan_size))
+            scan_size = scan_frame_parameters.scan_size
+            flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_frame_parameters)
+            assert camera_frame_time is not None
+            assert camera_frame_bytes is not None
+            scan_frame_time = scan_size.height * (scan_size.width + flyback_pixels) * camera_frame_time
+            channel_bytes = len(scan_frame_parameters.enabled_channel_indexes or list()) * numpy.dtype(
+                numpy.float32).itemsize
+            scan_frame_bytes = scan_size.height * scan_size.width * channel_bytes
+            total_frame_bytes = camera_frame_bytes * scan_size.height * scan_size.width + scan_frame_bytes
+        return TimeSpaceUsage(scan_frame_time, total_frame_bytes)
+
     def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
         camera_hardware_source = self._camera_settings_model.camera_hardware_source
@@ -1320,6 +1599,38 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
                                                            )
 
 
+@dataclasses.dataclass
+class CameraFrameParametersAndReadoutArea:
+    """A class to define the frame parameters and readout area of a camera device."""
+    frame_parameters: camera_base.CameraFrameParameters
+    readout_area_TLBR: tuple[int, int, int, int]
+
+
+class CameraFrameParametersStream(Stream.ValueStream[CameraFrameParametersAndReadoutArea]):
+    """Define a stream of combination of camera frame parameters and readout area.
+
+    The CameraHardwareSource camera_frame_parameters_changed_event will get fired if the device provides readout area
+    changed event and fires it. This is a hack since eventually the readout area should be part of the frame parameters.
+    """
+
+    def __init__(self, hardware_source_stream: HardwareSourceChoice.HardwareSourceChoiceStream) -> None:
+        super().__init__()
+        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__camera_hardware_source_stream_listener = hardware_source_stream.value_stream.listen(weak_partial(CameraFrameParametersStream.__hardware_source_stream_changed, self))
+        self.__hardware_source_stream_changed(hardware_source_stream.value)
+
+    def __hardware_source_stream_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        # when the hardware source choice changes, update the frame parameters listener. close the old one.
+        self.__frame_parameters_changed_listener = None
+        assert isinstance(hardware_source, camera_base.CameraHardwareSource)
+        self.__frame_parameters_changed_listener = hardware_source.current_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
+        self.__camera_frame_parameters_changed(hardware_source, hardware_source.get_current_frame_parameters())
+        self.__camera_frame_parameters_changed_listener = hardware_source.camera_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
+
+    def __camera_frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters) -> None:
+        self.value = CameraFrameParametersAndReadoutArea(frame_parameters, camera_hardware_source.camera.readout_area)
+
+
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
     """A declarative component handler for a camera device.
 
@@ -1341,6 +1652,27 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
 
         # a camera is always valid.
         self.acquire_valid_value_stream = Stream.ConstantStream(True)
+
+        # for this component, the time space usage changed event is fired when the extended camera frame parameters (
+        # includes readout area) change.
+        self.time_space_usage_changed_event = Event.Event()
+
+        camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self._camera_settings_model.hardware_source_choice_model.hardware_source_choice)
+
+        self.__camera_hardware_source_stream = camera_hardware_source_stream
+
+        self.__camera_frame_parameters_stream = CameraFrameParametersStream(camera_hardware_source_stream)
+
+        def camera_frame_parameters_changed(camera_frame_parameters: CameraFrameParametersAndReadoutArea | None) -> None:
+            self.time_space_usage_changed_event.fire()
+
+        self.__camera_frame_parameters_stream_listener = self.__camera_frame_parameters_stream.value_stream.listen(camera_frame_parameters_changed)
+
+        def camera_settings_property_changed(key: str) -> None:
+            if key in ("exposure_time", "channel_index"):
+                self.time_space_usage_changed_event.fire()
+
+        self.__camera_settings_listener = self._camera_settings_model.property_changed_event.listen(camera_settings_property_changed)
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1370,6 +1702,19 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
             return CameraDetailsHandler(self._camera_settings_model)
         return None
 
+    def get_time_space_usage(self, camera_exposure_time: float | None = None) -> TimeSpaceUsage:
+        camera_hardware_source_stream = self.__camera_hardware_source_stream
+        camera_hardware_source = camera_hardware_source_stream.value
+        camera_frame_parameters = self._camera_settings_model.camera_frame_parameters
+        camera_frame_time: float | None = None
+        camera_frame_bytes: int | None = None
+        if isinstance(camera_hardware_source, camera_base.CameraHardwareSource) and camera_frame_parameters:
+            camera_size = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+            camera_dimensions = self._camera_settings_model.get_byte_dimensions(camera_size)
+            camera_frame_bytes = int(numpy.prod(camera_dimensions, dtype=numpy.int64))
+            camera_frame_time = camera_exposure_time if camera_exposure_time is not None else camera_frame_parameters.exposure
+        return TimeSpaceUsage(camera_frame_time, camera_frame_bytes)
+
     def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
 
@@ -1381,6 +1726,28 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         assert camera_frame_parameters
 
         return camera_base.CameraAcquisitionDevice(camera_hardware_source, camera_frame_parameters, camera_channel)
+
+
+class ScanFrameParametersStream(Stream.ValueStream[scan_base.ScanFrameParameters]):
+    """Define a stream of scan frame parameters (extended with enabled channels)."""
+
+    def __init__(self, scan_hardware_source_stream: HardwareSourceChoice.HardwareSourceChoiceStream) -> None:
+        super().__init__()
+        self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__scan_hardware_source_stream_listener = scan_hardware_source_stream.value_stream.listen(weak_partial(ScanFrameParametersStream.__hardware_source_stream_changed, self))
+        self.__hardware_source_stream_changed(scan_hardware_source_stream.value)
+
+    def __hardware_source_stream_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
+        # when the hardware source choice changes, update the frame parameters listener. close the old one.
+        self.__frame_parameters_changed_listener = None
+        assert isinstance(hardware_source, scan_base.ScanHardwareSource)
+        self.__frame_parameters_changed_listener = hardware_source.scan_frame_parameters_changed_event.listen(weak_partial(ScanFrameParametersStream.__frame_parameters_changed, self))
+        scan_frame_parameters = hardware_source.get_current_frame_parameters()
+        scan_frame_parameters.enabled_channel_indexes = hardware_source.get_enabled_channel_indexes()
+        self.__frame_parameters_changed(scan_frame_parameters)
+
+    def __frame_parameters_changed(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
+        self.value = frame_parameters
 
 
 class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1406,6 +1773,21 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         # the scan is always valid.
         self.acquire_valid_value_stream = Stream.ConstantStream(True)
 
+        # for this component, the time space usage changed event is fired when the extended scan frame parameters (
+        # includes enabled channels) change.
+        self.time_space_usage_changed_event = Event.Event()
+
+        scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice)
+
+        def scan_frame_parameters_changed(scan_frame_parameters: scan_base.ScanFrameParameters | None) -> None:
+            self.time_space_usage_changed_event.fire()
+
+        self.__scan_hardware_source_stream = scan_hardware_source_stream
+
+        self.__scan_frame_parameters_stream = ScanFrameParametersStream(scan_hardware_source_stream)
+
+        self.__scan_frame_parameters_stream_listener = self.__scan_frame_parameters_stream.value_stream.listen(scan_frame_parameters_changed)
+
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
             u.create_component_instance(identifier="scan-hardware-source-choice-component"),
@@ -1414,6 +1796,8 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         )
 
     def close(self) -> None:
+        self.__scan_frame_parameters_stream_listener = typing.cast(typing.Any, None)
+        self.__scan_frame_parameters_stream = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_model.close()
         self.__scan_hardware_source_choice_model = typing.cast(typing.Any, None)
         super().close()
@@ -1423,6 +1807,21 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         if component_id == "scan-hardware-source-choice-component":
             return HardwareSourceChoiceHandler(self.__scan_hardware_source_choice_model, title=_("Scan Detector"))
         return None
+
+    def get_time_space_usage(self, camera_exposure_time: float | None = None) -> TimeSpaceUsage:
+        scan_hardware_source_stream = self.__scan_hardware_source_stream
+        scan_frame_parameters = self.__scan_frame_parameters_stream.value
+        scan_hardware_source = scan_hardware_source_stream.value
+        scan_frame_time: float | None = None
+        scan_frame_bytes: int | None = None
+        if isinstance(scan_hardware_source, scan_base.ScanHardwareSource) and scan_frame_parameters:
+            size = scan_frame_parameters.scan_size
+            flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_frame_parameters)
+            pixel_time_us = scan_frame_parameters.pixel_time_us
+            scan_frame_time = size.height * (size.width + flyback_pixels) * pixel_time_us / 1000000.0
+            channel_bytes = len(scan_frame_parameters.enabled_channel_indexes or list()) * numpy.dtype(numpy.float32).itemsize
+            scan_frame_bytes = size.height * size.width * channel_bytes
+        return TimeSpaceUsage(scan_frame_time, scan_frame_bytes)
 
     def build_acquisition_device(self) -> Acquisition.AcquisitionDeviceLike:
         # build the device data stream. return the data stream, channel names, drift tracker (optional), and device map.
@@ -1631,6 +2030,92 @@ class StreamStreamer(Stream.ValueStream[T], typing.Generic[T]):
             self.send_value(None)
 
 
+class TimeSpaceUsageStream(Stream.ValueStream[TimeSpaceUsage]):
+    """A time/space usage stream based on the method and device components.
+
+    When the selected method or device component changes, this object informs the method component of the new device
+    so it can get the unit time/space usage from the device and use it in its own time/space usage calculation. It
+    also listens for the method to fire time space usage changed events, updating the value of this stream when that
+    happens.
+    """
+
+    def __init__(self, method_component_stream: Stream.AbstractStream[AcquisitionMethodComponentHandler], device_component_stream: Stream.AbstractStream[AcquisitionDeviceComponentHandler]) -> None:
+        super().__init__()
+        self.__method_component_stream = method_component_stream
+        self.__device_component_stream = device_component_stream
+        self.__method_component_stream_listener = method_component_stream.value_stream.listen(weak_partial(TimeSpaceUsageStream.__method_component_changed, self))
+        self.__device_component_stream_listener = device_component_stream.value_stream.listen(weak_partial(TimeSpaceUsageStream.__device_component_changed, self))
+        self.__time_space_usage_changed_event_listener: Event.EventListener | None = None
+        self.__device_component_changed(device_component_stream.value)
+        self.__method_component_changed(method_component_stream.value)
+
+    def __device_component_changed(self, device_component: AcquisitionDeviceComponentHandler | None) -> None:
+        method_component = self.__method_component_stream.value
+        if method_component:
+            method_component.set_device_component(device_component)
+
+    def __method_component_changed(self, method_component: AcquisitionMethodComponentHandler | None) -> None:
+        method_component = self.__method_component_stream.value
+        if method_component:
+            method_component.set_device_component(self.__device_component_stream.value)
+            self.__time_space_usage_changed_event_listener = method_component.time_space_usage_changed_event.listen(weak_partial(TimeSpaceUsageStream.__time_space_usage_changed, self, method_component))
+            self.value = method_component.get_time_space_usage()
+        else:
+            self.__time_space_usage_changed_event_listener = None
+            self.value = TimeSpaceUsage(None, None)
+
+    def __time_space_usage_changed(self, method_component: AcquisitionMethodComponentHandler) -> None:
+        self.value = method_component.get_time_space_usage()
+
+
+class BytesToStringConverter(Converter.ConverterLike[float, str]):
+    """A converter that converts bytes to a human-readable string."""
+
+    def convert(self, value: float | None) -> str | None:
+        if value is not None:
+            bytes = float(value)
+            kbytes = float(1024)
+            mbytes = float(kbytes ** 2)  # 1,048,576
+            gbytes = float(kbytes ** 3)  # 1,073,741,824
+            tbytes = float(kbytes ** 4)  # 1,099,511,627,776
+
+            if bytes < kbytes:
+                return '{0} {1}'.format(bytes, 'Bytes' if 0 == bytes > 1 else 'Byte')
+            elif kbytes <= bytes < mbytes:
+                return '{0:.2f} KB'.format(bytes / kbytes)
+            elif mbytes <= bytes < gbytes:
+                return '{0:.2f} MB'.format(bytes / mbytes)
+            elif gbytes <= bytes < tbytes:
+                return '{0:.2f} GB'.format(bytes / gbytes)
+            elif tbytes <= bytes:
+                return '{0:.2f} TB'.format(bytes / tbytes)
+        return None
+
+    def convert_back(self, formatted_value: str | None) -> float | None:
+        return None
+
+
+class TimeToStringConverter(Converter.ConverterLike[float, str]):
+    """A converter that converts time to a human-readable string."""
+
+    def convert(self, value: float | None) -> str | None:
+        if value is not None:
+            if value > 3600:
+                return "{0:.1f} hours".format(int(value) / 3600)
+            elif value > 90:
+                return "{0:.1f} minutes".format(int(value) / 60)
+            elif value > 1:
+                return "{0:.1f} seconds".format(value)
+            elif value > 0.001:
+                return "{0:.1f} milliseconds".format(value * 1000)
+            elif value > 0.000001:
+                return "{0:.1f} microseconds".format(value * 1000000)
+        return None
+
+    def convert_back(self, formatted_value: str | None) -> float | None:
+        return None
+
+
 @dataclasses.dataclass
 class HandlerEntry:
     handler: Declarative.HandlerLike
@@ -1699,6 +2184,13 @@ class AcquisitionController(Declarative.Handler):
         # define whether this controller is in an error state
         self.is_error = False
 
+        # define the list of methods
+        method_component_ids = tuple(self.__acquisition_method_component._component_handler_map.keys())
+
+        # define the method model
+        self.method_model = Model.PropertyChangedPropertyModel[str](acquisition_configuration, "acquisition_method_component_id")
+        self.method_model.value = self.method_model.value if self.method_model.value in method_component_ids else "basic-acquire"
+
         # define the list of acquisition modes
         acquisition_modes = [device_component_handler.component_id for device_component_handler in device_component_handlers]
 
@@ -1727,6 +2219,13 @@ class AcquisitionController(Declarative.Handler):
         # associated acquire_valid_value_stream, which is a stream of bools.
         # finally, the button_enabled_model turns the stream of bools into a property model.
 
+        def find_method_component_handler(component_id: str | None) -> AcquisitionMethodComponentHandler | None:
+            return self.__acquisition_method_component._component_handler_map.get(component_id, None) if component_id else None
+
+        # create a stream of AcquisitionMethodComponentHandler based on the selected acquisition method.
+        self.__method_component_stream = Stream.MapStream[str, AcquisitionMethodComponentHandler](Stream.PropertyChangedEventStream(self.method_model, "value"), find_method_component_handler)
+
+        # create a stream of AcquisitionDeviceComponentHandler based on the selected acquisition mode.
         self.__device_component_stream = Stream.MapStream[str, AcquisitionDeviceComponentHandler](Stream.PropertyChangedEventStream(self.acquisition_mode_model, "value"), lambda component_id: device_component_handlers[acquisition_modes.index(component_id) if component_id in acquisition_modes else 0])
 
         def get_acquire_valid_value_stream(device_component: typing.Optional[AcquisitionDeviceComponentHandler]) -> Stream.AbstractStream[bool]:
@@ -1734,9 +2233,19 @@ class AcquisitionController(Declarative.Handler):
 
         self.button_enabled_model = Model.StreamValueModel(StreamStreamer[bool](Stream.MapStream[AcquisitionDeviceComponentHandler, Stream.AbstractStream[bool]](self.__device_component_stream, get_acquire_valid_value_stream)))
 
+        # create the stream of time/space usage with method/device component streams as inputs.
+        time_space_usage_stream = TimeSpaceUsageStream(self.__method_component_stream, self.__device_component_stream)
+
+        # break out the time and space for use in the UI.
+        self.time_usage_model = Model.StreamValueModel[float](Stream.MapStream(time_space_usage_stream, operator.attrgetter("time")))
+        self.space_usage_model = Model.StreamValueModel[int](Stream.MapStream(time_space_usage_stream, operator.attrgetter("space")))
+
         # define a progress task and acquisition. these are ephemeral and get closed after use in _acquire_data_stream.
         self.__progress_task: typing.Optional[asyncio.Task[None]] = None
         self.__acquisition: typing.Optional[Acquisition.Acquisition] = None
+
+        self.bytes_converter = BytesToStringConverter()
+        self.time_converter = TimeToStringConverter()
 
         u = Declarative.DeclarativeUI()
         self.ui_view = u.create_column(
@@ -1758,6 +2267,7 @@ class AcquisitionController(Declarative.Handler):
                 current_index="@binding(acquisition_mode_model.value, converter=acquisition_mode_to_index_converter)",
             ),
             u.create_divider(orientation="horizontal", height=8),
+            u.create_row(u.create_label(text="@binding(time_usage_model.value, converter=time_converter)"), u.create_label(text="@binding(space_usage_model.value, converter=bytes_converter)"), u.create_stretch(), spacing=8),
             u.create_row(
                 u.create_push_button(text="@binding(button_text_model.value)",
                                      enabled="@binding(button_enabled_model.value)", on_clicked="handle_button",
