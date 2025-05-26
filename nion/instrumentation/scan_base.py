@@ -847,6 +847,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     probe_state_changed_event: Event.Event
     channel_state_changed_event: Event.Event
+    scan_frame_parameters_changed_event: Event.Event
 
 
 @dataclasses.dataclass
@@ -1204,6 +1205,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.frame_parameters_changed_event = Event.Event()
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
+
+        # fired when frame parameters or channel states change
+        self.scan_frame_parameters_changed_event = Event.Event()
 
         # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
@@ -1811,6 +1815,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
+        frame_parameters_with_channels = copy.copy(frame_parameters)
+        frame_parameters_with_channels.enabled_channel_indexes = self.get_enabled_channel_indexes()
+        self.scan_frame_parameters_changed_event.fire(frame_parameters_with_channels)
 
     def __handle_current_frame_parameters_changed(self, frame_parameters: ScanFrameParameters) -> None:
         # this method is called when the frame parameters are changed in the settings via a profile change. if the
@@ -1916,6 +1923,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 self.__pending_channel_states = None
             for channel_index, channel_state in enumerate(self.__channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
+                frame_parameters_with_channels = copy.copy(self.__frame_parameters)
+                frame_parameters_with_channels.enabled_channel_indexes = self.get_enabled_channel_indexes()
+                self.scan_frame_parameters_changed_event.fire(frame_parameters_with_channels)
             at_least_one_enabled = False
             for channel_index in range(channel_count):
                 if self.get_channel_state(channel_index).enabled:
@@ -1947,7 +1957,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__settings.get_frame_parameters_from_dict(d)
 
     def calculate_frame_time(self, frame_parameters: ScanFrameParameters) -> float:
-        size = frame_parameters.pixel_size
+        size = frame_parameters.scan_size
         pixel_time_us = frame_parameters.pixel_time_us
         return size.height * size.width * pixel_time_us / 1000000.0
 
