@@ -1433,6 +1433,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     profile_changed_event: Event.Event
     frame_parameters_changed_event: Event.Event
+    camera_frame_parameters_changed_event: Event.Event
     log_messages_event: Event.Event
 
 
@@ -1502,6 +1503,9 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
         # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
+
+        # fired when the current frame parameters change or the readout area (if applicable) changes
+        self.camera_frame_parameters_changed_event = Event.Event()
 
         self.__profile_changed_event_listener = self.__camera_settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__camera_settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
@@ -2109,6 +2113,9 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
 
+        # fired when the current frame parameters change or the readout area (if applicable) changes
+        self.camera_frame_parameters_changed_event = Event.Event()
+
         self.__profile_changed_event_listener = self.__camera_settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__camera_settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
@@ -2129,6 +2136,16 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
         self.__grab_sequence_partial_data: typing.Optional[PartialData] = None
         self.__grab_sequence_frame_parameters: typing.Optional[CameraFrameParameters] = None
+
+        # camera devices may optionally provide a readout_area_changed_event. this event should be fired when the
+        # readout area changes. this is a temporary solution until readout area is incorporated into the frame
+        # parameters.
+        self.__readout_area_changed_listener: Event.EventListener | None = None
+        if readout_area_changed_event := typing.cast(Event.Event | None, getattr(self.__camera, "readout_area_changed_event", None)):
+            def handle_readout_area_changed() -> None:
+                self.camera_frame_parameters_changed_event.fire(self.__frame_parameters)
+
+            self.__readout_area_changed_listener = readout_area_changed_event.listen(handle_readout_area_changed)
 
         # the periodic logger function retrieves any log messages from the camera. it is called during
         # __handle_log_messages_event. any messages are sent out on the log_messages_event.
@@ -2422,6 +2439,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
             acquisition_task.set_frame_parameters(CameraFrameParameters(frame_parameters.as_dict()))
         self.__frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
+        self.camera_frame_parameters_changed_event.fire(self.__frame_parameters)
 
     def set_current_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
         frame_parameters = CameraFrameParameters(frame_parameters.as_dict())
