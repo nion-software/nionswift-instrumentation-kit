@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+UNRELEASED
+----------
+- Add time/space usage estimates to acquisition panel. Fix #165.
+
 23.4.0 (2025-05-27)
 -------------------
 - Fix issue where summed acquisition would work from SI/4D panel.

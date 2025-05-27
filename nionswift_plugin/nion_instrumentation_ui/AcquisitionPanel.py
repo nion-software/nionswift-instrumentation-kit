@@ -20,6 +20,7 @@ from __future__ import annotations
 
 # system imports
 import asyncio
+import copy
 import dataclasses
 import functools
 import gettext
@@ -1563,7 +1564,9 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int],
                                                                                                scan_context_description.scan_size))
             scan_size = scan_frame_parameters.scan_size
-            flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_frame_parameters)
+            scan_frame_parameters_with_camera_exposure = copy.copy(scan_frame_parameters)
+            scan_frame_parameters_with_camera_exposure.pixel_time_us = camera_frame_parameters.exposure * 1E6 if camera_frame_parameters.exposure is not None else scan_frame_parameters.pixel_time_us
+            flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_frame_parameters_with_camera_exposure)
             assert camera_frame_time is not None
             assert camera_frame_bytes is not None
             scan_frame_time = scan_size.height * (scan_size.width + flyback_pixels) * camera_frame_time
