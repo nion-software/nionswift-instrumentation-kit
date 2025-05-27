@@ -1,8 +1,8 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+23.4.0 (2025-05-27)
+-------------------
 - Fix issue where summed acquisition would work from SI/4D panel.
 - Fix issue where summed acquisitions could spuriously time out.
 - Improve granularity of progress bar during acquisition procedures.
