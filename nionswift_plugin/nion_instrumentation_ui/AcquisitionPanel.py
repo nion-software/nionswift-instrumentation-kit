@@ -2080,7 +2080,7 @@ class BytesToStringConverter(Converter.ConverterLike[float, str]):
             tbytes = float(kbytes ** 4)  # 1,099,511,627,776
 
             if bytes < kbytes:
-                return '{0} {1}'.format(bytes, 'Bytes' if 0 == bytes > 1 else 'Byte')
+                return '{0} {1}'.format(bytes, 'Bytes' if bytes != 1 else 'Byte')
             elif kbytes <= bytes < mbytes:
                 return '{0:.2f} KB'.format(bytes / kbytes)
             elif mbytes <= bytes < gbytes:
