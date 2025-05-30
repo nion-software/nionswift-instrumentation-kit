@@ -1039,7 +1039,7 @@ class DataChannelManager:
             assert data_element is not None
             channel_id = data_element.get("channel_id")
             channel_variant = data_element.get("channel_variant")
-            channel_name = data_element.get("channel_name", data_element.get("title", "Data"))
+            channel_name = data_element.get("channel_name", typing.cast(str, data_element.get("title", "Data")))
             data_channel_specifier = self.__data_channel_specifier_map_fn(DataChannelSpecifier(channel_id, channel_variant, channel_name))
             channel_id = data_channel_specifier.channel_id
             channel_variant = data_channel_specifier.channel_variant
