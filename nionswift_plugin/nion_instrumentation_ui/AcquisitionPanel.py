@@ -1554,7 +1554,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             camera_frame_bytes = int(numpy.prod(camera_dimensions, dtype=numpy.int64))
             camera_frame_time = camera_exposure_time if camera_exposure_time is not None else camera_frame_parameters.exposure
         scan_hardware_source_stream = self.__scan_hardware_source_stream
-        scan_frame_parameters = self.__scan_frame_parameters_stream.value
+        scan_frame_parameters = copy.copy(self.__scan_frame_parameters_stream.value)  # use a copy since they will be modified during calculations.
         scan_hardware_source = scan_hardware_source_stream.value
         scan_frame_time: float | None = None
         if isinstance(scan_hardware_source,
@@ -1631,7 +1631,7 @@ class CameraFrameParametersStream(Stream.ValueStream[CameraFrameParametersAndRea
         self.__camera_frame_parameters_changed_listener = hardware_source.camera_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
 
     def __camera_frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters) -> None:
-        self.value = CameraFrameParametersAndReadoutArea(frame_parameters, camera_hardware_source.camera.readout_area)
+        self.value = CameraFrameParametersAndReadoutArea(copy.copy(frame_parameters), camera_hardware_source.camera.readout_area)
 
 
 class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
@@ -1750,7 +1750,7 @@ class ScanFrameParametersStream(Stream.ValueStream[scan_base.ScanFrameParameters
         self.__frame_parameters_changed(scan_frame_parameters)
 
     def __frame_parameters_changed(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
-        self.value = frame_parameters
+        self.value = copy.copy(frame_parameters)
 
 
 class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
