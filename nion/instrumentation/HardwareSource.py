@@ -2009,10 +2009,12 @@ class MetadataDisplayComponent:
             if voltage % 1000 == 0:
                 voltage = voltage // 1000
                 units = "kV"
+            d["ht"] = f"{voltage} {units}"
             info_items.append(f"{voltage} {units}")
 
         hardware_source_name = Metadata.get_metadata_value(metadata, "stem.hardware_source.name")
         if hardware_source_name:
+            d["hardware"] = str(hardware_source_name)
             info_items.append(str(hardware_source_name))
 
         if info_items:
