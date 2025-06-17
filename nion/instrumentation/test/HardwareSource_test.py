@@ -1018,11 +1018,14 @@ class TestHardwareSourceClass(unittest.TestCase):
             display_panel.set_display_panel_display_item(document_model.display_items[0])
             display_panel.repaint_immediate(DrawingContext.DrawingContext(), Geometry.IntSize(100, 100))
             self.__acquire_one(document_controller, hardware_source)
+            time.sleep(0.01)  # give the display panel time to update
             update_count = display_panel.display_canvas_item._update_count
             self.__acquire_one(document_controller, hardware_source)
+            time.sleep(0.01)  # give the display panel time to update
+            self.assertEqual(display_panel.display_canvas_item._update_count, update_count + 1)
             self.__acquire_one(document_controller, hardware_source)
-            new_update_count = display_panel.display_canvas_item._update_count
-            self.assertEqual(new_update_count, update_count + 2)
+            time.sleep(0.01)  # give the display panel time to update
+            self.assertEqual(display_panel.display_canvas_item._update_count, update_count + 2)
 
     def test_partial_frame_acquisition_generates_single_canvas_update_event_for_each_segment(self):
         with self.__scan_test_context() as scan_test_context:
