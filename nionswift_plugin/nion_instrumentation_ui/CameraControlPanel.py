@@ -672,6 +672,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__key_released_event_listener = DisplayPanel.DisplayPanelManager().key_released_event.listen(self.image_panel_key_released)
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
+        self.__focus_changed_event_listener = DisplayPanel.DisplayPanelManager().focus_changed_event.listen(self.image_panel_focus_changed)
         self.__mouse_pressed = False
 
         help_widget = None
@@ -975,6 +976,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
+            self.__shift_click_state = None
             return self.__mouse_pressed
         if data_item and hardware_source_id and self.__shift_click_state == "tilt":
             mouse_position = image_position
@@ -984,6 +986,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
+            self.__shift_click_state = None
             return self.__mouse_pressed
         return False
 
@@ -1002,6 +1005,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         return False
 
     def image_panel_key_released(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
+        self.__shift_click_state = None
+        return False
+
+    def image_panel_focus_changed(self, display_panel: DisplayPanel.DisplayPanel, focussed: bool) -> bool:
         self.__shift_click_state = None
         return False
 
