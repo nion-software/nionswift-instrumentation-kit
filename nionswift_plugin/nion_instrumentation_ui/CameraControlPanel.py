@@ -975,6 +975,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
+            self.__shift_click_state = None
             return self.__mouse_pressed
         if data_item and hardware_source_id and self.__shift_click_state == "tilt":
             mouse_position = image_position
@@ -984,6 +985,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
+            self.__shift_click_state = None
             return self.__mouse_pressed
         return False
 

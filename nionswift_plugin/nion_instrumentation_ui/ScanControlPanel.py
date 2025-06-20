@@ -1677,6 +1677,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             for record in logger_buffer.buffer:
                 display_panel.document_controller.display_log_record(record)
             logger_buffer.flush()
+            self.__shift_click_state = None
             return self.__mouse_pressed
         return False
 
