@@ -3159,7 +3159,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__config = config
 
     def __construct_suffix(self) -> str:
-        control = self.__config.get("calibrationModeIndexControl", self.__config.get("calibrationModeIndexControl".lower(), None))
+        control = self.__config.get("calibrationModeIndexControl", None)
         if control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
             if valid:
@@ -3168,22 +3168,30 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
 
     def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
         scale = None
-        suffix_nz = suffix if suffix != "0" else ""  # for backwards compatibility, empty if '0'
-        scale_control_base_key = prefix + "ScaleControl"
-        scale_control = self.__config.get(scale_control_base_key + suffix, self.__config.get((scale_control_base_key + suffix_nz).lower(), None))
+        if suffix:
+            scale_control_base_key = prefix + "ScaleControl"
+        else:
+            scale_control_base_key = prefix + "scale_control"
+        scale_control = self.__config.get(scale_control_base_key + suffix, None)
         if scale_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
             if valid:
                 scale = value
         offset = None
-        offset_control_base_key = prefix + "OffsetControl"
-        offset_control = self.__config.get(offset_control_base_key + suffix, self.__config.get((offset_control_base_key + suffix_nz).lower(), None))
+        if suffix:
+            offset_control_base_key = prefix + "OffsetControl"
+        else:
+            offset_control_base_key = prefix + "offset_control"
+        offset_control = self.__config.get(offset_control_base_key + suffix, None)
         if offset_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
             if valid:
                 offset = value
-        units_base_key = prefix + "Units" + suffix
-        units = self.__config.get(units_base_key + suffix, self.__config.get((units_base_key + suffix_nz).lower(), None))
+        if suffix:
+            units_base_key = prefix + "Units"
+        else:
+            units_base_key = prefix + "units_value"
+        units = self.__config.get(units_base_key + suffix, None)
         scale = scale * relative_scale if scale is not None else scale
         if is_center_origin and scale is not None and data_len:
             offset = -scale * data_len * 0.5
@@ -3196,11 +3204,11 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         is_center_origin = getattr(self.__camera_device, "signal_type", str()) != "eels" or getattr(self.__camera_device, "camera_type", str()) != "eels"
         suffix = self.__construct_suffix()
         if len(data_shape) == 2:
-            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
-            y_calibration = self.__construct_calibration("calibY", suffix, binning, is_center_origin, data_shape[0])
+            x_calibration = self.__construct_calibration("calibX" if suffix else "x_", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
+            y_calibration = self.__construct_calibration("calibY" if suffix else "y_", suffix, binning, is_center_origin, data_shape[0])
             return (y_calibration, x_calibration)
         else:
-            x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[0])
+            x_calibration = self.__construct_calibration("calibX" if suffix else "x_", suffix, binning, is_center_origin, data_shape[0])
             return (x_calibration,)
 
     def get_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters, **kwargs: typing.Any) -> Calibration.Calibration:
