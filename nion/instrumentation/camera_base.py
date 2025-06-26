@@ -3159,31 +3159,35 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__config = config
 
     def __construct_suffix(self) -> str:
-        control = self.__config.get("calibrationModeIndexControl", self.__config.get("calibrationModeIndexControl".lower(), None))
+        control = self.__config.get("calibrationModeIndexControl", None)
         if control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
             if valid:
                 return str(int(value or 0))
+        control = self.__config.get("calibrationModeIndexControl".lower(), None)
+        if control:
+            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
+            if valid and value:
+                return str(int(value))
         return str()
 
     def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
         scale = None
-        suffix_nz = suffix if suffix != "0" else ""  # for backwards compatibility, empty if '0'
-        scale_control_base_key = prefix + "ScaleControl"
-        scale_control = self.__config.get(scale_control_base_key + suffix, self.__config.get((scale_control_base_key + suffix_nz).lower(), None))
+        scale_control_key = prefix + "ScaleControl" + suffix
+        scale_control = self.__config.get(scale_control_key, self.__config.get((scale_control_key).lower(), None))
         if scale_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
             if valid:
                 scale = value
         offset = None
-        offset_control_base_key = prefix + "OffsetControl"
-        offset_control = self.__config.get(offset_control_base_key + suffix, self.__config.get((offset_control_base_key + suffix_nz).lower(), None))
+        offset_control_key = prefix + "OffsetControl" + suffix
+        offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
             if valid:
                 offset = value
-        units_base_key = prefix + "Units" + suffix
-        units = self.__config.get(units_base_key + suffix, self.__config.get((units_base_key + suffix_nz).lower(), None))
+        units_key = prefix + "Units" + suffix
+        units = self.__config.get(units_key, self.__config.get((units_key).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
         if is_center_origin and scale is not None and data_len:
             offset = -scale * data_len * 0.5

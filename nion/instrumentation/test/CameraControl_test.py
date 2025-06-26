@@ -14,6 +14,7 @@ import zlib
 
 import numpy
 
+from nion.data import Calibration
 from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
@@ -24,7 +25,6 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
-from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
@@ -33,7 +33,6 @@ from nion.swift.model import Graphics
 from nion.swift.model import Metadata
 from nion.swift.model import Schema
 from nion.swift.test import TestContext
-from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
@@ -1596,6 +1595,228 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(1, len(document_model.data_items))
+
+    def test_camera_calibrator(self) -> None:
+        class InstrumentController:
+            def __init__(self, values: dict[str, float]) -> None:
+                self.values = values
+
+            def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
+                if s in self.values:
+                    return True, self.values[s]
+                else:
+                    return False, None
+
+        class CameraDevice:
+            def __init__(self, camera_type: str) -> None:
+                self.camera_type = camera_type
+
+        class CameraFrameParameters:
+            def __init__(self) -> None:
+                self.binning = 2
+
+        def calibration_equal(a: Calibration.Calibration, b: Calibration.Calibration) -> bool:
+            a_scale_1000 = round(a.scale * 1000) if a.scale else None
+            b_scale_1000 = round(b.scale * 1000) if b.scale else None
+            a_offset_1000 = round(a.offset * 1000) if a.offset else None
+            b_offset_1000 = round(b.offset * 1000) if b.offset else None
+            return a_scale_1000 == b_scale_1000 and a_offset_1000 == b_offset_1000 and a.units == b.units
+
+        instrument_controller = InstrumentController(
+            {
+                "angle": 0.01,
+                "angle1": 0.011,
+                "angle2": 0.012,
+                "angle-old": 0.02,
+                "angle-old1": 0.021,
+                "angle-old2": 0.022,
+                "intensity": 0.1,
+                "intensity1": 0.11,
+                "intensity2": 0.12,
+                "intensity-old": 0.2,
+                "intensity-old1": 0.21,
+                "intensity-old2": 0.22,
+                "index": 0,
+                "index-old": 0
+            }
+        )
+
+        # test simple ronchigram calibration, old style (lowercase)
+        camera_device = CameraDevice("ronchigram")
+        camera_frame_parameters = CameraFrameParameters()
+        config = {
+            "calibxscalecontrol": "angle-old",
+            "calibyscalecontrol": "angle-old",
+            "calibxoffsetcontrol": "",
+            "calibyoffsetcontrol": "",
+            "calibxunits": "rad-old",
+            "calibyunits": "rad-old",
+            "calibintensityscalecontrol": "intensity-old",
+            "calibintensityoffsetcontrol": "",
+            "calibintensityunits": "counts-old",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.0, 0.04, "rad-old"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.0, 0.04, "rad-old"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.2, "counts-old"), intensity_calibration))
+
+        # test simple ronchigram calibration, new style (capitalized)
+        camera_device = CameraDevice("ronchigram")
+        config = {
+            "calibXScaleControl": "angle",
+            "calibYScaleControl": "angle",
+            "calibXOffsetControl": "",
+            "calibYOffsetControl": "",
+            "calibXUnits": "rad",
+            "calibYUnits": "rad",
+            "calibIntensityScaleControl": "intensity",
+            "calibIntensityOffsetControl": "",
+            "calibIntensityUnits": "counts",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(CameraFrameParameters(), (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "rad"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "rad"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(CameraFrameParameters())
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.1, "counts"), intensity_calibration))
+
+        # test simple 1d/2d eels calibration, old style (lowercase)
+        camera_device = CameraDevice("eels")
+        config = {
+            "calibxscalecontrol": "angle-old",
+            "calibyscalecontrol": "angle-old",
+            "calibxoffsetcontrol": "",
+            "calibyoffsetcontrol": "",
+            "calibxunits": "eV-old",
+            "calibyunits": "y-old",
+            "calibintensityscalecontrol": "intensity-old",
+            "calibintensityoffsetcontrol": "",
+            "calibintensityunits": "counts-old",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.04, "y-old"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.04, "eV-old"), calibrations[1]))
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100,))
+        self.assertEqual(1, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.04, "eV-old"), calibrations[0]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.2, "counts-old"), intensity_calibration))
+
+        # test indexed ronchigram calibration, old style (lowercase)
+        camera_device = CameraDevice("ronchigram")
+        config = {
+            "calibrationmodeindexcontrol": "index-old",
+            "calibxscalecontrol": "angle-old",
+            "calibyscalecontrol": "angle-old",
+            "calibxscalecontrol1": "angle-old1",
+            "calibyscalecontrol1": "angle-old1",
+            "calibxscalecontrol2": "angle-old2",
+            "calibyscalecontrol2": "angle-old2",
+            "calibxoffsetcontrol": "",
+            "calibyoffsetcontrol": "",
+            "calibxoffsetcontrol1": "",
+            "calibyoffsetcontrol1": "",
+            "calibxoffsetcontrol2": "",
+            "calibyoffsetcontrol2": "",
+            "calibxunits": "rad-old",
+            "calibyunits": "rad-old",
+            "calibxunits1": "rad-old1",
+            "calibyunits1": "rad-old1",
+            "calibxunits2": "rad-old2",
+            "calibyunits2": "rad-old2",
+            "calibintensityscalecontrol": "intensity-old",
+            "calibintensityscalecontrol1": "intensity-old1",
+            "calibintensityscalecontrol2": "intensity-old2",
+            "calibintensityoffsetcontrol": "",
+            "calibintensityoffsetcontrol1": "",
+            "calibintensityoffsetcontrol2": "",
+            "calibintensityunits": "counts-old",
+            "calibintensityunits1": "counts-old1",
+            "calibintensityunits2": "counts-old2",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.0, 0.04, "rad-old"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.0, 0.04, "rad-old"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.2, "counts-old"), intensity_calibration))
+        instrument_controller.values["index-old"] = 1
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.1, 0.042, "rad-old1"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.1, 0.042, "rad-old1"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.21, "counts-old1"), intensity_calibration))
+        instrument_controller.values["index-old"] = 2
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.2, 0.044, "rad-old2"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-2.2, 0.044, "rad-old2"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.22, "counts-old2"), intensity_calibration))
+        instrument_controller.values["index-old"] = 0
+
+        # test indexed ronchigram calibration, new style (capitalized)
+        camera_device = CameraDevice("ronchigram")
+        config = {
+            "calibrationModeIndexControl": "index",
+            "calibXScaleControl0": "angle",
+            "calibYScaleControl0": "angle",
+            "calibXScaleControl1": "angle1",
+            "calibYScaleControl1": "angle1",
+            "calibXScaleControl2": "angle2",
+            "calibYScaleControl2": "angle2",
+            "calibXOffsetControl0": "",
+            "calibYOffsetControl0": "",
+            "calibXOffsetControl1": "",
+            "calibYOffsetControl1": "",
+            "calibXOffsetControl2": "",
+            "calibYOffsetControl2": "",
+            "calibXUnits0": "rad",
+            "calibYUnits0": "rad",
+            "calibXUnits1": "rad1",
+            "calibYUnits1": "rad1",
+            "calibXUnits2": "rad2",
+            "calibYUnits2": "rad2",
+            "calibIntensityScaleControl0": "intensity",
+            "calibIntensityScaleControl1": "intensity1",
+            "calibIntensityScaleControl2": "intensity2",
+            "calibIntensityOffsetControl0": "",
+            "calibIntensityOffsetControl1": "",
+            "calibIntensityOffsetControl2": "",
+            "calibIntensityUnits0": "counts",
+            "calibIntensityUnits1": "counts1",
+            "calibIntensityUnits2": "counts2",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "rad"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "rad"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.1, "counts"), intensity_calibration))
+        instrument_controller.values["index"] = 1
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.11, "counts1"), intensity_calibration))
+        instrument_controller.values["index"] = 2
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.2, 0.024, "rad2"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.2, 0.024, "rad2"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.12, "counts2"), intensity_calibration))
+        instrument_controller.values["index"] = 0
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
