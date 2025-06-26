@@ -1708,6 +1708,32 @@ class TestCameraControlClass(unittest.TestCase):
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.2, "counts-old"), intensity_calibration))
 
+        # test dynamic ronchigram calibration, new style (capitalized)
+        camera_device = CameraDevice("eels")
+        config = {
+            "calibXScaleControl": "angle",
+            "calibYScaleControl": "angle",
+            "calibXOffsetControl": "",
+            "calibYOffsetControl": "",
+            "calibXUnits": "eV",
+            "calibYUnits": "y",
+            "calibIntensityScaleControl": "intensity",
+            "calibIntensityOffsetControl": "",
+            "calibIntensityUnits": "counts",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        camera_device.signal_type = None
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.02, "y"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.02, "eV"), calibrations[1]))
+        camera_device.signal_type = "ronchigram"
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "y"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "eV"), calibrations[1]))
+        camera_device.signal_type = None
+
         # test indexed ronchigram calibration, old style (lowercase)
         camera_device = CameraDevice("ronchigram")
         config = {

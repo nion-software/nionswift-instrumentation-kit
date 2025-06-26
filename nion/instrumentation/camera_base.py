@@ -3197,7 +3197,9 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
 
     def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
         binning = frame_parameters.binning
-        is_center_origin = getattr(self.__camera_device, "camera_type", str()) != "eels"
+        signal_type = typing.cast(str | None, getattr(self.__camera_device, "signal_type", None))
+        camera_type = typing.cast(str | None, getattr(self.__camera_device, "camera_type", None))
+        is_center_origin = (signal_type is not None and signal_type != "eels") or (camera_type is not None and camera_type != "eels")
         suffix = self.__construct_suffix()
         if len(data_shape) == 2:
             x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
