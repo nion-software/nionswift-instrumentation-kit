@@ -1,9 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
-UNRELEASED
-----------
+23.5.0 (2025-06-26)
+-------------------
 - Add time/space usage estimates to acquisition panel. Fix #165.
+- Expand calibrator functionality for use in camera devices.
 
 23.4.0 (2025-05-27)
 -------------------
