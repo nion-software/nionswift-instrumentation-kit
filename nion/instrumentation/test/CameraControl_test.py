@@ -1844,6 +1844,33 @@ class TestCameraControlClass(unittest.TestCase):
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.12, "counts2"), intensity_calibration))
         instrument_controller.values["index"] = 0
 
+        # test indexed ronchigram calibration, new style (capitalized), fallback
+        camera_device = CameraDevice("ronchigram")
+        config = {
+            "calibrationModeIndexControl": "index_missing",
+            "calibXScaleControl": "angle",
+            "calibYScaleControl": "angle",
+            "calibXScaleControl0": "angle1",
+            "calibYScaleControl0": "angle1",
+            "calibXOffsetControl0": "",
+            "calibYOffsetControl0": "",
+            "calibXUnits": "rad_fail",
+            "calibYUnits": "rad_fail",
+            "calibXUnits0": "rad1",
+            "calibYUnits0": "rad1",
+            "calibIntensityScaleControl": "intensity",
+            "calibIntensityScaleControl0": "intensity1",
+            "calibIntensityOffsetControl0": "",
+            "calibIntensityUnits0": "counts1",
+        }
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[1]))
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.11, "counts1"), intensity_calibration))
+
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
 

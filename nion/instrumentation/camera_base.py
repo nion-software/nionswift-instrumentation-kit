@@ -3164,6 +3164,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
             if valid:
                 return str(int(value or 0))
+            return "0"
         control = self.__config.get("calibrationModeIndexControl".lower(), None)
         if control:
             valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
