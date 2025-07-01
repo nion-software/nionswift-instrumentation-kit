@@ -917,15 +917,12 @@ class CameraDevice3(typing.Protocol):
         return  # required to avoid being recognized as abstract by mypy
 
 
-class InstrumentController(abc.ABC):
+class InstrumentController(typing.Protocol):
 
-    @abc.abstractmethod
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]: ...
 
-    @abc.abstractmethod
     def get_value(self, value_id: str, default_value: typing.Optional[float] = None) -> typing.Optional[float]: ...
 
-    @abc.abstractmethod
     def set_value(self, value_id: str, value: float) -> None: ...
 
     def get_autostem_properties(self) -> typing.Mapping[str, typing.Any]: return dict()
