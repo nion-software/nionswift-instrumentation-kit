@@ -1890,11 +1890,11 @@ class FramedDataStream(DataStream):
     Pass a data channel to accept the frame as it arrives.
     """
 
-    def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None, data_channel: typing.Optional[DataChannel] = None) -> None:
+    def __init__(self, data_stream: DataStream, *, operator: typing.Optional[DataStreamOperator] = None) -> None:
         super().__init__()
         self.__data_stream = data_stream
         self.__operator = operator or NullDataStreamOperator()
-        self.__framer = Framer(data_channel or DataAndMetadataDataChannel())
+        self.__framer = Framer(DataAndMetadataDataChannel())
 
     def __str__(self) -> str:
         s = super().__str__()
