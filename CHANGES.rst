@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.5.1 (2025-07-02)
+-------------------
+- Fix issue with camera device calibrator fallback when index control present.
+
 23.5.0 (2025-06-26)
 -------------------
 - Add time/space usage estimates to acquisition panel. Fix #165.
