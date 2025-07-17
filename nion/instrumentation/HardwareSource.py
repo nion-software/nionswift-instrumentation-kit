@@ -981,6 +981,8 @@ class DataChannelDelegateProtocol(typing.Protocol):
 
 
 class DataChannelManager:
+    """Utility class to manage data channels for a hardware source."""
+
     def __init__(self, hardware_source_id: str, data_channel_specifier_map_fn: typing.Callable[[DataChannelSpecifier], DataChannelSpecifier]) -> None:
         self.__hardware_source_id = hardware_source_id
         self.__data_channel_specifier_map_fn = data_channel_specifier_map_fn

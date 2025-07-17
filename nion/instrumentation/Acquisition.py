@@ -2446,6 +2446,8 @@ class AccumulatedDataStream(ContainerDataStream):
 
 
 class DataHandler:
+    """A data handler that can handle data available events and send packets to a connected data handler."""
+
     def __init__(self) -> None:
         self.__data_handler: typing.Optional[DataHandler] = None
 
