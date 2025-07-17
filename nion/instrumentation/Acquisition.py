@@ -2525,23 +2525,6 @@ class CollectionDataHandler(DataHandler):
         self.__collection_list = list[DataAndMetadata.MetadataType]()
         self.__last_collection_index: typing.Optional[ShapeType] = None
 
-    def get_info(self, channel: Channel, data_stream_info: DataStreamInfo) -> DataStreamInfo:
-        count = expand_shape(self.__collection_shape)
-        data_metadata = data_stream_info.data_metadata
-        data_dtype = data_metadata.data_dtype
-        assert data_dtype is not None
-        data_metadata = DataAndMetadata.DataMetadata(
-            data_shape=self.__collection_shape + data_metadata.data_shape, data_dtype=data_dtype,
-            intensity_calibration=data_metadata.intensity_calibration,
-            dimensional_calibrations=list(self.__collection_calibrations) + list(data_metadata.dimensional_calibrations),
-            metadata=data_metadata.metadata,
-            timestamp=data_metadata.timestamp,
-            data_descriptor=self._get_new_data_descriptor(data_metadata),
-            timezone=data_metadata.timezone,
-            timezone_offset=data_metadata.timezone_offset
-        )
-        return DataStreamInfo(data_metadata, count * data_stream_info.duration)
-
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         collection_count = expand_shape(self.__collection_shape)
         assert self.__indexes.get(packet.channel, 0) < collection_count
