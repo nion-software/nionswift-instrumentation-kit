@@ -178,12 +178,16 @@ class ScanControlStateController:
         self.__drift_region_listener: typing.Optional[Event.EventListener] = None
         self.__drift_settings_listener: typing.Optional[Event.EventListener] = None
         self.__data_channel_state_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__scan_frame_parameters_changed_event_listener: typing.Optional[Event.EventListener] = None
+        self.__max_fov_stream_listener: typing.Optional[Event.EventListener] = None
         self.on_display_name_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_subscan_state_changed : typing.Optional[typing.Callable[[stem_controller.SubscanState, stem_controller.LineScanState], None]] = None
         self.on_drift_state_changed : typing.Optional[typing.Callable[[typing.Optional[str], typing.Optional[Geometry.FloatRect], stem_controller.DriftCorrectionSettings, stem_controller.SubscanState], None]] = None
         self.on_profiles_changed : typing.Optional[typing.Callable[[typing.Sequence[str]], None]] = None
         self.on_profile_changed : typing.Optional[typing.Callable[[str], None]] = None
         self.on_frame_parameters_changed : typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
+        self.on_scan_frame_parameters_changed: typing.Optional[typing.Callable[[scan_base.ScanFrameParameters], None]] = None
+        self.on_max_fov_changed: typing.Optional[typing.Callable[[float], None]] = None
         self.on_linked_changed : typing.Optional[typing.Callable[[bool], None]] = None
         self.on_channel_state_changed : typing.Optional[typing.Callable[[int, bool, bool], None]] = None
         self.on_data_channel_state_changed : typing.Optional[typing.Callable[[int, str, str, bool], None]] = None
@@ -215,6 +219,8 @@ class ScanControlStateController:
         if self.__frame_parameters_changed_event_listener:
             self.__frame_parameters_changed_event_listener.close()
             self.__frame_parameters_changed_event_listener = None
+        self.__scan_frame_parameters_changed_event_listener = None
+        self.__max_fov_stream_listener = None
         self.__data_channel_state_changed_event_listener = None
         if self.__acquisition_state_changed_event_listener:
             self.__acquisition_state_changed_event_listener.close()
@@ -246,6 +252,8 @@ class ScanControlStateController:
         self.on_profiles_changed = None
         self.on_profile_changed = None
         self.on_frame_parameters_changed = None
+        self.on_scan_frame_parameters_changed = None
+        self.on_max_fov_changed = None
         self.on_linked_changed = None
         self.on_channel_state_changed = None
         self.on_data_channel_state_changed = None
@@ -290,6 +298,16 @@ class ScanControlStateController:
             if profile_index == self.__scan_hardware_source.selected_profile_index:
                 self.on_frame_parameters_changed(frame_parameters)
 
+    def __scan_frame_parameters_changed(self, frame_parameters_with_channels: scan_base.ScanFrameParameters) -> None:
+        """ Called when the frame parameters change. """
+        if self.on_scan_frame_parameters_changed:
+            self.on_scan_frame_parameters_changed(frame_parameters_with_channels)
+
+    def __max_fov_changed(self, max_fov_nm: float) -> None:
+        """ Called when the maximum field of view changes. """
+        if self.on_max_fov_changed:
+            self.on_max_fov_changed(max_fov_nm)
+
     # received from the scan controller when the profile changes.
     # thread safe
     def __update_profile_index(self, profile_index: int) -> None:
@@ -315,6 +333,8 @@ class ScanControlStateController:
             self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
             self.__probe_state_changed_event_listener = self.__scan_hardware_source.probe_state_changed_event.listen(self.__probe_state_changed)
             self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
+            self.__scan_frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_frame_parameters_changed_event.listen(self.__scan_frame_parameters_changed)
+            self.__max_fov_stream_listener = self.__scan_hardware_source.max_field_of_view_nm_stream.value_stream.listen(self.__max_fov_changed)
 
             def drift_state_changed(name: str) -> None:
                 if name in ("drift_channel_id", "drift_region", "drift_settings"):
@@ -1309,9 +1329,11 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         link_checkbox.on_checked_changed = handle_linked_changed
 
+        fov_label_widget = ui.create_label_widget(_("FOV (nm)"), properties={"width": 68, "stylesheet": "qproperty-alignment: 'AlignVCenter | AlignRight'"})
+
         fov_row = ui.create_row_widget(properties={"margin": 4, "spacing": 2})
         fov_row.add_stretch()
-        fov_row.add(ui.create_label_widget(_("FOV (nm)"), properties={"width": 68, "stylesheet": "qproperty-alignment: 'AlignVCenter | AlignRight'"}))  # note: this alignment technique will not work in future
+        fov_row.add(fov_label_widget)  # note: this alignment technique will not work in future
         fov_row.add_spacing(4)
         fov_group = ui.create_row_widget(properties={"width": 84})
         canvas_widget = ui.create_canvas_widget(properties={"height": 21, "width": 18})
@@ -1613,10 +1635,35 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             # this may be called on a thread. ensure it runs on the main thread.
             self.__thread_helper.call_on_main_thread("drift_state_changed", functools.partial(update_drift_state, drift_channel_id, drift_region, drift_settings, subscan_state))
 
+        def update_fov_color() -> None:
+            max_fov_nm = scan_controller.max_field_of_view_nm_stream.value or 100000.0
+            fov_nm = scan_controller.get_current_frame_parameters().fov_nm
+            if fov_nm > max_fov_nm:
+                color = "red"
+                tool_tip = _("Exceeds maximum field of view:") + f" {int(max_fov_nm)}nm"
+            elif fov_nm > max_fov_nm * 0.9:
+                color = "orange"
+                tool_tip = _("Near maximum field of view:") + f" {int(max_fov_nm)}nm"
+            else:
+                color = "black"
+                tool_tip = _("Maximum field of view:") + f" {int(max_fov_nm)}nm"
+            fov_label_widget.text_color = color
+            fov_label_widget.tool_tip = tool_tip
+
+        def scan_frame_parameters_changed(scan_frame_parameters: scan_base.ScanFrameParameters) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            self.__thread_helper.call_on_main_thread("scan_frame_parameters_changed", update_fov_color)
+
+        def max_fov_changed(max_fov: float) -> None:
+            # this may be called on a thread. ensure it runs on the main thread.
+            self.__thread_helper.call_on_main_thread("max_fov_changed", update_fov_color)
+
         self.__state_controller.on_display_name_changed = None
         self.__state_controller.on_profiles_changed = profiles_changed
         self.__state_controller.on_profile_changed = profile_changed
         self.__state_controller.on_frame_parameters_changed = frame_parameters_changed
+        self.__state_controller.on_scan_frame_parameters_changed = scan_frame_parameters_changed
+        self.__state_controller.on_max_fov_changed = max_fov_changed
         self.__state_controller.on_linked_changed = linked_changed
         self.__state_controller.on_scan_button_state_changed = scan_button_state_changed
         self.__state_controller.on_abort_button_state_changed = abort_button_state_changed

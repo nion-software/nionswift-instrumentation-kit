@@ -40,6 +40,7 @@ from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import ReferenceCounting
 from nion.utils import Registry
+from nion.utils import Stream
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
@@ -647,6 +648,7 @@ class ScanDevice(typing.Protocol):
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
+    def calculate_max_field_of_view(self, frame_parameters: ScanFrameParameters) -> float: return 100000.0
     def set_sequence_buffer_size(self, buffer_size: int) -> None: return
     def get_sequence_buffer_count(self) -> int: return 0
     def pop_sequence_buffer_data(self) -> typing.List[typing.Dict[str, typing.Any]]: return list()
@@ -850,6 +852,8 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     probe_state_changed_event: Event.Event
     channel_state_changed_event: Event.Event
     scan_frame_parameters_changed_event: Event.Event
+
+    max_field_of_view_nm_stream: Stream.ValueStream[float]
 
 
 @dataclasses.dataclass
@@ -1207,6 +1211,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.frame_parameters_changed_event = Event.Event()
         self.probe_state_changed_event = Event.Event()
         self.channel_state_changed_event = Event.Event()
+
+        # define value streams
+        self.max_field_of_view_nm_stream = Stream.ValueStream[float](device.calculate_max_field_of_view(self.__settings.get_current_frame_parameters()))
 
         # fired when frame parameters or channel states change
         self.scan_frame_parameters_changed_event = Event.Event()
@@ -1815,6 +1822,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             # handle case where current profile has been changed but scan is not running.
             device_frame_parameters = copy.copy(frame_parameters)
             self.__device.set_frame_parameters(device_frame_parameters)
+        self.max_field_of_view_nm_stream.value = self.__device.calculate_max_field_of_view(frame_parameters)
         self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
         self.__frame_parameters = copy.copy(frame_parameters)
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)

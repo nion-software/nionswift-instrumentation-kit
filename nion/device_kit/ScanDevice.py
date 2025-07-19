@@ -440,3 +440,6 @@ class Device(scan_base.ScanDevice):
 
     def calculate_flyback_pixels(self, frame_parameters: scan_base.ScanFrameParameters) -> int:
         return 2
+
+    def calculate_max_field_of_view(self, frame_parameters: scan_base.ScanFrameParameters) -> float:
+        return 1600.0
