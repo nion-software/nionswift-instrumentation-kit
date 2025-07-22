@@ -2451,6 +2451,12 @@ class DataHandler:
     def __init__(self) -> None:
         self.__data_handler: typing.Optional[DataHandler] = None
 
+    def _print(self, indent: typing.Optional[str] = None) -> None:
+        indent = indent or str()
+        print(f".{indent} {self}")
+        if self.__data_handler:
+            self.__data_handler._print(indent + "  ")
+
     def connect_data_handler(self, data_handler: DataHandler) -> None:
         assert not self.__data_handler
         self.__data_handler = data_handler
@@ -2476,6 +2482,12 @@ class SplittingDataHandler(DataHandler):
         super().__init__()
         self.__data_handlers = list(data_handlers)
 
+    def _print(self, indent: typing.Optional[str] = None) -> None:
+        indent = indent or str()
+        print(f".{indent} {self}")
+        for data_handler in self.__data_handlers:
+            data_handler._print(indent + "  ")
+
     def handle_data_available(self, packet: DataStreamEventArgs) -> None:
         for data_handler in self.__data_handlers:
             data_handler.handle_data_available(packet)
@@ -2491,6 +2503,12 @@ class SerialDataHandler(DataHandler):
         self.__data_handlers = list[DataHandler]()
         self.__counts = list[int]()
         self.__indexes = dict[Channel, int]()
+
+    def _print(self, indent: typing.Optional[str] = None) -> None:
+        indent = indent or str()
+        print(f".{indent} {self}")
+        for data_handler, count in zip(self.__data_handlers, self.__counts):
+            data_handler._print(indent + "  " + f"{count:2d} ")
 
     def add_data_handler(self, data_handler: DataHandler, count: int) -> None:
         self.__data_handlers.append(data_handler)
