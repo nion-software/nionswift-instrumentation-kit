@@ -1199,7 +1199,7 @@ class SequenceDataStream(CollectedDataStream):
         if self.__include_sum:
             accumulated_framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()))
             accumulated_framed_data_handler.connect_data_handler(data_handler)
-            accumulated_data_handler = AccumulatedDataHandler(True)
+            accumulated_data_handler = AccumulatedDataHandler()
             accumulated_data_handler.connect_data_handler(accumulated_framed_data_handler)
             return SplittingDataHandler((data_handler, accumulated_data_handler))
         else:
@@ -2428,7 +2428,7 @@ class AccumulatedDataStream(ContainerDataStream):
         if self.__include_sum:
             accumulated_framed_data_handler = FramedDataHandler(Framer(DataAndMetadataDataChannel()), force_count=True)
             accumulated_framed_data_handler.connect_data_handler(data_handler)
-            accumulated_data_handler = AccumulatedDataHandler(True)
+            accumulated_data_handler = AccumulatedDataHandler()
             accumulated_data_handler.connect_data_handler(accumulated_framed_data_handler)
             data_handlers.append(accumulated_data_handler)
 
@@ -2905,11 +2905,10 @@ class SequentialDataHandler(DataHandler):
 
 
 class AccumulatedDataHandler(DataHandler):
-    def __init__(self, do_rename: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.__data_channel = DataAndMetadataDataChannel()
         self.__dest_indexes = dict[Channel, int]()
-        self.__do_rename = do_rename
         # handle the count_frame state. the first pass through the first frame should be counted. subsequent frames
         # should not be counted. since the first frame is only indicated by the slice start being 0, we need to keep
         # count_frame on until another "first slice" is received. use these two dictionaries to track that state per
@@ -2954,7 +2953,7 @@ class AccumulatedDataHandler(DataHandler):
                                                 sequence_slices[1:], dest_slice, data_metadata)
             data_channel_data = self.__data_channel.get_data(channel).data
             assert data_channel_data is not None
-            new_channel = channel if not self.__do_rename else Channel(*channel.segments, "sum")
+            new_channel = Channel(*channel.segments, "sum")
             new_data_stream_event = DataStreamEventArgs(new_channel, data_metadata,
                                                         data_channel_data, None, new_source_slice,
                                                         data_stream_event.state)
