@@ -439,6 +439,9 @@ class DataStreamEventArgs:
         # the type of update
         self.update_in_place = update_in_place
 
+    def __repr__(self) -> str:
+        return f"{self.channel} {self.state} {self.count=} {self.source_data.shape=} {self.source_slice=} {self.data_metadata.data_shape=} {self.data_metadata.data_descriptor=} {self.reset_frame=} {self.count_frame=} {self.update_in_place=}"
+
     @property
     def total_bytes(self) -> int:
         """Return the total bytes contained in this packet."""
@@ -2450,6 +2453,7 @@ class DataHandler:
 
     def __init__(self) -> None:
         self.__data_handler: typing.Optional[DataHandler] = None
+        self._trace_send_packet = False
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
@@ -2465,6 +2469,8 @@ class DataHandler:
         raise NotImplementedError()
 
     def send_packet(self, packet: DataStreamEventArgs) -> None:
+        if self._trace_send_packet:
+            print(f"Send packet: {self} {packet}")
         if self.__data_handler:
             self.__data_handler.handle_data_available(packet)
 
