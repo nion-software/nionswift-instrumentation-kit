@@ -677,8 +677,14 @@ class DataStream:
 
     def abort_stream(self) -> None:
         """Abort the stream. Called to stop the stream. Also called during exceptions."""
-        self._abort_stream()
-        self.is_aborted = True
+        try:
+            self._abort_stream()
+        except Exception as e:
+            logging.warning(f"Error ignored during aborting stream {self}: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.is_aborted = True
 
     def _abort_stream(self) -> None:
         pass
