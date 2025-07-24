@@ -3241,8 +3241,9 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
         if device_controller:
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, None)
             action_delegate = ValueControllersActionValueController([value_controller])
+            channel_names = device_data_stream.channel_names
             device_data_stream = SequenceDataStream(ActionDataStream(device_data_stream, action_delegate), self.__control_values.shape[0])
-            device_data_stream.channel_names = device_data_stream.channel_names
+            device_data_stream.channel_names = channel_names
             device_data_stream.title = _("Series")
         return device_data_stream
 
@@ -3266,11 +3267,12 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
             axis = typing.cast(STEMController.STEMDeviceController, device_map["stem"]).stem_controller.resolve_axis(axis_id)
             value_controller = ControlCustomizationValueController(device_controller, control_customization, self.__control_values, axis)
             action_delegate = ValueControllersActionValueController([value_controller])
+            channel_names = device_data_stream.channel_names
             device_data_stream = CollectedDataStream(
                 ActionDataStream(device_data_stream, action_delegate),
                 self.__control_values.shape[0:2],
                 (Calibration.Calibration(), Calibration.Calibration()))
-            device_data_stream.channel_names = device_data_stream.channel_names
+            device_data_stream.channel_names = channel_names
             device_data_stream.title = _("Tableau")
         return device_data_stream
 
