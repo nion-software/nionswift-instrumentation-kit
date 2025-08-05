@@ -3159,7 +3159,6 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__instrument_controller = instrument_controller
         self.__camera_device = camera_device
         self.__config = config
-        self.__last_calibration_value_dict = dict[str, typing.Any]()
 
     def __construct_suffix(self) -> str:
         control = self.__config.get("calibrationModeIndexControl", None)
@@ -3238,6 +3237,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         if key + "_value" in calibration_controls:
             return calibration_controls.get(key + "_value")
         return None
+
 
 def update_camera_properties(properties: typing.MutableMapping[str, typing.Any],
                              frame_parameters: CameraFrameParameters, hardware_source_id: str, display_name: str,
