@@ -42,6 +42,7 @@ from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.utils import Stream
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -920,6 +921,8 @@ class CameraDevice3(typing.Protocol):
 class InstrumentController(typing.Protocol):
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]: ...
+
+    def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]: ...
 
     def get_value(self, value_id: str, default_value: typing.Optional[float] = None) -> typing.Optional[float]: ...
 
@@ -3154,6 +3157,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__instrument_controller = instrument_controller
         self.__camera_device = camera_device
         self.__config = config
+        self.__last_calibration_value_dict = dict[str, typing.Any]()
 
     def __construct_suffix(self) -> str:
         control = self.__config.get("calibrationModeIndexControl", None)
@@ -3174,16 +3178,12 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         scale_control_key = prefix + "ScaleControl" + suffix
         scale_control = self.__config.get(scale_control_key, self.__config.get((scale_control_key).lower(), None))
         if scale_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
-            if valid:
-                scale = value
+            scale = self.__get_latest_value(self.__instrument_controller, typing.cast(str, scale_control))
         offset = None
         offset_control_key = prefix + "OffsetControl" + suffix
         offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
-            if valid:
-                offset = value
+            offset = self.__get_latest_value(self.__instrument_controller, typing.cast(str, offset_control))
         units_key = prefix + "Units" + suffix
         units = self.__config.get(units_key, self.__config.get((units_key).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
@@ -3223,11 +3223,22 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
         control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
         if control_name:
-            valid, value = instrument_controller.TryGetVal(control_name)
-            if valid:
-                return value
+            return self.__get_latest_value(instrument_controller, control_name)
         if key + "_value" in calibration_controls:
             return calibration_controls.get(key + "_value")
+        return None
+
+    def __get_latest_value(self, instrument_controller: InstrumentController, name: str) -> float | None:
+        if name:
+            try:
+                stream = instrument_controller.get_control_value_stream(name)
+                value = stream.value
+                if value:
+                    self.__last_calibration_value_dict[name] = value
+            except Stream.StaleStreamException as e:
+                # Failed to read stream
+                logging.debug(f'Failed to read calibration value {name}')
+            return self.__last_calibration_value_dict.get(name)
         return None
 
 
