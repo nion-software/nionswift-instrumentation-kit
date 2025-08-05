@@ -42,6 +42,7 @@ from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.utils import Stream
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -920,6 +921,8 @@ class CameraDevice3(typing.Protocol):
 class InstrumentController(typing.Protocol):
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]: ...
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[STEMController.TryValue[float]]: ...
 
     def get_value(self, value_id: str, default_value: typing.Optional[float] = None) -> typing.Optional[float]: ...
 
@@ -3155,18 +3158,24 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__camera_device = camera_device
         self.__config = config
 
+    def __get_value_non_blocking(self, control_name: str) -> STEMController.TryValue[float] | None:
+        # this method makes use of the fact that streams are cached for a few seconds, so repeatedly
+        # calling this during view mode will not have significant overhead.
+        return self.__instrument_controller.get_control_try_value_stream(control_name).value
+
     def __construct_suffix(self) -> str:
-        control = self.__config.get("calibrationModeIndexControl", None)
+        control = self.__config.get("calibrationModeIndexControl", str())
         if control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
-            if valid:
-                return str(int(value or 0))
+            try_value = self.__get_value_non_blocking(control)
+            if try_value and try_value.value is not None:
+                return str(int(try_value.value))
             return "0"
-        control = self.__config.get("calibrationModeIndexControl".lower(), None)
+        control = self.__config.get("calibrationModeIndexControl".lower(), str())
         if control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, control))
-            if valid and value:
-                return str(int(value))
+            try_value = self.__get_value_non_blocking(control)
+            # note, for backwards compatibility, the logic here is different.
+            if try_value and try_value.value:
+                return str(int(try_value.value))
         return str()
 
     def __construct_calibration(self, prefix: str, suffix: str, relative_scale: float = 1.0, is_center_origin: bool = False, data_len: int = 0) -> Calibration.Calibration:
@@ -3174,16 +3183,16 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         scale_control_key = prefix + "ScaleControl" + suffix
         scale_control = self.__config.get(scale_control_key, self.__config.get((scale_control_key).lower(), None))
         if scale_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
-            if valid:
-                scale = value
+            try_scale_value = self.__get_value_non_blocking(scale_control)
+            if try_scale_value and try_scale_value.value is not None:
+                scale = try_scale_value.value
         offset = None
         offset_control_key = prefix + "OffsetControl" + suffix
         offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
-            if valid:
-                offset = value
+            try_offset_value = self.__get_value_non_blocking(scale_control)
+            if try_offset_value and try_offset_value.value is not None:
+                offset = try_offset_value.value
         units_key = prefix + "Units" + suffix
         units = self.__config.get(units_key, self.__config.get((units_key).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
@@ -3223,9 +3232,9 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
         control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
         if control_name:
-            valid, value = instrument_controller.TryGetVal(control_name)
-            if valid:
-                return value
+            try_control_value = self.__get_value_non_blocking(control_name)
+            if try_control_value and try_control_value.value is not None:
+                return try_control_value.value
         if key + "_value" in calibration_controls:
             return calibration_controls.get(key + "_value")
         return None
