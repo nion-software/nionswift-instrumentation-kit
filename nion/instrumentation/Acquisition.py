@@ -3044,6 +3044,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             error_handler(e)
         else:
             import traceback
+            traceback.print_stack()
             traceback.print_exc()
 
 

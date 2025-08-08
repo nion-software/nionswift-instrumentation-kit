@@ -48,6 +48,8 @@ _NDArray = numpy.typing.NDArray[typing.Any]
 
 _ = gettext.gettext
 
+SYNCHRONIZED_SCAN_TIMEOUT = 20.0  # not typed as 'final', since this is changed during testing
+
 
 class ParametersBase:
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -1431,7 +1433,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                           camera_frame_parameters: camera_base.CameraFrameParameters,
                           section_height: typing.Optional[int] = None,
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
-                          scan_count: int = 1) -> GrabSynchronizedResult:
+                          scan_count: int = 1,
+                          error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> GrabSynchronizedResult:
         synchronized_scan_data_stream = make_synchronized_scan_data_stream(scan_hardware_source=self,
                                                                            scan_frame_parameters=copy.copy(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
@@ -1450,7 +1453,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__scan_acquisition = scan_acquisition
         try:
             scan_acquisition.prepare_acquire()
-            scan_acquisition.acquire()
+            scan_acquisition.acquire(error_handler=error_handler)
             scan_acquisition.restore_device_state()
             if scan_acquisition.is_error:
                 raise RuntimeError("grab_synchronized failed.")
@@ -2531,22 +2534,48 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
 
 class SynchronizedDataStream(Acquisition.ContainerDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
-                 camera_hardware_source: camera_base.CameraHardwareSource, section_count: int) -> None:
+                 camera_hardware_source: camera_base.CameraHardwareSource, line_time: float, section_count: int) -> None:
         super().__init__(data_stream)
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
+        self.__line_time = line_time
         self.__section_count = section_count
         self.__stem_controller = scan_hardware_source.stem_controller
+        self.__camera_packet_time = time.perf_counter()
+        self.__scan_packet_time = time.perf_counter()
+        self.__scan_packet_counts = dict[Acquisition.Channel, int]()
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SynchronizedDataStream:
-        return SynchronizedDataStream(copy.deepcopy(self.data_stream), self.__scan_hardware_source, self.__camera_hardware_source, self.__section_count)
+        return SynchronizedDataStream(copy.deepcopy(self.data_stream), self.__scan_hardware_source, self.__camera_hardware_source, self.__line_time, self.__section_count)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
         self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source,
                                                          camera=self.__camera_hardware_source)
         self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
         self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
+        self.__camera_packet_time = time.perf_counter()
+        self.__scan_packet_time = time.perf_counter()
         super()._prepare_stream(stream_args, index_stack, **kwargs)
+
+    def _handle_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+        # observe incoming data and mark the last times that a camera or scan packet arrives.
+        # this facilitates an extra check to see if scan data is arriving in a timely manner.
+        # if it is not, an exception can be raised in _advance_stream to indicate this problem.
+        channel = data_stream_event.channel
+        if channel.segments[0] == self.__camera_hardware_source.hardware_source_id:
+            self.__camera_packet_time = time.perf_counter()
+        elif channel.segments[0] == self.__scan_hardware_source.hardware_source_id:
+            self.__scan_packet_time = time.perf_counter()
+            self.__scan_packet_counts[channel] = self.__scan_packet_counts.get(channel, 0) + 1
+        super()._handle_data_available(data_stream_event)
+
+    def _advance_stream(self) -> None:
+        if time.perf_counter() - self.__scan_packet_time > max(self.__line_time * 4, SYNCHRONIZED_SCAN_TIMEOUT):
+            if any(c >= 1 for c in self.__scan_packet_counts.values()):
+                raise RuntimeError(_("Scan data is arriving intermittently. Check the sync cables."))
+            else:
+                raise RuntimeError(_("Scan data is not arriving. Check the sync cables."))
+        super()._advance_stream()
 
     def _finish_stream(self) -> None:
         super()._finish_stream()
@@ -2591,9 +2620,9 @@ def make_synchronized_scan_data_stream(
     # calculate the flyback pixels by using the scan device. this is fragile because the exposure
     # for a particular section gets calculated here and in ScanDataStream.prepare. if they
     # don't match, the total pixel count for the camera will not match the scan pixels.
-    scan_paramaters_copy = copy.deepcopy(scan_frame_parameters)
-    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_paramaters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
-    flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_paramaters_copy)
+    scan_parameters_copy = copy.deepcopy(scan_frame_parameters)
+    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_parameters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
+    flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_parameters_copy)
     camera_data_stream = camera_base.CameraDataStream(camera_hardware_source, camera_frame_parameters,
                                                       camera_base.CameraDeviceSynchronizedStreamDelegate(
                                                                   camera_hardware_source,
@@ -2636,7 +2665,8 @@ def make_synchronized_scan_data_stream(
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
-    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, section_count)
+    line_time = (scan_parameters_copy.scan_size.width + flyback_pixels) * camera_exposure_ms / 1000
+    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, line_time, section_count)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         drift_tracker = scan_hardware_source.drift_tracker

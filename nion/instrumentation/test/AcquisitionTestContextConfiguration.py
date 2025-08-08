@@ -23,8 +23,9 @@ from nion.utils import Registry
 
 
 class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
-    def __init__(self, scan_data_generator: ScanDevice.ScanDataGeneratorLike) -> None:
+    def __init__(self, scan_data_generator: ScanDevice.ScanDataGeneratorLike, *, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> None:
         self.__scan_data_generator = scan_data_generator
+        self.__advance_pixel_filter = advance_pixel_filter
         self.__blanker_signal_condition = threading.Condition()
         self.__advance_pixel_lock = threading.RLock()
         self.__current_pixel_flat = 0
@@ -74,17 +75,18 @@ class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
 
     def _advance_pixel(self, n: int) -> None:
         with self.__advance_pixel_lock:
-            next_line = (self.__current_pixel_flat + n) // self.__scan_shape_pixels.width
-            if next_line > self.__current_line:
-                self.__n_flyback_pixels = 0
-                self.__current_line = next_line
-                with self.__blanker_signal_condition:
-                    self.__blanker_signal_condition.notify_all()
-            if self.__n_flyback_pixels < self.flyback_pixels:
-                new_flyback_pixels = min(self.flyback_pixels - self.__n_flyback_pixels, n)
-                n -= new_flyback_pixels
-                self.__n_flyback_pixels += new_flyback_pixels
-            self.__current_pixel_flat += n
+            if not callable(self.__advance_pixel_filter) or self.__advance_pixel_filter(n):
+                next_line = (self.__current_pixel_flat + n) // self.__scan_shape_pixels.width
+                if next_line > self.__current_line:
+                    self.__n_flyback_pixels = 0
+                    self.__current_line = next_line
+                    with self.__blanker_signal_condition:
+                        self.__blanker_signal_condition.notify_all()
+                if self.__n_flyback_pixels < self.flyback_pixels:
+                    new_flyback_pixels = min(self.flyback_pixels - self.__n_flyback_pixels, n)
+                    n -= new_flyback_pixels
+                    self.__n_flyback_pixels += new_flyback_pixels
+                self.__current_pixel_flat += n
 
     def advance_pixel(self) -> None:
         if self.external_clock:
@@ -95,9 +97,9 @@ class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
 
 
 class ScanModule(scan_base.ScanModule):
-    def __init__(self, instrument: InstrumentDevice.Instrument, device_id: str, scan_data_generator: ScanDevice.ScanDataGeneratorLike) -> None:
+    def __init__(self, instrument: InstrumentDevice.Instrument, device_id: str, scan_data_generator: ScanDevice.ScanDataGeneratorLike, *, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> None:
         self.stem_controller_id = instrument.instrument_id
-        self.device = ScanDevice.Device(device_id, "Scan", instrument, ScanBoxSimulator(scan_data_generator))
+        self.device = ScanDevice.Device(device_id, "Scan", instrument, ScanBoxSimulator(scan_data_generator, advance_pixel_filter=advance_pixel_filter))
         setattr(self.device, "priority", 20)
         scan_modes = (
             scan_base.ScanSettingsMode("Fast", "fast", ScanDevice.ScanFrameParameters(pixel_size=(256, 256), pixel_time_us=1, fov_nm=instrument.stage_size_nm * 0.1)),
@@ -209,7 +211,7 @@ class ScanDataGenerator(ScanDevice.ScanDataGeneratorLike):
 
 
 class AcquisitionTestContextConfiguration:
-    def __init__(self) -> None:
+    def __init__(self, *, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> None:
         configuration_location = pathlib.Path.cwd() / "test_data"
         if configuration_location.exists():
             shutil.rmtree(configuration_location)
@@ -219,7 +221,7 @@ class AcquisitionTestContextConfiguration:
         self.ronchigram_camera_device_id = "test_ronchigram_camera"
         self.eels_camera_device_id = "test_eels_camera"
         self.instrument = InstrumentDevice.Instrument(self.instrument_id, ValueManager(), AxisManager())
-        self.scan_module = ScanModule(self.instrument, "test_scan_device", ScanDataGenerator())
+        self.scan_module = ScanModule(self.instrument, "test_scan_device", ScanDataGenerator(), advance_pixel_filter=advance_pixel_filter)
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id, 0.005)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id, 0.005)
         self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
