@@ -100,8 +100,8 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         self.__exit_stack.append(ex)
 
 
-def test_context(configuration: typing.Optional[AcquisitionTestContextConfigurationLike] = None, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False, is_app: bool = False) -> AcquisitionTestContext:
-    configuration_ = configuration or AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration()
+def test_context(configuration: typing.Optional[AcquisitionTestContextConfigurationLike] = None, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False, is_app: bool = False, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> AcquisitionTestContext:
+    configuration_ = configuration or AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration(advance_pixel_filter=advance_pixel_filter)
     return AcquisitionTestContext(configuration_, is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras, is_app=is_app)
 
 

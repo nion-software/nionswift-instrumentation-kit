@@ -3,7 +3,6 @@ import math
 import numpy
 import threading
 import time
-import typing
 import unittest
 import uuid
 import tempfile
@@ -11,12 +10,10 @@ import typing
 import pathlib
 
 from nion.data import DataAndMetadata
-from nion.swift import Application
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
-from nion.ui import TestUI
 from nion.utils import Geometry
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
@@ -81,8 +78,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
         self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
 
-    def __test_context(self, *, is_eels: bool = False) -> AcquisitionTestContext.AcquisitionTestContext:
-        return AcquisitionTestContext.test_context(is_eels=is_eels)
+    def __test_context(self, *, is_eels: bool = False, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> AcquisitionTestContext.AcquisitionTestContext:
+        return AcquisitionTestContext.test_context(is_eels=is_eels, advance_pixel_filter=advance_pixel_filter)
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)
@@ -178,6 +175,68 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIsNone(scans_and_spectrum_images)
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
+
+    def test_grab_synchronized_basic_eels_no_scan_data(self):
+        def advance_pixel_filter(n: int) -> bool:
+            return False
+
+        error_str = str()
+
+        def handle_error(e: Exception) -> None:
+            nonlocal error_str
+            error_str = str(e)
+
+        with self.__test_context(is_eels=True, advance_pixel_filter=advance_pixel_filter) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            old_scan_timeout = scan_base.SYNCHRONIZED_SCAN_TIMEOUT
+            scan_base.SYNCHRONIZED_SCAN_TIMEOUT = 1.0
+            try:
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, error_handler=handle_error)
+                self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
+            except Exception:
+                pass
+            finally:
+                scan_base.SYNCHRONIZED_SCAN_TIMEOUT = old_scan_timeout
+            self.assertTrue("not arriving" in error_str, f"{error_str=}")
+
+    def test_grab_synchronized_basic_eels_some_scan_data(self):
+        pixel_count = 0
+
+        def advance_pixel_filter(n: int) -> bool:
+            nonlocal pixel_count
+            pixel_count += n
+            return pixel_count < 12
+
+        error_str = str()
+
+        def handle_error(e: Exception) -> None:
+            nonlocal error_str
+            error_str = str(e)
+
+        with self.__test_context(is_eels=True, advance_pixel_filter=advance_pixel_filter) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            old_scan_timeout = scan_base.SYNCHRONIZED_SCAN_TIMEOUT
+            scan_base.SYNCHRONIZED_SCAN_TIMEOUT = 2.0
+            try:
+                scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters, error_handler=handle_error)
+                self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
+            except Exception:
+                pass
+            finally:
+                scan_base.SYNCHRONIZED_SCAN_TIMEOUT = old_scan_timeout
+            self.assertTrue("intermittent" in error_str, f"{error_str=}")
 
     def test_grab_synchronized_sequence_basic_eels(self):
         with self.__test_context(is_eels=True) as test_context:
