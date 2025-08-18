@@ -2572,9 +2572,9 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
     def _advance_stream(self) -> None:
         if time.perf_counter() - self.__scan_packet_time > max(self.__line_time * 4, SYNCHRONIZED_SCAN_TIMEOUT):
             if any(c >= 1 for c in self.__scan_packet_counts.values()):
-                raise RuntimeError(_("Scan data is arriving intermittently. Check the sync cables."))
+                raise RuntimeError(_("Scan data is arriving intermittently. Check the synchronization configuration (cables, routing, signal quality)."))
             else:
-                raise RuntimeError(_("Scan data is not arriving. Check the sync cables."))
+                raise RuntimeError(_("Scan data is not arriving. Check the synchronization configuration (cables, routing)."))
         super()._advance_stream()
 
     def _finish_stream(self) -> None:
