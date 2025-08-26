@@ -690,6 +690,8 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                                             camera_frame_parameters=camera_frame_parameters,
                                                                             section_height=2,
                                                                             scan_data_stream_functor=scan_mover_functor)
+            scan_mover_functor = None
+            drift_correction_functor = None
             self.assertEqual(3, scan_hardware_source.drift_tracker.measurement_count)
             self.assertTrue(1.4 < numpy.mean(scan_hardware_source.drift_tracker.drift_data_frame[2]) < 1.6)
 
@@ -734,6 +736,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 import time
                 time.sleep(1/200)
             t.join()
+            drift_correction_functor = None
             # ensure graphic is still the original one and hasn't flickered with a replacement
             self.assertEqual(drift_graphic, display_item.graphics[-1])
 
@@ -781,6 +784,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 import time
                 time.sleep(1/200)
             t.join()
+            drift_correction_functor = None
             # ensure graphic is still the original one and hasn't flickered with a replacement
             self.assertEqual(drift_graphic, display_item.graphics[-1])
 
@@ -1344,8 +1348,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             old_frame_parameters_d = camera_hardware_source.get_current_frame_parameters().as_dict()
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4)
-            maker = Acquisition.MakerDataStream(data_stream)
+            maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4))
             Acquisition.acquire(maker)
             maker = None
             self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
@@ -1359,8 +1362,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # perform a sequence acquisition. ensure get camera frame parameters are restored.
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=False, include_summed=True)
-            maker = Acquisition.MakerDataStream(data_stream)
+            maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=False, include_summed=True))
             Acquisition.acquire(maker)
             self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
             maker = None
@@ -1371,8 +1373,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # perform a sequence acquisition. ensure get camera frame parameters are restored.
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=False)
-            maker = Acquisition.MakerDataStream(data_stream)
+            maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=False))
             Acquisition.acquire(maker)
             self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
             maker = None
@@ -1383,8 +1384,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # perform a sequence acquisition. ensure get camera frame parameters are restored.
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
-            data_stream = camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=True)
-            maker = Acquisition.MakerDataStream(data_stream)
+            maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=True))
             Acquisition.acquire(maker)
             self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
             self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)

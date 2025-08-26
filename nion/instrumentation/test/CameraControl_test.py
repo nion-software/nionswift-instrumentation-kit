@@ -1177,6 +1177,8 @@ class TestCameraControlClass(unittest.TestCase):
             device_data_stream = acquisition_device.build_acquisition_device_data_stream(device_map)
             data_stream = acquisition_method.wrap_acquisition_device_data_stream(device_data_stream, device_map)
             self.assertEqual((4, 256, 256), list(Acquisition.acquire_immediate(data_stream).values())[0].data_shape)
+            data_stream = typing.cast(typing.Any, None)
+            device_data_stream = typing.cast(typing.Any, None)
 
     def __test_acq(self,
                    document_controller: DocumentController.DocumentController,

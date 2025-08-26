@@ -551,6 +551,7 @@ class DataStream:
 
     The is_error property is set if this stream or one of its contained streams enters an error state.
     """
+    count = 0
 
     def __init__(self, sequence_count: int = 1) -> None:
         super().__init__()
@@ -574,6 +575,12 @@ class DataStream:
         # data stream has a valid progress value.
         self.__total_bytes = 0
         self._attached_data_handler: weakref.ref[DataHandler] | None = None
+        DataStream.count += 1
+
+        def finalize() -> None:
+            DataStream.count -= 1
+
+        weakref.finalize(self, finalize)
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()
@@ -1721,8 +1728,16 @@ class DataChannel:
 
     An acquisition data channel receives partial data and must return full data when required.
     """
+    count = 0
+
     def __init__(self) -> None:
         super().__init__()
+        DataChannel.count += 1
+
+        def finalize() -> None:
+            DataChannel.count -= 1
+
+        weakref.finalize(self, finalize)
 
     def prepare(self, channel_info_map: typing.Mapping[Channel, DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
@@ -2448,10 +2463,18 @@ class AccumulatedDataStream(ContainerDataStream):
 
 class DataHandler:
     """A data handler that can handle data available events and send packets to a connected data handler."""
+    count = 0
 
     def __init__(self) -> None:
         self.__data_handler: typing.Optional[DataHandler] = None
         self._trace_send_packet = False
+        DataHandler.count += 1
+
+        def finalize() -> None:
+            DataHandler.count -= 1
+
+        weakref.finalize(self, finalize)
+
 
     def _print(self, indent: typing.Optional[str] = None) -> None:
         indent = indent or str()

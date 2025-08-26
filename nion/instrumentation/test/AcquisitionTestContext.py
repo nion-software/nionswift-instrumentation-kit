@@ -3,8 +3,8 @@ import logging
 import typing
 import unittest
 
+from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
-from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
@@ -124,4 +124,7 @@ def end_leaks(test_case: unittest.TestCase) -> None:
     test_case.assertEqual(0, stem_controller.SubscanView.count)
     test_case.assertEqual(0, stem_controller.LineScanView.count)
     test_case.assertEqual(0, stem_controller.DriftView.count)
+    test_case.assertEqual(0, Acquisition.DataStream.count)
+    test_case.assertEqual(0, Acquisition.DataHandler.count)
+    test_case.assertEqual(0, Acquisition.DataChannel.count)
     TestContext.end_leaks(test_case)
