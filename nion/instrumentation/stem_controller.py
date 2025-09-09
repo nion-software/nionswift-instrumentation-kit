@@ -293,7 +293,7 @@ class ScanSpecifier:
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
 
-class ValueRequestItem(typing.Protocol):
+class TryValue(typing.Protocol):
     """
     Interface for a common value return pattern containing the last valid value, and an optional
     error value for any errors raised.  Clients should check whether an error has occurred if they
@@ -628,13 +628,13 @@ class STEMController(Observable.Observable):
         """
         raise NotImplementedError()
 
-    def get_control_value_stream_ex(self, control_name: str) -> Stream.AbstractStream[ValueRequestItem]:
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[TryValue]:
         """Return a stream of values for the given control.
         Returns a data structure containing last known good value and any current errors that may impact value reliability
 
         Example snippet (outputs to Output window, not script)::
 
-            stream = stem_controller.get_control_value_stream_ex("C10")
+            stream = stem_controller.get_control_try_value_stream("C10")
             listener = stream.value_stream.listen(lambda value: print(value.value))
 
         """
