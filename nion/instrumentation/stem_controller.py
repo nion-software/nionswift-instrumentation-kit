@@ -293,13 +293,14 @@ class ScanSpecifier:
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
 
-class TryValue(typing.Protocol):
+T = typing.TypeVar('T', covariant=True)
+class TryValue(typing.Protocol, typing.Generic[T]):
     """ A value and an exception.
 
     The value is valid only if exception is None.
     """
     @property
-    def value(self) -> typing.Any: ...
+    def value(self) -> T | None: ...
 
     @property
     def exception(self) -> Exception | None: ...
