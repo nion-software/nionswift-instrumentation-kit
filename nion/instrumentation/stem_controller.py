@@ -301,8 +301,17 @@ class TryValue(typing.Generic[_TryValueType]):
 
     The value is valid only if exception is None.
     """
-    value: _TryValueType | None
-    exception: Exception | None
+    def __init__(self, value: _TryValueType | None = None, exception: Exception | None = None) -> None:
+        self.__value = copy.deepcopy(value)
+        self.__exception = exception
+
+    @property
+    def value(self) -> _TryValueType | None:
+        return self.__value
+
+    @property
+    def exception(self) -> Exception | None:
+        return self.__exception
 
     @property
     def is_valid(self) -> bool:
