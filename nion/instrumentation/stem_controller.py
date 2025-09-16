@@ -293,19 +293,21 @@ class ScanSpecifier:
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
 
-class TryValue(typing.Protocol):
+
+_TryValueType = typing.TypeVar('_TryValueType', covariant=True)
+
+class TryValue(typing.Generic[_TryValueType]):
     """ A value and an exception.
 
     The value is valid only if exception is None.
     """
-    @property
-    def value(self) -> typing.Any: ...
+    value: _TryValueType | None
+    exception: Exception | None
 
     @property
-    def exception(self) -> Exception | None: ...
+    def is_valid(self) -> bool:
+        return self.exception is None
 
-    @property
-    def is_valid(self) -> bool: ...
 
 class STEMController(Observable.Observable):
     """An interface to a STEM microscope.
@@ -630,7 +632,7 @@ class STEMController(Observable.Observable):
         """
         raise NotImplementedError()
 
-    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[TryValue]:
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[TryValue[float]]:
         """Return a stream of TryValue objects for the given control.
 
         Return a data structure containing the latest value OR any current errors that may impact value reliability.
