@@ -305,6 +305,12 @@ class TryValue(typing.Generic[_TryValueType]):
         self.__value = copy.deepcopy(value)
         self.__exception = exception
 
+    def __repr__(self) -> str:
+        if self.is_valid:
+            return f"TryValue(value={self.__value} {type(self.__value)})"
+        else:
+            return f"TryValue(exception={self.__exception!r})"
+
     @property
     def value(self) -> _TryValueType | None:
         return self.__value
