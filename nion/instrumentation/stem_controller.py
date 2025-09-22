@@ -636,6 +636,11 @@ class STEMController(Observable.Observable):
         value_exists, value = self.TryGetVal(name)
         return "unknown" if value_exists else None
 
+    def does_control_exist(self, name: str) -> bool:
+        """Return True if the control exists."""
+        value_exists, value = self.TryGetVal(name)
+        return value_exists
+
     def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]:
         """Return a stream of values for the given control.
 
