@@ -3,6 +3,7 @@ from __future__ import annotations
 # standard libraries
 import asyncio
 import copy
+import dataclasses
 import functools
 import gettext
 import logging
@@ -29,22 +30,27 @@ from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
+from nion.swift.model import DocumentModel
+from nion.swift.model import Feature
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
-from nion.ui import MouseTrackingCanvasItem
-from nion.ui import UserInterface
 from nion.ui import Declarative
-from nion.ui import Widgets
+from nion.ui import MouseTrackingCanvasItem
 from nion.ui import PreferencesDialog
+from nion.ui import UserInterface
+from nion.ui import Widgets
+from nion.ui import Window
+from nion.utils import Binding
 from nion.utils import Converter
 from nion.utils import Geometry
+from nion.utils import ListModel
 from nion.utils import Model
+from nion.utils import Observable
 from nion.utils import Registry
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
     from nion.swift.model import DisplayItem
-    from nion.swift.model import DocumentModel
     from nion.swift.model import Persistence
     from nion.ui import DrawingContext
     from nion.utils import Event
@@ -1744,10 +1750,1098 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         return False
 
 
-class ScanControlPanel(Panel.Panel):
+class DataItemReferenceThumbnailWidget(DataItemThumbnailWidget.ThumbnailWidget):
+    """Thumbnail widget to display the thumbnail for a data item reference.
+
+    The data_item_reference property is used to set the data item reference to display and supports binding.
+
+    The document_controller property also needs to be set, but is not bindable.
+    """
+
+    def __init__(self, ui: UserInterface.UserInterface, size: Geometry.IntSize, properties: Persistence.PersistentDictType | None = None) -> None:
+        super().__init__(ui, None, size, properties)
+        self.__data_item_reference: DocumentModel.DocumentModel.DataItemReference | None = None
+        self.__document_controller: DocumentController.DocumentController | None = None
+
+        def get_data_item_reference() -> DocumentModel.DocumentModel.DataItemReference | None:
+            return self.__data_item_reference
+
+        def set_data_item_reference(value: DocumentModel.DocumentModel.DataItemReference | None) -> None:
+            self.__data_item_reference = value
+            self.__update()
+
+        self.__data_item_reference_binding_helper = UserInterface.BindablePropertyHelper[DocumentModel.DocumentModel.DataItemReference | None](get_data_item_reference, set_data_item_reference)
+
+        self.on_drag = self.drag
+
+    def close(self) -> None:
+        self.__data_item_reference_binding_helper.close()
+        self.__data_item_reference_binding_helper = typing.cast(typing.Any, None)
+        super().close()
+
+    def __update(self) -> None:
+        # when the document controller (window) or data item reference changes, update the thumbnail source.
+        if self.__document_controller and self.__data_item_reference:
+            data_item_reference = self.__data_item_reference
+            thumbnail_source = DataItemThumbnailWidget.DataItemReferenceThumbnailSource(self.__document_controller, data_item_reference)
+            self.set_thumbnail_source(thumbnail_source)
+
+    @property
+    def data_item_reference(self) -> DocumentModel.DocumentModel.DataItemReference | None:
+        return self.__data_item_reference_binding_helper.value
+
+    @data_item_reference.setter
+    def data_item_reference(self, data_item_reference: DocumentModel.DocumentModel.DataItemReference | None) -> None:
+        self.__data_item_reference_binding_helper.value = data_item_reference
+
+    def bind_data_item_reference(self, binding: Binding.Binding) -> None:
+        self.__data_item_reference_binding_helper.bind_value(binding)
+
+    def unbind_data_item_reference(self) -> None:
+        self.__data_item_reference_binding_helper.unbind_value()
+
+    @property
+    def document_controller(self) -> DocumentController.DocumentController | None:
+        return self.__document_controller
+
+    @document_controller.setter
+    def document_controller(self, document_controller: DocumentController.DocumentController | None) -> None:
+        self.__document_controller = document_controller
+        self.__update()
+
+
+class DeclarativeDataItemReferenceThumbnailFactory:
+    """Declarative factory for the DataItemReferenceThumbnailWidget.
+
+    Clients should create instances via the create_data_item_reference_thumbnail() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.data-item-reference-thumbnail"
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: Window.Window | None, d: Declarative.UIDescription, handler: Declarative.HandlerLike, finishes: typing.List[typing.Callable[[], None]]) -> UserInterface.Widget | None:
+        if d_type == DeclarativeDataItemReferenceThumbnailFactory.WIDGET_TYPE:
+            properties = Declarative.construct_sizing_properties(d)
+
+            widget = DataItemReferenceThumbnailWidget(ui, size=Geometry.IntSize(properties.get("height", 48), properties.get("width", 48)), properties=properties)
+
+            if handler:
+                Declarative.connect_name(widget, d, handler)
+                Declarative.connect_reference_value(widget, d, handler, "data_item_reference", finishes)
+                Declarative.connect_reference_value(widget, d, handler, "document_controller", finishes)
+                Declarative.connect_attributes(widget, d, handler, finishes)
+
+            return widget
+
+        return None
+
+    @staticmethod
+    def create_data_item_reference_thumbnail(*,
+                                             window: typing.Optional[Declarative.UIIdentifier],
+                                             data_item_reference: typing.Optional[Declarative.UIIdentifier],
+                                             **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        return {
+            "type": DeclarativeDataItemReferenceThumbnailFactory.WIDGET_TYPE,
+            "document_controller": window,
+            "data_item_reference": data_item_reference,
+            "width": 48,
+            "height": 48,
+        }
+
+
+# register the declarative factory
+Registry.register_component(DeclarativeDataItemReferenceThumbnailFactory(), {"declarative_constructor"})
+
+
+class CharButtonFactory:
+    """Declarative factory for the character button (scan control panel specific).
+
+    Clients should create instances via the create_char_button() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.char-button"
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: typing.Optional[Window.Window],
+                  d: Declarative.UIDescription, handler: Declarative.HandlerLike,
+                  finishes: typing.List[typing.Callable[[], None]]) -> typing.Optional[UserInterface.Widget]:
+        if d_type == CharButtonFactory.WIDGET_TYPE:
+            text = d["text"]
+            canvas_item = CanvasItem.TextButtonCanvasItem(text)
+            # canvas_item.text_font = "normal 13px serif"
+            canvas_item.padding = Geometry.IntSize(canvas_item.padding.height, 0)
+            canvas_item.size_to_content(ui.get_font_metrics)
+            widget = ui.create_canvas_widget(properties={"height": canvas_item.sizing.preferred_height, "width": canvas_item.sizing.preferred_width})
+            widget.canvas_item.add_canvas_item(canvas_item)
+            if handler:
+                Declarative.connect_name(widget, d, handler)
+                Declarative.connect_attributes(widget, d, handler, finishes)
+                Declarative.connect_event(widget, canvas_item, d, handler, "on_clicked", [])
+            return widget
+        return None
+
+    @staticmethod
+    def create_char_button(*, text: Declarative.UILabel | None = None, name: Declarative.UIIdentifier | None = None,
+                           on_clicked: Declarative.UICallableIdentifier | None = None,
+                           **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        return {
+            "type": CharButtonFactory.WIDGET_TYPE,
+            "text": text,
+            "on_clicked": on_clicked,
+            "width": 14
+        }
+
+
+Registry.register_component(CharButtonFactory(), {"declarative_constructor"})
+
+
+class ChannelModel(Observable.Observable):
+    """Model for a scan channel.
+
+    This model observes both scan hardware source channel_state_changed_event and stem_controller
+    property_changed_event and updates its properties when either changes. The stem_controller property_changed_event
+    is observed to track subscan and line scan state changes.
+
+    The channel model provides the observable properties:
+    - channel_id
+    - name
+    - enabled
+    - data_item_reference
+
+    The data item reference is updated when the subscan or line scan state changes and will reflect the
+    appropriate data item for the channel and state. The document model is required to get the data item reference.
+
+    State changes from the scan hardware source may occur on a different thread so the event loop is used to marshal
+    property change notifications to the main thread.
+    """
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int, document_model: DocumentModel.DocumentModel, event_loop: asyncio.AbstractEventLoop) -> None:
+        super().__init__()
+        self.__scan_hardware_source = scan_hardware_source
+        self.__document_model = document_model
+        self.__event_loop = event_loop
+        self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
+        self.__property_changed_event_listener = self.__scan_hardware_source.stem_controller.property_changed_event.listen(self.__handle_property_changed)
+        self.__name = str()
+        self.__channel_index = channel_index
+        self.__enabled = False
+        self.__channel_id = self.__scan_hardware_source.get_channel_id(channel_index) or str()
+        self.__actual_channel_id: str | None = None
+        self.__data_item_reference: DocumentModel.DocumentModel.DataItemReference | None = None
+        self.__pending_call_lock = threading.RLock()
+        self.__pending_call: typing.Optional[asyncio.Handle] = None
+        self.__handle_state_changed_on_ui_thread()
+
+    def close(self) -> None:
+        with self.__pending_call_lock:
+            if self.__pending_call is not None:
+                self.__pending_call.cancel()
+            self.__pending_call = None
+            self.__channel_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__property_changed_event_listener = typing.cast(typing.Any, None)
+
+    def __handle_state_changed_on_ui_thread(self) -> None:
+        channel_name = self.__scan_hardware_source.get_channel_name(self.__channel_index) or str()
+        channel_enabled = self.__scan_hardware_source.get_channel_enabled(self.__channel_index)
+        if self.__name != channel_name:
+            self.__name = channel_name
+            self.notify_property_changed("name")
+        if self.__enabled != channel_enabled:
+            self.__enabled = channel_enabled
+            self.notify_property_changed("enabled")
+        subscan_state = self.__scan_hardware_source.stem_controller.subscan_state
+        line_scan_state = self.__scan_hardware_source.stem_controller.line_scan_state
+        is_subscan_channel = subscan_state == stem_controller.SubscanState.ENABLED or line_scan_state == stem_controller.LineScanState.ENABLED
+        actual_channel_id = self.__channel_id if not is_subscan_channel else self.__channel_id + "_subscan"
+        if actual_channel_id != self.__actual_channel_id:
+            self.__actual_channel_id = actual_channel_id
+            self.__data_item_reference = self.__document_model.get_data_item_reference(self.__document_model.make_data_item_reference_key(self.__scan_hardware_source.hardware_source_id, actual_channel_id))
+            self.notify_property_changed("data_item_reference")
+
+    def __handle_state_changed(self) -> None:
+        # use async to call handle_property_changed on the main thread if an existing call is not pending.
+        if threading.current_thread() != threading.main_thread():
+            with self.__pending_call_lock:
+                if not self.__pending_call:
+                    self.__pending_call = self.__event_loop.call_soon_threadsafe(self.__handle_state_changed_on_ui_thread)
+        else:
+            self.__handle_state_changed_on_ui_thread()
+
+    def __channel_state_changed(self, channel_index: int, channel_id: str, name: str, enabled: bool) -> None:
+        if channel_index == self.__channel_index:
+            self.__handle_state_changed()
+
+    def __handle_property_changed(self, property_name: str) -> None:
+        self.__handle_state_changed()
+
+    @property
+    def channel_id(self) -> str:
+        return self.__channel_id
+
+    @property
+    def name(self) -> str:
+        return self.__name
+
+    @property
+    def enabled(self) -> bool:
+        return self.__enabled
+
+    @enabled.setter
+    def enabled(self, enabled: bool) -> None:
+        self.__scan_hardware_source.set_channel_enabled(self.__channel_index, enabled)
+
+    @property
+    def data_item_reference(self) -> DocumentModel.DocumentModel.DataItemReference | None:
+        return self.__data_item_reference
+
+
+class ChannelHandler(Declarative.Handler):
+    """Declarative handler for a scan channel.
+
+    Displays a thumbnail and a checkbox for enabling/disabling the channel.
+    """
+    def __init__(self, channel: ChannelModel, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource) -> None:
+        super().__init__()
+
+        self.document_controller = document_controller
+        self._channel = channel
+
+        thumbnail = DeclarativeDataItemReferenceThumbnailFactory.create_data_item_reference_thumbnail(window="@binding(document_controller)", data_item_reference="@binding(_channel.data_item_reference)")
+
+        u = Declarative.DeclarativeUI()
+
+        self.ui_view = u.create_column(
+            thumbnail,
+            u.create_check_box(text="@binding(_channel.name)", checked="@binding(_channel.enabled)"),
+            u.create_stretch()
+        )
+
+
+class ScanControlPanelModel(Observable.Observable):
+    """Model for the scan control panel.
+
+    The scan hardware source and stem controller directly represent the hardware.
+
+    The scan settings represent saved sets of scan settings (profiles).
+
+    Observes the scan hardware source for:
+    - scan settings profile changes (profile_index)
+    - scan settings current frame parameters changes (to track width, height, pixel time, fov, rotation)
+    - stem controller property changes (to track subscan and line scan state changes)
+    - scan hardware source data channel state changes (to track acquisition state for enabling/disabling buttons)
+    - scan hardware source acquisition state changes (to track acquisition state for enabling/disabling buttons)
+    - stem controller probe state changes (to track probe state text and position)
+    - scan hardware source channel state changes (to track channel enabled state)
+    - scan hardware source scan frame parameters changes (to track max fov color changes)
+    - scan hardware source max field of view stream changes (to track max fov color changes)
+
+    All observed changes are marshaled to the main thread using the document controller event loop through
+    __handle_state_changed which eventually calls __handle_state_changed_on_ui_thread.
+
+    __handle_state_changed_on_ui_thread updates all observable properties as needed and notifies property changes.
+
+    The following observable properties are provided:
+    - profiles_model (read only)
+    - profile_index (read/write)
+    - width_str (read/write)
+    - height_str (read/write)
+    - placeholder_height_str (read only)
+    - pixel_time_str (read/write)
+    - fov_str (read/write)
+    - rotation_deg_str (read/write)
+    - subscan_checkbox_enabled (read only)
+    - subscan_checkbox_checked (read/write)
+    - line_scan_checkbox_enabled (read only)
+    - line_scan_checkbox_checked (read/write)
+    - drift_controls_enabled (read only)
+    - drift_checkbox_checked (read/write)
+    - drift_settings_interval_str (read/write)
+    - drift_settings_interval_units_index (read/write)
+    - scan_button_enabled (read only)
+    - scan_button_title (read only)
+    - scan_abort_button_enabled (read only)
+    - record_button_enabled (read only)
+    - record_abort_button_enabled (read only)
+    - play_state_text (read only)
+    - probe_state_text (read only)
+    - probe_position_enabled (read/write)
+    - ac_line_sync_enabled (read/write)
+    - fov_label_color (read only)
+    - fov_label_tool_tip (read only)
+    - channels (read only)
+
+    The following methods are provided for modifying the model:
+    - increase_width()
+    - decrease_width()
+    - increase_height()
+    - decrease_height()
+    - increase_pixel_time()
+    - decrease_pixel_time()
+    - increase_fov()
+    - decrease_fov()
+    - handle_scan_button_clicked()
+    - handle_abort_button_clicked()
+    - handle_record_button_clicked()
+    - handle_record_abort_button_clicked()
+    """
+
+    def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, document_controller: DocumentController.DocumentController) -> None:
+        super().__init__()
+        self.__scan_hardware_source = scan_hardware_source
+        self.__document_controller = document_controller
+        self.__event_loop = document_controller.event_loop
+
+        stem_controller_ = self.__scan_hardware_source
+
+        self.__profile_changed_event_listener = self.__scan_hardware_source.scan_settings.profile_changed_event.listen(self.__update_profile_index)
+        self.__property_changed_event_listener = self.__scan_hardware_source.stem_controller.property_changed_event.listen(self.__handle_property_changed)
+        self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_settings.current_frame_parameters_changed_event.listen(self.__update_frame_parameters)
+        self.__data_channel_state_changed_event_listener = self.__scan_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
+        self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
+        self.__probe_state_changed_event_listener = stem_controller_.probe_state_changed_event.listen(self.__probe_state_changed)
+        self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
+        self.__scan_frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_frame_parameters_changed_event.listen(self.__scan_frame_parameters_changed)
+        self.__max_fov_stream_listener = self.__scan_hardware_source.max_field_of_view_nm_stream.value_stream.listen(self.__max_fov_changed)
+
+        self.__pending_call_lock = threading.RLock()
+        self.__pending_call: typing.Optional[asyncio.Handle] = None
+
+        self.profiles_model = ListModel.ListModel[str]()
+        self.profiles_model.append_item(_("Puma"))
+        self.profiles_model.append_item(_("Rabbit"))
+        self.profiles_model.append_item(_("Frame"))
+
+        self.channels = [ChannelModel(scan_hardware_source, i, document_controller.document_model, self.__event_loop) for i in range(scan_hardware_source.channel_count)]
+
+        self.__profile_index = 0
+        self.__frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__profile_index)
+        self.__width = 0
+        self.__height: int | None = None
+        self.__placeholder_height: int | None = None
+        self.__pixel_time_str = str()
+        self.__fov_str = str()
+        self.__rotation_deg_str = str()
+        self.__subscan_checkbox_enabled = True
+        self.__subscan_checkbox_checked = False
+        self.__line_scan_checkbox_enabled = True
+        self.__line_scan_checkbox_checked = False
+        self.__drift_controls_enabled = False
+        self.__drift_checkbox_checked = False
+        self.__drift_settings_interval_str: str | None = None
+        self.__drift_settings_interval_units_index = 0
+        self.__scan_button_enabled = False
+        self.__scan_button_title = _("Scan")
+        self.__scan_abort_button_enabled = False
+        self.__record_button_enabled = False
+        self.__record_abort_button_enabled = False
+        self.__play_state_text = map_channel_state_to_text["stopped"]
+        self.__probe_state_text = _("Parked")
+        self.__probe_position_enabled = False
+        self.__ac_line_sync_enabled = False
+        self.__fov_label_color = "black"
+        self.__fov_label_tool_tip = str()
+
+        self.__handle_state_changed_on_ui_thread()
+
+    def close(self) -> None:
+        while self.channels:
+            channel = self.channels.pop()
+            channel.close()
+        with self.__pending_call_lock:
+            if self.__pending_call is not None:
+                self.__pending_call.cancel()
+            self.__pending_call = None
+            self.__profile_changed_event_listener = typing.cast(typing.Any, None)
+            self.__property_changed_event_listener = typing.cast(typing.Any, None)
+            self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+            self.__data_channel_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__acquisition_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__probe_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__channel_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__scan_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
+            self.__max_fov_stream_listener = typing.cast(typing.Any, None)
+
+    def __handle_state_changed_on_ui_thread(self) -> None:
+        with self.__pending_call_lock:
+            self.__pending_call = None
+        profile_index = self.__scan_hardware_source.scan_settings.selected_profile_index
+        if profile_index != self.__profile_index:
+            self.__profile_index = profile_index
+            self.notify_property_changed("profile_index")
+        frame_parameters = self.__scan_hardware_source.get_current_frame_parameters()
+        self.__frame_parameters = frame_parameters
+        if self.__width != frame_parameters.pixel_size.width:
+            self.__width = frame_parameters.pixel_size.width
+            self.notify_property_changed("width_str")
+        if frame_parameters.pixel_size.width == frame_parameters.pixel_size.height:
+            if self.__height is not None:
+                if self.__height != frame_parameters.pixel_size.height:
+                    self.__height = frame_parameters.pixel_size.height
+                    self.notify_property_changed("height_str")
+                if self.__placeholder_height is not None:
+                    self.__placeholder_height = None
+                    self.notify_property_changed("placeholder_height_str")
+            else:
+                if self.__placeholder_height != frame_parameters.pixel_size.height:
+                    self.__placeholder_height = frame_parameters.pixel_size.height
+                    self.notify_property_changed("placeholder_height_str")
+        else:
+            if self.__height != frame_parameters.pixel_size.height:
+                self.__height = frame_parameters.pixel_size.height
+                self.notify_property_changed("height_str")
+            if self.__placeholder_height is not None:
+                self.__placeholder_height = None
+                self.notify_property_changed("placeholder_height_str")
+        pixel_time_str = f"{frame_parameters.pixel_time_us:.2f}"
+        if pixel_time_str != self.__pixel_time_str:
+            self.__pixel_time_str = pixel_time_str
+            self.notify_property_changed("pixel_time_str")
+        fov_str = f"{frame_parameters.fov_nm:.1f}"
+        if fov_str != self.__fov_str:
+            self.__fov_str = fov_str
+            self.notify_property_changed("fov_str")
+        rotation_deg_str = f"{frame_parameters.rotation_rad * 180.0 / math.pi:.1f}"
+        if rotation_deg_str != self.__rotation_deg_str:
+            self.__rotation_deg_str = rotation_deg_str
+            self.notify_property_changed("rotation_deg_str")
+        ac_line_sync_enabled = frame_parameters.ac_line_sync
+        if ac_line_sync_enabled != self.__ac_line_sync_enabled:
+            self.__ac_line_sync_enabled = ac_line_sync_enabled
+            self.notify_property_changed("ac_line_sync_enabled")
+        subscan_state = self.__scan_hardware_source.stem_controller.subscan_state
+        subscan_checkbox_enabled = subscan_state != stem_controller.SubscanState.INVALID
+        if subscan_checkbox_enabled != self.__subscan_checkbox_enabled:
+            self.__subscan_checkbox_enabled = subscan_checkbox_enabled
+            self.notify_property_changed("subscan_checkbox_enabled")
+        subscan_checkbox_checked = subscan_state == stem_controller.SubscanState.ENABLED
+        if subscan_checkbox_checked != self.__subscan_checkbox_checked:
+            self.__subscan_checkbox_checked = subscan_checkbox_checked
+            self.notify_property_changed("subscan_checkbox_checked")
+        line_scan_state = self.__scan_hardware_source.stem_controller.line_scan_state
+        line_scan_checkbox_enabled = line_scan_state != stem_controller.LineScanState.INVALID
+        if line_scan_checkbox_enabled != self.__line_scan_checkbox_enabled:
+            self.__line_scan_checkbox_enabled = line_scan_checkbox_enabled
+            self.notify_property_changed("line_scan_checkbox_enabled")
+        line_scan_checkbox_checked = line_scan_state == stem_controller.LineScanState.ENABLED
+        if line_scan_checkbox_checked != self.__line_scan_checkbox_checked:
+            self.__line_scan_checkbox_checked = line_scan_checkbox_checked
+            self.notify_property_changed("line_scan_checkbox_checked")
+        drift_controls_enabled = subscan_state != stem_controller.SubscanState.INVALID
+        if drift_controls_enabled != self.__drift_controls_enabled:
+            self.__drift_controls_enabled = drift_controls_enabled
+            self.notify_property_changed("drift_controls_enabled")
+        drift_channel_id = self.__scan_hardware_source.stem_controller.drift_channel_id
+        drift_region = self.__scan_hardware_source.stem_controller.drift_region
+        drift_checkbox_checked = drift_channel_id is not None and drift_region is not None
+        if drift_checkbox_checked != self.__drift_checkbox_checked:
+            self.__drift_checkbox_checked = drift_checkbox_checked
+            self.notify_property_changed("drift_checkbox_checked")
+        drift_settings = self.__scan_hardware_source.stem_controller.drift_settings
+        drift_settings_interval_str = Converter.IntegerToStringConverter().convert(drift_settings.interval)
+        if drift_settings_interval_str != self.__drift_settings_interval_str:
+            self.__drift_settings_interval_str = drift_settings_interval_str
+            self.notify_property_changed("drift_settings_interval_str")
+        drift_settings_interval_units_index = min(1, max(0, drift_settings.interval_units - 2))
+        if drift_settings_interval_units_index != self.__drift_settings_interval_units_index:
+            self.__drift_settings_interval_units_index = drift_settings_interval_units_index
+            self.notify_property_changed("drift_settings_interval_units_index")
+        channel_states = self.__scan_hardware_source.channel_states
+        is_playing = self.__scan_hardware_source.is_playing
+        is_recording = self.__scan_hardware_source.is_recording
+        is_any_channel_enabled = any(channel_state.enabled for channel_state in channel_states)
+        scan_button_enabled = is_any_channel_enabled
+        if scan_button_enabled != self.__scan_button_enabled:
+            self.__scan_button_enabled = scan_button_enabled
+            self.notify_property_changed("scan_button_enabled")
+        scan_button_title = _("Stop") if is_playing else _("Scan")
+        if scan_button_title != self.__scan_button_title:
+            self.__scan_button_title = scan_button_title
+            self.notify_property_changed("scan_button_title")
+        scan_abort_button_enabled = is_playing
+        if scan_abort_button_enabled != self.__scan_abort_button_enabled:
+            self.__scan_abort_button_enabled = scan_abort_button_enabled
+            self.notify_property_changed("scan_abort_button_enabled")
+        record_button_enabled = not is_recording and is_any_channel_enabled
+        if record_button_enabled != self.__record_button_enabled:
+            self.__record_button_enabled = record_button_enabled
+            self.notify_property_changed("record_button_enabled")
+        record_abort_button_enabled = is_recording
+        if record_abort_button_enabled != self.__record_abort_button_enabled:
+            self.__record_abort_button_enabled = record_abort_button_enabled
+            self.notify_property_changed("record_abort_button_enabled")
+        acquisition_state: str | None = None
+        data_channel_states = self.__scan_hardware_source.data_channel_states
+        for data_channel_state in data_channel_states:
+            if data_channel_state.data_channel_state != "stopped":
+                acquisition_state = data_channel_state.data_channel_state
+                break
+        play_state_text = map_channel_state_to_text[acquisition_state or "stopped"]
+        if play_state_text != self.__play_state_text:
+            self.__play_state_text = play_state_text
+            self.notify_property_changed("play_state_text")
+        stem_controller_ = self.__scan_hardware_source.stem_controller
+        probe_state = stem_controller_.probe_state
+        probe_position = stem_controller_.probe_position
+        map_probe_state_to_text = {"scanning": _("Scanning"), "parked": _("Parked")}
+        if probe_state != "scanning":
+            if probe_position is not None:
+                probe_position_str = " " + str(int(probe_position.x * 100)) + "%" + ", " + str(int(probe_position.y * 100)) + "%"
+            else:
+                probe_position_str = " Default"
+        else:
+            probe_position_str = ""
+        probe_state_text = map_probe_state_to_text.get(probe_state, "") + probe_position_str
+        if probe_state_text != self.__probe_state_text:
+            self.__probe_state_text = probe_state_text
+            self.notify_property_changed("probe_state_text")
+        probe_position_enabled = self.__scan_hardware_source.stem_controller.probe_position is not None
+        if probe_position_enabled != self.__probe_position_enabled:
+            self.__probe_position_enabled = probe_position_enabled
+            self.notify_property_changed("probe_position_enabled")
+        max_fov_nm = self.__scan_hardware_source.max_field_of_view_nm_stream.value or 100000.0
+        fov_nm = self.__scan_hardware_source.get_current_frame_parameters().fov_nm
+        if fov_nm > max_fov_nm:
+            fov_label_color = "red"
+            fov_label_tool_tip = _("Exceeds maximum field of view:") + f" {int(max_fov_nm)}nm"
+        elif fov_nm > max_fov_nm * 0.9:
+            fov_label_color = "orange"
+            fov_label_tool_tip = _("Near maximum field of view:") + f" {int(max_fov_nm)}nm"
+        else:
+            fov_label_color = "black"
+            fov_label_tool_tip = _("Maximum field of view:") + f" {int(max_fov_nm)}nm"
+        if fov_label_color != self.__fov_label_color:
+            self.__fov_label_color = fov_label_color
+            self.notify_property_changed("fov_label_color")
+        if fov_label_tool_tip != self.__fov_label_tool_tip:
+            self.__fov_label_tool_tip = fov_label_tool_tip
+            self.notify_property_changed("fov_label_tool_tip")
+
+    def __handle_state_changed(self) -> None:
+        # use async to call handle_property_changed on the main thread if an existing call is not pending.
+        if threading.current_thread() != threading.main_thread():
+            with self.__pending_call_lock:
+                if not self.__pending_call:
+                    self.__pending_call = self.__event_loop.call_soon_threadsafe(self.__handle_state_changed_on_ui_thread)
+        else:
+            self.__handle_state_changed_on_ui_thread()
+
+    def __update_profile_index(self, profile_index: int) -> None:
+        self.__handle_state_changed()
+
+    def __update_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
+        self.__handle_state_changed()
+
+    def __handle_property_changed(self, property_name: str) -> None:
+        self.__handle_state_changed()
+
+    def __data_channel_state_changed(self, data_channel_event_args: HardwareSource.DataChannelEventArgs) -> None:
+        self.__handle_state_changed()
+
+    def __acquisition_state_changed(self, acquisition_state: str) -> None:
+        self.__handle_state_changed()
+
+    def __probe_state_changed(self, probe_state: str, probe_position: Geometry.FloatPoint | None) -> None:
+        self.__handle_state_changed()
+
+    def __channel_state_changed(self, channel_index: int, channel_id: str, name: str, enabled: bool) -> None:
+        self.__handle_state_changed()
+
+    def __scan_frame_parameters_changed(self, scan_frame_parameters: scan_base.ScanFrameParameters) -> None:
+        self.__handle_state_changed()
+
+    def __max_fov_changed(self, max_fov: float) -> None:
+        self.__handle_state_changed()
+
+    @property
+    def profile_index(self) -> int:
+        return self.__profile_index
+
+    @profile_index.setter
+    def profile_index(self, value: int) -> None:
+        self.__scan_hardware_source.set_selected_profile_index(value)
+
+    @property
+    def width_str(self) -> str:
+        return str(self.__width)
+
+    @width_str.setter
+    def width_str(self, value_str: str) -> None:
+        value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1)
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if self.__height is not None:
+            pixel_size = Geometry.IntSize(self.__frame_parameters.pixel_size.height, value)
+        else:
+            pixel_size = Geometry.IntSize(value, value)
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def height_str(self) -> str | None:
+        return str(self.__height) if self.__height is not None else None
+
+    @height_str.setter
+    def height_str(self, value_str: str | None) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if value_str:
+            value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1)
+            pixel_size = Geometry.IntSize(value, self.__frame_parameters.pixel_size.width)
+        else:
+            pixel_size = Geometry.IntSize(self.__width, self.__width)
+            self.__height = None
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def increase_width(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if self.__height:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, frame_parameters.pixel_size.width * 2)
+        else:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def decrease_width(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if self.__height:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, max(1, frame_parameters.pixel_size.width // 2))
+        else:
+            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def increase_height(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if self.__height:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width)
+        else:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def decrease_height(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if self.__height:
+            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
+        else:
+            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
+        frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def placeholder_height_str(self) -> str | None:
+        return str(self.__placeholder_height) if self.__placeholder_height is not None else None
+
+    @property
+    def pixel_time_str(self) -> str:
+        return self.__pixel_time_str
+
+    @pixel_time_str.setter
+    def pixel_time_str(self, value_str: str) -> None:
+        value = max(0.01, Converter.FloatToStringConverter().convert_back(value_str) or 0.01)
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.pixel_time_us = value
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def increase_pixel_time(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.pixel_time_us *= 2.0
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def decrease_pixel_time(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.pixel_time_us = max(0.01, frame_parameters.pixel_time_us / 2.0)
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def fov_str(self) -> str:
+        return self.__fov_str
+
+    @fov_str.setter
+    def fov_str(self, value: str) -> None:
+        fov_nm = max(1.0, Converter.FloatToStringConverter().convert_back(value) or 1.0)
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.fov_nm = fov_nm
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def increase_fov(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.fov_nm *= 2.0
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def decrease_fov(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.fov_nm = max(1.0, frame_parameters.fov_nm / 2.0)
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def rotation_deg_str(self) -> str:
+        return self.__rotation_deg_str
+
+    @rotation_deg_str.setter
+    def rotation_deg_str(self, value: str) -> None:
+        rotation_deg = Converter.FloatToStringConverter().convert_back(value) or 0.0
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.rotation_rad = rotation_deg * math.pi / 180.0
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def subscan_checkbox_enabled(self) -> bool:
+        return self.__subscan_checkbox_enabled
+
+    @property
+    def subscan_checkbox_checked(self) -> bool:
+        return self.__subscan_checkbox_checked
+
+    @subscan_checkbox_checked.setter
+    def subscan_checkbox_checked(self, value: bool) -> None:
+        self.__scan_hardware_source.line_scan_enabled = False
+        self.__scan_hardware_source.subscan_enabled = value
+
+    @property
+    def line_scan_checkbox_enabled(self) -> bool:
+        return self.__line_scan_checkbox_enabled
+
+    @property
+    def line_scan_checkbox_checked(self) -> bool:
+        return self.__line_scan_checkbox_checked
+
+    @line_scan_checkbox_checked.setter
+    def line_scan_checkbox_checked(self, value: bool) -> None:
+        self.__scan_hardware_source.subscan_enabled = False
+        self.__scan_hardware_source.line_scan_enabled = value
+
+    @property
+    def drift_controls_enabled(self) -> bool:
+        return self.__drift_controls_enabled
+
+    @property
+    def drift_checkbox_checked(self) -> bool:
+        return self.__drift_checkbox_checked
+
+    @drift_checkbox_checked.setter
+    def drift_checkbox_checked(self, value: bool) -> None:
+        self.__scan_hardware_source.drift_enabled = value
+
+    @property
+    def drift_settings_interval_str(self) -> str | None:
+        return self.__drift_settings_interval_str
+
+    @drift_settings_interval_str.setter
+    def drift_settings_interval_str(self, value: str | None) -> None:
+        if value is not None:
+            interval = max(0, Converter.IntegerToStringConverter().convert_back(value) or 0)
+            drift_settings = copy.copy(self.__scan_hardware_source.stem_controller.drift_settings)
+            drift_settings.interval = interval
+            self.__scan_hardware_source.stem_controller.drift_settings = drift_settings
+
+    @property
+    def drift_settings_interval_units_index(self) -> int:
+        return self.__drift_settings_interval_units_index
+
+    @drift_settings_interval_units_index.setter
+    def drift_settings_interval_units_index(self, value: int) -> None:
+        drift_settings = copy.copy(self.__scan_hardware_source.stem_controller.drift_settings)
+        drift_settings.interval_units = stem_controller.DriftIntervalUnit(value + 2 if value else stem_controller.DriftIntervalUnit.LINE)
+        self.__scan_hardware_source.stem_controller.drift_settings = drift_settings
+
+    @property
+    def scan_button_enabled(self) -> bool:
+        return self.__scan_button_enabled
+
+    @property
+    def scan_button_title(self) -> str:
+        return self.__scan_button_title
+
+    @property
+    def scan_abort_button_enabled(self) -> bool:
+        return self.__scan_abort_button_enabled
+
+    @property
+    def record_button_enabled(self) -> bool:
+        return self.__record_button_enabled
+
+    @property
+    def record_abort_button_enabled(self) -> bool:
+        return self.__record_abort_button_enabled
+
+    @property
+    def play_state_text(self) -> str:
+        return self.__play_state_text
+
+    @property
+    def probe_state_text(self) -> str:
+        return self.__probe_state_text
+
+    @property
+    def probe_position_enabled(self) -> bool:
+        return self.__probe_position_enabled
+
+    @probe_position_enabled.setter
+    def probe_position_enabled(self, value: bool) -> None:
+        if value:
+            self.__scan_hardware_source.validate_probe_position()
+        else:
+            self.__scan_hardware_source.probe_position = None
+
+    @property
+    def ac_line_sync_enabled(self) -> bool:
+        return self.__ac_line_sync_enabled
+
+    @ac_line_sync_enabled.setter
+    def ac_line_sync_enabled(self, value: bool) -> None:
+        frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+        frame_parameters.ac_line_sync = value
+        self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
+
+    @property
+    def fov_label_color(self) -> str:
+        return self.__fov_label_color
+
+    @property
+    def fov_label_tool_tip(self) -> str:
+        return self.__fov_label_tool_tip
+
+    # must be called on ui thread
+    def handle_scan_button_clicked(self) -> None:
+        """ Call this when the user clicks the play/pause button. """
+        if self.__scan_hardware_source.is_playing:
+            action_context = self.__document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+            self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
+        else:
+            # the 'enabled channel indexes' implementation is incomplete, so, for now, explicitly add them to the
+            # frame parameters so that they can be recorded when logging the start playing action.
+            frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+            frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
+            action_context = self.__document_controller._get_action_context()
+            action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+            action_context.parameters["frame_parameters"] = frame_parameters.as_dict()
+            self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+
+    # must be called on ui thread
+    def handle_scan_abort_button_clicked(self) -> None:
+        """ Call this when the user clicks the abort button. """
+        action_context = self.__document_controller._get_action_context()
+        action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
+        self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
+
+    # must be called on ui thread
+    def handle_record_button_clicked(self) -> None:
+        """ Call this when the user clicks the record button. """
+        def finish_record(data_promise_list: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+            record_index = self.__scan_hardware_source.record_index
+            for data_promise in data_promise_list:
+                data_and_metadata = data_promise.xdata
+                if data_and_metadata:
+                    document_controller = self.__document_controller
+                    data_item = DataItem.DataItem()
+                    display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                    display_name = display_name if display_name else _("Record")
+                    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
+                    title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
+                    data_item.title = "{} {}".format(title_base, record_index)
+                    data_item.set_xdata(data_and_metadata)
+
+                    def handle_record_data_item(data_item: DataItem.DataItem) -> None:
+                        document_controller.document_model.append_data_item(data_item)
+                        result_display_panel = document_controller.next_result_display_panel()
+                        if result_display_panel:
+                            result_display_panel.set_display_panel_data_item(data_item)
+                            result_display_panel.request_focus()
+
+                    document_controller.queue_task(functools.partial(handle_record_data_item, data_item))
+            self.__scan_hardware_source.record_index += 1
+
+        self.__scan_hardware_source.record_async(finish_record)
+
+    # must be called on ui thread
+    def handle_record_abort_clicked(self) -> None:
+        """ Call this when the user clicks the abort button. """
+        if self.__scan_hardware_source:
+            self.__scan_hardware_source.abort_recording()
+
+
+class ScanPanelController(Declarative.Handler):
+
+    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource) -> None:
+        super().__init__()
+
+        self.__document_controller = document_controller
+        self.__scan_hardware_source = scan_hardware_source
+
+        self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
+
+        sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
+        assert sliders_icon_24_png is not None
+        self._config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
+
+        minus_png_data = pkgutil.get_data(__name__, "resources/minus_24.png")
+        assert minus_png_data is not None
+        self._minus_png = CanvasItem.load_rgba_data_from_bytes(minus_png_data, "png")
+
+        plus_png_data = pkgutil.get_data(__name__, "resources/plus_24.png")
+        assert plus_png_data is not None
+        self._plus_png = CanvasItem.load_rgba_data_from_bytes(plus_png_data, "png")
+
+        u = Declarative.DeclarativeUI()
+
+        @dataclasses.dataclass
+        class KeyAndAction:
+            key: str
+            action: str
+
+        def create_line_edit_row(label: Declarative.UILabel, text_binding: str, lower: KeyAndAction | None = None, upper: KeyAndAction | None = None, placeholder_binding: str | None = None, color_binding: str | None = None, tool_tip_binding: str | None = None, text_width: int | None = None) -> Declarative.UIDescription:
+            return u.create_row(
+                u.create_label(text=label, color=color_binding, tool_tip=tool_tip_binding, width=text_width, text_alignment_vertical="vcenter", text_alignment_horizontal="right"),
+                u.create_row(
+                    u.create_image(image="@binding(_minus_png)", width=12, height=12, on_clicked=lower.action) if lower else u.create_spacing(12),
+                    u.create_line_edit(text=text_binding, placeholder_text=placeholder_binding, width=44),
+                    u.create_image(image="@binding(_plus_png)", width=12, height=12, on_clicked=upper.action) if upper else u.create_spacing(12),
+                    u.create_stretch(),
+                    spacing=2
+                ),
+                spacing=6
+            )
+
+        pixel_time_row = create_line_edit_row(_("Time (\N{MICRO SIGN}s)"), "@binding(_model.pixel_time_str)", KeyAndAction("F", "handle_decrease_time"), KeyAndAction("S", "handle_increase_time"), text_width=68)
+        fov_row = create_line_edit_row(_("FoV (nm)"), "@binding(_model.fov_str)", KeyAndAction("I", "handle_decrease_fov"), KeyAndAction("O", "handle_increase_fov"), text_width=68, color_binding="@binding(_model.fov_label_color)", tool_tip_binding="@binding(_model.fov_label_tool_tip)")
+        rotation_row = create_line_edit_row(_("Rot. (deg)"), "@binding(_model.rotation_deg_str)", text_width=68)
+        width_row = create_line_edit_row(_("Width"), "@binding(_model.width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
+        height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), placeholder_binding="@binding(_model.placeholder_height_str)", text_width=48)
+
+        size_row = u.create_row(
+            u.create_column(width_row, height_row),
+            spacing=2
+        )
+
+        scan_profile_row = u.create_row(
+            u.create_label(text=_("Scan Profile")),
+            u.create_combo_box(items_ref="@binding(_model.profiles_model.items)", current_index="@binding(_model.profile_index)"), u.create_stretch(),
+            u.create_image(image="@binding(_config_icon)", width=24, height=24, on_clicked="handle_config_button"), spacing=8, margin=4
+        )
+
+        subscan_checkbox = u.create_check_box(text=_("Subscan"), checked="@binding(_model.subscan_checkbox_checked)", enabled="@binding(_model.subscan_checkbox_enabled)")
+        line_scan_checkbox = u.create_check_box(text=_("Line Scan"), checked="@binding(_model.line_scan_checkbox_checked)", enabled="@binding(_model.line_scan_checkbox_enabled)")
+
+        drift_correction_checkbox = u.create_check_box(text=_("Drift Correct Every"), checked="@binding(_model.drift_checkbox_checked)", enabled="@binding(_model.drift_controls_enabled)")
+        drift_correction_edit = u.create_line_edit(width=44, text="@binding(_model.drift_settings_interval_str)", enabled="@binding(_model.drift_controls_enabled)")
+        drift_correction_units = u.create_combo_box(items=[_("Scan Lines"), _("Scan Frames")], current_index="@binding(_model.drift_settings_interval_units_index)", enabled="@binding(_model.drift_controls_enabled)")
+
+        play_button = u.create_push_button(text="@binding(_model.scan_button_title)", enabled="@binding(_model.scan_button_enabled)", on_clicked="handle_scan_button")
+        abort_button = u.create_push_button(text=_("Abort"), enabled="@binding(_model.scan_abort_button_enabled)", on_clicked="handle_scan_abort_button")
+        play_state_label = u.create_label(text="@binding(_model.play_state_text)")
+        record_button = u.create_push_button(text=_("Record"), enabled="@binding(_model.record_button_enabled)", on_clicked="handle_record_button")
+        record_abort_button = u.create_push_button(text=_("Abort"), enabled="@binding(_model.record_abort_button_enabled)", on_clicked="handle_record_abort_button")
+
+        probe_state_label = u.create_label(text="@binding(_model.probe_state_text)")
+
+        positioned_check_box = u.create_check_box(text=_("Positioned"), checked="@binding(_model.probe_position_enabled)")
+        ac_line_sync_check_box = u.create_check_box(text=_("AC Line Sync"), checked="@binding(_model.ac_line_sync_enabled)")
+
+        self.display_item: DisplayItem.DisplayItem | None = document_controller.document_model.display_items[10] if len(document_controller.document_model.display_items) > 10 else None
+
+        self.ui_view = u.create_column(
+            scan_profile_row,
+            # region_row,
+            # region2_row,
+            u.create_row(
+                u.create_column(pixel_time_row, fov_row, rotation_row, u.create_stretch(), spacing=4),
+                u.create_column(
+                    u.create_column(size_row, subscan_checkbox, line_scan_checkbox, u.create_stretch(), spacing=4),
+                    u.create_stretch()
+                ),
+                spacing=8,
+                margin_horizontal=4
+            ),
+            u.create_spacing(4),
+            u.create_row(
+                drift_correction_checkbox,
+                u.create_spacing(8),
+                drift_correction_edit,
+                drift_correction_units,
+                u.create_stretch(),
+                spacing=4,
+                margin_horizontal=8
+            ),
+            u.create_spacing(4),
+            u.create_row(
+                play_button,
+                abort_button,
+                u.create_stretch(),
+                play_state_label,
+                spacing=6,
+                margin_horizontal=8
+            ),
+            u.create_row(
+                record_button,
+                record_abort_button,
+                u.create_stretch(),
+                spacing=6,
+                margin_horizontal=8
+            ),
+            u.create_spacing(4),
+            u.create_row(u.create_stretch(), u.create_row(items="_model.channels", item_component_id="channel-component", spacing=4), u.create_stretch(), margin_horizontal=8),
+            u.create_spacing(4),
+            u.create_row(probe_state_label, u.create_stretch(), margin_horizontal=8),
+            u.create_spacing(4),
+            u.create_row(positioned_check_box, u.create_stretch(), ac_line_sync_check_box, margin_horizontal=8),
+            u.create_stretch(),
+            margin=2
+        )
+
+    def close(self) -> None:
+        self._model.close()
+        super().close()
+
+    def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> Declarative.HandlerLike | None:
+        # this is called to construct contained declarative component handlers within this handler.
+        if component_id == "channel-component":
+            assert container is not None
+            assert item is not None
+            return ChannelHandler(typing.cast(ChannelModel, item), self.__document_controller, self.__scan_hardware_source)
+        return None
+
+    def handle_config_button(self, widget: UserInterface.Widget) -> None:
+        self.__scan_hardware_source.scan_settings.open_configuration_interface(PlugInManager.APIBroker())
+
+    def handle_increase_time(self, widget: UserInterface.Widget) -> None:
+        self._model.increase_pixel_time()
+
+    def handle_decrease_time(self, widget: UserInterface.Widget) -> None:
+        self._model.decrease_pixel_time()
+
+    def handle_increase_fov(self, widget: UserInterface.Widget) -> None:
+        self._model.increase_fov()
+
+    def handle_decrease_fov(self, widget: UserInterface.Widget) -> None:
+        self._model.decrease_fov()
+
+    def handle_increase_width(self, widget: UserInterface.Widget) -> None:
+        self._model.increase_width()
+
+    def handle_decrease_width(self, widget: UserInterface.Widget) -> None:
+        self._model.decrease_width()
+
+    def handle_increase_height(self, widget: UserInterface.Widget) -> None:
+        self._model.increase_height()
+
+    def handle_decrease_height(self, widget: UserInterface.Widget) -> None:
+        self._model.decrease_height()
+
+    def handle_scan_button(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_scan_button_clicked()
+
+    def handle_scan_abort_button(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_scan_abort_button_clicked()
+
+    def handle_record_button(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_record_button_clicked()
+
+    def handle_record_abort_button(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_record_abort_clicked()
+
+
+class ScanControlPanelV1(Panel.Panel):
 
     def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
-        super().__init__(document_controller, panel_id, "scan-control-panel")
+        super().__init__(document_controller, panel_id, "scan-control-panel-1")
         ui = document_controller.ui
         self.__column_widget = ui.create_column_widget()
         self.widget = self.__column_widget
@@ -1761,9 +2855,37 @@ class ScanControlPanel(Panel.Panel):
         if not self.__scan_control_widget:
             scan_controller = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
             if isinstance(scan_controller, scan_base.ScanHardwareSource):
-                self.__scan_control_widget = ScanControlWidget(self.document_controller, scan_controller)
+                document_controller = self.document_controller
+                self.__scan_control_widget = ScanControlWidget(document_controller, scan_controller)
                 self.__column_widget.add(self.__scan_control_widget)
                 self.__column_widget.add_spacing(12)
+                self.__column_widget.add_stretch()
+
+    def close(self) -> None:
+        HardwareSource.HardwareSourceManager().aliases_updated.remove(self.__build_widget)
+        super().close()
+
+
+class ScanControlPanel(Panel.Panel):
+
+    def __init__(self, document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> None:
+        super().__init__(document_controller, panel_id, "scan-control-panel")
+        ui = document_controller.ui
+        self.__column_widget = ui.create_column_widget()
+        self.widget = self.__column_widget
+        self.__scan_control_widget: ScanControlWidget | None = None
+        self.__hardware_source_id = properties["hardware_source_id"]
+        # listen for any hardware added or removed messages, and refresh the list
+        self.__build_widget()
+        HardwareSource.HardwareSourceManager().aliases_updated.append(self.__build_widget)
+
+    def __build_widget(self) -> None:
+        if not self.__scan_control_widget:
+            scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
+            if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
+                document_controller = self.document_controller
+                scan_panel_controller = ScanPanelController(document_controller, scan_hardware_source)
+                self.__column_widget.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller))
                 self.__column_widget.add_stretch()
 
     def close(self) -> None:
@@ -2137,6 +3259,8 @@ def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
 
         panel_type = hardware_source.features.get("panel_type")
         if not panel_type:
+            if Feature.FeatureManager().is_feature_enabled("feature.old_scan_control"):
+                Workspace.WorkspaceManager().register_panel(ScanControlPanelV1, panel_id + "-1", name + " Old", ["left", "right"], "left", panel_properties)
             Workspace.WorkspaceManager().register_panel(ScanControlPanel, panel_id, name, ["left", "right"], "left", panel_properties)
         else:
             panel_properties["panel_type"] = panel_type
@@ -2170,3 +3294,5 @@ def stop() -> None:
         hardware_source_removed_event_listener = None
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
         unregister_scan_panel(hardware_source)
+
+Feature.FeatureManager().add_feature(Feature.Feature("feature.old_scan_control", "Enable old scan control panel (requires relaunch)"))
