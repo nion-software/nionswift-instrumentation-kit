@@ -1,6 +1,14 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.6.0 (2025-09-25)
+-------------------
+- Add a 'does_control_exist' API method to the stem_controller object (scripting).
+- Add improved streaming control functions to API.
+- Add indication of field of view out of range by turning label orange/red.
+- Ensure series/table acquisitions outputs titles include correct channel names.
+- Ensure accumulating outputs are update during acquisition. Fix #268.
+
 23.5.1 (2025-07-02)
 -------------------
 - Fix issue with camera device calibrator fallback when index control present.
