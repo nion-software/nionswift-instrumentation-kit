@@ -2222,11 +2222,11 @@ class AcquisitionController(Declarative.Handler):
         # associated acquire_valid_value_stream, which is a stream of bools.
         # finally, the button_enabled_model turns the stream of bools into a property model.
 
-        def find_method_component_handler(component_id: str | None) -> AcquisitionMethodComponentHandler | None:
-            return self.__acquisition_method_component._component_handler_map.get(component_id, None) if component_id else None
+        def find_method_component_handler(acquisition_method_component: ComponentComboBoxHandler, component_id: str | None) -> AcquisitionMethodComponentHandler | None:
+            return acquisition_method_component._component_handler_map.get(component_id, None) if component_id else None
 
         # create a stream of AcquisitionMethodComponentHandler based on the selected acquisition method.
-        self.__method_component_stream = Stream.MapStream[str, AcquisitionMethodComponentHandler](Stream.PropertyChangedEventStream(self.method_model, "value"), find_method_component_handler)
+        self.__method_component_stream = Stream.MapStream[str, AcquisitionMethodComponentHandler](Stream.PropertyChangedEventStream(self.method_model, "value"), functools.partial(find_method_component_handler, self.__acquisition_method_component))
 
         # create a stream of AcquisitionDeviceComponentHandler based on the selected acquisition mode.
         self.__device_component_stream = Stream.MapStream[str, AcquisitionDeviceComponentHandler](Stream.PropertyChangedEventStream(self.acquisition_mode_model, "value"), lambda component_id: device_component_handlers[acquisition_modes.index(component_id) if component_id in acquisition_modes else 0])
