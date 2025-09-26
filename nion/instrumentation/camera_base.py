@@ -42,6 +42,7 @@ from nion.utils import DateTime
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.utils import Stream
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -920,6 +921,10 @@ class CameraDevice3(typing.Protocol):
 class InstrumentController(typing.Protocol):
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]: ...
+
+    def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]: ...
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[STEMController.TryValue[float]]: ...
 
     def get_value(self, value_id: str, default_value: typing.Optional[float] = None) -> typing.Optional[float]: ...
 
@@ -3174,16 +3179,18 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         scale_control_key = prefix + "ScaleControl" + suffix
         scale_control = self.__config.get(scale_control_key, self.__config.get((scale_control_key).lower(), None))
         if scale_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, scale_control))
-            if valid:
-                scale = value
+            scale_stream = self.__instrument_controller.get_control_try_value_stream(typing.cast(str, scale_control))
+            scale_stream_value = scale_stream.value
+            if scale_stream_value and scale_stream_value.is_valid:
+                scale = scale_stream_value.value
         offset = None
         offset_control_key = prefix + "OffsetControl" + suffix
         offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
-            valid, value = self.__instrument_controller.TryGetVal(typing.cast(str, offset_control))
-            if valid:
-                offset = value
+            offset_stream = self.__instrument_controller.get_control_try_value_stream(typing.cast(str, offset_control))
+            offset_stream_value = offset_stream.value
+            if offset_stream_value and offset_stream_value.is_valid:
+                offset = offset_stream_value.value
         units_key = prefix + "Units" + suffix
         units = self.__config.get(units_key, self.__config.get((units_key).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
@@ -3223,9 +3230,10 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
         control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
         if control_name:
-            valid, value = instrument_controller.TryGetVal(control_name)
-            if valid:
-                return value
+            control_stream = self.__instrument_controller.get_control_try_value_stream(control_name)
+            control_stream_value = control_stream.value
+            if control_stream_value and control_stream_value.is_valid:
+                return control_stream_value.value
         if key + "_value" in calibration_controls:
             return calibration_controls.get(key + "_value")
         return None
