@@ -1,9 +1,9 @@
 package:
   name: 'nionswift-instrumentation'
-  version: '23.6.0'
+  version: '23.6.1'
 
 source:
-  git_rev: 23.6.0
+  git_rev: 23.6.1
   git_url: https://github.com/nion-software/nionswift-instrumentation-kit.git
 
 build:

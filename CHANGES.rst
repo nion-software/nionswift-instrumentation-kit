@@ -1,6 +1,10 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.6.1 (2025-09-26)
+-------------------
+- Fix acquisition panel error when switching projects.
+
 23.6.0 (2025-09-25)
 -------------------
 - Add a 'does_control_exist' API method to the stem_controller object (scripting).
