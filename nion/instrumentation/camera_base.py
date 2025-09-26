@@ -924,6 +924,8 @@ class InstrumentController(typing.Protocol):
 
     def get_control_value_stream(self, control_name: str) -> Stream.AbstractStream[float]: ...
 
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[STEMController.TryValue[float]]: ...
+
     def get_value(self, value_id: str, default_value: typing.Optional[float] = None) -> typing.Optional[float]: ...
 
     def set_value(self, value_id: str, value: float) -> None: ...
@@ -3178,12 +3180,18 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         scale_control_key = prefix + "ScaleControl" + suffix
         scale_control = self.__config.get(scale_control_key, self.__config.get((scale_control_key).lower(), None))
         if scale_control:
-            scale = self.__get_latest_value(self.__instrument_controller, typing.cast(str, scale_control))
+            scale_stream = self.__instrument_controller.get_control_try_value_stream(typing.cast(str, scale_control))
+            scale_stream_value = scale_stream.value
+            if scale_stream_value and scale_stream_value.is_valid:
+                scale = scale_stream_value.value
         offset = None
         offset_control_key = prefix + "OffsetControl" + suffix
         offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
-            offset = self.__get_latest_value(self.__instrument_controller, typing.cast(str, offset_control))
+            offset_stream = self.__instrument_controller.get_control_try_value_stream(typing.cast(str, offset_control))
+            offset_stream_value = offset_stream.value
+            if offset_stream_value and offset_stream_value.is_valid:
+                offset = offset_stream_value.value
         units_key = prefix + "Units" + suffix
         units = self.__config.get(units_key, self.__config.get((units_key).lower(), None))
         scale = scale * relative_scale if scale is not None else scale
@@ -3223,24 +3231,13 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
     def __get_instrument_calibration_value(self, instrument_controller: InstrumentController, calibration_controls: typing.Mapping[str, typing.Union[str, int, float]], key: str) -> typing.Optional[typing.Union[float, str]]:
         control_name = typing.cast(str | None, calibration_controls.get(key + "_control", None))
         if control_name:
-            return self.__get_latest_value(instrument_controller, control_name)
+            control_stream = self.__instrument_controller.get_control_try_value_stream(control_name)
+            control_stream_value = control_stream.value
+            if control_stream_value and control_stream_value.is_valid:
+                return control_stream_value.value
         if key + "_value" in calibration_controls:
             return calibration_controls.get(key + "_value")
         return None
-
-    def __get_latest_value(self, instrument_controller: InstrumentController, name: str) -> float | None:
-        if name:
-            try:
-                stream = instrument_controller.get_control_value_stream(name)
-                value = stream.value
-                if value:
-                    self.__last_calibration_value_dict[name] = value
-            except Stream.StaleStreamException as e:
-                # Failed to read stream
-                logging.debug(f'Failed to read calibration value {name}')
-            return self.__last_calibration_value_dict.get(name)
-        return None
-
 
 def update_camera_properties(properties: typing.MutableMapping[str, typing.Any],
                              frame_parameters: CameraFrameParameters, hardware_source_id: str, display_name: str,
