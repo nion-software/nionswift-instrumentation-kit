@@ -36,6 +36,7 @@ from nion.swift.test import TestContext
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
+from nion.utils import Stream
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 from nionswift_plugin.nion_instrumentation_ui import CameraControlPanel
 
@@ -1608,6 +1609,10 @@ class TestCameraControlClass(unittest.TestCase):
                     return True, self.values[s]
                 else:
                     return False, None
+
+            def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
+                try_success, try_value = self.TryGetVal(control_name)
+                return Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if not try_success else None))
 
         class CameraDevice:
             def __init__(self, camera_type: str) -> None:
