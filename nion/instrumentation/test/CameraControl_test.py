@@ -149,6 +149,41 @@ def make_multi_acquisition_with_sum_method() -> Acquisition.AcquisitionMethodLik
     return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4, True), MultiSection(5.0, 0.05, 2, False)])
 
 
+class InstrumentController:
+    # for testing calibrator
+
+    def __init__(self, values: dict[str, float]) -> None:
+        self.values = values
+
+    def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
+        if s in self.values:
+            return True, self.values[s]
+        else:
+            return False, None
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
+        try_success, try_value = self.TryGetVal(control_name)
+        return Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if not try_success else None))
+
+
+class CameraDevice:
+    def __init__(self, camera_type: str) -> None:
+        self.camera_type = camera_type
+
+
+class CameraFrameParameters:
+    def __init__(self) -> None:
+        self.binning = 2
+
+
+def calibration_equal(a: Calibration.Calibration, b: Calibration.Calibration) -> bool:
+    a_scale_1000 = round(a.scale * 1000) if a.scale else None
+    b_scale_1000 = round(b.scale * 1000) if b.scale else None
+    a_offset_1000 = round(a.offset * 1000) if a.offset else None
+    b_offset_1000 = round(b.offset * 1000) if b.offset else None
+    return a_scale_1000 == b_scale_1000 and a_offset_1000 == b_offset_1000 and a.units == b.units
+
+
 class TestCameraControlClass(unittest.TestCase):
 
     def setUp(self):
@@ -1600,35 +1635,6 @@ class TestCameraControlClass(unittest.TestCase):
             self.assertEqual(1, len(document_model.data_items))
 
     def test_camera_calibrator(self) -> None:
-        class InstrumentController:
-            def __init__(self, values: dict[str, float]) -> None:
-                self.values = values
-
-            def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
-                if s in self.values:
-                    return True, self.values[s]
-                else:
-                    return False, None
-
-            def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
-                try_success, try_value = self.TryGetVal(control_name)
-                return Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if not try_success else None))
-
-        class CameraDevice:
-            def __init__(self, camera_type: str) -> None:
-                self.camera_type = camera_type
-
-        class CameraFrameParameters:
-            def __init__(self) -> None:
-                self.binning = 2
-
-        def calibration_equal(a: Calibration.Calibration, b: Calibration.Calibration) -> bool:
-            a_scale_1000 = round(a.scale * 1000) if a.scale else None
-            b_scale_1000 = round(b.scale * 1000) if b.scale else None
-            a_offset_1000 = round(a.offset * 1000) if a.offset else None
-            b_offset_1000 = round(b.offset * 1000) if b.offset else None
-            return a_scale_1000 == b_scale_1000 and a_offset_1000 == b_offset_1000 and a.units == b.units
-
         instrument_controller = InstrumentController(
             {
                 "angle": 0.01,
@@ -1877,6 +1883,31 @@ class TestCameraControlClass(unittest.TestCase):
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.11, "counts1"), intensity_calibration))
+
+    def test_calibrator_with_no_controls(self) -> None:
+        # even though units are specified, calibration should be empty
+
+        instrument_controller = InstrumentController(dict())
+
+        # test basic ronchigram calibration, no controls but units
+        camera_device = CameraDevice("ronchigram")
+        camera_frame_parameters = CameraFrameParameters()
+        config = {
+            "calibXUnits": "rad",
+            "calibYUnits": "rad",
+            "calibIntensityScaleControl": "intensity",
+            "calibIntensityUnits": "counts",
+        }
+
+        calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+
+        calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
+        self.assertEqual(2, len(calibrations))
+        self.assertTrue(calibration_equal(Calibration.Calibration(), calibrations[0]))
+        self.assertTrue(calibration_equal(Calibration.Calibration(), calibrations[1]))
+
+        intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
+        self.assertTrue(calibration_equal(Calibration.Calibration(), intensity_calibration))
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass
