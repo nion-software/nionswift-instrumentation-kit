@@ -920,6 +920,8 @@ class CameraDevice3(typing.Protocol):
 
 class InstrumentController(typing.Protocol):
 
+    def does_control_exist(self, name: str) -> bool: ...
+
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]: ...
 
     def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[STEMController.TryValue[float]]: ...
@@ -3157,22 +3159,45 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         self.__instrument_controller = instrument_controller
         self.__camera_device = camera_device
         self.__config = config
+        self.__streams = dict[str, Stream.AbstractStream[STEMController.TryValue[float]]]()
 
-    def __get_value_non_blocking(self, control_name: str) -> STEMController.TryValue[float] | None:
-        # this method makes use of the fact that streams are cached for a few seconds, so repeatedly
-        # calling this during view mode will not have significant overhead.
-        return self.__instrument_controller.get_control_try_value_stream(control_name).value
+    def __get_value_non_blocking(self, control_name: str, clean: bool = True) -> STEMController.TryValue[float] | None:
+        stream: Stream.AbstractStream[STEMController.TryValue[float]] | None = self.__streams.get(control_name, None)
+
+        if not stream:
+            stream = self.__instrument_controller.get_control_try_value_stream(control_name)
+            value_changed_event = threading.Event()
+
+            def handle_value_changed(value: STEMController.TryValue[float] | None) -> None:
+                value_changed_event.set()
+
+            with stream.value_stream.listen(handle_value_changed) as listener:
+                first_value = stream.value
+                if not first_value or not first_value.is_valid:  # only wait if the current value is not valid
+                    # only wait if the control exists; this is needed to handle the case where the
+                    # control doesn't exist in the data web and for fast tests.
+                    if self.__instrument_controller.does_control_exist(control_name):
+                        value_changed_event.wait(5.0)  # wait up to 5s for the first value
+            self.__streams[control_name] = stream
+
+        if clean:
+            activate_control_names = self.__get_active_calibration_controls()
+            for key in list(self.__streams.keys()):
+                if key not in activate_control_names:
+                    del self.__streams[key]
+
+        return stream.value
 
     def __construct_suffix(self) -> str:
         control = self.__config.get("calibrationModeIndexControl", str())
         if control:
-            try_value = self.__get_value_non_blocking(control)
+            try_value = self.__get_value_non_blocking(control, clean=False)
             if try_value and try_value.value is not None:
                 return str(int(try_value.value))
             return "0"
         control = self.__config.get("calibrationModeIndexControl".lower(), str())
         if control:
-            try_value = self.__get_value_non_blocking(control)
+            try_value = self.__get_value_non_blocking(control, clean=False)
             # note, for backwards compatibility, the logic here is different.
             if try_value and try_value.value:
                 return str(int(try_value.value))
@@ -3203,6 +3228,25 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         if (offset is None or math.isfinite(offset)) and (scale is None or math.isfinite(scale)) and scale != 0 and units:
             return Calibration.Calibration(offset, scale, units)
         return Calibration.Calibration()
+
+    def __get_active_calibration_controls(self) -> list[str]:
+        def get_config_value(key: str) -> str | None:
+            return typing.cast(str | None, self.__config.get(key, self.__config.get((key).lower(), None)))
+
+        suffix = self.__construct_suffix()
+
+        calibration_controls = list[str | None]()
+
+        calibration_controls.append(get_config_value("calibrationModeIndexControl"))
+        calibration_controls.append(get_config_value("calibXScaleControl" + suffix))
+        calibration_controls.append(get_config_value("calibYScaleControl" + suffix))
+        calibration_controls.append(get_config_value("calibXOffsetControl" + suffix))
+        calibration_controls.append(get_config_value("calibYOffsetControl" + suffix))
+        calibration_controls.append(get_config_value("calibIntensityScaleControl" + suffix))
+        calibration_controls.append(get_config_value("calibIntensityOffsetControl" + suffix))
+        calibration_controls.append(typing.cast(str | None, self.__camera_device.calibration_controls.get("counts_per_electron_control", None)))
+
+        return [calibration_control for calibration_control in calibration_controls if calibration_control]
 
     def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
         binning = frame_parameters.binning
