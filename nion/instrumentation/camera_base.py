@@ -3190,7 +3190,7 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         offset_control_key = prefix + "OffsetControl" + suffix
         offset_control = self.__config.get(offset_control_key, self.__config.get((offset_control_key).lower(), None))
         if offset_control:
-            try_offset_value = self.__get_value_non_blocking(scale_control)
+            try_offset_value = self.__get_value_non_blocking(offset_control)
             if try_offset_value and try_offset_value.value is not None:
                 offset = try_offset_value.value
         units_key = prefix + "Units" + suffix
