@@ -1884,7 +1884,7 @@ class TestCameraControlClass(unittest.TestCase):
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.11, "counts1"), intensity_calibration))
 
-    def test_calibrator_with_no_controls(self) -> None:
+    def test_calibrator_with_missing_controls(self) -> None:
         # even though units are specified, calibration should be empty
 
         instrument_controller = InstrumentController(dict())
@@ -1893,9 +1893,11 @@ class TestCameraControlClass(unittest.TestCase):
         camera_device = CameraDevice("ronchigram")
         camera_frame_parameters = CameraFrameParameters()
         config = {
+            "calibXScaleControl": "angle_missing",
+            "calibYScaleControl": "angle_missing",
             "calibXUnits": "rad",
             "calibYUnits": "rad",
-            "calibIntensityScaleControl": "intensity",
+            "calibIntensityScaleControl": "intensity_missing",
             "calibIntensityUnits": "counts",
         }
 
