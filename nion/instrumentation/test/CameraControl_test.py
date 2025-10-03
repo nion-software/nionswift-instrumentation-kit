@@ -154,6 +154,15 @@ class InstrumentController:
 
     def __init__(self, values: dict[str, float]) -> None:
         self.values = values
+        self.streams = dict[str, Stream.ValueStream[stem_controller.TryValue[float]]]()
+
+    def set_control_value(self, control_name: str, value: float) -> None:
+        stream = self.streams[control_name]
+        if stream:
+            stream.value = stem_controller.TryValue(value)
+
+    def does_control_exist(self, name: str) -> bool:
+        return name in self.values
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         if s in self.values:
@@ -162,13 +171,16 @@ class InstrumentController:
             return False, None
 
     def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
-        try_success, try_value = self.TryGetVal(control_name)
-        return Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if not try_success else None))
+        if control_name not in self.streams:
+            try_success, try_value = self.TryGetVal(control_name)
+            self.streams[control_name] = Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if not try_success else None))
+        return self.streams[control_name]
 
 
 class CameraDevice:
     def __init__(self, camera_type: str) -> None:
         self.camera_type = camera_type
+        self.calibration_controls = dict[str, typing.Any]()
 
 
 class CameraFrameParameters:
@@ -1786,21 +1798,21 @@ class TestCameraControlClass(unittest.TestCase):
         self.assertTrue(calibration_equal(Calibration.Calibration(-2.0, 0.04, "rad-old"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.2, "counts-old"), intensity_calibration))
-        instrument_controller.values["index-old"] = 1
+        instrument_controller.set_control_value("index-old", 1)
         calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
         self.assertEqual(2, len(calibrations))
         self.assertTrue(calibration_equal(Calibration.Calibration(-2.1, 0.042, "rad-old1"), calibrations[0]))
         self.assertTrue(calibration_equal(Calibration.Calibration(-2.1, 0.042, "rad-old1"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.21, "counts-old1"), intensity_calibration))
-        instrument_controller.values["index-old"] = 2
+        instrument_controller.set_control_value("index-old", 2)
         calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
         self.assertEqual(2, len(calibrations))
         self.assertTrue(calibration_equal(Calibration.Calibration(-2.2, 0.044, "rad-old2"), calibrations[0]))
         self.assertTrue(calibration_equal(Calibration.Calibration(-2.2, 0.044, "rad-old2"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.22, "counts-old2"), intensity_calibration))
-        instrument_controller.values["index-old"] = 0
+        instrument_controller.set_control_value("index-old", 0)
 
         # test indexed ronchigram calibration, new style (capitalized)
         camera_device = CameraDevice("ronchigram")
@@ -1841,21 +1853,21 @@ class TestCameraControlClass(unittest.TestCase):
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.0, 0.02, "rad"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.1, "counts"), intensity_calibration))
-        instrument_controller.values["index"] = 1
+        instrument_controller.set_control_value("index", 1)
         calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
         self.assertEqual(2, len(calibrations))
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[0]))
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.1, 0.022, "rad1"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.11, "counts1"), intensity_calibration))
-        instrument_controller.values["index"] = 2
+        instrument_controller.set_control_value("index", 2)
         calibrations = calibrator.get_signal_calibrations(camera_frame_parameters, (100, 100))
         self.assertEqual(2, len(calibrations))
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.2, 0.024, "rad2"), calibrations[0]))
         self.assertTrue(calibration_equal(Calibration.Calibration(-1.2, 0.024, "rad2"), calibrations[1]))
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.12, "counts2"), intensity_calibration))
-        instrument_controller.values["index"] = 0
+        instrument_controller.set_control_value("index", 0)
 
         # test indexed ronchigram calibration, new style (capitalized), fallback
         camera_device = CameraDevice("ronchigram")
