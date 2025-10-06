@@ -3248,6 +3248,34 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
 
         return [calibration_control for calibration_control in calibration_controls if calibration_control]
 
+    @property
+    def _active_calibration_controls(self) -> list[str]:
+        return self.__get_active_calibration_controls()
+
+    @property
+    def _calibration_mode_index(self) -> int:
+        control = self.__config.get("calibrationModeIndexControl", str())
+        if control:
+            try_value = self.__get_value_non_blocking(control, clean=False)
+            if try_value and try_value.value is not None:
+                return int(try_value.value)
+            return 0
+        control = self.__config.get("calibrationModeIndexControl".lower(), str())
+        if control:
+            try_value = self.__get_value_non_blocking(control, clean=False)
+            # note, for backwards compatibility, the logic here is different.
+            if try_value and try_value.value:
+                return int(try_value.value)
+        return 0
+
+    @property
+    def _calibration_suffix(self) -> str:
+        return self.__construct_suffix()
+
+    @property
+    def _calibration_config(self) -> typing.Mapping[str, typing.Any]:
+        return self.__config
+
     def get_signal_calibrations(self, frame_parameters: CameraFrameParameters, data_shape: typing.Sequence[int], **kwargs: typing.Any) -> typing.Sequence[Calibration.Calibration]:
         binning = frame_parameters.binning
         signal_type = typing.cast(str | None, getattr(self.__camera_device, "signal_type", None))
