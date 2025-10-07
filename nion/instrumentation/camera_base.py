@@ -3017,7 +3017,8 @@ class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         assert self.__actual_camera_frame_parameters  # configured in prepare_stream
-        acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters())
+        timeout = max(5.0, self.__actual_camera_frame_parameters.exposure * 1.5)
+        acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters(), timeout)
         # NOTE: subsequent record tasks are created in continue data.
         self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
 
@@ -3055,8 +3056,8 @@ class CameraDeviceFrameStreamDelegate(CameraDeviceStreamInterface):
             # before starting the next frame.
             if self.__record_count > 0:
                 assert self.__actual_camera_frame_parameters
-                acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters,
-                                                                              CameraAcquisitionTaskParameters())
+                timeout = max(5.0, self.__actual_camera_frame_parameters.exposure * 1.5)
+                acquisition_parameters = HardwareSource.AcquisitionParameters(self.__actual_camera_frame_parameters, CameraAcquisitionTaskParameters(), timeout)
                 self.__record_task = HardwareSource.RecordTask(self.__camera_hardware_source, acquisition_parameters)
 
 
