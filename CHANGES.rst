@@ -1,6 +1,11 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.6.2 (2025-10-12)
+-------------------
+- Fix issues when canceling acquisitions when exposure time longer than 5s. Fix #296.
+- Improve calibration readout to be non-blocking, improves view performance.
+
 23.6.1 (2025-09-26)
 -------------------
 - Fix acquisition panel error when switching projects.
