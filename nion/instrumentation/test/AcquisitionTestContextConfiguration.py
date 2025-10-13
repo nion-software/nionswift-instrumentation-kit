@@ -20,6 +20,7 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.utils import Geometry
 from nion.utils import Registry
+from nion.utils import Stream
 
 
 class ScanBoxSimulator(ScanDevice.ScanSimulatorLike):
@@ -148,12 +149,16 @@ class ValueManager(InstrumentDevice.ValueManagerLike):
             "eels_y_offset": 0.0,
             "EELS_MagneticShift_Offset": -20.0
         }
+        self.__streams = dict[str, Stream.ValueStream[stem_controller.TryValue[float]]]()
 
     def get_value(self, name: str) -> typing.Optional[float]:
         return self.__values.get(name)
 
     def set_value(self, name: str, value: float) -> bool:
         self.__values[name] = value
+        stream = self.__streams.get(name)
+        if stream is not None:
+            stream.value = stem_controller.TryValue(value, Exception() if value is None else None)
         return True
 
     def inform_value(self, name: str, value: float) -> bool:
@@ -170,6 +175,12 @@ class ValueManager(InstrumentDevice.ValueManagerLike):
 
     def get_reference_setting_index(self, settings_control: str) -> int:
         return 0
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
+        if control_name not in self.__streams:
+            try_value = self.get_value(control_name)
+            self.__streams[control_name] = Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if try_value is None else None))
+        return self.__streams[control_name]
 
 
 class AxisManager(InstrumentDevice.AxisManagerLike):

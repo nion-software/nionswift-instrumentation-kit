@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # standard libraries
-import copy
 import typing
 
 import numpy.typing
@@ -10,9 +9,7 @@ from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller
 from nion.utils import Event
 from nion.utils import Geometry
-
-if typing.TYPE_CHECKING:
-    from nion.device_kit import ScanDevice
+from nion.utils import Stream
 
 
 _NDArray = numpy.typing.NDArray[typing.Any]
@@ -39,6 +36,9 @@ class ValueManagerLike(typing.Protocol):
         ...
 
     def get_reference_setting_index(self, settings_control: str) -> int:
+        ...
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
         ...
 
 
@@ -240,6 +240,9 @@ class Instrument(stem_controller.STEMController):
 
     def HasValError(self, s: str) -> bool:
         return False
+
+    def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
+        return self.__value_manager.get_control_try_value_stream(control_name)
 
     @property
     def axis_descriptions(self) -> typing.Sequence[stem_controller.AxisDescription]:
