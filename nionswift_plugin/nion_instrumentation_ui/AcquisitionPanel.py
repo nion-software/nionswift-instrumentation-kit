@@ -1406,7 +1406,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
             self._camera_settings_model.hardware_source_choice_stream,
             HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice),
             self.scan_width,
-            asyncio.get_event_loop_policy().get_event_loop()).add_ref()
+            asyncio.get_event_loop()).add_ref()
 
         # the scan context value model is the text description of the scan context extracted from the value stream.
         self.scan_context_value_model = Model.StreamValueModel(Stream.MapStream(

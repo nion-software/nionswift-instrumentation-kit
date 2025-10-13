@@ -3459,7 +3459,7 @@ def _acquire_data_stream(data_stream: DataStream,
                 traceback.print_exc()
                 raise
 
-    progress_task = asyncio.get_event_loop_policy().get_event_loop().create_task(update_progress(acquisition, progress_value_model))
+    progress_task = asyncio.get_event_loop().create_task(update_progress(acquisition, progress_value_model))
 
     # start async acquire.
     acquisition.acquire_async(event_loop=event_loop,
