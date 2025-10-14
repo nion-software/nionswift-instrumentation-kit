@@ -1235,6 +1235,7 @@ class TestCameraControlClass(unittest.TestCase):
                    expected_dimensions: typing.Sequence[typing.Tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]],
                    expected_error: bool = False,
                    error_handler: typing.Optional[typing.Callable[[Exception], None]] = None,
+                   periodic_fn: typing.Optional[typing.Callable[[Acquisition.Acquisition], None]] = None
                    ) -> None:
 
         class DataChannelProvider(Acquisition.DataChannelProviderLike):
@@ -1288,6 +1289,8 @@ class TestCameraControlClass(unittest.TestCase):
                 if progress > last_progress:
                     last_progress = progress
                     last_progress_time = time.time()
+                if periodic_fn:
+                    periodic_fn(acquisition)
                 time.sleep(0.005)
             self.assertEqual(expected_error, acquisition.is_error)
             self.assertTrue(acquisition.is_finished)
@@ -1497,6 +1500,20 @@ class TestCameraControlClass(unittest.TestCase):
                 # stop the hardware sources
                 test_context.scan_hardware_source.stop_playing(sync_timeout=3.0)
                 test_context.camera_hardware_source.stop_playing(sync_timeout=3.0)
+
+    def test_acquisition_panel_aborts_before_first_frame(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            camera_frame_parameters = typing.cast(camera_base.CameraFrameParameters, test_context.camera_hardware_source.get_frame_parameters(0))
+            camera_frame_parameters.exposure = 5.0  # long exposure to ensure we can abort before the first frame
+            acquisition_device = camera_base.CameraAcquisitionDevice(test_context.camera_hardware_source, camera_frame_parameters, None)
+            acquisition_method = make_sequence_acquisition_method()
+            # run the acquisition procedure
+            start_time = time.time()
+            def periodic(acquisition: Acquisition.Acquisition) -> None:
+                if time.time() - start_time > 1.0:
+                    acquisition.abort_acquire()
+            self.__test_acq(document_controller, acquisition_device, acquisition_method, [], periodic_fn=periodic)
 
     def test_acquisition_panel_recovers_after_error_in_start_stream(self) -> None:
         with self._test_context() as test_context:

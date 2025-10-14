@@ -323,6 +323,7 @@ class Camera(camera_base.CameraDevice3):
             xdata._set_timestamp(DateTime.utcnow())
             self.__xdata_buffer = xdata
             return True
+        self.__xdata_buffer = xdata
         return False
 
     def __acquisition_thread(self) -> None:
