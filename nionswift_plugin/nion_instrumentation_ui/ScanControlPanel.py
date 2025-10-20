@@ -1628,7 +1628,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
             drift_settings_unit.enabled = enabled
             drift_checkbox.checked = drift_channel_id is not None and drift_region is not None
             drift_settings_value.text = Converter.IntegerToStringConverter().convert(drift_settings.interval)
-            drift_settings_unit.current_item = drift_settings.interval_units
+            drift_settings_unit.current_index = min(1, max(0, drift_settings.interval_units - 2))
 
         def drift_state_changed(drift_channel_id: typing.Optional[str], drift_region: typing.Optional[Geometry.FloatRect], drift_settings: stem_controller.DriftCorrectionSettings, subscan_state: stem_controller.SubscanState) -> None:
             # this may be called on a thread. ensure it runs on the main thread.
