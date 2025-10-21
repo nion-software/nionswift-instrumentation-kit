@@ -647,6 +647,7 @@ class ScanDevice(typing.Protocol):
     def set_scan_context_probe_position(self, scan_context: STEMController.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
+    def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
     def calculate_max_field_of_view(self, frame_parameters: ScanFrameParameters) -> float: return 100000.0
     def set_sequence_buffer_size(self, buffer_size: int) -> None: return
@@ -828,6 +829,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_synchronized_get_info(self, *, scan_frame_parameters: ScanFrameParameters, camera: camera_base.CameraHardwareSource, camera_frame_parameters: camera_base.CameraFrameParameters) -> GrabSynchronizedInfo: ...
     def get_current_frame_time(self) -> float: ...
     def calculate_frame_time(self, frame_parameters: ScanFrameParameters) -> float: ...
+    def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float: ...
 
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: ...
@@ -1973,6 +1975,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         pixel_time_us = frame_parameters.pixel_time_us
         return size.height * size.width * pixel_time_us / 1000000.0
 
+    def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float:
+        return self.__device.calculate_synchronized_scan_partial_timeout(scan_frame_parameters, camera_exposure_ms=camera_exposure_ms)
+
     def get_current_frame_time(self) -> float:
         return self.calculate_frame_time(self.get_current_frame_parameters())
 
@@ -2544,11 +2549,13 @@ class ScanFrameDataStream(Acquisition.StackedDataStream):
 
 class SynchronizedDataStream(Acquisition.ContainerDataStream):
     def __init__(self, data_stream: Acquisition.DataStream, scan_hardware_source: ScanHardwareSource,
-                 camera_hardware_source: camera_base.CameraHardwareSource, line_time: float, section_count: int) -> None:
+                 camera_hardware_source: camera_base.CameraHardwareSource, scan_frame_parameters: ScanFrameParameters,
+                 camera_exposure: float, section_count: int) -> None:
         super().__init__(data_stream)
         self.__scan_hardware_source = scan_hardware_source
         self.__camera_hardware_source = camera_hardware_source
-        self.__line_time = line_time
+        self.__scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
+        self.__camera_exposure = camera_exposure
         self.__section_count = section_count
         self.__stem_controller = scan_hardware_source.stem_controller
         self.__camera_packet_time = time.perf_counter()
@@ -2556,11 +2563,10 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__scan_packet_counts = dict[Acquisition.Channel, int]()
 
     def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> SynchronizedDataStream:
-        return SynchronizedDataStream(copy.deepcopy(self.data_stream), self.__scan_hardware_source, self.__camera_hardware_source, self.__line_time, self.__section_count)
+        return SynchronizedDataStream(copy.deepcopy(self.data_stream), self.__scan_hardware_source, self.__camera_hardware_source, self.__scan_frame_parameters, self.__camera_exposure, self.__section_count)
 
     def _prepare_stream(self, stream_args: Acquisition.DataStreamArgs, index_stack: Acquisition.IndexDescriptionList, **kwargs: typing.Any) -> None:
-        self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source,
-                                                         camera=self.__camera_hardware_source)
+        self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
         self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
         self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
         self.__camera_packet_time = time.perf_counter()
@@ -2580,7 +2586,8 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         super()._handle_data_available(data_stream_event)
 
     def _advance_stream(self) -> None:
-        if time.perf_counter() - self.__scan_packet_time > max(self.__line_time * 4, SYNCHRONIZED_SCAN_TIMEOUT):
+        scan_device_timeout = self.__scan_hardware_source.calculate_synchronized_scan_partial_timeout(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure * 1000)
+        if time.perf_counter() - self.__scan_packet_time > max(scan_device_timeout, SYNCHRONIZED_SCAN_TIMEOUT):
             if any(c >= 1 for c in self.__scan_packet_counts.values()):
                 raise RuntimeError(_("Scan data is arriving intermittently. Check the synchronization configuration (cables, routing, signal quality)."))
             else:
@@ -2675,8 +2682,8 @@ def make_synchronized_scan_data_stream(
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
-    line_time = (scan_parameters_copy.scan_size.width + flyback_pixels) * camera_exposure_ms / 1000
-    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, line_time, section_count)
+    line_count = scan_parameters_copy.scan_size.width + flyback_pixels
+    collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, scan_frame_parameters, camera_exposure_ms / 1000, section_count)
     if scan_count > 1:
         # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
         drift_tracker = scan_hardware_source.drift_tracker

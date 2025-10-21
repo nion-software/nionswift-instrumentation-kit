@@ -419,6 +419,11 @@ class Device(scan_base.ScanDevice):
         scan_frame_parameters.set_parameter("external_clock_wait_time_ms", 20000)  # int(camera_frame_parameters["exposure_ms"] * 1.5)
         scan_frame_parameters.set_parameter("external_clock_mode", 1)
 
+    def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: scan_base.ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float:
+        scan_width = scan_frame_parameters.scan_size.width
+        flyback_pixels = self.calculate_flyback_pixels(scan_frame_parameters)
+        return (scan_width + flyback_pixels) * camera_exposure_ms / 1000 * 1.5
+
     def set_sequence_buffer_size(self, buffer_size: int) -> None:
         self.__sequence_buffer_size = buffer_size
         self.__buffer = list()
