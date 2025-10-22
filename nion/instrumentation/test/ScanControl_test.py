@@ -17,14 +17,13 @@ from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
-from nion.swift import Application
+from nion.swift import DisplayPanel
 from nion.swift import Facade
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
-from nion.ui import TestUI
 from nion.utils import Geometry
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 
@@ -995,6 +994,38 @@ class TestScanControlClass(unittest.TestCase):
             finally:
                 scan_hardware_source.abort_playing()
             ScanControlPanel.stop()
+
+    def test_scan_controller_matches(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            display_panel_manager = DisplayPanel.DisplayPanelManager()
+            ScanControlPanel.register_scan_panel(scan_hardware_source)
+            try:
+                self._acquire_one(document_controller, scan_hardware_source)
+                d = display_panel_manager.detect_controller(document_model, document_model.data_items[-1])
+                self.assertEqual("a", d["channel_id"])
+                self.assertEqual("scan-live", d["controller_type"])
+                self.assertEqual(scan_hardware_source.hardware_source_id, d["hardware_source_id"])
+                scan_hardware_source.subscan_enabled = True
+                self._acquire_one(document_controller, scan_hardware_source)
+                d = display_panel_manager.detect_controller(document_model, document_model.data_items[-1])
+                self.assertEqual("a_subscan", d["channel_id"])
+                self.assertEqual("scan-live", d["controller_type"])
+                self.assertEqual(scan_hardware_source.hardware_source_id, d["hardware_source_id"])
+                # synthesize the drift data item
+                document_model.append_data_item(document_model.data_items[-1].snapshot())
+                metadata = document_model.data_items[-1].metadata
+                metadata["hardware_source"]["channel_id"] = "drift"
+                document_model.data_items[-1].metadata = metadata
+                document_model.data_items[-1].category = "temporary"
+                d = display_panel_manager.detect_controller(document_model, document_model.data_items[-1])
+                self.assertEqual("drift", d["channel_id"])
+                self.assertEqual("scan-live", d["controller_type"])
+                self.assertEqual(scan_hardware_source.hardware_source_id, d["hardware_source_id"])
+            finally:
+                ScanControlPanel.unregister_scan_panel(scan_hardware_source)
 
     def test_probe_graphic_gets_closed(self):
         with self._test_context() as test_context:
