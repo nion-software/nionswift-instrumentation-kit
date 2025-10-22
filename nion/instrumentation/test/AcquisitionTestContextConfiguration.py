@@ -165,9 +165,15 @@ class ValueManager(InstrumentDevice.ValueManagerLike):
         return self.set_value(name, value)
 
     def get_value_2d(self, name: str, default_value: typing.Optional[Geometry.FloatPoint] = None, *, axis: typing.Optional[stem_controller.AxisType] = None) -> Geometry.FloatPoint:
-        return Geometry.FloatPoint()
+        axis = axis or ("x", "y")
+        y = self.get_value(name + axis[1]) or 0.0
+        x = self.get_value(name + axis[0]) or 0.0
+        return Geometry.FloatPoint(y, x)
 
     def set_value_2d(self, name: str, value: Geometry.FloatPoint, *, axis: typing.Optional[stem_controller.AxisType] = None) -> bool:
+        axis = axis or ("x", "y")
+        self.set_value(name + axis[1], value.y)
+        self.set_value(name + axis[0], value.x)
         return True
 
     def inform_control_2d(self, name: str, value: Geometry.FloatPoint, *, axis: stem_controller.AxisType) -> bool:

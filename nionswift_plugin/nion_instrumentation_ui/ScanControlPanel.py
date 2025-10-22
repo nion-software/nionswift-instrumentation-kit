@@ -85,7 +85,6 @@ class ScanControlStateController:
         (event) probe_state_changed_event(probe_state, probe_position): "parked", "scanning"
         (event) channel_state_changed_event(channel_index, channel_id, channel_name, enabled)
         (read-only property) selected_profile_index: return current profile index
-        (read-only property) use_hardware_simulator: return True to use hardware simulator
         (read-only property) probe_state
         (read/write property) probe_position may be None
         (read-only property) channel_count
