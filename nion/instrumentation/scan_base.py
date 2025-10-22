@@ -738,6 +738,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def channel_count(self) -> int: raise NotImplementedError()
 
     @property
+    def channel_states(self) -> typing.Sequence[ChannelState]: raise NotImplementedError()
+
+    @property
     def scan_context(self) -> STEMController.ScanContext: raise NotImplementedError()
 
     @property
@@ -1223,10 +1226,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
-
-        self.__channel_states_lock = threading.RLock()
-        self.__channel_states: typing.List[ChannelState] = list()
-        self.__pending_channel_states: typing.Optional[typing.List[ChannelState]] = None
 
         self.__profile_changed_event_listener = self.__settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
@@ -1860,6 +1859,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def channel_count(self) -> int:
         return self.get_channel_count()
 
+    @property
+    def channel_states(self) -> typing.Sequence[ChannelState]:
+        return [self.get_channel_state(i) for i in range(self.channel_count)]
+
     def get_channel_state(self, channel_index: int) -> ChannelState:
         channels_enabled = self.__device.channels_enabled
         assert 0 <= channel_index < len(channels_enabled)
@@ -1931,11 +1934,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # hardware, since they're already set, and doing so can cause strange change loops.
         channel_count = self.channel_count
         assert len(channel_states) == channel_count
-        def channel_states_changed() -> None:
-            with self.__channel_states_lock:
-                self.__channel_states = self.__pending_channel_states or list()
-                self.__pending_channel_states = None
-            for channel_index, channel_state in enumerate(self.__channel_states):
+        def channel_states_changed(channel_states: list[ChannelState]) -> None:
+            for channel_index, channel_state in enumerate(channel_states):
                 self.channel_state_changed_event.fire(channel_index, channel_state.channel_id, channel_state.name, channel_state.enabled)
                 frame_parameters_with_channels = copy.copy(self.__frame_parameters)
                 frame_parameters_with_channels.enabled_channel_indexes = self.get_enabled_channel_indexes()
@@ -1947,10 +1947,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                     break
             if not at_least_one_enabled:
                 self.stop_playing()
-        with self.__channel_states_lock:
-            if list(channel_states) != list(self.__channel_states):
-                self.__pending_channel_states = list(channel_states)
-                self.__task_queue.put(channel_states_changed)
+        self.__task_queue.put(functools.partial(channel_states_changed, channel_states))
         self.data_channels_updated()
 
     def __make_channel_id(self, channel_index: int) -> str:
@@ -1965,7 +1962,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_states = list()
         for channel_index, (channel_name, channel_enabled) in enumerate(device_channel_states):
             channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))
-        self.__channel_states_changed(channel_states)
+        if self.channel_states != channel_states:
+            self.__channel_states_changed(channel_states)
 
     def get_frame_parameters_from_dict(self, d: typing.Mapping[str, typing.Any]) -> ScanFrameParameters:
         return self.__settings.get_frame_parameters_from_dict(d)
