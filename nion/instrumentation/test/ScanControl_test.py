@@ -1,6 +1,8 @@
 import contextlib
 import copy
 import json
+import logging
+import math
 import os
 import pathlib
 import random
@@ -45,6 +47,11 @@ class TestScanControlClass(unittest.TestCase):
     def tearDown(self) -> None:
         self._test_setup = typing.cast(typing.Any, None)
         AcquisitionTestContext.end_leaks(self)
+
+    def assertAlmostEqualPoint(self, p1, p2, e=0.00001):
+        if not(Geometry.distance(p1, p2) < e):
+            logging.info("%s != %s", p1, p2)
+        self.assertTrue(Geometry.distance(p1, p2) < e)
 
     def _acquire_one(self, document_controller, hardware_source):
         hardware_source.start_playing(sync_timeout=3.0)
@@ -2067,6 +2074,32 @@ class TestScanControlClass(unittest.TestCase):
                 scan_hardware_source.stop_playing(sync_timeout=3.0)
                 scan_hardware_source.set_channel_enabled(0, True)
                 scan_hardware_source.set_channel_enabled(1, False)
+
+    def test_shift_click_with_rotation(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            stem_controller_ = test_context.instrument
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.pixel_size = Geometry.IntSize(100, 100)
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertAlmostEqualPoint(Geometry.FloatPoint(), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
+            logger = logging.getLogger("shift-click-test")
+            logger.addHandler(logging.NullHandler())
+            logger.propagate = False
+            scan_hardware_source.shift_click(Geometry.FloatPoint(53, 54), (100, 100), logger)
+            self.assertAlmostEqualPoint(Geometry.FloatPoint(y=-3e-9, x=-4e-9), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
+            scan_hardware_source.shift_click(Geometry.FloatPoint(47, 46), (100, 100), logger)
+            self.assertAlmostEqualPoint(Geometry.FloatPoint(), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
+            # now test rotated
+            scan_frame_parameters.rotation_rad = math.radians(45)
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.shift_click(Geometry.FloatPoint(60, 50), (100, 100), logger)
+            self.assertAlmostEqualPoint(Geometry.FloatPoint(y=-math.sqrt(2)/2*1e-8, x=math.sqrt(2)/2*1e-8), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
+            scan_hardware_source.shift_click(Geometry.FloatPoint(40, 50), (100, 100), logger)
+            self.assertAlmostEqualPoint(Geometry.FloatPoint(), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
 
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded

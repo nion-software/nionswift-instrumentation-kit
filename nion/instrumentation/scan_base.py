@@ -2114,10 +2114,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def data_channels_updated(self) -> None:
         self.__stem_controller.data_channels_updated()
 
-    @property
-    def use_hardware_simulator(self) -> bool:
-        return False
-
     def get_property(self, name: str) -> typing.Any:
         return getattr(self, name)
 
@@ -2132,11 +2128,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         width, height = frame_parameters.pixel_size
         fov_nm = frame_parameters.fov_nm
         pixel_size_nm = fov_nm / max(width, height)
-        # calculate dx, dy in meters
-        dx = 1e-9 * pixel_size_nm * (mouse_position.x - (camera_shape[1] / 2))
-        dy = 1e-9 * pixel_size_nm * (mouse_position.y - (camera_shape[0] / 2))
-        logger.info("Shifting (%s,%s) um.\n", -dx * 1e6, -dy * 1e6)
-        self.__stem_controller.change_stage_position(dy=dy, dx=dx)
+        rotation = frame_parameters.rotation_rad
+        # calculate dx, dy in meters and un-rotate
+        d = 1e-9 * pixel_size_nm * (mouse_position - Geometry.FloatPoint.make(camera_shape) / 2)
+        d = d.rotate(rotation, Geometry.FloatPoint())
+        logger.info("Shifting (%s,%s) um.\n", -d.x * 1e6, -d.y * 1e6)
+        self.__stem_controller.change_stage_position(dy=d.y, dx=d.x)
 
     def increase_pmt(self, channel_index: int) -> None:
         self.__stem_controller.change_pmt_gain(channel_index, factor=2.0)
