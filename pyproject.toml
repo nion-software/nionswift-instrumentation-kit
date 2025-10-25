@@ -2,6 +2,46 @@
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "nionswift-instrumentation"
+version = "23.6.2"
+authors = [
+    { name = "Nion Software", email = "swift@nion.com" }
+]
+description = "A Nion Swift library for STEM instrumentation (Camera, Scan, Video, Microscope)."
+readme = "README.rst"
+requires-python = ">=3.12"
+license = "GPL-3.0-only"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14"
+]
+urls = { "Homepage" = "https://github.com/nion-software/nionswift-instrumentation-kit" }
+dependencies = [
+    "niondata >=15.9,<16.0",
+    "nionswift >=16.16,<17.0",
+    "nionui >=10.2,<11.0",
+    "nionutils >=4.14,<5.0",
+    "numpy >=2.0,<3.0"
+]
+
+[tool.setuptools.packages.find]
+include = [
+    "nion",
+    "nion.device_kit",
+    "nion.instrumentation",
+    "nion.instrumentation.test",
+    "nionswift_plugin",
+    "nionswift_plugin.nion_instrumentation_ui"
+]
+
+[tool.setuptools.package-data]
+"nionswift_plugin.nion_instrumentation_ui" = ["resources/*", "manifest.json", "py.typed"]
+"nion.instrumentation" = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = [
     "nion/instrumentation/test"
