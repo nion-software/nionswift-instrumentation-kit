@@ -2679,13 +2679,14 @@ def make_synchronized_scan_data_stream(
             collector = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator(
                 processed_camera_data_stream.channels[0]))
     # SynchronizedDataStream saves and restores the scan parameters; also enters/exits synchronized state
-    line_count = scan_parameters_copy.scan_size.width + flyback_pixels
     collector = SynchronizedDataStream(collector, scan_hardware_source, camera_hardware_source, scan_frame_parameters, camera_exposure_ms / 1000, section_count)
+    # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
+    # the drift tracker may be enabled even when doing single synchronized scans, for instance if drift tracking
+    # is desired between frames of a sequence.
+    drift_tracker = scan_hardware_source.drift_tracker
+    if drift_tracker and enable_drift_tracker:
+        collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, drift_rotation)
     if scan_count > 1:
-        # DriftUpdaterDataStream watches the first channel (HAADF) and sends its frames to the drift compensator
-        drift_tracker = scan_hardware_source.drift_tracker
-        if drift_tracker and enable_drift_tracker:
-            collector = DriftTracker.DriftUpdaterDataStream(collector, drift_tracker, drift_rotation)
         # SequenceDataStream puts all streams in the collector into a sequence
         collector = Acquisition.SequenceDataStream(collector, scan_count)
         assert include_raw or include_summed

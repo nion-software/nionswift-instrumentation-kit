@@ -1079,8 +1079,12 @@ class ScanSpecifierValueStream(Stream.ValueStream[STEMController.ScanSpecifier])
             scan_width = self.__scan_width_model.value or 32
             assert scan_width is not None
 
+            # note: this is different from 'scan_hardware_source.drift_enabled' which is whether the drift graphic is on the context image
+            # this is a more direct indication of whether drift correction is enabled for scanning related items in the acquisition panel.
+            drift_enabled = self.__stem_controller.drift_settings.interval > 0
+
             scan_specifier = STEMController.ScanSpecifier()
-            scan_specifier.update(scan_hardware_source, exposure_time * 1000, scan_width, 1, False)
+            scan_specifier.update(scan_hardware_source, exposure_time * 1000, scan_width, 1, drift_enabled)
             self.send_value(scan_specifier)
 
 
