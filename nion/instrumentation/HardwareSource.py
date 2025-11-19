@@ -935,6 +935,10 @@ class HardwareSource(typing.Protocol):
     def is_aborted(self) -> bool:
         return False
 
+    @property
+    def data_channel_states(self) -> typing.Sequence[DataChannelEventArgs]:
+        return list()
+
     # private. do not use outside instrumentation-kit.
 
     xdatas_available_event: Event.Event
@@ -1033,6 +1037,13 @@ class DataChannelManager:
         data_channel = next(filter(lambda dc: dc.variant == variant, self.__data_channel_list_model.items), None)
         assert data_channel
         self.__data_channel_list_model.remove_item(self.__data_channel_list_model.items.index(data_channel))
+
+    @property
+    def data_channel_states(self) -> typing.Sequence[DataChannelEventArgs]:
+        args_list: typing.List[DataChannelEventArgs] = list()
+        for data_channel in self.__data_channel_list_model.items:
+            args_list.append(data_channel.get_data_channel_event_args())
+        return args_list
 
     def process_data_elements(self, data_elements: typing.Sequence[DataElementType], view_id: typing.Optional[str], is_stopping: bool, e: typing.Optional[Exception]) -> typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         is_error = e is not None
@@ -1259,6 +1270,10 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     # subclasses can implement this method which is called when the data channels are updated.
     def data_channels_updated(self) -> None:
         pass
+
+    @property
+    def data_channel_states(self) -> typing.Sequence[DataChannelEventArgs]:
+        return self.__data_channel_manager.data_channel_states
 
     # subclasses should implement this method to create a continuous-style acquisition task.
     # create the view task
