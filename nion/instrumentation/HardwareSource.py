@@ -1812,12 +1812,24 @@ def record_thread(
         is_error_ref: typing.List[bool],
         data_and_metadata_list: list[typing.Optional[DataAndMetadata.DataAndMetadata]]
 ) -> None:
-    hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
-    # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
-    recording_task = hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
-    is_error_ref[0] = not recording_task.wait_started(timeout=acquisition_parameters.timeout)
-    recording_started_or_error_event.set()
-    if not is_error_ref[0]:
+    # note: recording_started_or_error_event must be triggered and this method should not throw exceptions.
+    recording_task: RecordingTask | None = None
+    try:
+        hardware_source.set_record_frame_parameters(acquisition_parameters.frame_parameters)
+        # pass the acquisition_task_parameters, so they can get to _create_acquisition_record_task
+        recording_task = hardware_source.start_recording(acquisition_task_parameters=acquisition_parameters.acquisition_task_parameters)
+        is_error_ref[0] = not recording_task.wait_started(timeout=acquisition_parameters.timeout)
+    except Exception as e:
+        is_error_ref[0] = True
+        try:
+            hardware_source.abort_recording(sync_timeout=acquisition_parameters.timeout)
+        except Exception as nested_e:
+            logging.debug(f"Error aborting recording after failure to start: {nested_e}")
+        logging.debug(f"Error starting recording: {e}")
+        # error is killed here. needs rework.
+    finally:
+        recording_started_or_error_event.set()
+    if recording_task and not is_error_ref[0]:
         data_and_metadata_list.extend(recording_task.grab_xdatas())
         hardware_source.stop_recording(sync_timeout=acquisition_parameters.timeout)
 
