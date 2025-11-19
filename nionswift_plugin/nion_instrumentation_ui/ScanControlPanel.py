@@ -1852,6 +1852,47 @@ class DeclarativeDataItemReferenceThumbnailFactory:
 Registry.register_component(DeclarativeDataItemReferenceThumbnailFactory(), {"declarative_constructor"})
 
 
+class CharButtonFactory:
+    """Declarative factory for the character button (scan control panel specific).
+
+    Clients should create instances via the create_char_button() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.char-button"
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: typing.Optional[Window.Window],
+                  d: Declarative.UIDescription, handler: Declarative.HandlerLike,
+                  finishes: typing.List[typing.Callable[[], None]]) -> typing.Optional[UserInterface.Widget]:
+        if d_type == CharButtonFactory.WIDGET_TYPE:
+            text = d["text"]
+            canvas_item = CanvasItem.TextButtonCanvasItem(text)
+            # canvas_item.text_font = "normal 13px serif"
+            canvas_item.padding = Geometry.IntSize(canvas_item.padding.height, 0)
+            canvas_item.size_to_content(ui.get_font_metrics)
+            widget = ui.create_canvas_widget(properties={"height": canvas_item.sizing.preferred_height, "width": canvas_item.sizing.preferred_width})
+            widget.canvas_item.add_canvas_item(canvas_item)
+            if handler:
+                Declarative.connect_name(widget, d, handler)
+                Declarative.connect_attributes(widget, d, handler, finishes)
+                Declarative.connect_event(widget, canvas_item, d, handler, "on_clicked", [])
+            return widget
+        return None
+
+    @staticmethod
+    def create_char_button(*, text: Declarative.UILabel | None = None, name: Declarative.UIIdentifier | None = None,
+                           on_clicked: Declarative.UICallableIdentifier | None = None,
+                           **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        return {
+            "type": CharButtonFactory.WIDGET_TYPE,
+            "text": text,
+            "on_clicked": on_clicked,
+            "width": 14
+        }
+
+
+Registry.register_component(CharButtonFactory(), {"declarative_constructor"})
+
+
 class ChannelModel(Observable.Observable):
     """Model for a scan channel.
 
@@ -2631,6 +2672,14 @@ class ScanPanelController(Declarative.Handler):
         assert sliders_icon_24_png is not None
         self._config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
 
+        minus_png_data = pkgutil.get_data(__name__, "resources/minus_24.png")
+        assert minus_png_data is not None
+        self._minus_png = CanvasItem.load_rgba_data_from_bytes(minus_png_data, "png")
+
+        plus_png_data = pkgutil.get_data(__name__, "resources/plus_24.png")
+        assert plus_png_data is not None
+        self._plus_png = CanvasItem.load_rgba_data_from_bytes(plus_png_data, "png")
+
         u = Declarative.DeclarativeUI()
 
         @dataclasses.dataclass
@@ -2638,17 +2687,13 @@ class ScanPanelController(Declarative.Handler):
             key: str
             action: str
 
-        def create_key_button(*, text: Declarative.UILabel, on_clicked: Declarative.UICallableIdentifier) -> Declarative.UIDescription:
-            # return u.create_push_button(text=text, on_clicked=on_clicked, width=20, height=20, style="minimal")
-            return {"type": "notification_char_button", "text": text, "on_clicked": on_clicked, "width": 14}
-
         def create_line_edit_row(label: Declarative.UILabel, text_binding: str, lower: KeyAndAction | None = None, upper: KeyAndAction | None = None, placeholder_binding: str | None = None, color_binding: str | None = None, tool_tip_binding: str | None = None, text_width: int | None = None) -> Declarative.UIDescription:
             return u.create_row(
                 u.create_label(text=label, color=color_binding, tool_tip=tool_tip_binding, width=text_width, text_alignment_vertical="vcenter", text_alignment_horizontal="right"),
                 u.create_row(
-                    create_key_button(text="\N{CIRCLED MINUS}", on_clicked=lower.action) if lower else u.create_spacing(14),
+                    u.create_image(image="@binding(_minus_png)", width=12, height=12, on_clicked=lower.action) if lower else u.create_spacing(12),
                     u.create_line_edit(text=text_binding, placeholder_text=placeholder_binding, width=44),
-                    create_key_button(text="\N{CIRCLED PLUS}", on_clicked=upper.action) if upper else u.create_spacing(14),
+                    u.create_image(image="@binding(_plus_png)", width=12, height=12, on_clicked=upper.action) if upper else u.create_spacing(12),
                     u.create_stretch(),
                     spacing=2
                 ),
