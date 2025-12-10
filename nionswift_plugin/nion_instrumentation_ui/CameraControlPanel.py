@@ -653,6 +653,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         self.document_controller = document_controller
 
+        self.__camera_hardware_source = camera_hardware_source
+
         self.__state_controller = CameraControlStateController(camera_hardware_source, document_controller)
 
         self.__delegate: typing.Optional[CameraPanelDelegate] = None
@@ -967,7 +969,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
-        if data_item and hardware_source_id and self.__shift_click_state == "shift":
+        if data_item and hardware_source_id == self.__camera_hardware_source.hardware_source_id and self.__shift_click_state == "shift":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
@@ -977,7 +979,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             logger_buffer.flush()
             self.__shift_click_state = None
             return self.__mouse_pressed
-        if data_item and hardware_source_id and self.__shift_click_state == "tilt":
+        if data_item and hardware_source_id == self.__camera_hardware_source.hardware_source_id and self.__shift_click_state == "tilt":
             mouse_position = image_position
             camera_shape = data_item.dimensional_shape
             self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)

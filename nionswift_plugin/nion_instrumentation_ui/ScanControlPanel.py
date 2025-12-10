@@ -1151,6 +1151,8 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
 
         self.document_controller = document_controller
 
+        self.__scan_controller = scan_controller
+
         self.__state_controller = ScanControlStateController(scan_controller, document_controller, None)
 
         self.__shift_click_state: typing.Optional[str] = None
@@ -1722,7 +1724,7 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
         camera_shape = data_item.dimensional_shape if data_item else ()
-        if data_item and hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
+        if data_item and hardware_source_id == self.__scan_controller.hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
             mouse_position = image_position
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
             logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
@@ -2668,6 +2670,14 @@ class ScanPanelController(Declarative.Handler):
 
         self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
 
+        self.__shift_click_state: str | None = None
+        self.__mouse_pressed = False
+
+        self.__key_pressed_event_listener = DisplayPanel.DisplayPanelManager().key_pressed_event.listen(self.__image_panel_key_pressed)
+        self.__key_released_event_listener = DisplayPanel.DisplayPanelManager().key_released_event.listen(self.__image_panel_key_released)
+        self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.__image_panel_mouse_pressed)
+        self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.__image_panel_mouse_released)
+
         sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
         assert sliders_icon_24_png is not None
         self._config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
@@ -2837,6 +2847,44 @@ class ScanPanelController(Declarative.Handler):
     def handle_record_abort_button(self, widget: UserInterface.Widget) -> None:
         self._model.handle_record_abort_clicked()
 
+    # this gets called from the DisplayPanelManager. pass on the message to the state controller.
+    # must be called on ui thread
+    def __image_panel_mouse_pressed(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
+        data_item = display_panel.data_item if display_panel else None
+        hardware_source_id = data_item.metadata.get("hardware_source", dict()).get("hardware_source_id") if data_item else str()
+        logger = logging.getLogger("camera_control_ui")
+        logger.propagate = False  # do not send messages to root logger
+        if not logger.handlers:
+            logger.addHandler(logging.handlers.BufferingHandler(4))
+        camera_shape = data_item.dimensional_shape if data_item else ()
+        if data_item and hardware_source_id == self.__scan_hardware_source.hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
+            mouse_position = image_position
+            self.__scan_hardware_source.shift_click(mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
+            logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
+            for record in logger_buffer.buffer:
+                display_panel.document_controller.display_log_record(record)
+            logger_buffer.flush()
+            self.__shift_click_state = None
+            self.__mouse_pressed = True
+            return self.__mouse_pressed
+        return False
+
+    def __image_panel_mouse_released(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
+        mouse_pressed = self.__mouse_pressed
+        self.__mouse_pressed = False
+        return mouse_pressed
+
+    def __image_panel_key_pressed(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
+        if key.text.lower() == "s":
+            self.__shift_click_state = "shift"
+        else:
+            self.__shift_click_state = None
+        return False
+
+    def __image_panel_key_released(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
+        self.__shift_click_state = None
+        return False
+
 
 class ScanControlPanelV1(Panel.Panel):
 
@@ -2873,20 +2921,18 @@ class ScanControlPanel(Panel.Panel):
         ui = document_controller.ui
         self.__column_widget = ui.create_column_widget()
         self.widget = self.__column_widget
-        self.__scan_control_widget: ScanControlWidget | None = None
         self.__hardware_source_id = properties["hardware_source_id"]
         # listen for any hardware added or removed messages, and refresh the list
         self.__build_widget()
         HardwareSource.HardwareSourceManager().aliases_updated.append(self.__build_widget)
 
     def __build_widget(self) -> None:
-        if not self.__scan_control_widget:
-            scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
-            if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
-                document_controller = self.document_controller
-                scan_panel_controller = ScanPanelController(document_controller, scan_hardware_source)
-                self.__column_widget.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller))
-                self.__column_widget.add_stretch()
+        scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
+        if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
+            document_controller = self.document_controller
+            scan_panel_controller = ScanPanelController(document_controller, scan_hardware_source)
+            self.__column_widget.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller))
+            self.__column_widget.add_stretch()
 
     def close(self) -> None:
         HardwareSource.HardwareSourceManager().aliases_updated.remove(self.__build_widget)
