@@ -816,7 +816,7 @@ class MultiAcquireController:
     def shift_x(self, eV: float) -> None:
         if self.__active_settings.x_shifter:
             self.stem_controller.SetValAndConfirm(self.__active_settings.x_shifter,
-                                                  self.zeros['x'] + eV, 1.0, 1000)
+                                                  self.zeros['x'] + eV, 1.0, 5000)
         else: # do not wait if nothing was done
             return
         time.sleep(self.__active_settings.x_shift_delay)
@@ -832,7 +832,7 @@ class MultiAcquireController:
 
     def __set_beam_blanker(self, blanker_on: bool) -> None:
         if self.__active_settings.blanker:
-            self.stem_controller.SetValAndConfirm(self.__active_settings.blanker, 1 if blanker_on else 0, 1.0, 1000)
+            self.stem_controller.SetValAndConfirm(self.__active_settings.blanker, 1 if blanker_on else 0, 1.0, 5000)
         else: # do not wait if nothing was done
             return
         time.sleep(self.__active_settings.blanker_delay)
