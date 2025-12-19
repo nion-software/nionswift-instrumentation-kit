@@ -152,10 +152,7 @@ class ScanContext:
     @property
     def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
         if self.size and self.fov_nm is not None:
-            if self.size.aspect_ratio > 1.0:
-                return Geometry.FloatSize(height=self.fov_nm / self.size.aspect_ratio, width=self.fov_nm)
-            else:
-                return Geometry.FloatSize(height=self.fov_nm, width=self.fov_nm * self.size.aspect_ratio)
+            return Geometry.FloatSize(self.fov_nm, self.fov_nm * self.size.aspect_ratio)
         else:
             return None
 

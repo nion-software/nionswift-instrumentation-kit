@@ -246,7 +246,8 @@ class Device(scan_base.ScanDevice):
         # Apply any rotation (context + subscan)
         if frame_parameters.subscan_rotation:
             total_rotation -= frame_parameters.subscan_rotation
-        scan_frame_parameters = ScanFrameParameters(size=size, pixel_time_us=frame_parameters.pixel_time_us, fov_nm=used_fov_size_nm[0], center_nm=center_nm, rotation_rad=total_rotation)
+        # NOTE: the real hardware uses the max of width and height for fov. same here.
+        scan_frame_parameters = ScanFrameParameters(size=size, pixel_time_us=frame_parameters.pixel_time_us, fov_nm=max(used_fov_size_nm.width, used_fov_size_nm.height), center_nm=center_nm, rotation_rad=total_rotation)
         return self.__scan_simulator.generate_scan_data(self.__instrument, scan_frame_parameters)
 
     def read_partial(self, frame_number: typing.Optional[int], pixels_to_skip: int) -> typing.Tuple[typing.Sequence[typing.Dict[str, typing.Any]], bool, bool, typing.Tuple[typing.Tuple[int, int], typing.Tuple[int, int]], typing.Optional[int], int]:

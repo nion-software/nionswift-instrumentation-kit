@@ -15,6 +15,7 @@ import uuid
 
 import numpy
 
+from nion.data import Calibration
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
@@ -2100,6 +2101,47 @@ class TestScanControlClass(unittest.TestCase):
             self.assertAlmostEqualPoint(Geometry.FloatPoint(y=-math.sqrt(2)/2*1e-8, x=math.sqrt(2)/2*1e-8), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
             scan_hardware_source.shift_click(Geometry.FloatPoint(40, 50), (100, 100), logger)
             self.assertAlmostEqualPoint(Geometry.FloatPoint(), stem_controller_.GetVal2D("stage_position_m"), e=1e-9)
+
+    def test_scan_size_consistency(self):
+        # NOTE: the hardware (and simulator) always map the FoV to the largest dimension
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.fov_nm = 100.0
+            # test the square case
+            scan_frame_parameters.pixel_size = Geometry.IntSize(h=200, w=200)
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual((200, 200), document_controller.document_model.data_items[0].data_shape)
+            self.assertEqual((100, 100), tuple(scan_hardware_source.get_current_frame_parameters().fov_size_nm))
+            self.assertEqual((100, 100), tuple(scan_hardware_source.scan_context.fov_size_nm))
+            self.assertEqual((200, 200), tuple(scan_hardware_source.scan_context.size))
+            self.assertEqual(100/200, document_controller.document_model.data_items[0].dimensional_calibrations[0].scale)
+            self.assertEqual(100/200, document_controller.document_model.data_items[0].dimensional_calibrations[1].scale)
+            self.assertEqual(Calibration.Calibration(None, 100/200, "nm"), scan_hardware_source.scan_context.calibration)
+            # test the w > h case
+            scan_frame_parameters.pixel_size = Geometry.IntSize(h=150, w=300)
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual((150, 300), document_controller.document_model.data_items[0].data_shape)
+            self.assertEqual((50, 100), tuple(scan_hardware_source.get_current_frame_parameters().fov_size_nm))
+            self.assertEqual((100, 200), tuple(scan_hardware_source.scan_context.fov_size_nm))
+            self.assertEqual((150, 300), tuple(scan_hardware_source.scan_context.size))
+            self.assertEqual(100/300, document_controller.document_model.data_items[0].dimensional_calibrations[0].scale)
+            self.assertEqual(100/300, document_controller.document_model.data_items[0].dimensional_calibrations[1].scale)
+            self.assertEqual(Calibration.Calibration(None, 100/300, "nm"), scan_hardware_source.scan_context.calibration)
+            # test the h > w case
+            scan_frame_parameters.pixel_size = Geometry.IntSize(h=300, w=150)
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertEqual((300, 150), document_controller.document_model.data_items[0].data_shape)
+            self.assertEqual((100, 50), tuple(scan_hardware_source.get_current_frame_parameters().fov_size_nm))
+            self.assertEqual((100, 50), tuple(scan_hardware_source.scan_context.fov_size_nm))
+            self.assertEqual((300, 150), tuple(scan_hardware_source.scan_context.size))
+            self.assertEqual(100/300, document_controller.document_model.data_items[0].dimensional_calibrations[0].scale)
+            self.assertEqual(100/300, document_controller.document_model.data_items[0].dimensional_calibrations[1].scale)
+            self.assertEqual(Calibration.Calibration(None, 100/300, "nm"), scan_hardware_source.scan_context.calibration)
 
     # center_nm, center_x_nm, and center_y_nm are all sensible for context and subscans
     # all requested and actual frame parameters are recorded

@@ -287,9 +287,11 @@ class ScanFrameParameters(ParametersBase):
     @property
     def fov_size_nm(self) -> typing.Optional[Geometry.FloatSize]:
         # return the fov size with the same aspect ratio as the size
-        # the height of the fov_size_nm will be the same as the fov_nm
-        # the width will depend on the aspect ratio of the pixel shape.
-        return Geometry.FloatSize(self.fov_nm, self.fov_nm * self.pixel_size.aspect_ratio)
+        # the largest dimension will be the same as the fov_nm
+        if self.pixel_size.aspect_ratio > 1.0:  # width > height
+            return Geometry.FloatSize(self.fov_nm / self.pixel_size.aspect_ratio, self.fov_nm)
+        else:
+            return Geometry.FloatSize(self.fov_nm, self.fov_nm * self.pixel_size.aspect_ratio)
 
     @property
     def rotation_deg(self) -> float:
