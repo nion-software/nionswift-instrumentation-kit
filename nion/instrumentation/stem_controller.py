@@ -785,7 +785,7 @@ class STEMController(Observable.Observable):
     # high level commands
 
     def change_stage_position(self, *, dy: typing.Optional[float] = None, dx: typing.Optional[float] = None) -> None:
-        """Shift the stage by dx, dy (meters). Do not wait for confirmation."""
+        """Shift the stage by dx, dy (meters). Do not wait for confirmation. Coordinates are in u, v (scan) coordinates."""
         raise NotImplementedError()
 
     def change_pmt_gain(self, pmt_type: PMTType, *, factor: float) -> None:

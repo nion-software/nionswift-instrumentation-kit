@@ -255,10 +255,16 @@ class Instrument(stem_controller.STEMController):
         return self.__axis_manager.axis_transform_point(point, from_axis, to_axis)
 
     def change_stage_position(self, *, dy: typing.Optional[float] = None, dx: typing.Optional[float] = None) -> None:
-        """Shift the stage by dx, dy (meters). Do not wait for confirmation."""
-        dx = dx or 0
-        dy = dy or 0
-        self.stage_position_m += Geometry.FloatPoint(y=-dy, x=-dx)
+        """Shift the stage by dx, dy (meters). Do not wait for confirmation. Coordinates are in u, v (scan) coordinates."""
+        scan_delta = Geometry.FloatPoint(x=(dx or 0.0), y=(dy or 0.0))
+        # get the rotation of the scan through this hack.
+        scan_controller = self.scan_controller
+        assert scan_controller is not None
+        frame_parameters = scan_controller.scan_device.current_frame_parameters
+        rotation = frame_parameters.rotation_rad
+        # convert scan coordinates delta to stage coordinates delta.
+        stage_delta = scan_delta.rotate(rotation, Geometry.FloatPoint())
+        self.stage_position_m += Geometry.FloatPoint(y=-stage_delta.y, x=-stage_delta.x)
 
     def change_pmt_gain(self, pmt_type: stem_controller.PMTType, *, factor: float) -> None:
         """Change specified PMT by factor. Do not wait for confirmation."""
