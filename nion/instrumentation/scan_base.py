@@ -2128,11 +2128,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         width, height = frame_parameters.pixel_size
         fov_nm = frame_parameters.fov_nm
         pixel_size_nm = fov_nm / max(width, height)
-        rotation = frame_parameters.rotation_rad
-        # calculate dx, dy in meters and un-rotate
+        # calculate dx, dy in meters
         d = 1e-9 * pixel_size_nm * (mouse_position - Geometry.FloatPoint.make(camera_shape) / 2)
-        d = d.rotate(rotation, Geometry.FloatPoint())
         logger.info("Shifting (%s,%s) um.\n", -d.x * 1e6, -d.y * 1e6)
+        # do NOT rotate for shift-click; coordinate are in u,v (scan) coordinates already and will be translateed to
+        # sx, sy (stage) coordinates in change_stage_position.
         self.__stem_controller.change_stage_position(dy=d.y, dx=d.x)
 
     def increase_pmt(self, channel_index: int) -> None:
