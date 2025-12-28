@@ -971,24 +971,30 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
             logger.addHandler(logging.handlers.BufferingHandler(4))
         if data_item and hardware_source_id == self.__camera_hardware_source.hardware_source_id and self.__shift_click_state == "shift":
             mouse_position = image_position
-            camera_shape = data_item.dimensional_shape
-            self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
-            logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
-            for record in logger_buffer.buffer:
-                display_panel.document_controller.display_log_record(record)
-            logger_buffer.flush()
-            self.__shift_click_state = None
-            return self.__mouse_pressed
+            data_metadata = data_item.data_metadata if data_item else None
+            camera_shape = data_metadata.dimensional_shape if data_metadata else None
+            if camera_shape:
+                self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
+                logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
+                for record in logger_buffer.buffer:
+                    display_panel.document_controller.display_log_record(record)
+                logger_buffer.flush()
+                self.__shift_click_state = None
+                return self.__mouse_pressed
+            return False
         if data_item and hardware_source_id == self.__camera_hardware_source.hardware_source_id and self.__shift_click_state == "tilt":
             mouse_position = image_position
-            camera_shape = data_item.dimensional_shape
-            self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
-            logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
-            for record in logger_buffer.buffer:
-                display_panel.document_controller.display_log_record(record)
-            logger_buffer.flush()
-            self.__shift_click_state = None
-            return self.__mouse_pressed
+            data_metadata = data_item.data_metadata if data_item else None
+            camera_shape = data_metadata.dimensional_shape if data_metadata else None
+            if camera_shape:
+                self.__mouse_pressed = self.__state_controller.handle_tilt_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
+                logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
+                for record in logger_buffer.buffer:
+                    display_panel.document_controller.display_log_record(record)
+                logger_buffer.flush()
+                self.__shift_click_state = None
+                return self.__mouse_pressed
+            return False
         return False
 
     def image_panel_mouse_released(self, display_panel: DisplayPanel.DisplayPanel, display_item: DisplayItem.DisplayItem, image_position: Geometry.FloatPoint, modifiers: CanvasItem.KeyboardModifiers) -> bool:
