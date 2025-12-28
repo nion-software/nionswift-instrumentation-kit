@@ -1723,8 +1723,9 @@ class ScanControlWidget(Widgets.CompositeWidgetBase):
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
-        camera_shape = data_item.dimensional_shape if data_item else ()
-        if data_item and hardware_source_id == self.__scan_controller.hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
+        data_metadata = data_item.data_metadata if data_item else None
+        camera_shape = data_metadata.dimensional_shape if data_metadata else None
+        if hardware_source_id == self.__scan_controller.hardware_source_id and camera_shape and len(camera_shape) == 2 and self.__shift_click_state == "shift":
             mouse_position = image_position
             self.__mouse_pressed = self.__state_controller.handle_shift_click(hardware_source_id, mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
             logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])
@@ -2856,8 +2857,9 @@ class ScanPanelController(Declarative.Handler):
         logger.propagate = False  # do not send messages to root logger
         if not logger.handlers:
             logger.addHandler(logging.handlers.BufferingHandler(4))
-        camera_shape = data_item.dimensional_shape if data_item else ()
-        if data_item and hardware_source_id == self.__scan_hardware_source.hardware_source_id and len(camera_shape) == 2 and self.__shift_click_state == "shift":
+        data_metadata = data_item.data_metadata if data_item else None
+        camera_shape = data_metadata.dimensional_shape if data_metadata else None
+        if hardware_source_id == self.__scan_hardware_source.hardware_source_id and camera_shape and len(camera_shape) == 2 and self.__shift_click_state == "shift":
             mouse_position = image_position
             self.__scan_hardware_source.shift_click(mouse_position, typing.cast(DataAndMetadata.Shape2dType, camera_shape), logger)
             logger_buffer = typing.cast(logging.handlers.BufferingHandler, logger.handlers[0])

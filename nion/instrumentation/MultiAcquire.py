@@ -384,11 +384,11 @@ class ScanDataChannel:
             dst_slice: typing.Tuple[typing.Union[slice, int, ellipsis]] = (Ellipsis,)
             if frames > 1:
                 if sum_frames:
-                    existing_data = data_item.data
-                    if existing_data is not None:
+                    existing_xdata = data_item.xdata
+                    if existing_xdata:
                         data = data_and_metadata.data
                         assert data is not None
-                        summed_data = existing_data[dst_slice] + data[src_slice]
+                        summed_data = existing_xdata.data[dst_slice] + data[src_slice]
                         data_and_metadata._set_data(summed_data)
                 else:
                     dst_slice = (self.current_frames_index,) + dst_slice # type: ignore
@@ -615,11 +615,11 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
 
         if frames > 1:
             if sum_frames:
-                data_item_data = self.__data_item.data
-                if data_item_data is not None:
+                data_item_xdata = self.__data_item.xdata
+                if data_item_xdata:
                     data = data_and_metadata.data
                     assert data is not None
-                    data_item_data[tuple(dst_slice)] += data[tuple(src_slice)]
+                    data_item_xdata.data[tuple(dst_slice)] += data[tuple(src_slice)]
             else:
                 dst_slice = [slice(self.current_frames_index, self.current_frames_index + 1)] + dst_slice
 
