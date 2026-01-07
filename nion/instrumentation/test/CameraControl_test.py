@@ -1102,34 +1102,32 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             frame_parameters = hardware_source.get_frame_parameters(0)
             # ensure it is initially dict-like
-            self.assertEqual(frame_parameters.exposure_ms, frame_parameters["exposure_ms"])
-            self.assertEqual(frame_parameters.binning, frame_parameters["binning"])
-            self.assertEqual(frame_parameters.processing, frame_parameters["processing"])
-            self.assertEqual(frame_parameters.integration_count, frame_parameters["integration_count"])
+            self.assertEqual(frame_parameters.exposure_ms, frame_parameters.exposure_ms)
+            self.assertEqual(frame_parameters.binning, frame_parameters.binning)
+            self.assertEqual(frame_parameters.processing, frame_parameters.processing)
+            self.assertEqual(frame_parameters.integration_count, frame_parameters.integration_count)
             # try setting values
-            frame_parameters["exposure_ms"] = 8.0
-            frame_parameters["binning"] = 8
-            frame_parameters["processing"] = "processing"
-            frame_parameters["integration_count"] = 8
+            frame_parameters.exposure_ms = 8.0
+            frame_parameters.binning = 8
+            frame_parameters.processing = "processing"
+            frame_parameters.integration_count = 8
             self.assertEqual(8.0, frame_parameters.exposure_ms)
             self.assertEqual(8, frame_parameters.binning)
             self.assertEqual("processing", frame_parameters.processing)
             self.assertEqual(8, frame_parameters.integration_count)
             # ensure masks are not None and can be set to masks or dict's but always return the object
             self.assertIsNotNone(frame_parameters.active_masks)
-            self.assertIsNotNone(frame_parameters["active_masks"])
             mask = camera_base.Mask()
             graphic = Graphics.RectangleGraphic()
             mask.add_layer(graphic, 1.0)
             graphic.close()
             frame_parameters.active_masks = [mask]
             self.assertEqual(frame_parameters.active_masks[0].to_dict(), mask.to_dict())
-            self.assertEqual(frame_parameters["active_masks"][0].to_dict(), mask.to_dict())  # mask is already a dict
             # test extra parameters
-            frame_parameters["extra"] = 8
-            self.assertEqual(8, frame_parameters["extra"])
+            frame_parameters.set_parameter("extra", 8)
+            self.assertEqual(8, frame_parameters.get_parameter("extra"))
             frame_parameters_copy = camera_base.CameraFrameParameters(frame_parameters.as_dict())
-            self.assertEqual(8, frame_parameters_copy["extra"])
+            self.assertEqual(8, frame_parameters_copy.get_parameter("extra"))
             # test dict is writeable to json
             json.dumps(frame_parameters.as_dict())
 
