@@ -34,7 +34,7 @@ from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller as STEMController
-from nion.instrumentation.scan_base import ParametersBase
+from nion.instrumentation import scan_base
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
 from nion.swift.model import Graphics
@@ -600,7 +600,7 @@ class CameraDevice3(typing.Protocol):
         """
         return CameraFrameParameters(frame_parameters.as_dict())
 
-    def set_frame_parameters(self, frame_parameters: typing.Any) -> None:
+    def set_frame_parameters(self, frame_parameters: CameraFrameParameters) -> None:
         """Set the pending frame parameters (exposure_ms, binning, processing, integration_count).
 
         The parameters may be out of range or not precise; the device is free to use the closest value.
@@ -2534,58 +2534,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__camera_settings.open_configuration_interface(api_broker)
 
 
-class CameraFrameParameters(ParametersBase):
+class CameraFrameParameters(scan_base.ParametersBase):
     """Camera frame parameters."""
-
-    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.__is_validated = False
-        self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in self.get_parameter("active_masks", [])]
-
-        # Assign defaults if not set
-        self.exposure_ms = self.get_parameter("exposure_ms", 125)
-        self.binning = self.get_parameter("binning", 1)
-        self.integration_count = self.get_parameter("integration_count", 1)
-
-    def __copy__(self) -> CameraFrameParameters:
-        return copy.deepcopy(self)
-
-    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> CameraFrameParameters:
-        deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
-        memo[id(self)] = deepcopy
-        return deepcopy
-
-    def as_dict(self) -> typing.Dict[str, typing.Any]:
-        # Return dictionary version, prioritising locally calculated values from properties where appropriate
-        d = super().as_dict()
-        d.update({
-            "exposure_ms": self.exposure_ms,
-            "exposure": self.exposure,
-            "binning": self.binning,
-            "processing": self.processing,
-            "integration_count": self.integration_count,
-            "active_masks": [mask.as_dict() for mask in self.active_masks]
-            })
-        return d
-
-    def __getitem__(self, item: str) -> typing.Any:
-        # Prefer property access if it exists
-        attr = getattr(type(self), item, None)
-        if isinstance(attr, property):
-            return getattr(self, item)
-
-        if self.has_parameter(item):
-            return self.get_parameter(item)
-
-        raise KeyError(item)
-
-    def __setitem__(self, key: str, value: typing.Any) -> None:
-        # Prefer property setters if they exist
-        attr = getattr(type(self), key, None)
-        if isinstance(attr, property) and attr.fset is not None:
-            setattr(self, key, value)
-        else:
-            self.set_parameter(key, value)
 
     @property
     def exposure(self) -> float:
@@ -2633,22 +2583,12 @@ class CameraFrameParameters(ParametersBase):
         self.set_parameter("integration_count", value)
 
     @property
-    def is_validated(self) -> bool:
-        return self.__is_validated
-
-    def _set_is_validated(self, is_validated: bool) -> None:
-        self.__is_validated = is_validated
-
-    @property
     def active_masks(self) -> typing.Sequence[Mask]:
-        return self.__active_masks
+        return [Mask.from_dict(mask) for mask in self.get_parameter("active_masks", [])]
 
     @active_masks.setter
     def active_masks(self, value: typing.Union[typing.Sequence[Mask], typing.List[typing.Dict[str, typing.Any]]]) -> None:
-        self.__active_masks = [Mask.from_dict(mask) if not isinstance(mask, Mask) else mask for mask in value]
-        # Store the dictionary version in the backend store to try to maintain consistency
-        mask_dict = [mask.as_dict() if isinstance(mask, Mask) else mask for mask in value]
-        self.set_parameter("active_masks", mask_dict)
+        self.set_parameter("active_masks", [mask.as_dict() if isinstance(mask, Mask) else mask for mask in value])
 
 
 class CameraAcquisitionTaskParameters(HardwareSource.AcquisitionTaskParameters):
