@@ -592,6 +592,16 @@ class CameraDevice3(typing.Protocol):
         """
         ...
 
+    def get_expected_dimensions_for_frame_parameters(self, frame_parameters: CameraFrameParameters) -> typing.Tuple[int, int]:
+        """Read-only property for the expected image size given parameters (binning and readout area included).
+
+        Returns (height, width).
+
+        Cameras are allowed to bin in one dimension and not the other.
+        Default implementation utilises get_expected_dimensions. Cameras should override where appropriate.
+        """
+        return self.get_expected_dimensions(frame_parameters.binning)
+
     def validate_frame_parameters(self, frame_parameters: CameraFrameParameters) -> CameraFrameParameters:
         """Validate the frame parameters.
 
@@ -1385,6 +1395,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_sequence_end(self) -> None: ...
     def acquire_sequence_cancel(self) -> None: ...
+
+    # method with default implementations
+    def get_expected_dimensions_for_frame_parameters(self, frame_parameters: CameraFrameParameters) -> typing.Tuple[int, int]:
+         # Legacy default implementation for when only binning was provided.
+         # Override with correct implementation where appropriate
+         return self.get_expected_dimensions(frame_parameters.binning)
 
     # properties
 
