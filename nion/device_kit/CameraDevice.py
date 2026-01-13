@@ -139,7 +139,7 @@ class Camera(camera_base.CameraDevice3):
         self.__binning = frame_parameters.binning
         self.__processing = frame_parameters.processing
         self.__integration_count = frame_parameters.integration_count
-        mask_array = [mask.get_mask_array(self.get_expected_dimensions(self.__binning)) for mask in frame_parameters.active_masks]
+        mask_array = [mask.get_mask_array(self.get_expected_dimensions_for_frame_parameters(frame_parameters)) for mask in frame_parameters.active_masks]
         self.__mask_array = numpy.array(mask_array) if mask_array else None
 
     @property
@@ -392,7 +392,7 @@ class CameraTask:
 
     def start(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
         # returns the full readout, including flyback pixels
-        camera_readout_shape: typing.Tuple[int, ...] = self.__camera_device.get_expected_dimensions(self.__camera_frame_parameters.binning)
+        camera_readout_shape: typing.Tuple[int, ...] = self.__camera_device.get_expected_dimensions_for_frame_parameters(self.__camera_frame_parameters)
         if self.__camera_frame_parameters.processing == "sum_project":
             camera_readout_shape = camera_readout_shape[1:]
         elif self.__camera_frame_parameters.processing == "sum_masked":

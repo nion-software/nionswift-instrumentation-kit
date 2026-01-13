@@ -1405,7 +1405,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             fractional_area = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=1.0, w=1.0))
             is_subscan = False
 
-        camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions(camera_frame_parameters.binning))
+        camera_readout_size = Geometry.IntSize.make(camera.get_expected_dimensions_for_frame_parameters(camera_frame_parameters))
 
         camera_readout_size_squeezed: typing.Tuple[int, ...]
         if camera_frame_parameters.processing == "sum_project":

@@ -1875,7 +1875,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         instrument_controller = self.__get_instrument_controller()
         calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.binning
-        data_shape = self.get_expected_dimensions(binning)
+        data_shape = self.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
@@ -2409,7 +2409,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         calibrator = self.__get_camera_calibrator()
         processing = camera_frame_parameters.processing
         binning = camera_frame_parameters.binning
-        data_shape = self.get_expected_dimensions(binning)
+        data_shape = self.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
@@ -2867,7 +2867,7 @@ class CameraDataStream(Acquisition.DataStream):
         self.__actual_camera_frame_parameters: typing.Optional[CameraFrameParameters] = None
         self.__record_task = typing.cast(HardwareSource.RecordTask, None)  # used for single frames
         self.__record_count = 0
-        self.__frame_shape = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+        self.__frame_shape = camera_hardware_source.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
         self.__channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
         self.__last_index = 0
         self.__camera_sequence_overheads: typing.List[float] = list()
@@ -2887,7 +2887,7 @@ class CameraDataStream(Acquisition.DataStream):
         return (self.__channel,)
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters.binning))
+        data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions_for_frame_parameters(self.__camera_frame_parameters))
         data_metadata = DataAndMetadata.DataMetadata(data_shape=data_shape, data_dtype=numpy.float32)
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
