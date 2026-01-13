@@ -309,7 +309,7 @@ class TestCameraControlClass(unittest.TestCase):
                 recording_task = hardware_source.start_recording(sync_timeout=3.0)
                 try:
                     results = recording_task.grab_xdatas()
-                    self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions(binning))
+                    self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters))
                 finally:
                     hardware_source.stop_recording(sync_timeout=3.0)
 
@@ -331,6 +331,26 @@ class TestCameraControlClass(unittest.TestCase):
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(1))
 
+    def test_ability_to_set_profile_parameters_is_reflected_in_acquisition_for_frame_parameters(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            hardware_source = test_context.camera_hardware_source
+            frame_parameters_0 = hardware_source.get_frame_parameters(0)
+            frame_parameters_0.binning = 2
+            hardware_source.set_frame_parameters(0, frame_parameters_0)
+            frame_parameters_1 = hardware_source.get_frame_parameters(1)
+            frame_parameters_1.binning = 1
+            hardware_source.set_frame_parameters(1, frame_parameters_1)
+            hardware_source.set_selected_profile_index(0)
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(
+                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters_0))
+            hardware_source.set_selected_profile_index(1)
+            self._acquire_one(document_controller, hardware_source)
+            self.assertEqual(
+                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters_1))
+
     def test_change_to_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
         with self._test_context() as test_context:
             hardware_source = test_context.camera_hardware_source
@@ -350,6 +370,15 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(1))
             finally:
                 hardware_source.abort_playing()
+
+    def test_get_expected_dimensions_for_frame_parameters_consistent_legacy(self):
+        with self._test_context() as test_context:
+            for binning in (1, 2):
+                hardware_source = test_context.camera_hardware_source
+                frame_parameters = hardware_source.get_frame_parameters(2)
+                frame_parameters.binning = binning
+
+                self.assertEqual(hardware_source.get_expected_dimensions(binning), hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters))
 
     def test_changing_frame_parameters_during_view_does_not_affect_current_acquisition(self):
         # NOTE: this currently fails on Orca camera because changing binning will immediately stop acquisition and restart.
