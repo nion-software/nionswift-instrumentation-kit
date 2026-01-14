@@ -19,6 +19,11 @@ class AcquisitionLibrary(typing.Protocol):
                                                     axis_id: str,
                                                     y_values: numpy.typing.ArrayLike,
                                                     x_values: numpy.typing.ArrayLike) -> Acquisition.AcquisitionProcedureFactoryInterface.AcquisitionProcedure: ...
+    """Creates an acquisition procedure that performs a table of scans acquisition.
+
+    The x-and y-values are relative for STEM controller except when otherwise noted. The camera device exposure time,
+    the field of view, and rotation are absolute.
+    """
 
 
 class AcquisitionLibraryV1(AcquisitionLibrary):
