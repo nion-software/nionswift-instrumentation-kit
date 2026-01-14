@@ -309,7 +309,7 @@ class TestCameraControlClass(unittest.TestCase):
                 recording_task = hardware_source.start_recording(sync_timeout=3.0)
                 try:
                     results = recording_task.grab_xdatas()
-                    self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters))
+                    self.assertEqual(results[0].data.shape, hardware_source.get_expected_dimensions(frame_parameters))
                 finally:
                     hardware_source.stop_recording(sync_timeout=3.0)
 
@@ -326,10 +326,10 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_frame_parameters(1, frame_parameters_1)
             hardware_source.set_selected_profile_index(0)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(frame_parameters_0))
             hardware_source.set_selected_profile_index(1)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(1))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(frame_parameters_1))
 
     def test_ability_to_set_profile_parameters_is_reflected_in_acquisition_for_frame_parameters(self):
         with self._test_context() as test_context:
@@ -345,11 +345,11 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_selected_profile_index(0)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(
-                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters_0))
+                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(frame_parameters_0))
             hardware_source.set_selected_profile_index(1)
             self._acquire_one(document_controller, hardware_source)
             self.assertEqual(
-                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters_1))
+                document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(frame_parameters_1))
 
     def test_change_to_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
         with self._test_context() as test_context:
@@ -363,22 +363,13 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source.set_selected_profile_index(0)
             hardware_source.start_playing(sync_timeout=3.0)
             try:
-                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(2))
+                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(frame_parameters_0))
                 time.sleep(self.exposure * 1.1)
                 hardware_source.set_selected_profile_index(1)
                 hardware_source.get_next_xdatas_to_start()  # skip one frame during testing to avoid timing variance
-                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(1))
+                self.assertEqual(hardware_source.get_next_xdatas_to_start()[0].data.shape, hardware_source.get_expected_dimensions(frame_parameters_1))
             finally:
                 hardware_source.abort_playing()
-
-    def test_get_expected_dimensions_for_frame_parameters_consistent_legacy(self):
-        with self._test_context() as test_context:
-            for binning in (1, 2):
-                hardware_source = test_context.camera_hardware_source
-                frame_parameters = hardware_source.get_frame_parameters(2)
-                frame_parameters.binning = binning
-
-                self.assertEqual(hardware_source.get_expected_dimensions(binning), hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters))
 
     def test_changing_frame_parameters_during_view_does_not_affect_current_acquisition(self):
         # NOTE: this currently fails on Orca camera because changing binning will immediately stop acquisition and restart.
@@ -386,9 +377,9 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             # verify that the frame parameters are applied to the _next_ frame.
             profile_index = 0  # 1, 2 both have special cases that make this test fail.
-            frame_parameters = hardware_source.get_frame_parameters(profile_index)
-            frame_parameters.exposure_ms = 800
-            hardware_source.set_frame_parameters(0, frame_parameters)
+            frame_parameters0 = hardware_source.get_frame_parameters(profile_index)
+            frame_parameters0.exposure_ms = 800
+            hardware_source.set_frame_parameters(0, frame_parameters0)
             hardware_source.set_selected_profile_index(profile_index)
             frame_parameters = hardware_source.get_frame_parameters(profile_index)
             frame_parameters.binning = 4
@@ -410,10 +401,10 @@ class TestCameraControlClass(unittest.TestCase):
                 # is if 0.8 * exposure is greater than the total of the intentional delays.
                 # the ccd1010 currently sleeps 600ms. so exposure must be about 800ms.
                 hardware_source.set_frame_parameters(profile_index, frame_parameters)
-                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(2))
+                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(frame_parameters0))
                 # now verify that the frame parameters are actually applied to the _next_ frame.
                 time.sleep(frame_time * 0.8)
-                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, hardware_source.get_expected_dimensions(frame_parameters))
             finally:
                 hardware_source.stop_playing()
 
@@ -515,7 +506,7 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertTrue(time.time() - start_time < TIMEOUT)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 1)
-            self.assertEqual(document_model.data_items[0].dimensional_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].dimensional_shape, hardware_source.get_expected_dimensions(frame_parameters_0))
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
@@ -558,10 +549,10 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             state_controller = self.__create_state_controller(test_context)
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
             state_controller.handle_binning_changed("4")
             self._acquire_one(document_controller, hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
 
     def test_first_view_uses_correct_mode(self):
         with self._test_context() as test_context:
@@ -576,12 +567,12 @@ class TestCameraControlClass(unittest.TestCase):
                 time.sleep(self.exposure * 0.5)
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
-                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
             finally:
                 hardware_source.abort_playing()
-            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
 
     def test_first_view_uses_correct_exposure(self):
         with self._test_context() as test_context:
@@ -599,7 +590,7 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 elapsed = time.perf_counter() - start
                 document_controller.periodic()
-                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(4))
+                self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
                 self.assertTrue(elapsed > long_exposure)
             finally:
                 hardware_source.abort_playing()
@@ -617,7 +608,7 @@ class TestCameraControlClass(unittest.TestCase):
             try:
                 time.sleep(self.exposure * 0.5)
                 data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # view again
-                self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(2))
+                self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
             finally:
                 hardware_source.stop_playing(sync_timeout=3.0)
             state_controller.handle_change_profile("Snap")
@@ -628,7 +619,7 @@ class TestCameraControlClass(unittest.TestCase):
                 elapsed = time.perf_counter() - start
             finally:
                 hardware_source.abort_playing()
-            self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(4))
+            self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
             self.assertTrue(elapsed > long_exposure)
 
     def test_exception_during_view_leaves_buttons_in_ready_state(self):
@@ -705,8 +696,9 @@ class TestCameraControlClass(unittest.TestCase):
             finally:
                 hardware_source.abort_playing()
             document_model.recompute_all()
-            self.assertEqual(data_items[0].data_shape, hardware_source.get_expected_dimensions(2))
-            self.assertEqual(data_items[1].data_shape, (hardware_source.get_expected_dimensions(2)[1], ))
+            frame_parameters = hardware_source.get_current_frame_parameters()
+            self.assertEqual(data_items[0].data_shape, hardware_source.get_expected_dimensions(frame_parameters))
+            self.assertEqual(data_items[1].data_shape, (hardware_source.get_expected_dimensions(frame_parameters)[1],))
             data_item_reference_changed_listener.close()
             processed_data_item_reference_changed_listener.close()
 

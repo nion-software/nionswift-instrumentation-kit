@@ -1553,7 +1553,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         camera_frame_time: float | None = None
         camera_frame_bytes: int | None = None
         if isinstance(camera_hardware_source, camera_base.CameraHardwareSource) and camera_frame_parameters:
-            camera_size = camera_hardware_source.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
+            camera_size = camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
             camera_dimensions = self._camera_settings_model.get_byte_dimensions(camera_size)
             camera_frame_bytes = int(numpy.prod(camera_dimensions, dtype=numpy.int64))
             camera_frame_time = camera_exposure_time if camera_exposure_time is not None else camera_frame_parameters.exposure
@@ -1716,7 +1716,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         camera_frame_time: float | None = None
         camera_frame_bytes: int | None = None
         if isinstance(camera_hardware_source, camera_base.CameraHardwareSource) and camera_frame_parameters:
-            camera_size = camera_hardware_source.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
+            camera_size = camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
             camera_dimensions = self._camera_settings_model.get_byte_dimensions(camera_size)
             camera_frame_bytes = int(numpy.prod(camera_dimensions, dtype=numpy.int64))
             camera_frame_time = camera_exposure_time if camera_exposure_time is not None else camera_frame_parameters.exposure

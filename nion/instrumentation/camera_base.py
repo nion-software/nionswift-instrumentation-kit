@@ -1378,7 +1378,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     # protected methods
 
-    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]: ...
+    def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]: ...
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str: ...
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
@@ -1395,12 +1395,6 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_sequence_end(self) -> None: ...
     def acquire_sequence_cancel(self) -> None: ...
-
-    # method with default implementations
-    def get_expected_dimensions_for_frame_parameters(self, frame_parameters: CameraFrameParameters) -> typing.Tuple[int, int]:
-         # Legacy default implementation for when only binning was provided.
-         # Override with correct implementation where appropriate
-         return self.get_expected_dimensions(frame_parameters.binning)
 
     # properties
 
@@ -1656,8 +1650,8 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
         self.__camera.readout_area = readout_area_TLBR
 
-    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
-        return self.__camera.get_expected_dimensions(binning)
+    def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]:
+        return self.__camera.get_expected_dimensions(frame_parameters.binning)
 
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
         if self.__signal_type == "eels":
@@ -1875,7 +1869,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         instrument_controller = self.__get_instrument_controller()
         calibration_controls = self.__camera.calibration_controls
         binning = camera_frame_parameters.binning
-        data_shape = self.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
+        data_shape = self.get_expected_dimensions(camera_frame_parameters)
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
@@ -2304,8 +2298,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
         self.__camera.readout_area = readout_area_TLBR
 
-    def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
-        return self.__camera.get_expected_dimensions(binning)
+    def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]:
+        return self.__camera.get_expected_dimensions_for_frame_parameters(frame_parameters)
 
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
         if self.__signal_type == "eels":
@@ -2408,8 +2402,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
         calibrator = self.__get_camera_calibrator()
         processing = camera_frame_parameters.processing
-        binning = camera_frame_parameters.binning
-        data_shape = self.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
+        data_shape = self.get_expected_dimensions(camera_frame_parameters)
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
@@ -2867,7 +2860,7 @@ class CameraDataStream(Acquisition.DataStream):
         self.__actual_camera_frame_parameters: typing.Optional[CameraFrameParameters] = None
         self.__record_task = typing.cast(HardwareSource.RecordTask, None)  # used for single frames
         self.__record_count = 0
-        self.__frame_shape = camera_hardware_source.get_expected_dimensions_for_frame_parameters(camera_frame_parameters)
+        self.__frame_shape = camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
         self.__channel = Acquisition.Channel(self.__camera_hardware_source.hardware_source_id)
         self.__last_index = 0
         self.__camera_sequence_overheads: typing.List[float] = list()
@@ -2887,7 +2880,7 @@ class CameraDataStream(Acquisition.DataStream):
         return (self.__channel,)
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions_for_frame_parameters(self.__camera_frame_parameters))
+        data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters))
         data_metadata = DataAndMetadata.DataMetadata(data_shape=data_shape, data_dtype=numpy.float32)
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 

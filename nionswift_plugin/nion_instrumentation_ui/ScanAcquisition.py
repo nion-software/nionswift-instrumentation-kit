@@ -572,7 +572,7 @@ class PanelDelegate:
 
         def eels_profile_parameters_changed(profile_index: int, frame_parameters: camera_base.CameraFrameParameters) -> None:
             if profile_index == 0 and isinstance(camera_hardware_source, camera_base.CameraHardwareSource):
-                expected_dimensions = camera_hardware_source.get_expected_dimensions_for_frame_parameters(frame_parameters)
+                expected_dimensions = camera_hardware_source.get_expected_dimensions(frame_parameters)
                 self.__camera_width = expected_dimensions[1]
                 self.__camera_height = expected_dimensions[0]
                 if self.__exposure_time_ms_value_model:
