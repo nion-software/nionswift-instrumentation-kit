@@ -1078,6 +1078,7 @@ class TestHardwareSourceClass(unittest.TestCase):
             hardware_source.start_playing(sync_timeout=3.0)
             hardware_source.stop_playing(sync_timeout=3.0)
             self.assertEqual(document_model._get_pending_data_item_updates_count(), 1)
+            document_controller.periodic()
 
     def test_two_acquisitions_succeed(self):
         with self.__simple_test_context() as simple_test_context:
