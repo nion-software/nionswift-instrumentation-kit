@@ -311,7 +311,7 @@ class TestMultiAcquire(unittest.TestCase):
                             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
 
                             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
-                                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+                                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
                                 total_shape = tuple(scan_frame_parameters.size)
                                 haadf_shape = tuple(scan_frame_parameters.size)
                                 index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
@@ -455,7 +455,7 @@ class TestMultiAcquire(unittest.TestCase):
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
 
             for data_item, haadf_data_item in zip(multi_acquire_data_items, haadf_data_items):
-                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters.binning)
+                camera_dims = camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
                 total_shape = tuple(scan_frame_parameters.size)
                 haadf_shape = tuple(scan_frame_parameters.size)
                 index = data_item.xdata.metadata['MultiAcquire.parameters']['index']
