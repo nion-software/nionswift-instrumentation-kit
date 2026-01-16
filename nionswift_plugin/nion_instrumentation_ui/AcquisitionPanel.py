@@ -600,7 +600,7 @@ class SeriesAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler)
             if control_handler:
                 # get the control values range from the control handler.
                 return Acquisition.SeriesAcquisitionMethod(control_customization, control_handler.get_control_values())
-        return Acquisition.BasicAcquisitionMethod(_("Series"))
+        return Acquisition.BasicAcquisitionMethod(_("1D Ramp"))
 
 
 class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler):
@@ -762,7 +762,7 @@ class TableauAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandler
                 x_control_values = x_control_handler.get_control_values()
                 control_values = numpy.stack(numpy.meshgrid(y_control_values, x_control_values, indexing='ij'), axis=-1)
                 return Acquisition.TableAcquisitionMethod(control_customization, axis_id, control_values)
-        return Acquisition.BasicAcquisitionMethod(_("Tableau"))
+        return Acquisition.BasicAcquisitionMethod(_("2D Ramp"))
 
 
 class MultiAcquireEntryHandler(Declarative.Handler):

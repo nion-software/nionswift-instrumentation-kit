@@ -3274,7 +3274,7 @@ class SeriesAcquisitionMethod(AcquisitionMethodLike):
             channel_names = device_data_stream.channel_names
             device_data_stream = SequenceDataStream(ActionDataStream(device_data_stream, action_delegate), self.__control_values.shape[0])
             device_data_stream.channel_names = channel_names
-            device_data_stream.title = _("Series")
+            device_data_stream.title = _("1D Ramp")
         return device_data_stream
 
 
@@ -3303,7 +3303,7 @@ class TableAcquisitionMethod(AcquisitionMethodLike):
                 self.__control_values.shape[0:2],
                 (Calibration.Calibration(), Calibration.Calibration()))
             device_data_stream.channel_names = channel_names
-            device_data_stream.title = _("Tableau")
+            device_data_stream.title = _("2D Ramp")
         return device_data_stream
 
 
