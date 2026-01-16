@@ -1349,6 +1349,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4))
+            Acquisition.prepare_acquire(maker)
             Acquisition.acquire(maker)
             maker = None
             self.assertEqual(old_frame_parameters_d, camera_hardware_source.get_current_frame_parameters().as_dict())
@@ -1363,6 +1364,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=False, include_summed=True))
+            Acquisition.prepare_acquire(maker)
             Acquisition.acquire(maker)
             self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
             maker = None
@@ -1374,6 +1376,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=False))
+            Acquisition.prepare_acquire(maker)
             Acquisition.acquire(maker)
             self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
             maker = None
@@ -1385,6 +1388,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             maker = Acquisition.MakerDataStream(camera_base.make_sequence_data_stream(camera_hardware_source, camera_frame_parameters, 4, include_raw=True, include_summed=True))
+            Acquisition.prepare_acquire(maker)
             Acquisition.acquire(maker)
             self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
             self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
