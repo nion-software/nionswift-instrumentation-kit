@@ -288,7 +288,7 @@ class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
 
 
 def _test_acquiring_frames_with_generator_produces_correct_frame_numbers(testcase, hardware_source, document_controller):
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         frame0 = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["frame_index"]
         frame1 = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["frame_index"]
@@ -299,7 +299,7 @@ def _test_acquiring_frames_with_generator_produces_correct_frame_numbers(testcas
         hardware_source.abort_playing(sync_timeout=3.0)
 
 def _test_acquire_multiple_frames_reuses_same_data_item(testcase, hardware_source, document_controller):
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         testcase.assertTrue(hardware_source.is_playing)
         hardware_source.get_next_xdatas_to_finish()
@@ -319,7 +319,7 @@ def _test_simple_hardware_start_and_stop_actually_stops_acquisition(testcase, ha
         hardware_source.abort_playing(sync_timeout=3.0)
 
 def _test_simple_hardware_start_and_abort_works_as_expected(testcase, hardware_source, document_controller):
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         testcase.assertTrue(hardware_source.is_playing)
     finally:
@@ -344,7 +344,7 @@ def _test_record_only_acquires_one_item(testcase, hardware_source, document_cont
     # UPDATE: record data is now in data_elements; it is neither temporary or not. it's just data.
 
 def _test_record_during_view_records_one_item_and_keeps_viewing(testcase, hardware_source, document_controller):
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         # start playing, grab a few frames
         hardware_source.get_next_xdatas_to_finish()
@@ -368,7 +368,7 @@ def _test_record_during_view_records_one_item_and_keeps_viewing(testcase, hardwa
 
 def _test_abort_record_during_view_returns_to_view(testcase, hardware_source, document_controller):
     # first start playing
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         hardware_source.get_next_xdatas_to_finish()
         document_controller.periodic()
@@ -385,7 +385,7 @@ def _test_view_reuses_single_data_item(testcase, hardware_source, document_contr
     document_model = document_controller.document_model
     testcase.assertEqual(len(document_model.data_items), 0)
     # play the first time
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         hardware_source.get_next_xdatas_to_finish()
     finally:
@@ -398,7 +398,7 @@ def _test_view_reuses_single_data_item(testcase, hardware_source, document_contr
     # play the second time. it should make a copy of the first data item and use the original.
     new_data_item = copy.deepcopy(document_model.data_items[0])
     document_model.append_data_item(new_data_item)
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         hardware_source.get_next_xdatas_to_start()
     finally:
@@ -413,7 +413,7 @@ def _test_view_reuses_single_data_item(testcase, hardware_source, document_contr
     testcase.assertEqual(frame_index, copied_frame_index)
 
 def _test_get_next_data_elements_to_finish_returns_full_frames(testcase, hardware_source, document_controller):
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         extended_data_list = hardware_source.get_next_xdatas_to_finish()
     finally:
@@ -429,7 +429,7 @@ def _test_exception_during_view_halts_playback(testcase, hardware_source, exposu
             raise Exception("Error during acquisition")
     hardware_source._test_acquire_hook = raise_exception
     hardware_source._test_acquire_exception = lambda *args: None
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         try:
             hardware_source.get_next_xdatas_to_finish(timeout=10.0)
@@ -479,7 +479,7 @@ def _test_able_to_restart_view_after_exception(testcase, hardware_source, exposu
             raise Exception("Error during acquisition")
     hardware_source._test_acquire_hook = raise_exception
     hardware_source._test_acquire_exception = lambda *args: None
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         hardware_source.get_next_xdatas_to_finish(timeout=10.0)
         testcase.assertTrue(hardware_source.is_playing)
@@ -493,7 +493,7 @@ def _test_able_to_restart_view_after_exception(testcase, hardware_source, exposu
     finally:
         hardware_source.abort_playing(sync_timeout=3.0)
     enabled[0] = False
-    hardware_source.start_playing()
+    hardware_source.start_playing(sync_timeout=3.0)
     try:
         hardware_source.get_next_xdatas_to_finish(timeout=10.0)
         hardware_source.get_next_xdatas_to_finish(timeout=10.0)
@@ -502,16 +502,18 @@ def _test_able_to_restart_view_after_exception(testcase, hardware_source, exposu
 
 def _test_record_starts_and_finishes_in_reasonable_time(testcase, hardware_source, exposure):
     # a reasonable time is 2x of record mode exposure (record mode exposure is 2x regular exposure)
+    time0 = time.time()
     hardware_source.start_recording(sync_timeout=3.0)
+    time1 = time.time()
     try:
         testcase.assertTrue(hardware_source.is_recording)
     except Exception as e:
         hardware_source.abort_recording(sync_timeout=3.0)
-    start = time.time()
+    time2 = time.time()
     hardware_source.stop_recording(sync_timeout=10.0)
-    elapsed = time.time() - start
+    elapsed = time.time() - time2
     # print(exposure, elapsed)
-    testcase.assertTrue(elapsed < exposure * 8.0)
+    testcase.assertTrue(elapsed < exposure * 8.0, f"Exceeded expected time {elapsed=} {exposure * 8.0=} {hardware_source.is_recording=} {time0=} {time1=} {time2=}")
     testcase.assertFalse(hardware_source.is_recording)
 
 

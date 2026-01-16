@@ -712,7 +712,7 @@ class TestScanControlClass(unittest.TestCase):
 
             # start playing and wait for one frame to finish
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            scan_frame_parameters.pixel_time_us = 2.0
+            scan_frame_parameters.pixel_time_us = 4.0
             scan_hardware_source.start_playing(frame_parameters=scan_frame_parameters, sync_timeout=3.0)
             scan_hardware_source.get_next_xdatas_to_finish()
             document_controller.periodic()
