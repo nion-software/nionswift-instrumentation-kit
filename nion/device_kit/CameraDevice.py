@@ -408,9 +408,11 @@ class CameraTask:
         start = self.__start
         frame_parameters = self.__camera_frame_parameters
         exposure = frame_parameters.exposure_ms / 1000.0
+        min_exposure = getattr(self.__camera_device.simulator, "_min_exposure", None)
+        if min_exposure is not None:
+            exposure = max(exposure, min_exposure)
         n = min(max(int(update_period / exposure), 1), self.__count - start)
         is_complete = start + n == self.__count
-        # print(f"{start=} {n=} {self.__count=} {is_complete=}")
         data_element = self.__camera_device._acquire_sequence(n)
         if data_element and not self.__aborted:
             xdata = ImportExportManager.convert_data_element_to_data_and_metadata(data_element)
