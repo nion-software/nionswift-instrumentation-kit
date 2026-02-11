@@ -2570,7 +2570,7 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__scan_packet_time = time.perf_counter()
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
-    def _handle_data_available(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
+    def _handle_data_received(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         # observe incoming data and mark the last times that a camera or scan packet arrives.
         # this facilitates an extra check to see if scan data is arriving in a timely manner.
         # if it is not, an exception can be raised in _advance_stream to indicate this problem.
@@ -2580,7 +2580,7 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         elif channel.segments[0] == self.__scan_hardware_source.hardware_source_id:
             self.__scan_packet_time = time.perf_counter()
             self.__scan_packet_counts[channel] = self.__scan_packet_counts.get(channel, 0) + 1
-        super()._handle_data_available(data_stream_event)
+        super()._handle_data_received(data_stream_event)
 
     def _advance_stream(self) -> None:
         scan_device_timeout = self.__scan_hardware_source.calculate_synchronized_scan_partial_timeout(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure * 1000)

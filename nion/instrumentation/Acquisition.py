@@ -822,6 +822,13 @@ class DataStream:
             assert self.__sequence_indexes.get(channel, 0) + count <= self.__sequence_counts.get(channel, self.__sequence_count)
             self.__sequence_indexes[channel] = self.__sequence_indexes.get(channel, 0) + count
 
+    def handle_data_received(self, data_stream_events: typing.Sequence[DataStreamEventArgs]) -> None:
+        for data_stream_event in data_stream_events:
+            self._handle_data_received(data_stream_event)
+
+    def _handle_data_received(self, data_stream_event: DataStreamEventArgs) -> None:
+        pass
+
     def wrap_in_sequence(self, length: int) -> DataStream:
         """Wrap this data stream in a sequence of length."""
         return SequenceDataStream(self, length)
@@ -2290,6 +2297,11 @@ class ContainerDataStream(DataStream):
     def _get_serial_data_handler(self) -> typing.Tuple[SerialDataHandler, bool]:
         return self.__data_stream._get_serial_data_handler()
 
+    def _handle_data_received(self, data_stream_event: DataStreamEventArgs) -> None:
+        for data_stream in self.data_streams:
+            data_stream.handle_data_received([data_stream_event])
+        super()._handle_data_received(data_stream_event)
+
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
         return self.data_stream.build_data_handler(data_handler)
 
@@ -3030,6 +3042,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                             data_stream_.send_raw_data_stream_event_to_data_handler(raw_data_stream_event)
                             last_progress_time = time.time()
                 data_stream.process_raw_stream_events(raw_data_stream_events)
+                data_stream.handle_data_received([data_stream_event_ for data_stream_, data_stream_event_ in raw_data_stream_events])
                 post_progress = data_stream.progress
                 data_stream.advance_stream()
                 next_progress = data_stream.progress
