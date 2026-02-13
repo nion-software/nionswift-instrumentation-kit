@@ -294,6 +294,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len, (2, 2), channel)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
 
@@ -305,6 +306,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
         self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
@@ -317,6 +319,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collectors = [Acquisition.CollectedDataStream(data_stream, (1,), [Calibration.Calibration()]) for i in numpy.ndindex(*collection_shape)]
         collector = Acquisition.StackedDataStream(collectors)
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
         self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
@@ -331,6 +334,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                             [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
+                Acquisition.prepare_acquire(maker)
                 Acquisition.acquire(maker)
                 expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
                 self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
@@ -347,6 +351,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
         self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
@@ -357,6 +362,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len, (4, 4), channel, 2)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
 
@@ -369,6 +375,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, collection_shape,
                                                     [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = collection_shape + maker.get_data(channel).data.shape[len(collection_shape):]
         self.assertTrue(numpy.array_equal(data_stream.data.reshape(expected_shape), maker.get_data(channel).data))
@@ -381,6 +388,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(1, scan_shape, [channel], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = scan_shape
         self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
@@ -396,6 +404,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 data_stream = ScanDataStream(1, scan_shape, [channel], 9)
                 collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
+                Acquisition.prepare_acquire(maker)
                 Acquisition.acquire(maker)
                 expected_shape = scan_shape
                 self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
@@ -413,6 +422,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = (sequence_len,) + scan_shape
         self.assertTrue(numpy.array_equal(data_stream.data[channel].reshape(expected_shape), maker.get_data(channel).data))
@@ -427,6 +437,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = ScanDataStream(1, scan_shape, [channel0, channel1], scan_shape[1])
         collector = Acquisition.CollectedDataStream(data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_shape = scan_shape
         self.assertTrue(numpy.array_equal(data_stream.data[channel0].reshape(expected_shape), maker.get_data(channel0).data))
@@ -448,6 +459,7 @@ class TestAcquisitionClass(unittest.TestCase):
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = scan_shape
         expected_camera_shape = scan_shape + (2,)
@@ -474,6 +486,7 @@ class TestAcquisitionClass(unittest.TestCase):
                 combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
                 collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
                 maker = Acquisition.MakerDataStream(collector)
+                Acquisition.prepare_acquire(maker)
                 Acquisition.acquire(maker)
                 expected_scan_shape = scan_shape
                 expected_camera_shape = scan_shape + (2,)
@@ -494,6 +507,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator())
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_camera_shape = scan_shape
         self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel).data))
@@ -512,6 +526,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.MaskedSumOperator(mask))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_camera_shape = scan_shape
         mask_data = numpy.zeros((8, 8))
@@ -532,6 +547,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({channel11: Acquisition.SumOperator(), channel22: Acquisition.SumOperator()}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_camera_shape = scan_shape
         self.assertTrue(numpy.array_equal(camera_data_stream.data.sum((-2, -1)).reshape(expected_camera_shape), maker.get_data(channel11).data))
@@ -553,6 +569,7 @@ class TestAcquisitionClass(unittest.TestCase):
         summed_data_stream = Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.CompositeDataStreamOperator({channel11: Acquisition.MaskedSumOperator(mask1), channel22: Acquisition.MaskedSumOperator(mask2)}))
         collector = Acquisition.CollectedDataStream(summed_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_camera_shape = scan_shape
         mask_data1 = numpy.zeros((8, 8))
@@ -577,6 +594,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(stacked_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         move_axis_data_stream = Acquisition.FramedDataStream(collector, operator=Acquisition.MoveAxisDataStreamOperator())
         maker = Acquisition.MakerDataStream(move_axis_data_stream)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_camera_shape = scan_shape
         mask_data1 = numpy.zeros((8, 8))
@@ -602,6 +620,7 @@ class TestAcquisitionClass(unittest.TestCase):
         combined_data_stream = Acquisition.CombinedDataStream([scan_data_stream, summed_data_stream])
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         maker = Acquisition.MakerDataStream(collector)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = scan_shape
         expected_camera_shape = scan_shape
@@ -627,6 +646,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = (sequence_len,) + scan_shape
         expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
@@ -656,6 +676,7 @@ class TestAcquisitionClass(unittest.TestCase):
             ])
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = (sequence_len,) + scan_shape
         expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
@@ -682,6 +703,7 @@ class TestAcquisitionClass(unittest.TestCase):
         collector = Acquisition.CollectedDataStream(combined_data_stream, scan_shape, [Calibration.Calibration(), Calibration.Calibration()])
         sequencer = Acquisition.StackedDataStream([Acquisition.SequenceDataStream(collector, 1) for i in range(sequence_len)])
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = (sequence_len,) + scan_shape
         expected_camera_shape = (sequence_len,) + scan_shape + (2, 2)
@@ -712,6 +734,7 @@ class TestAcquisitionClass(unittest.TestCase):
         sequencer = Acquisition.SequenceDataStream(collector, sequence_len)
         accumulator = Acquisition.AccumulatedDataStream(sequencer, False, True)
         maker = Acquisition.MakerDataStream(accumulator)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         expected_scan_shape = scan_shape
         sequence_camera_shape = (sequence_len,) + scan_shape + (2, 2)
@@ -734,6 +757,7 @@ class TestAcquisitionClass(unittest.TestCase):
         section2 = Acquisition.CollectedDataStream(camera_data_stream, (2, 4), [Calibration.Calibration(), Calibration.Calibration()])
         sections = Acquisition.StackedDataStream((section1, section2))
         maker = Acquisition.MakerDataStream(Acquisition.SequenceDataStream(sections, 2))
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertFalse(maker.is_error)
         maker_data = maker.get_data(channel)
@@ -748,6 +772,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream2 = SingleFrameDataStream(sequence_len2, (2, 2), channel)
         sequencer2 = Acquisition.SequenceDataStream(data_stream2, sequence_len2)
         maker = Acquisition.MakerDataStream(Acquisition.SequentialDataStream((sequencer1, sequencer2)))
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertTrue(numpy.array_equal(data_stream1.data, maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
         self.assertTrue(numpy.array_equal(data_stream2.data, maker.get_data(Acquisition.Channel("1", *channel.segments)).data))
@@ -758,6 +783,7 @@ class TestAcquisitionClass(unittest.TestCase):
         data_stream = SingleFrameDataStream(sequence_len * 2, (2, 2), channel)
         sequencer = Acquisition.SequenceDataStream(data_stream, sequence_len)
         maker = Acquisition.MakerDataStream(Acquisition.SequentialDataStream((sequencer, sequencer)))
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertEqual(2, len(maker.channels))
         self.assertTrue(numpy.array_equal(data_stream.data[0:4], maker.get_data(Acquisition.Channel("0", *channel.segments)).data))
@@ -788,6 +814,7 @@ class TestAcquisitionClass(unittest.TestCase):
         action = Action()
         sequencer = Acquisition.SequenceDataStream(Acquisition.ActionDataStream(data_stream, action), sequence_len)
         maker = Acquisition.MakerDataStream(sequencer)
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker)
         self.assertTrue(numpy.array_equal(data_stream.data, maker.get_data(channel).data))
         self.assertEqual(1, action._s)
@@ -806,6 +833,7 @@ class TestAcquisitionClass(unittest.TestCase):
             nonlocal had_error
             had_error = True
 
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker, error_handler=handle_error)
         self.assertTrue(had_error)
         self.assertTrue(maker.is_error)
@@ -822,6 +850,7 @@ class TestAcquisitionClass(unittest.TestCase):
             nonlocal had_error
             had_error = True
 
+        Acquisition.prepare_acquire(maker)
         Acquisition.acquire(maker, error_handler=handle_error)
         self.assertTrue(had_error)
         self.assertTrue(maker.is_error)

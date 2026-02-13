@@ -3011,6 +3011,13 @@ class MakerDataStream(ContainerDataStream):
         return self.__framed_data_handler.sent_bytes / self._total_bytes if self._total_bytes else 1.0
 
 
+def prepare_acquire(data_stream: DataStream, framer: Framer | None = None) -> None:
+    # this is called on the main thread. give data stream and data channel a chance to prepare.
+    data_stream.prepare_stream(DataStreamArgs((1,)), [])
+    if framer:
+        framer.prepare({channel: data_stream.get_info(channel) for channel in data_stream.channels})
+
+
 def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
     """Perform an acquire. This is the main acquisition loop. It runs on a thread.
 
@@ -3019,7 +3026,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
     Progress must be made once per 60s or else an exception is thrown.
     """
     TIMEOUT = 60.0
-    data_stream.prepare_stream(DataStreamArgs((1,)), [])
+    # data_stream.prepare_stream(DataStreamArgs((1,)), [])
     try:
         data_stream.start_stream(DataStreamArgs((1,)))
         try:
@@ -3097,8 +3104,7 @@ class Acquisition:
         self.__device_state.restore()
 
     def prepare_acquire(self) -> None:
-        # this is called on the main thread. give data channel a chance to prepare.
-        self.__framer.prepare({channel: self.__data_stream.get_info(channel) for channel in self.__data_stream.channels})
+        prepare_acquire(self.__data_stream, self.__framer)
 
     def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
@@ -3512,6 +3518,7 @@ def start_acquire(data_stream: DataStream,
 def acquire_immediate(data_stream: DataStream) -> typing.Mapping[Channel, DataAndMetadata.DataAndMetadata]:
     framer = Framer(DataAndMetadataDataChannel())
     data_stream.attach_root_data_handler(FramedDataHandler(framer))
+    prepare_acquire(data_stream, framer)
     acquire(data_stream)
     return {channel: framer.get_data(channel) for channel in data_stream.channels}
 
