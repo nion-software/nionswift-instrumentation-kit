@@ -48,7 +48,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
         self.__title_base = title_base
         self.__channel_names = dict(channel_names)
         self.__data_item_ref_map: typing.Dict[Acquisition.Channel, DataItemReference] = dict()
-        self.on_display_data_item: typing.Optional[typing.Callable[[DataItem.DataItem], None]] = None
+        self.on_display_data_item: typing.Optional[typing.Callable[[DataItem.DataItem, Acquisition.Channel], None]] = None
 
     def prepare(self, channel_info_map: typing.Mapping[Acquisition.Channel, Acquisition.DataStreamInfo]) -> None:
         # prepare will be called on the main thread.
@@ -61,7 +61,7 @@ class DataItemDataChannel(Acquisition.DataChannel):
             data_item = self.__create_data_item(data_stream_info.data_metadata, title)
             self.__data_item_ref_map[channel] = DataItemReference(self.__document_model, data_item)
             if callable(self.on_display_data_item):
-                self.on_display_data_item(data_item)
+                self.on_display_data_item(data_item, channel)
 
     def get_data(self, channel: Acquisition.Channel) -> DataAndMetadata.DataAndMetadata:
         data_and_metadata = self.__data_item_ref_map[channel].data_item.data_and_metadata

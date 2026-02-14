@@ -182,7 +182,7 @@ class ScanSpecifier:
     scan_context: ScanContext | None = None
     scan_count = 1
     size: tuple[int, int] | None = None
-    scan_size = Geometry.IntSize()
+    scan_size: Geometry.IntSize | None = None
     scan_pixel_count = 0
     drift_interval_lines = 0
     drift_interval_scans = 0
@@ -195,7 +195,7 @@ class ScanSpecifier:
         self.scan_context = None
         self.scan_count = 1
         self.size = None
-        self.scan_size = Geometry.IntSize()
+        self.scan_size = None
         self.scan_pixel_count = 0
         self.drift_interval_lines = 0
         self.drift_interval_scans = 0

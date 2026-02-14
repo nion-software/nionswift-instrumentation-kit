@@ -3011,7 +3011,7 @@ class MakerDataStream(ContainerDataStream):
         return self.__framed_data_handler.sent_bytes / self._total_bytes if self._total_bytes else 1.0
 
 
-def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
+def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> Exception | None:
     """Perform an acquire. This is the main acquisition loop. It runs on a thread.
 
     Performs consistency checks on progress and data.
@@ -3060,6 +3060,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
                 # assert data_stream.progress == 1.0, f"{data_stream.progress=}"
                 if data_stream.progress != 1.0:
                     logging.warning(f"Data stream progress should be 1.0 [{data_stream.progress}]")
+            return None
         except Exception as e:
             data_stream.is_error = True
             data_stream.abort_stream()
@@ -3075,6 +3076,7 @@ def acquire(data_stream: DataStream, *, error_handler: typing.Optional[typing.Ca
             import traceback
             traceback.print_stack()
             traceback.print_exc()
+        return e
 
 
 class Acquisition:
@@ -3102,9 +3104,9 @@ class Acquisition:
 
     def acquire(self, *, error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> None:
         try:
-            acquire(self.__data_stream, error_handler=error_handler)
+            e = acquire(self.__data_stream, error_handler=error_handler)
             self.__is_aborted = self.__data_stream.is_aborted
-            self.__is_error = self.__data_stream.is_error
+            self.__is_error = self.__data_stream.is_error or e is not None
             self.__is_finished = True
         finally:
             self.__data_stream = typing.cast(typing.Any, None)
