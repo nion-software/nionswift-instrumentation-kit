@@ -827,7 +827,8 @@ class DataStream:
             self._handle_data_received(data_stream_event)
 
     def _handle_data_received(self, data_stream_event: DataStreamEventArgs) -> None:
-        pass
+        for data_stream in self.data_streams:
+            data_stream.handle_data_received([data_stream_event])
 
     def wrap_in_sequence(self, length: int) -> DataStream:
         """Wrap this data stream in a sequence of length."""
@@ -2296,11 +2297,6 @@ class ContainerDataStream(DataStream):
 
     def _get_serial_data_handler(self) -> typing.Tuple[SerialDataHandler, bool]:
         return self.__data_stream._get_serial_data_handler()
-
-    def _handle_data_received(self, data_stream_event: DataStreamEventArgs) -> None:
-        for data_stream in self.data_streams:
-            data_stream.handle_data_received([data_stream_event])
-        super()._handle_data_received(data_stream_event)
 
     def _build_data_handler(self, data_handler: DataHandler) -> bool:
         return self.data_stream.build_data_handler(data_handler)
