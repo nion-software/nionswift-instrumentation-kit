@@ -34,8 +34,10 @@ from nion.swift.model import DocumentModel
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import Declarative
+from nion.ui import DrawingContext
 from nion.ui import PreferencesDialog
 from nion.ui import UserInterface
+from nion.ui import Widgets
 from nion.ui import Window
 from nion.utils import Binding
 from nion.utils import Converter
@@ -49,7 +51,6 @@ if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
     from nion.swift.model import DisplayItem
     from nion.swift.model import Persistence
-    from nion.ui import DrawingContext
     from nion.utils import Event
     from nion.swift.model import Schema
 
@@ -777,6 +778,48 @@ class IconCell(ButtonCell):
             drawing_context.begin_path()
 
 
+class CharCell(ButtonCell):
+    def __init__(self, char: str) -> None:
+        super().__init__()
+        self.padding = Geometry.IntSize()
+        self.__char = char
+
+    def _paint_cell(self, drawing_context: DrawingContext.DrawingContext, rect: Geometry.FloatRect, style: typing.Set[str]) -> None:
+        enabled = "disabled" not in style
+        active = "active" in style
+        with drawing_context.saver():
+            drawing_context.translate(rect.left, rect.top)
+            drawing_context.begin_path()
+            drawing_context.round_rect(1, 1, rect.width - 2, rect.height - 2, 2.0)
+            if enabled:
+                if active:
+                    if self.fill_style_pressed:
+                        drawing_context.fill_style = self.fill_style_pressed
+                        drawing_context.fill()
+                    if self.border_style_pressed:
+                        drawing_context.stroke_style = self.border_style_pressed
+                        drawing_context.stroke()
+                else:
+                    if self.fill_style:
+                        drawing_context.fill_style = self.fill_style
+                        drawing_context.fill()
+                    if self.border_style:
+                        drawing_context.stroke_style = self.border_style
+                        drawing_context.stroke()
+            else:
+                if self.fill_style_disabled:
+                    drawing_context.fill_style = self.fill_style_disabled
+                    drawing_context.fill()
+                if self.border_style_disabled:
+                    drawing_context.stroke_style = self.border_style_disabled
+                    drawing_context.stroke()
+            drawing_context.begin_path()
+            drawing_context.text_align = "center"
+            drawing_context.text_baseline = "bottom"
+            drawing_context.fill_style = self.stroke_style
+            drawing_context.fill_text(self.__char, rect.width / 2, rect.height / 2 + 5.5)
+
+
 class ButtonCellCanvasItem(CanvasItem.CellCanvasItem):
 
     def __init__(self, button_cell: ButtonCell) -> None:
@@ -870,6 +913,83 @@ class IconCanvasItem(ButtonCellCanvasItem):
         super().__init__(IconCell(icon_id))
         self.wants_mouse_events = True
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18, 18)))
+
+
+class CharButtonCanvasItem(ButtonCellCanvasItem):
+
+    def __init__(self, char: str) -> None:
+        super().__init__(CharCell(char))
+        self.wants_mouse_events = True
+        self.fill_style = "rgb(255, 255, 255)"
+        self.fill_style_pressed = "rgb(128, 128, 128)"
+        self.fill_style_disabled = "rgb(192, 192, 192)"
+        self.border_style = "rgb(192, 192, 192)"
+        self.border_style_pressed = "rgb(128, 128, 128)"
+        self.border_style_disabled = "rgb(192, 192, 192)"
+        self.stroke_style = "#000"
+        self.border_enabled = False
+
+
+class CharButtonWidget(UserInterface.Widget):
+    def __init__(self, ui: UserInterface.UserInterface, text: str):
+        fm = ui.get_font_metrics("", "M")
+        height = fm.height + 4
+        width = (fm.width + 3) if sys.platform == "win32" else (fm.width + 4)  # less padding on Windows to look right
+        column_widget = ui.create_column_widget(properties={"height": height, "width": width})
+        super().__init__(Widgets.CompositeWidgetBehavior(column_widget))
+
+        self.__text = text
+
+        self.on_clicked = None
+
+        def button_clicked() -> None:
+            if callable(self.on_clicked):
+                self.on_clicked()
+
+        canvas_item = CharButtonCanvasItem(text)
+        canvas_item.on_clicked = button_clicked
+
+        canvas_widget = ui.create_canvas_widget()
+        canvas_widget.canvas_item.add_canvas_item(canvas_item)
+
+        # ugh. this is a partially working stop-gap when a canvas item is in a widget it will not get mouse exited reliably
+        root_container = canvas_item.root_container
+        if root_container and root_container.canvas_widget:
+            canvas_widget.on_mouse_exited = root_container.canvas_widget.on_mouse_exited
+
+        self.__canvas_item = canvas_item
+
+        column_widget.add(canvas_widget)
+
+        def get_text() -> str:
+            return self.__text
+
+        def set_text(value: str) -> None:
+            self.__text = str(value)
+
+        self.__text_binding_helper = UserInterface.BindablePropertyHelper[str](get_text, set_text)
+
+        self.text = text
+
+    def close(self) -> None:
+        self.__text_binding_helper.close()
+        self.__text_binding_helper = typing.cast(typing.Any, None)
+        self.on_clicked = None
+        super().close()
+
+    @property
+    def text(self) -> str:
+        return self.__text_binding_helper.value
+
+    @text.setter
+    def text(self, text: str) -> None:
+        self.__text_binding_helper.value = text
+
+    def bind_text(self, binding: Binding.Binding) -> None:
+        self.__text_binding_helper.bind_value(binding)
+
+    def unbind_text(self) -> None:
+        self.__text_binding_helper.unbind_value()
 
 
 class LinkedCheckBoxCanvasItemComposer(CanvasItem.BaseComposer):
@@ -1035,6 +1155,56 @@ class DeclarativeDataItemReferenceThumbnailFactory:
 
 # register the declarative factory
 Registry.register_component(DeclarativeDataItemReferenceThumbnailFactory(), {"declarative_constructor"})
+
+
+class CharButtonFactory:
+    """Declarative factory for the character button (scan control panel specific).
+
+    Clients should create instances via the create_char_button() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.char-button"
+    DEFAULT_WIDTH = 15
+    DEFAULT_HEIGHT = 20
+    TEXT_OFFSET = 4.5
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: typing.Optional[Window.Window],
+                  d: Declarative.UIDescription, handler: Declarative.HandlerLike,
+                  finishes: list[typing.Callable[[], None]]) -> UserInterface.Widget | None:
+        """Construct a character button widget.
+
+        This is a callback from the declarative UI engine.
+
+        Returns the constructed widget or None if the d_type does not match.
+        """
+        if d_type == CharButtonFactory.WIDGET_TYPE:
+            text = d["text"]
+            character = text[0] if text else " "
+            widget = CharButtonWidget(ui, character)
+            Declarative.connect_name(widget, d, handler)
+            Declarative.connect_event(widget, widget, d, handler, "on_clicked", [])
+            Declarative.connect_attributes(widget, d, handler, finishes)
+            return widget
+        return None
+
+    @staticmethod
+    def create_char_button(*, text: Declarative.UILabel | None = None, name: Declarative.UIIdentifier | None = None,
+                           on_clicked: Declarative.UICallableIdentifier | None = None,
+                           **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        """Create a declarative description for a character button with the given text, name, and on_clicked handler.
+
+        Returns the description.
+        """
+        return {
+            "type": CharButtonFactory.WIDGET_TYPE,
+            "text": text,
+            "on_clicked": on_clicked,
+            "width": CharButtonFactory.DEFAULT_WIDTH,
+            "height": CharButtonFactory.DEFAULT_HEIGHT
+        } | kwargs
+
+
+Registry.register_component(CharButtonFactory(), {"declarative_constructor"})
 
 
 class ChannelModel(Observable.Observable):
@@ -1824,14 +1994,6 @@ class ScanPanelController(Declarative.Handler):
         assert sliders_icon_24_png is not None
         self._config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
 
-        minus_png_data = pkgutil.get_data(__name__, "resources/minus_24.png")
-        assert minus_png_data is not None
-        self._minus_png = CanvasItem.load_rgba_data_from_bytes(minus_png_data, "png")
-
-        plus_png_data = pkgutil.get_data(__name__, "resources/plus_24.png")
-        assert plus_png_data is not None
-        self._plus_png = CanvasItem.load_rgba_data_from_bytes(plus_png_data, "png")
-
         u = Declarative.DeclarativeUI()
 
         @dataclasses.dataclass
@@ -1843,9 +2005,9 @@ class ScanPanelController(Declarative.Handler):
             return u.create_row(
                 u.create_label(text=label, color=color_binding, tool_tip=tool_tip_binding, width=text_width, text_alignment_vertical="vcenter", text_alignment_horizontal="right"),
                 u.create_row(
-                    u.create_image(image="@binding(_minus_png)", width=12, height=12, on_clicked=lower.action) if lower else u.create_spacing(12),
+                    CharButtonFactory.create_char_button(text=lower.key, on_clicked=lower.action) if lower else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
                     u.create_line_edit(text=text_binding, placeholder_text=placeholder_binding, width=44),
-                    u.create_image(image="@binding(_plus_png)", width=12, height=12, on_clicked=upper.action) if upper else u.create_spacing(12),
+                    CharButtonFactory.create_char_button(text=upper.key, on_clicked=upper.action) if upper else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
                     u.create_stretch(),
                     spacing=2
                 ),
@@ -1859,7 +2021,7 @@ class ScanPanelController(Declarative.Handler):
         height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), placeholder_binding="@binding(_model.placeholder_height_str)", text_width=48)
 
         size_row = u.create_row(
-            u.create_column(width_row, height_row),
+            u.create_column(width_row, height_row, spacing=2),
             spacing=2
         )
 
