@@ -125,10 +125,9 @@ class TestScanControlClass(unittest.TestCase):
                 model.width_str = "512"
                 self.assertTrue(watcher.changed)
 
-            # test changing height. initially will be None if not set
+            # test changing height
             profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertIsNone(model.height_str)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.placeholder_height_str))
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
             model.height_str = "515"
             self.assertEqual(515, scan_settings.get_frame_parameters(0).pixel_size.height)
             self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
@@ -150,7 +149,7 @@ class TestScanControlClass(unittest.TestCase):
                 model.rotation_deg_str = "12.4"
                 self.assertTrue(watcher.changed)
 
-    def test_width_height_placeholder(self):
+    def test_width_height_linking(self):
         # test that height field placeholder updates with width when height is empty, and that height syncs/unsyncs properly
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
@@ -160,9 +159,8 @@ class TestScanControlClass(unittest.TestCase):
 
             # initial assumptions
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.width_str))
-            self.assertIsNone(model.height_str)
-            self.assertEqual(model.placeholder_height_str, model.width_str)
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertTrue(model.width_height_linked)
 
             # change the width, height should update too
             model.width_str = "600"
@@ -170,46 +168,37 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 600)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.width_str))
-            self.assertIsNone(model.height_str)
-            self.assertEqual(model.placeholder_height_str, model.width_str)
 
-            # change the height, should be independent of width now
+            # change the height, width should update too
             model.height_str = "500"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 600)
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 500)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 500)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
 
-            # change the width again, height should remain unchanged
+            # unlink the width and height
+            model.width_height_linked = False
+
+            # change the width, height should remain unchanged
             model.width_str = "400"
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 500)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
 
-            # change height back to empty, should sync to width again
-            model.height_str = ""
+            # change the height, width should remain unchanged
+            model.height_str = "300"
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 300)
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+
+            # link the width and height. ensure height updates to match width.
+            model.width_height_linked = True
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 400)
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.width_str))
-            self.assertIsNone(model.height_str)
-            self.assertEqual(model.placeholder_height_str, model.width_str)
-
-            # change width again, height should follow
-            model.width_str = "300"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 300)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 300)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.width_str))
-            self.assertIsNone(model.height_str)
-            self.assertEqual(model.placeholder_height_str, model.width_str)
-
-            # test changing width generates placeholder_height_str property changed event when height is synced
-            model.height_str = ""
-            with PropertyChangedEventWatcher(model, "placeholder_height_str") as watcher:
-                model.width_str = "250"
-                self.assertTrue(watcher.changed)
+            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
 
     def test_increase_decrease_fields(self):
         # test that the increase/decrease methods work for pixel time, fov, width, and height

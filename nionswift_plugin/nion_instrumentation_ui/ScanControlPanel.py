@@ -992,10 +992,12 @@ class CharButtonWidget(UserInterface.Widget):
         self.__text_binding_helper.unbind_value()
 
 
-class LinkedCheckBoxCanvasItemComposer(CanvasItem.BaseComposer):
-    def __init__(self, canvas_item: CanvasItem.AbstractCanvasItem, layout_sizing: CanvasItem.Sizing, composer_cache: CanvasItem.ComposerCache, check_state: str) -> None:
+class LinkedFieldsCheckBoxCanvasItemComposer(CanvasItem.BaseComposer):
+    def __init__(self, canvas_item: CanvasItem.AbstractCanvasItem, layout_sizing: CanvasItem.Sizing, composer_cache: CanvasItem.ComposerCache, check_state: str, mouse_inside: bool, mouse_checked: bool) -> None:
         super().__init__(canvas_item, layout_sizing, composer_cache)
         self.__check_state = check_state
+        self.__mouse_inside = mouse_inside
+        self.__mouse_pressed = mouse_checked
 
     def _repaint(self, drawing_context: DrawingContext.DrawingContext, canvas_bounds: Geometry.IntRect, composer_cache: CanvasItem.ComposerCache) -> None:
         with drawing_context.saver():
@@ -1005,34 +1007,139 @@ class LinkedCheckBoxCanvasItemComposer(CanvasItem.BaseComposer):
             canvas_height = canvas_bounds.height
             check_state = self.__check_state
             if check_state == "checked":
-                drawing_context.move_to(canvas_width - 2, 0)
-                drawing_context.line_to(2, 0)
-                drawing_context.line_to(2, canvas_height)
-                drawing_context.line_to(canvas_width - 2, canvas_height)
+                drawing_context.move_to(2, 2)
+                drawing_context.line_to(canvas_width - 2, 2)
+                drawing_context.line_to(canvas_width - 2, canvas_height - 2)
+                drawing_context.line_to(2, canvas_height - 2)
             else:
-                drawing_context.move_to(canvas_width - 2, 0)
-                drawing_context.line_to(2, 0)
-                drawing_context.line_to(2, canvas_height * 0.5 - 4)
-                drawing_context.move_to(0, canvas_height * 0.5 - 4)
-                drawing_context.line_to(4, canvas_height * 0.5 - 4)
-                drawing_context.move_to(0, canvas_height * 0.5 + 4)
-                drawing_context.line_to(4, canvas_height * 0.5 + 4)
-                drawing_context.move_to(2, canvas_height * 0.5 + 4)
-                drawing_context.line_to(2, canvas_height)
-                drawing_context.line_to(canvas_width - 2, canvas_height)
-            drawing_context.stroke_style = "#000"
-            drawing_context.line_width = 1.0
+                # draw the top bar and down stroke
+                drawing_context.move_to(2, 2)
+                drawing_context.line_to(canvas_width - 2, 2)
+                drawing_context.line_to(canvas_width - 2, canvas_height * 0.5 - 3)
+                # draw the top crossbar
+                drawing_context.move_to(canvas_width, canvas_height * 0.5 - 3)
+                drawing_context.line_to(canvas_width - 4, canvas_height * 0.5 - 3)
+                # draw the bottom crossbar
+                drawing_context.move_to(canvas_width, canvas_height * 0.5 + 3)
+                drawing_context.line_to(canvas_width - 4, canvas_height * 0.5 + 3)
+                # draw the down stroke and bottom bar
+                drawing_context.move_to(canvas_width - 2, canvas_height * 0.5 + 3)
+                drawing_context.line_to(canvas_width - 2, canvas_height - 2)
+                drawing_context.line_to(2, canvas_height - 2)
+            if self.__mouse_pressed:
+                drawing_context.stroke_style = "#CCC"
+            else:
+                drawing_context.stroke_style = "#888"
+            if self.__mouse_inside:
+                drawing_context.line_width = 3.0
+            else:
+                drawing_context.line_width = 1.5
             drawing_context.stroke()
 
 
-class LinkedCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
-
+class LinkedFieldsCheckBoxCanvasItem(CanvasItem.CheckBoxCanvasItem):
     def __init__(self) -> None:
         super().__init__()
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(w=10, h=30)))
 
     def _get_composer(self, composer_cache: CanvasItem.ComposerCache) -> typing.Optional[CanvasItem.BaseComposer]:
-        return LinkedCheckBoxCanvasItemComposer(self, self.layout_sizing, composer_cache, self.check_state)
+        return LinkedFieldsCheckBoxCanvasItemComposer(self, self.layout_sizing, composer_cache, self.check_state, self._mouse_inside, self._mouse_pressed)
+
+
+class LinkedFieldsCheckBoxWidget(UserInterface.Widget):
+    """A linked checkbox widget.
+
+    Presents a line/broken-line icon that can be toggled between checked and unchecked to represent linking between
+    two vertically stacked text fields.
+    """
+
+    def __init__(self, ui: UserInterface.UserInterface) -> None:
+        canvas_item = LinkedFieldsCheckBoxCanvasItem()
+        properties = {"height": canvas_item.sizing.preferred_height, "width": canvas_item.sizing.preferred_width}
+        widget = ui.create_canvas_widget(properties=properties)
+        widget.canvas_item.add_canvas_item(canvas_item)
+        super().__init__(Widgets.CompositeWidgetBehavior(widget))
+        self.on_checked_changed: typing.Callable[[bool], None] | None = None
+
+        def set_checked(value: bool) -> None:
+            canvas_item.checked = value
+
+        self.__checked_binding_helper = UserInterface.BindablePropertyHelper[bool](None, set_checked)
+
+        def handle_checked_changed(checked: bool) -> None:
+            if checked != self.checked:
+                self.checked = checked
+                if callable(self.on_checked_changed):
+                    self.on_checked_changed(checked)
+
+        canvas_item.on_checked_changed = handle_checked_changed
+
+    def close(self) -> None:
+        self.__checked_binding_helper.close()
+        self.__checked_binding_helper = typing.cast(typing.Any, None)  # help catch use after close
+        super().close()
+
+    @property
+    def checked(self) -> bool:
+        return self.__checked_binding_helper.value
+
+    @checked.setter
+    def checked(self, value: bool) -> None:
+        self.__checked_binding_helper.value = value
+
+    def bind_checked(self, binding: Binding.Binding) -> None:
+        self.__checked_binding_helper.bind_value(binding)
+
+    def unbind_checked(self) -> None:
+        self.__checked_binding_helper.unbind_value()
+
+
+class LinkedFieldsCheckBoxFactory:
+    """Declarative factory for the linked checkbox control.
+
+    Clients should create declarative descriptions via the create_linked_fields_check_box() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.linked-check-box"
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: Window.Window | None,
+                  d: Declarative.UIDescription, handler: Declarative.HandlerLike,
+                  finishes: list[typing.Callable[[], None]]) -> UserInterface.Widget | None:
+        """Construct a linked checkbox widget.
+
+        This is a callback from the declarative UI engine.
+
+        Returns the constructed widget or None if the d_type does not match.
+        """
+        if d_type == LinkedFieldsCheckBoxFactory.WIDGET_TYPE:
+            widget = LinkedFieldsCheckBoxWidget(ui)
+            Declarative.connect_name(widget, d, handler)
+            Declarative.connect_reference_value(widget, d, handler, "checked", finishes, value_type=bool)
+            Declarative.connect_event(widget, widget, d, handler, "on_checked_changed", ["checked"])
+            Declarative.connect_attributes(widget, d, handler, finishes)
+            return widget
+        return None
+
+    @staticmethod
+    def create_linked_fields_check_box(*, name: Declarative.UIIdentifier | None = None,
+                                checked: str | None = None,
+                                on_checked_changed: Declarative.UICallableIdentifier | None = None,
+                                **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        """Create a declarative description for a linked checkbox.
+
+        Returns the declarative description.
+        """
+        d = {"type": LinkedFieldsCheckBoxFactory.WIDGET_TYPE}
+        if name is not None:
+            d["name"] = name
+        if checked is not None:
+            d["checked"] = checked
+        if on_checked_changed is not None:
+            d["on_checked_changed"] = on_checked_changed
+        return d | kwargs
+
+
+Registry.register_component(LinkedFieldsCheckBoxFactory(), {"declarative_constructor"})
 
 
 class ThreadHelper:
@@ -1356,7 +1463,7 @@ class ScanControlPanelModel(Observable.Observable):
     - profile_index (read/write)
     - width_str (read/write)
     - height_str (read/write)
-    - placeholder_height_str (read only)
+    - width_height_linked (read/write)
     - pixel_time_str (read/write)
     - fov_str (read/write)
     - rotation_deg_str (read/write)
@@ -1427,8 +1534,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__profile_index = 0
         self.__frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__profile_index)
         self.__width = 0
-        self.__height: int | None = None
-        self.__placeholder_height: int | None = None
+        self.__height = 0
+        self.__width_height_linked = self.__frame_parameters.pixel_size.width == self.__frame_parameters.pixel_size.height
         self.__pixel_time_str = str()
         self.__fov_str = str()
         self.__rotation_deg_str = str()
@@ -1484,25 +1591,9 @@ class ScanControlPanelModel(Observable.Observable):
         if self.__width != frame_parameters.pixel_size.width:
             self.__width = frame_parameters.pixel_size.width
             self.notify_property_changed("width_str")
-        if frame_parameters.pixel_size.width == frame_parameters.pixel_size.height:
-            if self.__height is not None:
-                if self.__height != frame_parameters.pixel_size.height:
-                    self.__height = frame_parameters.pixel_size.height
-                    self.notify_property_changed("height_str")
-                if self.__placeholder_height is not None:
-                    self.__placeholder_height = None
-                    self.notify_property_changed("placeholder_height_str")
-            else:
-                if self.__placeholder_height != frame_parameters.pixel_size.height:
-                    self.__placeholder_height = frame_parameters.pixel_size.height
-                    self.notify_property_changed("placeholder_height_str")
-        else:
-            if self.__height != frame_parameters.pixel_size.height:
-                self.__height = frame_parameters.pixel_size.height
-                self.notify_property_changed("height_str")
-            if self.__placeholder_height is not None:
-                self.__placeholder_height = None
-                self.notify_property_changed("placeholder_height_str")
+        if self.__height != frame_parameters.pixel_size.height:
+            self.__height = frame_parameters.pixel_size.height
+            self.notify_property_changed("height_str")
         pixel_time_str = f"{frame_parameters.pixel_time_us:.2f}"
         if pixel_time_str != self.__pixel_time_str:
             self.__pixel_time_str = pixel_time_str
@@ -1679,68 +1770,79 @@ class ScanControlPanelModel(Observable.Observable):
     def width_str(self, value_str: str) -> None:
         value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1)
         frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__height is not None:
-            pixel_size = Geometry.IntSize(self.__frame_parameters.pixel_size.height, value)
-        else:
+        if self.__width_height_linked:
             pixel_size = Geometry.IntSize(value, value)
+        else:
+            pixel_size = Geometry.IntSize(self.__frame_parameters.pixel_size.height, value)
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
-    def height_str(self) -> str | None:
-        return str(self.__height) if self.__height is not None else None
+    def height_str(self) -> str:
+        return str(self.__height)
 
     @height_str.setter
-    def height_str(self, value_str: str | None) -> None:
+    def height_str(self, value_str: str) -> None:
+        value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1)
         frame_parameters = copy.copy(self.__frame_parameters)
-        if value_str:
-            value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1)
-            pixel_size = Geometry.IntSize(value, self.__frame_parameters.pixel_size.width)
+        if self.__width_height_linked:
+            pixel_size = Geometry.IntSize(value, value)
         else:
-            pixel_size = Geometry.IntSize(self.__width, self.__width)
-            self.__height = None
+            pixel_size = Geometry.IntSize(value, self.__frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
+    @property
+    def width_height_linked(self) -> bool:
+        """Whether width and height are linked. If linking is enabled, changing one will change the other to match."""
+        return self.__width_height_linked
+
+    @width_height_linked.setter
+    def width_height_linked(self, value: bool) -> None:
+        self.__width_height_linked = value
+        frame_parameters = copy.copy(self.__frame_parameters)
+        if value:
+            # if enabling linking, ensure the height matches the width immediately.
+            # notifications and internal values are updated in __handle_state_changed_on_ui_thread
+            pixel_size = Geometry.IntSize(self.__width, self.__width)
+            frame_parameters.pixel_size = pixel_size
+            self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
     def increase_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__height:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, frame_parameters.pixel_size.width * 2)
-        else:
+        if self.__width_height_linked:
             pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
+        else:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, frame_parameters.pixel_size.width * 2)
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__height:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, max(1, frame_parameters.pixel_size.width // 2))
-        else:
+        if self.__width_height_linked:
             pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
+        else:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, max(1, frame_parameters.pixel_size.width // 2))
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_height(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__height:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width)
-        else:
+        if self.__width_height_linked:
             pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
+        else:
+            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_height(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__height:
-            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
-        else:
+        if self.__width_height_linked:
             pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
+        else:
+            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
-
-    @property
-    def placeholder_height_str(self) -> str | None:
-        return str(self.__placeholder_height) if self.__placeholder_height is not None else None
 
     @property
     def pixel_time_str(self) -> str:
@@ -2001,12 +2103,18 @@ class ScanPanelController(Declarative.Handler):
             key: str
             action: str
 
-        def create_line_edit_row(label: Declarative.UILabel, text_binding: str, lower: KeyAndAction | None = None, upper: KeyAndAction | None = None, placeholder_binding: str | None = None, color_binding: str | None = None, tool_tip_binding: str | None = None, text_width: int | None = None) -> Declarative.UIDescription:
+        def create_line_edit_row(label: Declarative.UILabel,
+                                 text_binding: str,
+                                 lower: KeyAndAction | None = None,
+                                 upper: KeyAndAction | None = None,
+                                 color_binding: str | None = None,
+                                 tool_tip_binding: str | None = None,
+                                 text_width: int | None = None) -> Declarative.UIDescription:
             return u.create_row(
                 u.create_label(text=label, color=color_binding, tool_tip=tool_tip_binding, width=text_width, text_alignment_vertical="vcenter", text_alignment_horizontal="right"),
                 u.create_row(
                     CharButtonFactory.create_char_button(text=lower.key, on_clicked=lower.action) if lower else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
-                    u.create_line_edit(text=text_binding, placeholder_text=placeholder_binding, width=44),
+                    u.create_line_edit(text=text_binding, width=44),
                     CharButtonFactory.create_char_button(text=upper.key, on_clicked=upper.action) if upper else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
                     u.create_stretch(),
                     spacing=2
@@ -2018,11 +2126,12 @@ class ScanPanelController(Declarative.Handler):
         fov_row = create_line_edit_row(_("FoV (nm)"), "@binding(_model.fov_str)", KeyAndAction("I", "handle_decrease_fov"), KeyAndAction("O", "handle_increase_fov"), text_width=68, color_binding="@binding(_model.fov_label_color)", tool_tip_binding="@binding(_model.fov_label_tool_tip)")
         rotation_row = create_line_edit_row(_("Rot. (deg)"), "@binding(_model.rotation_deg_str)", text_width=68)
         width_row = create_line_edit_row(_("Width"), "@binding(_model.width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
-        height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), placeholder_binding="@binding(_model.placeholder_height_str)", text_width=48)
+        height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), text_width=48)
 
         size_row = u.create_row(
             u.create_column(width_row, height_row, spacing=2),
-            spacing=2
+            LinkedFieldsCheckBoxFactory.create_linked_fields_check_box(checked="@binding(_model.width_height_linked)"),
+            u.create_stretch()
         )
 
         scan_profile_row = u.create_row(
