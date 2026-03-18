@@ -33,6 +33,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
+from nion.ui import CanvasUserInterface
 from nion.ui import Declarative
 from nion.ui import DrawingContext
 from nion.ui import PreferencesDialog
@@ -913,6 +914,66 @@ class IconCanvasItem(ButtonCellCanvasItem):
         super().__init__(IconCell(icon_id))
         self.wants_mouse_events = True
         self.update_sizing(self.sizing.with_fixed_size(Geometry.IntSize(18, 18)))
+        self.fill_style = "#FFF"
+        self.fill_style_pressed = "rgb(128, 128, 128)"
+        self.border_style = "#000"
+        self.border_style_pressed = "#000"
+        self.stroke_style = "#000"
+        self.stroke_width = 1.5
+
+
+class IconButtonWidget(UserInterface.Widget):
+    def __init__(self, ui: UserInterface.UserInterface, icon_id: str):
+        column_widget = ui.create_column_widget(properties={"height": 18, "width": 18})
+        super().__init__(Widgets.CompositeWidgetBehavior(column_widget))
+
+        self.__icon_id = icon_id
+
+        self.on_clicked = None
+
+        def button_clicked() -> None:
+            if callable(self.on_clicked):
+                self.on_clicked()
+
+        canvas_item = IconCanvasItem(icon_id)
+        canvas_item.on_clicked = button_clicked
+
+        canvas_widget = ui.create_canvas_widget()
+        canvas_widget.canvas_item.add_canvas_item(canvas_item)
+
+        self.__canvas_item = canvas_item
+
+        column_widget.add(canvas_widget)
+
+        def get_icon_id() -> str:
+            return self.__icon_id
+
+        def set_icon_id(value: str) -> None:
+            self.__icon_id = str(value)
+
+        self.__icon_id_binding_helper = UserInterface.BindablePropertyHelper[str](get_icon_id, set_icon_id)
+
+        self.icon_id = icon_id
+
+    def close(self) -> None:
+        self.__icon_id_binding_helper.close()
+        self.__icon_id_binding_helper = typing.cast(typing.Any, None)
+        self.on_clicked = None
+        super().close()
+
+    @property
+    def icon_id(self) -> str:
+        return self.__icon_id_binding_helper.value
+
+    @icon_id.setter
+    def icon_id(self, icon_id: str) -> None:
+        self.__icon_id_binding_helper.value = icon_id
+
+    def bind_icon_id(self, binding: Binding.Binding) -> None:
+        self.__icon_id_binding_helper.bind_value(binding)
+
+    def unbind_icon_id(self) -> None:
+        self.__icon_id_binding_helper.unbind_value()
 
 
 class CharButtonCanvasItem(ButtonCellCanvasItem):
@@ -1307,6 +1368,50 @@ class CharButtonFactory:
 
 
 Registry.register_component(CharButtonFactory(), {"declarative_constructor"})
+
+
+class IconButtonFactory:
+    """Declarative factory for the icon button (scan control panel specific).
+
+    Clients should create instances via the create_icon_button() static method.
+    """
+
+    WIDGET_TYPE = "widget.acquisition.icon-button"
+
+    def construct(self, d_type: str, ui: UserInterface.UserInterface, window: typing.Optional[Window.Window],
+                  d: Declarative.UIDescription, handler: Declarative.HandlerLike,
+                  finishes: list[typing.Callable[[], None]]) -> UserInterface.Widget | None:
+        """Construct a icon button widget.
+
+        This is a callback from the declarative UI engine.
+
+        Returns the constructed widget or None if the d_type does not match.
+        """
+        if d_type == IconButtonFactory.WIDGET_TYPE:
+            icon_id = d["icon_id"]
+            widget = IconButtonWidget(ui, icon_id)
+            Declarative.connect_name(widget, d, handler)
+            Declarative.connect_event(widget, widget, d, handler, "on_clicked", [])
+            Declarative.connect_attributes(widget, d, handler, finishes)
+            return widget
+        return None
+
+    @staticmethod
+    def create_icon_button(*, icon_id: str, name: Declarative.UIIdentifier | None = None,
+                           on_clicked: Declarative.UICallableIdentifier | None = None,
+                           **kwargs: typing.Any) -> Declarative.UIDescriptionResult:
+        """Create a declarative description for a icon button with the given icon_id, name, and on_clicked handler.
+
+        Returns the description.
+        """
+        return {
+            "type": IconButtonFactory.WIDGET_TYPE,
+            "icon_id": icon_id,
+            "on_clicked": on_clicked,
+        } | kwargs
+
+
+Registry.register_component(IconButtonFactory(), {"declarative_constructor"})
 
 
 class ChannelModel(Observable.Observable):
@@ -2408,8 +2513,133 @@ class ScanControlPanel(Panel.Panel):
         HardwareSource.HardwareSourceManager().aliases_updated.remove(self.__build_widget)
         super().close()
 
+    def periodic(self) -> None:
+        scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
+        if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
+            if getattr(scan_hardware_source, "periodic", None):
+                scan_hardware_source.periodic()
+
+
+class ScanDisplayPanelControllerHandler(Declarative.Handler):
+    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
+        super().__init__()
+        self.__channel_id = channel_id
+        self.__channel_index = scan_hardware_source.get_channel_index(channel_id) or 0
+        u = Declarative.DeclarativeUI()
+        self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
+        self._channel = ChannelModel(scan_hardware_source, self.__channel_index, document_controller.document_model, document_controller.event_loop)
+        self.ui_view = u.create_row(
+            u.create_push_button(text="@binding(_model.scan_button_title)",
+                                 enabled="@binding(_model.scan_button_enabled)", on_clicked="handle_scan_clicked",
+                                 border_color="transparent", background_color="rgba(0,0,0,0.0)", style="minimal"),
+            u.create_push_button(text=_("Abort"), visible="@binding(_model.scan_abort_button_enabled)",
+                                 enabled="@binding(_model.scan_abort_button_enabled)",
+                                 on_clicked="handle_scan_abort_clicked", border_color="transparent",
+                                 background_color="rgba(0,0,0,0.0)", style="minimal"),
+            u.create_label(text="@binding(_model.play_state_text)", text_alignment_vertical="vcenter",
+                           height=30),
+            u.create_stretch(),
+            u.create_push_button(text=_("Capture"), visible="@binding(_model.capture_button_visible)",
+                                 enabled="@binding(_model.capture_button_enabled)", on_clicked="handle_capture_clicked",
+                                 border_color="transparent", background_color="rgba(0,0,0,0.0)", style="minimal"),
+            u.create_row(
+                IconButtonFactory.create_icon_button(icon_id="minus", on_clicked="handle_decrease_pmt_clicked"),
+                u.create_label(text="PMT", text_alignment_vertical="vcenter"),
+                IconButtonFactory.create_icon_button(icon_id="plus", on_clicked="handle_increase_pmt_clicked"),
+                alignment="center"
+            ),
+            u.create_check_box(checked="@binding(_channel.enabled)"),
+            u.create_stretch(),
+            u.create_row(u.create_label(text="@binding(_model.name)"), u.create_label(text="@binding(_channel.name)"), spacing=4),
+            alignment="center"
+        )
+
+    def close(self) -> None:
+        super().close()
+        self._model.close()
+        self._channel.close()
+
+    def handle_scan_clicked(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_scan_button_clicked()
+
+    def handle_scan_abort_clicked(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_scan_abort_button_clicked()
+
+    def handle_capture_clicked(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_capture_button_clicked()
+
+    def handle_decrease_pmt_clicked(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_decrease_pmt_clicked(self.__channel_index)
+
+    def handle_increase_pmt_clicked(self, widget: UserInterface.Widget) -> None:
+        self._model.handle_increase_pmt_clicked(self.__channel_index)
+
 
 class ScanDisplayPanelController:
+    type = "scan-live"
+
+    def __init__(self, display_panel: DisplayPanel.DisplayPanel, hardware_source_id: str, data_channel_id: str) -> None:
+        assert hardware_source_id is not None
+        scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(hardware_source_id)
+        assert isinstance(scan_hardware_source, scan_base.ScanHardwareSource)
+        self.type = ScanDisplayPanelController.type
+
+        self.__hardware_source_id = hardware_source_id
+        self.__channel_id = data_channel_id
+
+        # configure the display panel contents
+        document_controller = display_panel.document_controller
+        document_model = document_controller.document_model
+        data_item_reference = document_model.get_data_item_reference(document_model.make_data_item_reference_key(scan_hardware_source.hardware_source_id, data_channel_id))
+        display_panel.set_data_item_reference(data_item_reference)
+
+        self.__display_panel = display_panel
+        self.__display_panel.header_canvas_item.end_header_color = "#98FB98"
+
+        canvas_ui = CanvasUserInterface.CanvasUserInterface(document_controller.ui)
+
+        self.__ui_handler = ScanDisplayPanelControllerHandler(document_controller, scan_hardware_source, data_channel_id)
+        self.__widget = Declarative.construct_widget(canvas_ui, document_controller.event_loop, self.__ui_handler)
+
+        self.__canvas_item_composition = CanvasItem.CanvasItemComposition()
+        self.__canvas_item_composition.layout = CanvasItem.CanvasItemLayout()
+        self.__canvas_item_composition.update_sizing(self.__canvas_item_composition.sizing.with_fixed_height(30))
+        self.__canvas_item_composition.add_canvas_item(CanvasItem.BackgroundCanvasItem("#98FB98"))
+        canvas_item = CanvasUserInterface.extract_canvas_item(self.__widget)
+        assert canvas_item
+        self.__canvas_item_composition.add_canvas_item(canvas_item)
+
+        self.__display_panel.footer_canvas_item.insert_canvas_item(0, self.__canvas_item_composition)
+
+    def close(self) -> None:
+        self.__widget.close()
+        self.__widget = typing.cast(typing.Any, None)
+        self.__display_panel.footer_canvas_item.remove_canvas_item(self.__canvas_item_composition)
+        self.__display_panel = typing.cast(typing.Any, None)
+        self.__ui_handler.close()
+        self.__ui_handler = typing.cast(typing.Any, None)
+
+    def save(self, d: typing.MutableMapping[str, typing.Any]) -> None:
+        d["hardware_source_id"] = self.__hardware_source_id
+        if self.__channel_id is not None:
+            d["channel_id"] = self.__channel_id
+
+    def key_pressed(self, key: UserInterface.Key) -> bool:
+        return False
+
+    def key_released(self, key: UserInterface.Key) -> bool:
+        return False
+
+    @property
+    def channel_id(self) -> str:
+        return self.__channel_id
+
+    @property
+    def hardware_source_id(self) -> str:
+        return self.__hardware_source_id
+
+
+class ScanDisplayPanelControllerX:
     """
         Represents a controller for the content of an image panel.
     """
