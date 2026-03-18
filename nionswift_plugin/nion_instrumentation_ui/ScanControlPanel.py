@@ -1516,6 +1516,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_frame_parameters_changed_event.listen(self.__scan_frame_parameters_changed)
         self.__max_fov_stream_listener = self.__scan_hardware_source.max_field_of_view_nm_stream.value_stream.listen(self.__max_fov_changed)
 
+        self.__captured_xdatas_available_listener: Event.EventListener | None = None
+
         self.__pending_call_lock = threading.RLock()
         self.__pending_call: typing.Optional[asyncio.Handle] = None
 
@@ -1527,6 +1529,7 @@ class ScanControlPanelModel(Observable.Observable):
         self.channels = [ChannelModel(scan_hardware_source, i, document_controller.document_model, self.__event_loop) for i in range(scan_hardware_source.channel_count)]
 
         self.__profile_index = 0
+        self.__name = str()
         self.__frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__profile_index)
         self.__width = 0
         self.__height = 0
@@ -1547,6 +1550,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_abort_button_enabled = False
         self.__record_button_enabled = False
         self.__record_abort_button_enabled = False
+        self.__capture_button_visible = False
+        self.__capture_button_enabled = False
         self.__play_state_text = map_channel_state_to_text["stopped"]
         self.__probe_state_text = _("Parked")
         self.__probe_position_enabled = False
@@ -1573,14 +1578,22 @@ class ScanControlPanelModel(Observable.Observable):
             self.__channel_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__scan_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
             self.__max_fov_stream_listener = typing.cast(typing.Any, None)
+            self.__captured_xdatas_available_listener = None
 
     def __handle_state_changed_on_ui_thread(self) -> None:
         with self.__pending_call_lock:
             self.__pending_call = None
+        # hack since scan hardware source may be shut down before this model currently.
+        if not self.__scan_hardware_source.scan_settings:
+            return
         profile_index = self.__scan_hardware_source.scan_settings.selected_profile_index
         if profile_index != self.__profile_index:
             self.__profile_index = profile_index
             self.notify_property_changed("profile_index")
+        name = self.__scan_hardware_source.display_name
+        if name != self.__name:
+            self.__name = name
+            self.notify_property_changed("name")
         frame_parameters = self.__scan_hardware_source.get_current_frame_parameters()
         self.__frame_parameters = frame_parameters
         if self.__width != frame_parameters.pixel_size.width:
@@ -1666,6 +1679,16 @@ class ScanControlPanelModel(Observable.Observable):
         if record_abort_button_enabled != self.__record_abort_button_enabled:
             self.__record_abort_button_enabled = record_abort_button_enabled
             self.notify_property_changed("record_abort_button_enabled")
+        capture_button_visible = is_playing
+        if capture_button_visible != self.__capture_button_visible:
+            self.__capture_button_visible = capture_button_visible
+            self.notify_property_changed("capture_button_visible")
+            if not capture_button_visible:
+                self.__captured_xdatas_available_listener = None
+        capture_button_enabled = not self.__captured_xdatas_available_listener
+        if capture_button_enabled != self.__capture_button_enabled:
+            self.__capture_button_enabled = capture_button_enabled
+            self.notify_property_changed("capture_button_enabled")
         acquisition_state: str | None = None
         data_channel_states = self.__scan_hardware_source.data_channel_states
         for data_channel_state in data_channel_states:
@@ -1756,6 +1779,10 @@ class ScanControlPanelModel(Observable.Observable):
     @profile_index.setter
     def profile_index(self, value: int) -> None:
         self.__scan_hardware_source.set_selected_profile_index(value)
+
+    @property
+    def name(self) -> str:
+        return self.__name or _("Scan")
 
     @property
     def width_str(self) -> str:
@@ -1973,6 +2000,14 @@ class ScanControlPanelModel(Observable.Observable):
         return self.__record_abort_button_enabled
 
     @property
+    def capture_button_visible(self) -> bool:
+        return self.__capture_button_visible
+
+    @property
+    def capture_button_enabled(self) -> bool:
+        return self.__capture_button_enabled
+
+    @property
     def play_state_text(self) -> str:
         return self.__play_state_text
 
@@ -2067,6 +2102,60 @@ class ScanControlPanelModel(Observable.Observable):
         """ Call this when the user clicks the abort button. """
         if self.__scan_hardware_source:
             self.__scan_hardware_source.abort_recording()
+
+    def handle_capture_button_clicked(self) -> None:
+        def receive_new_xdatas(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+            self.__captured_xdatas_available_listener = None
+            document_model = self.__document_controller.document_model
+            Acquisition.session_manager.begin_acquisition(document_model)  # bump the index
+            for data_promise in data_promises:
+                def add_data_item(data_item: DataItem.DataItem) -> None:
+                    document_controller = self.__document_controller
+                    document_controller.document_model.append_data_item(data_item)
+                    result_display_panel = document_controller.next_result_display_panel()
+                    if result_display_panel:
+                        result_display_panel.set_display_panel_data_item(data_item)
+                        result_display_panel.request_focus()
+
+                xdata = data_promise.xdata
+                if xdata:
+                    data_item = DataItem.new_data_item(xdata)
+                    display_name = xdata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                    display_name = display_name if display_name else _("Capture")
+                    channel_name = xdata.metadata.get("hardware_source", dict()).get("channel_name")
+                    acquisition_number = Acquisition.session_manager.get_project_acquisition_index(document_model)
+                    data_item_title = display_name
+                    if channel_name:
+                        data_item_title += f" ({channel_name})"
+                    if acquisition_number:
+                        data_item_title += f" Capture {acquisition_number}"
+                    data_item.title = data_item_title
+                    data_item.session_metadata = ApplicationData.get_session_metadata_dict()
+                    self.__event_loop.call_soon_threadsafe(add_data_item, data_item)
+            self.__handle_state_changed()
+
+        self.__captured_xdatas_available_listener = self.__scan_hardware_source.xdatas_available_event.listen(receive_new_xdatas)
+        self.__handle_state_changed()
+
+    def handle_increase_pmt_clicked(self, channel_index: int) -> None:
+        try:
+            self.__scan_hardware_source.increase_pmt(channel_index)
+        except Exception as e:
+            from nion.swift.model import Notification
+            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
+                                                     "Unable to change PMT",
+                                                     f"Exception: {e}.")
+            Notification.notify(notification)
+
+    def handle_decrease_pmt_clicked(self, channel_index: int) -> None:
+        try:
+            self.__scan_hardware_source.decrease_pmt(channel_index)
+        except Exception as e:
+            from nion.swift.model import Notification
+            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
+                                                     "Unable to change PMT",
+                                                     f"Exception: {e}.")
+            Notification.notify(notification)
 
 
 class ScanPanelController(Declarative.Handler):
