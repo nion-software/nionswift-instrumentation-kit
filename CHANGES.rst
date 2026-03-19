@@ -1,6 +1,17 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.7.0 (2026-03-19)
+-------------------
+- Fix issue with larger virtual detector acquisition timeout when using two or more masks.
+- Update naming of ramp acquisition data items to '1D/2D Ramp'.
+- Fix issue where drift correction between frames didn't work when using acquisition panel.
+- Fix issue where shift-to-click on scans didn't account for scan rotation.
+- Fix issue dragging drift channel data item into display panel.
+- Fix issue handling timeout error when recording and acquisition panel that required relaunch.
+- Fix issue aborting long exposure acquisitions before first frame.
+- Python 3.14 support.
+
 23.6.2 (2025-10-12)
 -------------------
 - Fix issues when canceling acquisitions when exposure time longer than 5s. Fix #296.
