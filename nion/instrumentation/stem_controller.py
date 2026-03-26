@@ -49,6 +49,9 @@ class PMTTypeEnum(enum.IntEnum):
 
 PMTType = typing.Union[PMTTypeEnum, int]
 
+# JSON is a recursive type, so using typing.Any on collections for now
+JSONType = dict[str, typing.Any] | list[typing.Any] | str | int | float | bool | None
+
 
 class SubscanState(enum.Enum):
     INVALID = -1
@@ -779,6 +782,38 @@ class STEMController(Observable.Observable):
 
     def HasValError(self, s: str) -> bool:
         return False
+
+    def _post_rest_api(self, url: str, *, timeout: float = 5.0, content: JSONType | None = None) -> TryValue[JSONType]:
+        """
+        Performs a POST REST call to the specified url.
+
+        Returns a TryValue of any returned value from the query and any exception raised from the query.
+        """
+        raise NotImplementedError()
+
+    def _put_rest_api(self, url: str, *, timeout: float = 5.0, content: JSONType | None = None) -> TryValue[JSONType]:
+        """
+        Performs a PUT REST call to the specified url.
+
+        Returns a TryValue of any returned value from the query and any exception raised from the query.
+        """
+        raise NotImplementedError()
+
+    def _get_rest_api(self, url: str, *, timeout: float = 5.0) -> TryValue[JSONType]:
+        """
+        Performs a GET REST call to the specified url.
+
+        Returns a TryValue of any returned value from the query and any exception raised from the query.
+        """
+        raise NotImplementedError()
+
+    def _delete_rest_api(self, url: str, *, timeout: float = 5.0) -> TryValue[JSONType]:
+        """
+        Performs a DELETE REST call to the specified url.
+
+        Returns a TryValue of any returned value from the query and any exception raised from the query.
+        """
+        raise NotImplementedError()
 
     # end required functions
 
