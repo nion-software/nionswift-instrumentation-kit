@@ -1,30 +1,28 @@
 import asyncio
 import dataclasses
 import enum
+import json
 import logging
+import pkgutil
 import time
 import typing
 
 from nion.data import DataAndMetadata
-from nion.experimental import Wizard
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base as CameraBase
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base as ScanBase
 from nion.instrumentation import stem_controller as STEMController
-from nion.swift import Application
 from nion.swift import DocumentController
-from nion.swift import Facade
-from nion.swift.model import PlugInManager
+from nion.swift.model import DataItem
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 from nion.ui import Declarative
 from nion.ui import Dialog
 from nion.utils import Converter
-from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import Registry
 from nion.utils import Stream
-from scipy.stats.contingency import margins
 
 
 class AcquisitionTestState(enum.Enum):
@@ -64,20 +62,29 @@ def make_not_available_result(message: str) -> AcquisitionTestResult:
     return result
 
 
-def check_results(ar: AcquisitionPanel._AcquireResult, logger: logging.Logger, expected_results: typing.Mapping[Acquisition.Channel, tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]]) -> AcquisitionTestResult:
+@dataclasses.dataclass
+class ExpectedShapeAndDescriptor:
+    data_shape: DataAndMetadata.ShapeType
+    data_descriptor: DataAndMetadata.DataDescriptor
+
+
+ExpectedResults = typing.Mapping[Acquisition.Channel, ExpectedShapeAndDescriptor]
+
+
+def check_results(ar: AcquisitionPanel._AcquireResult, logger: logging.Logger, expected_results: ExpectedResults) -> AcquisitionTestResult:
     result = AcquisitionTestResult()
     result.result = ar
     if not ar.success:
         result.messages.append(AcquisitionTestResultMessage(False, "Acquisition failed"))
-    for channel, expected_dimension in expected_results.items():
+    for channel, expected_result in expected_results.items():
         data_item = ar.data_item_map.get(channel)
         if data_item:
             data_shape = data_item.data_shape
             data_and_metadata = data_item.data_and_metadata
             if data_and_metadata:
                 data_descriptor = data_and_metadata.data_descriptor
-                result.messages.append(AcquisitionTestResultMessage(data_shape == expected_dimension[0], f"Channel {channel} data shape {data_shape} matches expected {expected_dimension[0]}"))
-                result.messages.append(AcquisitionTestResultMessage(data_descriptor == expected_dimension[1], f"Channel {channel} data descriptor {data_descriptor} matches expected {expected_dimension[1]}"))
+                result.messages.append(AcquisitionTestResultMessage(data_shape == expected_result.data_shape, f"Channel {channel} data shape {data_shape} matches expected {expected_result.data_shape}"))
+                result.messages.append(AcquisitionTestResultMessage(data_descriptor == expected_result.data_descriptor, f"Channel {channel} data descriptor {data_descriptor} matches expected {expected_result.data_descriptor}"))
             else:
                 result.messages.append(AcquisitionTestResultMessage(False, f"Channel {channel} data and metadata not found"))
         else:
@@ -86,641 +93,6 @@ def check_results(ar: AcquisitionPanel._AcquireResult, logger: logging.Logger, e
         if channel not in expected_results:
             result.messages.append(AcquisitionTestResultMessage(False, f"Channel {channel} not expected in acquisition result"))
     return result
-
-
-async def test_ronchigram_view(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    ronchigram_camera_hardware_source = stem_controller.ronchigram_camera
-    if ronchigram_camera_hardware_source:
-        binning = 2
-        ronchigram_camera_hardware_source.set_current_frame_parameters(CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning))
-        ronchigram_camera_hardware_source.start_playing(sync_timeout=3.0)
-        start = time.time()
-        while time.time() - start < 5.0:
-            await asyncio.sleep(0.1)
-        ronchigram_camera_hardware_source.stop_playing(sync_timeout=3.0)
-        ar = AcquisitionPanel._AcquireResult(True, dict())
-        expected_results: typing.Mapping[Acquisition.Channel, tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]] = {
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Ronchigram camera not found.")
-
-
-async def test_eels_view(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        eels_camera_hardware_source.set_current_frame_parameters(CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning))
-        eels_camera_hardware_source.start_playing(sync_timeout=3.0)
-        start = time.time()
-        while time.time() - start < 5.0:
-            await asyncio.sleep(0.1)
-        eels_camera_hardware_source.stop_playing(sync_timeout=3.0)
-        ar = AcquisitionPanel._AcquireResult(True, dict())
-        expected_results: typing.Mapping[Acquisition.Channel, tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]] = {
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_scan_view(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        scan_size = Geometry.IntSize(512, 512)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_hardware_source.start_playing(sync_timeout=3.0)
-        start = time.time()
-        while time.time() - start < 5.0:
-            await asyncio.sleep(0.1)
-        scan_hardware_source.stop_playing(sync_timeout=3.0)
-        ar = AcquisitionPanel._AcquireResult(True, dict())
-        expected_results: typing.Mapping[Acquisition.Channel, tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]] = {
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_scan_2ch_view(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        scan_size = Geometry.IntSize(512, 512)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index in (0, 1))
-        scan_hardware_source.start_playing(sync_timeout=3.0)
-        start = time.time()
-        while time.time() - start < 5.0:
-            await asyncio.sleep(0.1)
-        scan_hardware_source.stop_playing(sync_timeout=3.0)
-        ar = AcquisitionPanel._AcquireResult(True, dict())
-        expected_results: typing.Mapping[Acquisition.Channel, tuple[DataAndMetadata.ShapeType, DataAndMetadata.DataDescriptor]] = {
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_ronchigram(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of ronchigram
-    ronchigram_camera_hardware_source = stem_controller.ronchigram_camera
-    if ronchigram_camera_hardware_source:
-        binning = 2
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        ronchigram_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = ronchigram_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        ronchigram_hardware_source_id = ronchigram_camera_hardware_source.hardware_source_id
-        ronchigram_channel = Acquisition.Channel(ronchigram_hardware_source_id)
-        ap._activate_basic_acquire()
-        ap._activate_camera_acquire(ronchigram_hardware_source_id, "image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            ronchigram_channel: (expected_dimensions, DataAndMetadata.DataDescriptor(False, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Ronchigram camera not found.")
-
-
-async def test_eels_spectra(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_basic_acquire()
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: ((expected_dimensions[1],), DataAndMetadata.DataDescriptor(False, 0, 1))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_eels_image(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_basic_acquire()
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: (expected_dimensions, DataAndMetadata.DataDescriptor(False, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_scan(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        scan_size = Geometry.IntSize(8, 8)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        ap._activate_basic_acquire()
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(scan_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_scan_2ch(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        scan_size = Geometry.IntSize(8, 8)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index in (0, 1))
-        ap._activate_basic_acquire()
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(scan_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel(scan_hardware_source_id, "1"): (tuple(scan_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_scan_subscan(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        binning = 1
-        scan_size = Geometry.IntSize(20, 20)
-        subscan_pixel_size = Geometry.IntSize(10, 10)
-        scan_frame_parameters = ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size, subscan_pixel_size=subscan_pixel_size, subscan_fractional_center=Geometry.FloatPoint(0.5, 0.5), subscan_fractional_size=Geometry.FloatSize(0.5, 0.5))
-        scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
-        scan_hardware_source.subscan_enabled = True
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        ap._activate_basic_acquire()
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_scan_subscan_2ch(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        binning = 1
-        scan_size = Geometry.IntSize(20, 20)
-        subscan_pixel_size = Geometry.IntSize(10, 10)
-        scan_frame_parameters = ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size, subscan_pixel_size=subscan_pixel_size, subscan_fractional_center=Geometry.FloatPoint(0.5, 0.5), subscan_fractional_size=Geometry.FloatSize(0.5, 0.5))
-        scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
-        scan_hardware_source.subscan_enabled = True
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index in (0, 1))
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        ap._activate_basic_acquire()
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel(scan_hardware_source_id, "1"): (tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_scan_eels(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if scan_hardware_source and eels_camera_hardware_source:
-        binning = 1
-        scan_size = Geometry.IntSize(8, 8)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        ap._activate_basic_acquire()
-        ap._activate_synchronized_acquire(scan_hardware_source_id, scan_size.width, eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(scan_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel(eels_hardware_source_id): (tuple(scan_size) + (expected_dimensions[1],), DataAndMetadata.DataDescriptor(False, 2, 1)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_scan_subscan_eels(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test spectrum image
-    scan_hardware_source = stem_controller.scan_controller
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if scan_hardware_source and eels_camera_hardware_source:
-        binning = 1
-        scan_size = Geometry.IntSize(20, 20)
-        subscan_pixel_size = Geometry.IntSize(10, 10)
-        scan_frame_parameters = ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size, subscan_pixel_size=subscan_pixel_size, subscan_fractional_center=Geometry.FloatPoint(0.5, 0.5), subscan_fractional_size=Geometry.FloatSize(0.5, 0.5))
-        scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
-        scan_hardware_source.subscan_enabled = True
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        ap._activate_basic_acquire()
-        ap._activate_synchronized_acquire(scan_hardware_source_id, subscan_pixel_size.width, eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): (tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel(eels_hardware_source_id): (tuple(subscan_pixel_size) + (expected_dimensions[1],), DataAndMetadata.DataDescriptor(False, 2, 1)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_ronchigram_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of ronchigram
-    ronchigram_camera_hardware_source = stem_controller.ronchigram_camera
-    if ronchigram_camera_hardware_source:
-        binning = 2
-        count = 4
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        ronchigram_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = ronchigram_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        ronchigram_hardware_source_id = ronchigram_camera_hardware_source.hardware_source_id
-        ronchigram_channel = Acquisition.Channel(ronchigram_hardware_source_id)
-        ap._activate_sequence_acquire(count)
-        ap._activate_camera_acquire(ronchigram_hardware_source_id, "image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            ronchigram_channel: ((count,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Ronchigram camera not found.")
-
-
-async def test_eels_spectra_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count = 4
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_sequence_acquire(count)
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: ((count, expected_dimensions[1]), DataAndMetadata.DataDescriptor(True, 0, 1))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_eels_image_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count = 4
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_sequence_acquire(count)
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: ((count,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_scan_one_channel_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        count = 4
-        scan_size = Geometry.IntSize(40, 40)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        ap._activate_sequence_acquire(count)
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            scan_channel: ((count,) + tuple(scan_size), DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_scan_two_channel_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        count = 4
-        scan_size = Geometry.IntSize(40, 40)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index in (0, 1))
-        scan_channel0 = Acquisition.Channel(scan_hardware_source_id, "0")
-        scan_channel1 = Acquisition.Channel(scan_hardware_source_id, "1")
-        ap._activate_sequence_acquire(count)
-        ap._activate_scan_acquire(scan_hardware_source_id)
-        ar = await ap._acquire()
-        expected_results = {
-            scan_channel0: ((count,) + tuple(scan_size), DataAndMetadata.DataDescriptor(True, 0, 2)),
-            scan_channel1: ((count,) + tuple(scan_size), DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_scan_subscan_one_channel_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        count = 4
-        scan_size = Geometry.IntSize(40, 40)
-        subscan_pixel_size = Geometry.IntSize(20, 20)
-        scan_frame_parameters = ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size, subscan_pixel_size=subscan_pixel_size, subscan_fractional_center=Geometry.FloatPoint(0.5, 0.5), subscan_fractional_size=Geometry.FloatSize(0.5, 0.5))
-        scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
-        scan_hardware_source.subscan_enabled = True
-        try:
-            scan_hardware_source_id = scan_hardware_source.hardware_source_id
-            for channel_index in range(scan_hardware_source.get_channel_count()):
-                scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-            scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-            ap._activate_sequence_acquire(count)
-            ap._activate_scan_acquire(scan_hardware_source_id)
-            ar = await ap._acquire()
-            expected_results = {
-                scan_channel: ((count,) + tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(True, 0, 2))
-            }
-            return check_results(ar, logger, expected_results)
-        finally:
-            scan_hardware_source.subscan_enabled = False
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_scan_subscan_two_channel_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    scan_hardware_source = stem_controller.scan_controller
-    if scan_hardware_source:
-        count = 4
-        scan_size = Geometry.IntSize(40, 40)
-        subscan_pixel_size = Geometry.IntSize(20, 20)
-        scan_frame_parameters = ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size, subscan_pixel_size=subscan_pixel_size, subscan_fractional_center=Geometry.FloatPoint(0.5, 0.5), subscan_fractional_size=Geometry.FloatSize(0.5, 0.5))
-        scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
-        scan_hardware_source.subscan_enabled = True
-        try:
-            scan_hardware_source_id = scan_hardware_source.hardware_source_id
-            for channel_index in range(scan_hardware_source.get_channel_count()):
-                scan_hardware_source.set_channel_enabled(channel_index, channel_index in (0, 1))
-            scan_channel0 = Acquisition.Channel(scan_hardware_source_id, "0")
-            scan_channel1 = Acquisition.Channel(scan_hardware_source_id, "1")
-            ap._activate_sequence_acquire(count)
-            ap._activate_scan_acquire(scan_hardware_source_id)
-            ar = await ap._acquire()
-            expected_results = {
-                scan_channel0: ((count,) + tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(True, 0, 2)),
-                scan_channel1: ((count,) + tuple(subscan_pixel_size), DataAndMetadata.DataDescriptor(True, 0, 2))
-            }
-            return check_results(ar, logger, expected_results)
-        finally:
-            scan_hardware_source.subscan_enabled = False
-    else:
-        return make_not_available_result("Scan controller not found.")
-
-
-async def test_synchronized_eels_sequence(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    scan_hardware_source = stem_controller.scan_controller
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if scan_hardware_source and eels_camera_hardware_source:
-        binning = 1
-        count = 4
-        scan_size = Geometry.IntSize(8, 8)
-        scan_hardware_source.set_current_frame_parameters(ScanBase.ScanFrameParameters(fov_nm=100.0, pixel_time_us=10.0, pixel_size=scan_size))
-        scan_hardware_source.subscan_enabled = False
-        scan_hardware_source_id = scan_hardware_source.hardware_source_id
-        for channel_index in range(scan_hardware_source.get_channel_count()):
-            scan_hardware_source.set_channel_enabled(channel_index, channel_index == 0)
-        scan_channel = Acquisition.Channel(scan_hardware_source_id, "0")
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        ap._activate_sequence_acquire(count)
-        ap._activate_synchronized_acquire(scan_hardware_source_id, scan_size.width, eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel(scan_hardware_source_id, "0"): ((count,) + tuple(scan_size), DataAndMetadata.DataDescriptor(True, 0, 2)),
-            Acquisition.Channel(eels_hardware_source_id): ((count,) + tuple(scan_size) + (expected_dimensions[1],), DataAndMetadata.DataDescriptor(True, 2, 1)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Scan controller or EELS camera not found.")
-
-
-async def test_ronchigram_series(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test series of ronchigram
-    ronchigram_camera_hardware_source = stem_controller.ronchigram_camera
-    if ronchigram_camera_hardware_source:
-        binning = 2
-        count = 4
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        ronchigram_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = ronchigram_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        ronchigram_hardware_source_id = ronchigram_camera_hardware_source.hardware_source_id
-        ronchigram_channel = Acquisition.Channel(ronchigram_hardware_source_id)
-        ap._activate_series_acquire("defocus", AcquisitionPanel.ControlValues(count, 0e-9, 5e-9))
-        ap._activate_camera_acquire(ronchigram_hardware_source_id, "image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            ronchigram_channel: ((count,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Ronchigram camera not found.")
-
-
-async def test_eels_spectra_series(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count = 6
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_series_acquire("energy_offset", AcquisitionPanel.ControlValues(count, 0, 20))
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: ((count, expected_dimensions[1]), DataAndMetadata.DataDescriptor(True, 0, 1))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_eels_image_series(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count = 4
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        eels_channel = Acquisition.Channel(eels_hardware_source_id)
-        ap._activate_series_acquire("energy_offset", AcquisitionPanel.ControlValues(count, 0, 20))
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            eels_channel: ((count,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2))
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_ronchigram_multi(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test series of ronchigram
-    ronchigram_camera_hardware_source = stem_controller.ronchigram_camera
-    if ronchigram_camera_hardware_source:
-        binning = 2
-        count1 = 4
-        count2 = 2
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        ronchigram_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = ronchigram_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        ronchigram_hardware_source_id = ronchigram_camera_hardware_source.hardware_source_id
-        ap._activate_multiple_acquire([AcquisitionPanel.MultipleAcquireEntry(0.0, 0.025, count1, True), AcquisitionPanel.MultipleAcquireEntry(5.0, 0.05, count2, False)])
-        ap._activate_camera_acquire(ronchigram_hardware_source_id, "image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel("0", ronchigram_hardware_source_id): ((count1,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2)),
-            Acquisition.Channel("0", ronchigram_hardware_source_id, "sum"): (expected_dimensions, DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel("1", ronchigram_hardware_source_id): ((count2,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("Ronchigram camera not found.")
-
-
-async def test_eels_spectra_multi(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count1 = 4
-        count2 = 2
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        ap._activate_multiple_acquire([AcquisitionPanel.MultipleAcquireEntry(0.0, 0.025, count1, True), AcquisitionPanel.MultipleAcquireEntry(5.0, 0.05, count2, False)])
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_spectrum", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel("0", eels_hardware_source_id): ((count1, expected_dimensions[1]), DataAndMetadata.DataDescriptor(True, 0, 1)),
-            Acquisition.Channel("0", eels_hardware_source_id, "sum"): ((expected_dimensions[1],), DataAndMetadata.DataDescriptor(False, 0, 1)),
-            Acquisition.Channel("1", eels_hardware_source_id): ((count2, expected_dimensions[1]), DataAndMetadata.DataDescriptor(True, 0, 1)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
-
-
-async def test_eels_image_multi(ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-    # test sequence of eels
-    eels_camera_hardware_source = stem_controller.eels_camera
-    if eels_camera_hardware_source:
-        binning = 1
-        count1 = 4
-        count2 = 2
-        camera_frame_parameters = CameraBase.CameraFrameParameters(exposure_ms=10, binning=binning)
-        eels_camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
-        expected_dimensions = eels_camera_hardware_source.get_expected_dimensions(camera_frame_parameters)
-        eels_hardware_source_id = eels_camera_hardware_source.hardware_source_id
-        ap._activate_multiple_acquire([AcquisitionPanel.MultipleAcquireEntry(0.0, 0.025, count1, True), AcquisitionPanel.MultipleAcquireEntry(5.0, 0.05, count2, False)])
-        ap._activate_camera_acquire(eels_hardware_source_id, "eels_image", 12e-3)
-        ar = await ap._acquire()
-        expected_results = {
-            Acquisition.Channel("0", eels_hardware_source_id): ((count1,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2)),
-            Acquisition.Channel("0", eels_hardware_source_id, "sum"): (expected_dimensions, DataAndMetadata.DataDescriptor(False, 0, 2)),
-            Acquisition.Channel("1", eels_hardware_source_id): ((count2,) + expected_dimensions, DataAndMetadata.DataDescriptor(True, 0, 2)),
-        }
-        return check_results(ar, logger, expected_results)
-    else:
-        return make_not_available_result("EELS camera not found.")
 
 
 def acquisition_test_state_to_string(state: AcquisitionTestState | None) -> str:
@@ -833,33 +205,407 @@ class AcquisitionTest(Observable.Observable):
             is_stopped_model.value = was_stopped
 
 
-all_acquisition_tests = [
-    AcquisitionTest("Ronchigram (View)", test_ronchigram_view),
-    AcquisitionTest("EELS (View)", test_eels_view),
-    AcquisitionTest("Scan (View)", test_scan_view),
-    AcquisitionTest("Scan/2Ch (View)", test_scan_2ch_view),
-    AcquisitionTest("Ronchigram (Single)", test_ronchigram),
-    AcquisitionTest("EELS (Single/Spectra)", test_eels_spectra),
-    AcquisitionTest("EELS (Single/Image)", test_eels_image),
-    AcquisitionTest("Scan (Single)", test_scan),
-    AcquisitionTest("Scan (Single/Subscan)", test_scan_subscan),
-    AcquisitionTest("Spectrum Image (Single)", test_scan_eels),
-    AcquisitionTest("Spectrum Image (Single/Subscan)", test_scan_subscan_eels),
-    AcquisitionTest("Ronchigram (Sequence)", test_ronchigram_sequence),
-    AcquisitionTest("EELS (Sequence/Spectra)", test_eels_spectra_sequence),
-    AcquisitionTest("EELS (Sequence/Images)", test_eels_image_sequence),
-    AcquisitionTest("Scan (Sequence)", test_scan_one_channel_sequence),
-    AcquisitionTest("Scan/2Ch (Sequence)", test_scan_two_channel_sequence),
-    AcquisitionTest("Subscan (Sequence)", test_scan_subscan_one_channel_sequence),
-    AcquisitionTest("Subscan/2Ch (Sequence)", test_scan_subscan_two_channel_sequence),
-    AcquisitionTest("SI (Sequence)", test_synchronized_eels_sequence),
-    AcquisitionTest("Ronchigram (Series/defocus)", test_ronchigram_series),
-    AcquisitionTest("EELS (Series/Spectra/energy_offset)", test_eels_spectra_series),
-    AcquisitionTest("EELS (Series/Images/energy_offset)", test_eels_image_series),
-    AcquisitionTest("Ronchigram (Multi)", test_ronchigram_multi),
-    AcquisitionTest("EELS (Multi/Spectra)", test_eels_spectra_multi),
-    AcquisitionTest("EELS (Multi/Images)", test_eels_image_multi),
-]
+all_acquisition_tests = list[AcquisitionTest]()
+
+
+class AcquisitionProcedure:
+    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        self.procedure_d = procedure_d
+        self.ap = ap
+        self.stem_controller = stem_controller
+        self.logger = logger
+
+    def preflight(self) -> AcquisitionTestResult | None:
+        return None
+
+    async def run_procedure(self) -> AcquisitionPanel._AcquireResult:
+        raise NotImplementedError()
+
+    def get_expected_results(self) -> ExpectedResults:
+        raise NotImplementedError()
+
+
+def get_device(d: typing.Mapping[str, typing.Any], stem_controller: STEMController.STEMController) -> HardwareSource.HardwareSource | None:
+    device_type_id = typing.cast(str, d["device_type_id"])
+    match device_type_id:
+        case "ronchigram_camera":
+            return stem_controller.ronchigram_camera
+        case "eels_camera":
+            return stem_controller.eels_camera
+        case "scan_controller":
+            return stem_controller.scan_controller
+        case _:
+            return None
+
+
+@dataclasses.dataclass
+class Detector:
+    device_type_id: str
+    device: HardwareSource.HardwareSource
+    frame_parameters: HardwareSource.FrameParameters
+    channels: typing.Sequence[Acquisition.Channel]
+    expected_results: ExpectedResults
+    hardware_source_channel_description_map: dict[Acquisition.Channel, str]
+
+    def prepare(self) -> None:
+        self.device.set_current_frame_parameters(self.frame_parameters)
+        if isinstance(self.device, ScanBase.ScanHardwareSource) and isinstance(self.frame_parameters, ScanBase.ScanFrameParameters):
+            if self.frame_parameters.subscan_pixel_size:
+                self.device.subscan_enabled = True
+            else:
+                self.device.subscan_enabled = False
+        enabled_channel_indexes = [self.device.get_channel_index(channel.segments[1]) for channel in self.channels if len(channel.segments) > 1]
+        if enabled_channel_indexes:
+            for channel_index in range(self.device.get_channel_count()):
+                self.device.set_channel_enabled(channel_index, channel_index in enabled_channel_indexes)
+
+    @property
+    def is_camera(self) -> bool:
+        return isinstance(self.device, CameraBase.CameraHardwareSource)
+
+    @property
+    def view_channels(self) -> typing.Iterable[Acquisition.Channel]:
+        return self.expected_results.keys()
+
+    def get_expected_results(self, channel: Acquisition.Channel) -> ExpectedShapeAndDescriptor:
+        return self.expected_results[channel]
+
+
+def parse_detector_channels(channels_l: typing.Sequence[typing.Mapping[str, typing.Any]], device: HardwareSource.HardwareSource) -> typing.Sequence[Acquisition.Channel]:
+    channels = list[Acquisition.Channel]()
+    for channel_d in channels_l:
+        channel = Acquisition.Channel(device.hardware_source_id)
+        channel_id = channel_d.get("channel_id", None)
+        if channel_id is None and "channel_index" in channel_d:
+            channel_id = device.get_channel_id(typing.cast(int, channel_d["channel_index"]))
+        if channel_id is None and channel_d.get("channel_type", None) == "primary":
+            pass
+        if channel_id:
+            channel = channel.join_segment(typing.cast(str, channel_id))
+        channels.append(channel)
+    return tuple(channels)
+
+
+def get_detector(detector_d: typing.Mapping[str, typing.Any], stem_controller: STEMController.STEMController, magnification_d: typing.Mapping[str, typing.Any] | None, scan_d: typing.Mapping[str, typing.Any] | None) -> Detector:
+    device_type_id = typing.cast(str, detector_d["device_type_id"])
+    device = get_device(detector_d, stem_controller)
+    if not device:
+        raise ValueError(f"Device of type {device_type_id} not found in STEM controller.")
+    frame_parameters: HardwareSource.FrameParameters
+    channels = parse_detector_channels(detector_d["channels"], device)
+    expected_results = dict[Acquisition.Channel, ExpectedShapeAndDescriptor]()
+    hardware_source_channel_description_map = dict[Acquisition.Channel, str]()
+    match detector_d["device_type_id"]:
+        case "ronchigram_camera":
+            assert isinstance(device, CameraBase.CameraHardwareSource)
+            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_d.get("device_parameters", dict()))
+            channel = Acquisition.Channel(device.hardware_source_id)
+            data_shape = device.get_expected_dimensions(camera_frame_parameters)
+            expected_results[channel] = ExpectedShapeAndDescriptor(data_shape, DataAndMetadata.DataDescriptor(False, 0, 2))
+            hardware_source_channel_description_map[channel] = "ronchigram"
+            frame_parameters = camera_frame_parameters
+        case "eels_camera":
+            assert isinstance(device, CameraBase.CameraHardwareSource)
+            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_d.get("device_parameters", dict()))
+            channel = Acquisition.Channel(device.hardware_source_id)
+            channel_summed = Acquisition.Channel(device.hardware_source_id, "summed")
+            data_shape = device.get_expected_dimensions(camera_frame_parameters)
+            expected_results[channel] = ExpectedShapeAndDescriptor(data_shape, DataAndMetadata.DataDescriptor(False, 0, 2))
+            expected_results[channel_summed] = ExpectedShapeAndDescriptor(data_shape[1:], DataAndMetadata.DataDescriptor(False, 0, 1))
+            hardware_source_channel_description_map[channel] = "eels_image"
+            hardware_source_channel_description_map[channel_summed] = "eels_spectrum"
+            frame_parameters = camera_frame_parameters
+        case "scan_controller":
+            assert isinstance(device, ScanBase.ScanHardwareSource)
+            # hack to put together the scan frame parameters
+            frame_parameters_d = dict(magnification_d or dict())
+            frame_parameters_d |= dict(scan_d or dict())
+            frame_parameters_d |= frame_parameters_d.get("clock", dict())
+            scan_frame_parameters = typing.cast(ScanBase.ScanFrameParameters, device.get_frame_parameters_from_dict(frame_parameters_d))
+            enabled_channel_indexes = [device.get_channel_index(channel.segments[1]) for channel in channels]
+            for channel_index in enabled_channel_indexes:
+                channel = Acquisition.Channel(device.hardware_source_id, str(channel_index))
+                expected_results[channel] = ExpectedShapeAndDescriptor(scan_frame_parameters.scan_size.as_tuple(), DataAndMetadata.DataDescriptor(False, 0, 2))
+                hardware_source_channel_description_map[channel] = ".".join(channel.segments)
+            frame_parameters = scan_frame_parameters
+        case _:
+            raise ValueError(f"Unknown device type: {device_type_id}")
+    assert frame_parameters
+    return Detector(device_type_id, device, frame_parameters, channels, expected_results, hardware_source_channel_description_map)
+
+
+class ViewAcquisitionProcedure(AcquisitionProcedure):
+    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        super().__init__(procedure_d, ap, stem_controller, logger)
+        magnification_d = typing.cast(typing.Mapping[str, typing.Any] | None, procedure_d.get("magnification"))
+        scan_d = typing.cast(typing.Mapping[str, typing.Any] | None, procedure_d.get("scan"))
+        self.detector = get_detector(procedure_d["detector"], stem_controller, magnification_d, scan_d)
+        self.duration = typing.cast(float, procedure_d.get("duration", None))
+
+    def preflight(self) -> AcquisitionTestResult | None:
+        if not self.detector.device:
+            return make_not_available_result(f"Device type {self.detector.device_type_id} not found.")
+        return None
+
+    async def run_procedure(self) -> AcquisitionPanel._AcquireResult:
+        self.detector.prepare()
+        self.detector.device.start_playing(sync_timeout=3.0)
+        start = time.time()
+        while time.time() - start < 5.0:
+            await asyncio.sleep(0.1)
+        self.detector.device.stop_playing(sync_timeout=3.0)
+        model = self.ap.document_controller.document_model
+        result_map = dict[Acquisition.Channel, DataItem.DataItem]()
+        for channel in self.detector.view_channels:
+            hardware_source_id = channel.segments[0]
+            # some real messiness resulting from inconsistent use of channel_id and channel_index in get_data_item_channel_reference
+            if isinstance(self.detector.device, ScanBase.ScanHardwareSource):
+                channel_index = int(channel.segments[1]) if len(channel.segments) > 1 else None
+                channel_id = self.detector.device.get_channel_id(channel_index) if channel_index is not None else None
+            else:
+                channel_id = channel.segments[1] if len(channel.segments) > 1 else None
+            data_item = model.get_data_item_channel_reference(hardware_source_id, channel_id).data_item
+            if data_item:
+                result_map[channel] = data_item
+        return AcquisitionPanel._AcquireResult(True, result_map)
+
+    def get_expected_results(self) -> ExpectedResults:
+        return self.detector.expected_results
+
+
+class Iteration:
+    def __init__(self) -> None:
+        pass
+
+    def activate(self, ap: AcquisitionPanel.AcquisitionPanel) -> None:
+        raise NotImplementedError()
+
+    def update_expected_results(self, expected_results: ExpectedResults) -> ExpectedResults:
+        raise NotImplementedError()
+
+
+class BasicIteration(Iteration):
+    def activate(self, ap: AcquisitionPanel.AcquisitionPanel) -> None:
+        ap._activate_basic_acquire()
+
+    def update_expected_results(self, expected_results: ExpectedResults) -> ExpectedResults:
+        return expected_results
+
+
+class SequenceIteration(Iteration):
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def activate(self, ap: AcquisitionPanel.AcquisitionPanel) -> None:
+        ap._activate_sequence_acquire(self.count)
+
+    def update_expected_results(self, expected_results: ExpectedResults) -> ExpectedResults:
+        results = dict[Acquisition.Channel, ExpectedShapeAndDescriptor]()
+        for channel, expected_shape_and_descriptor in expected_results.items():
+            data_shape = (self.count,) + expected_shape_and_descriptor.data_shape
+            assert not expected_shape_and_descriptor.data_descriptor.is_sequence
+            data_descriptor = DataAndMetadata.DataDescriptor(True, expected_shape_and_descriptor.data_descriptor.collection_dimension_count, expected_shape_and_descriptor.data_descriptor.datum_dimension_count)
+            results[channel] = ExpectedShapeAndDescriptor(data_shape, data_descriptor)
+        return results
+
+
+class SeriesIteration(Iteration):
+    def __init__(self, control_id: str, control_values: AcquisitionPanel.ControlValues) -> None:
+        super().__init__()
+        self.control_id = control_id
+        self.control_values = control_values
+
+    def activate(self, ap: AcquisitionPanel.AcquisitionPanel) -> None:
+        ap._activate_series_acquire(self.control_id, self.control_values)
+
+    def update_expected_results(self, expected_results: ExpectedResults) -> ExpectedResults:
+        results = dict[Acquisition.Channel, ExpectedShapeAndDescriptor]()
+        for channel, expected_shape_and_descriptor in expected_results.items():
+            data_shape = (self.control_values.count,) + expected_shape_and_descriptor.data_shape
+            assert not expected_shape_and_descriptor.data_descriptor.is_sequence
+            data_descriptor = DataAndMetadata.DataDescriptor(True, expected_shape_and_descriptor.data_descriptor.collection_dimension_count, expected_shape_and_descriptor.data_descriptor.datum_dimension_count)
+            results[channel] = ExpectedShapeAndDescriptor(data_shape, data_descriptor)
+        return results
+
+
+class MultipleSeriesIteration(Iteration):
+    def __init__(self, sections: typing.Sequence[AcquisitionPanel.MultipleAcquireEntry]) -> None:
+        super().__init__()
+        self.sections = sections
+
+    def activate(self, ap: AcquisitionPanel.AcquisitionPanel) -> None:
+        ap._activate_multiple_acquire(self.sections)
+
+    def update_expected_results(self, expected_results: ExpectedResults) -> ExpectedResults:
+        results = dict[Acquisition.Channel, ExpectedShapeAndDescriptor]()
+        for index, section in enumerate(self.sections):
+            for channel, expected_shape_and_descriptor in expected_results.items():
+                data_shape = (section.count,) + expected_shape_and_descriptor.data_shape
+                assert expected_shape_and_descriptor.data_descriptor.is_sequence == False
+                data_descriptor = DataAndMetadata.DataDescriptor(True, expected_shape_and_descriptor.data_descriptor.collection_dimension_count, expected_shape_and_descriptor.data_descriptor.datum_dimension_count)
+                results[Acquisition.Channel(str(index), *channel.segments)] = ExpectedShapeAndDescriptor(data_shape, data_descriptor)
+                if section.include_sum:
+                    results[Acquisition.Channel(str(index), *channel.segments, "sum")] = expected_shape_and_descriptor
+        return results
+
+
+def create_iteration(iteration_d: typing.Mapping[str, typing.Any] | None) -> Iteration:
+    iteration_d = iteration_d or dict()
+    match iteration_d.get("type", "basic"):
+        case "basic":
+            return BasicIteration()
+        case "sequence":
+            count = typing.cast(int, iteration_d["count"])
+            return SequenceIteration(count)
+        case "series":
+            control_id = typing.cast(str, iteration_d["control_id"])
+            count = typing.cast(int, iteration_d["count"])
+            start = typing.cast(float, iteration_d["start"])
+            step = typing.cast(float, iteration_d["step"])
+            return SeriesIteration(control_id, AcquisitionPanel.ControlValues(count, start, step))
+        case "multiple-series":
+            sections_d = typing.cast(typing.Sequence[typing.Mapping[str, typing.Any]], iteration_d["sections"])
+            sections = list[AcquisitionPanel.MultipleAcquireEntry]()
+            for section_d in sections_d:
+                offset = typing.cast(int, section_d["offset"])
+                exposure_ms = typing.cast(float, section_d["exposure_ms"])
+                count = typing.cast(int, section_d["count"])
+                include_sum = typing.cast(bool, section_d["include_sum"])
+                sections.append(AcquisitionPanel.MultipleAcquireEntry(offset, exposure_ms / 1e3, count, include_sum))
+            return MultipleSeriesIteration(sections)
+        case _:
+            raise ValueError(f"Unknown iteration type: {iteration_d['type']}")
+
+
+class AcquireAcquisitionProcedure(AcquisitionProcedure):
+    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        super().__init__(procedure_d, ap, stem_controller, logger)
+        magnification_d = procedure_d.get("magnification")
+        scan_d = procedure_d.get("scan")
+        self.detectors = [get_detector(detector_d, stem_controller, magnification_d, scan_d) for detector_d in procedure_d["detectors"]]
+        self.iteration = create_iteration(procedure_d.get("iteration"))
+
+    def preflight(self) -> AcquisitionTestResult | None:
+        camera_count = 0  # count cameras, only a single camera allowed in detectors
+        for detector in self.detectors:
+            if not detector.device:
+                return make_not_available_result(f"Device type {detector.device_type_id} not found.")
+            if detector.is_camera:
+                camera_count += 1
+        if camera_count > 1:
+            return make_not_available_result(f"Only a single camera-like detector is allowed.")
+        return None
+
+    async def run_procedure(self) -> AcquisitionPanel._AcquireResult:
+        self.iteration.activate(self.ap)
+        if len(self.detectors) == 1:
+            detector = self.detectors[0]
+            detector.prepare()
+            if isinstance(detector.device, CameraBase.CameraHardwareSource):
+                # hack until we allow multiple camera channels
+                selected_channel = detector.channels[0]
+                hardware_source_channel_description_id = detector.hardware_source_channel_description_map[selected_channel]
+                exposure = typing.cast(CameraBase.CameraFrameParameters, detector.frame_parameters).exposure
+                self.ap._activate_camera_acquire(detector.device.hardware_source_id, hardware_source_channel_description_id, exposure)
+            else:
+                self.ap._activate_scan_acquire(detector.device.hardware_source_id)
+            acquire_result = await self.ap._acquire()
+        elif len(self.detectors) == 2:
+            for detector in self.detectors:
+                detector.prepare()
+            # assumes scan detector is first, camera is second
+            scan_detector = self.detectors[0]
+            camera_detector = self.detectors[1]
+            selected_channel = camera_detector.channels[0]
+            hardware_source_channel_description_id = camera_detector.hardware_source_channel_description_map[selected_channel]
+            exposure = typing.cast(CameraBase.CameraFrameParameters, camera_detector.frame_parameters).exposure
+            scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, scan_detector.device)
+            scan_size = scan_hardware_source.get_current_frame_parameters().scan_size
+            self.ap._activate_synchronized_acquire(scan_detector.device.hardware_source_id, scan_size.width, camera_detector.device.hardware_source_id, hardware_source_channel_description_id, exposure)
+            acquire_result = await self.ap._acquire()
+        else:
+            raise NotImplementedError()
+        # special hack until channel results are cleaned up. this is necessary because the acquisition panel current
+        # uses a result key of the eels_camera_id instead of the eels_camera_id + processing.
+        for detector in self.detectors:
+            if isinstance(detector.device, CameraBase.CameraHardwareSource):
+                # hack until we allow multiple camera channels
+                selected_channel = detector.channels[0]
+                hardware_source_channel_description_id = detector.hardware_source_channel_description_map[selected_channel]
+                if hardware_source_channel_description_id == "eels_spectrum":
+                    for channel in list(acquire_result.data_item_map.keys()):
+                        new_channel_segments = list[str]()
+                        for segment in channel.segments:
+                            if segment != detector.device.hardware_source_id:
+                                new_channel_segments.append(segment)
+                            else:
+                                new_channel_segments.extend(selected_channel.segments)
+                        new_channel = Acquisition.Channel(*new_channel_segments)
+                        acquire_result.data_item_map[new_channel] = acquire_result.data_item_map.pop(channel)
+        return acquire_result
+
+    def get_expected_results(self) -> ExpectedResults:
+        expected_results = dict(self.detectors[0].expected_results)
+        if len(self.detectors) == 2:
+            # assumes scan detector is first, camera is second
+            scan_detector = self.detectors[0]
+            camera_detector = self.detectors[1]
+            scan_size = typing.cast(ScanBase.ScanFrameParameters, scan_detector.frame_parameters).scan_size
+            for camera_channel, camera_expected_result in camera_detector.expected_results.items():
+                data_descriptor = DataAndMetadata.DataDescriptor(False, len(scan_size), camera_expected_result.data_descriptor.datum_dimension_count)
+                expected_results[camera_channel] = ExpectedShapeAndDescriptor(scan_size.as_tuple() + camera_expected_result.data_shape, data_descriptor)
+        # special hack since acquisition only acquires one of the two channels for camera detectors currently.
+        for detector in self.detectors:
+            if isinstance(detector.device, CameraBase.CameraHardwareSource):
+                # hack until we allow multiple camera channels
+                selected_channel = detector.channels[0]
+                hardware_source_channel_description_id = detector.hardware_source_channel_description_map[selected_channel]
+                if hardware_source_channel_description_id == "eels_spectrum":
+                    expected_results.pop(Acquisition.Channel(detector.device.hardware_source_id))
+                elif hardware_source_channel_description_id == "eels_image":
+                    expected_results.pop(Acquisition.Channel(detector.device.hardware_source_id, "summed"))
+        return self.iteration.update_expected_results(expected_results)
+
+
+def create_acquisition_procedure(procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionProcedure:
+    match procedure_d["type"]:
+        case "view":
+            return ViewAcquisitionProcedure(procedure_d, ap, stem_controller, logger)
+        case "acquire":
+            return AcquireAcquisitionProcedure(procedure_d, ap, stem_controller, logger)
+        case _:
+            raise ValueError(f"Unknown acquisition procedure type: {procedure_d['type']}")
+
+
+def parse_expected_result_channel(channel_d: typing.Mapping[str, typing.Any], device: HardwareSource.HardwareSource) -> Acquisition.Channel:
+    channel = Acquisition.Channel(device.hardware_source_id)
+    channel_id = channel_d.get("channel_id", None)
+    if channel_id is None and "channel_index" in channel_d:
+        channel_id = str(typing.cast(int, channel_d["channel_index"]))
+    if channel_id:
+        channel = channel.join_segment(typing.cast(str, channel_id))
+    return channel
+
+
+class AcquisitionProcedureTest(AcquisitionTest):
+    def __init__(self, test_d: typing.Mapping[str, typing.Any]) -> None:
+        super().__init__(test_d["title"], self.acquire)
+        self.__test_d = test_d
+
+    async def acquire(self, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
+        procedure = create_acquisition_procedure(self.__test_d["procedure"], ap, stem_controller, logger)
+        if preflight_result := procedure.preflight():
+            return preflight_result
+        procedure_results = await procedure.run_procedure()
+        expected_results = procedure.get_expected_results()
+        return check_results(procedure_results, logger, expected_results)
+
+
+json_bytes = pkgutil.get_data(AcquisitionPanel.__name__, "resources/acquisition_tests.json")
+if json_bytes:
+    for test_d in json.loads(json_bytes.decode("utf-8")):
+        all_acquisition_tests.append(AcquisitionProcedureTest(test_d))
 
 
 class AcquisitionTestHandler(Declarative.Handler):
