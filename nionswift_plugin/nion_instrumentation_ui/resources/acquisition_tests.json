@@ -537,9 +537,11 @@
       "iteration": {
         "type": "series",
         "control_id": "defocus",
-        "count": 4,
-        "start": 0e-9,
-        "step": 5e-9
+        "control_values": {
+          "count": 4,
+          "start": 0e-9,
+          "step": 5e-9
+        }
       },
       "detectors": [
         {
@@ -564,9 +566,11 @@
       "iteration": {
         "type": "series",
         "control_id": "energy_offset",
-        "count": 6,
-        "start": 0,
-        "step": 20
+        "control_values": {
+          "count": 6,
+          "start": 0,
+          "step": 20
+        }
       },
       "detectors": [
         {
@@ -591,9 +595,11 @@
       "iteration": {
         "type": "series",
         "control_id": "energy_offset",
-        "count": 6,
-        "start": 0,
-        "step": 20
+        "control_values": {
+          "count": 6,
+          "start": 0,
+          "step": 20
+        }
       },
       "detectors": [
         {
@@ -627,8 +633,7 @@
           {
             "offset": 5,
             "exposure_ms": 50,
-            "count": 2,
-            "include_sum": false
+            "count": 2
           }
         ]
       },
@@ -664,8 +669,7 @@
           {
             "offset": 5,
             "exposure_ms": 50,
-            "count": 2,
-            "include_sum": false
+            "count": 2
           }
         ]
       },
@@ -701,8 +705,7 @@
           {
             "offset": 5,
             "exposure_ms": 50,
-            "count": 2,
-            "include_sum": false
+            "count": 2
           }
         ]
       },

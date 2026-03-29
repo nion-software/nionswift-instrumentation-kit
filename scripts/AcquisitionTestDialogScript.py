@@ -62,6 +62,380 @@ def make_not_available_result(message: str) -> AcquisitionTestResult:
     return result
 
 
+PersistentDictType = typing.Mapping[str, typing.Any]
+
+
+def validate_keys(cls: typing.Any, d: PersistentDictType) -> None:
+    field_names = {f.name for f in dataclasses.fields(cls)}
+    for key in d.keys():
+        if key not in field_names:
+            raise ValueError(f"Unexpected key: '{key}'. Expected keys for {cls.__name__} are: {field_names}")
+
+
+@dataclasses.dataclass
+class ChannelRecord:
+    channel_type: str | None
+    channel_id: str | None
+    channel_index: int | None
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ChannelRecord:
+        validate_keys(cls, d)
+        channel_type = d.get("channel_type", None)
+        channel_id = d.get("channel_id", None)
+        channel_index = d.get("channel_index", None)
+        return cls(channel_type, channel_id, channel_index)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        if self.channel_type is not None:
+            d["channel_type"] = self.channel_type
+        if self.channel_id is not None:
+            d["channel_id"] = self.channel_id
+        if self.channel_index is not None:
+            d["channel_index"] = self.channel_index
+        return d
+
+
+@dataclasses.dataclass
+class DeviceParametersRecord:
+    parameters: typing.Mapping[str, typing.Any]
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> DeviceParametersRecord:
+        parameters = dict(d)
+        return cls(parameters)
+
+    def to_dict(self) -> PersistentDictType:
+        return dict(self.parameters)
+
+
+@dataclasses.dataclass
+class DetectorRecord:
+    device_type_id: str
+    device_parameters: DeviceParametersRecord
+    channels: typing.Sequence[ChannelRecord]
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> DetectorRecord:
+        validate_keys(cls, d)
+        device_type_id = typing.cast(str, d["device_type_id"])
+        device_parameters = DeviceParametersRecord.from_dict(d.get("device_parameters", dict()))
+        channels = [ChannelRecord.from_dict(channel_d) for channel_d in d["channels"]]
+        return cls(device_type_id, device_parameters, channels)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["device_type_id"] = self.device_type_id
+        device_parameters_d = self.device_parameters.to_dict()
+        if device_parameters_d:
+            d["device_parameters"] = device_parameters_d
+        d["channels"] = [channel.to_dict() for channel in self.channels]
+        return d
+
+
+@dataclasses.dataclass
+class MagnificationRecord:
+    fov_nm: float | None
+    rotation: float | None
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> MagnificationRecord:
+        validate_keys(cls, d)
+        fov_nm = typing.cast(float | None, d.get("fov_nm", None))
+        rotation = typing.cast(float | None, d.get("rotation", None))
+        return cls(fov_nm, rotation)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        if self.fov_nm is not None:
+            d["fov_nm"] = self.fov_nm
+        if self.rotation is not None:
+            d["rotation"] = self.rotation
+        return d
+
+
+@dataclasses.dataclass
+class ClockRecord:
+    type: str
+    pixel_time_us: float | None
+    device_type_id: str | None
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ClockRecord:
+        validate_keys(cls, d)
+        type = typing.cast(str, d["type"])
+        pixel_time_us = typing.cast(float | None, d.get("pixel_time_us", None))
+        device_type_id = typing.cast(str | None, d.get("device_type_id", None))
+        return cls(type, pixel_time_us, device_type_id)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["type"] = self.type
+        if self.pixel_time_us is not None:
+            d["pixel_time_us"] = self.pixel_time_us
+        if self.device_type_id is not None:
+            d["device_type_id"] = self.device_type_id
+        return d
+
+
+@dataclasses.dataclass
+class ScanRecord:
+    pixel_size: tuple[int, int]
+    subscan_pixel_size: tuple[int, int] | None
+    subscan_fractional_center: tuple[float, float] | None
+    subscan_fractional_size: tuple[float, float] | None
+    clock: ClockRecord
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ScanRecord:
+        validate_keys(cls, d)
+        pixel_size_l = typing.cast(typing.Sequence[int], d["pixel_size"])
+        pixel_size = (pixel_size_l[0], pixel_size_l[1])
+        subscan_pixel_size_l = typing.cast(typing.Sequence[int] | None, d.get("subscan_pixel_size", None))
+        subscan_pixel_size = (subscan_pixel_size_l[0], subscan_pixel_size_l[1]) if subscan_pixel_size_l else None
+        subscan_fractional_center_l = typing.cast(typing.Sequence[float] | None, d.get("subscan_fractional_center", None))
+        subscan_fractional_center = (subscan_fractional_center_l[0], subscan_fractional_center_l[1]) if subscan_fractional_center_l else None
+        subscan_fractional_size_l = typing.cast(typing.Sequence[float] | None, d.get("subscan_fractional_size", None))
+        subscan_fractional_size = (subscan_fractional_size_l[0], subscan_fractional_size_l[1]) if subscan_fractional_size_l else None
+        clock = ClockRecord.from_dict(typing.cast(typing.Mapping[str, typing.Any], d["clock"]))
+        return cls(pixel_size, subscan_pixel_size, subscan_fractional_center, subscan_fractional_size, clock)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["pixel_size"] = list(self.pixel_size)
+        if self.subscan_pixel_size is not None:
+            d["subscan_pixel_size"] = list(self.subscan_pixel_size)
+        if self.subscan_fractional_center is not None:
+            d["subscan_fractional_center"] = list(self.subscan_fractional_center)
+        if self.subscan_fractional_size is not None:
+            d["subscan_fractional_size"] = list(self.subscan_fractional_size)
+        d["clock"] = self.clock.to_dict()
+        return d
+
+
+@dataclasses.dataclass
+class ProcedureRecord:
+    type: str
+    magnification: MagnificationRecord | None
+    scan: ScanRecord | None
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ProcedureRecord:
+        type = typing.cast(str, d["type"])
+        if type == "view":
+            return ViewProcedureRecord.from_dict(d)
+        elif type == "acquire":
+            return AcquireProcedureRecord.from_dict(d)
+        raise ValueError(f"Unknown procedure type: {type}")
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["type"] = self.type
+        if self.magnification is not None:
+            d["magnification"] = self.magnification.to_dict()
+        if self.scan is not None:
+            d["scan"] = self.scan.to_dict()
+        return d
+
+
+@dataclasses.dataclass
+class ViewProcedureRecord(ProcedureRecord):
+    detector: DetectorRecord
+    duration: float
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ViewProcedureRecord:
+        validate_keys(cls, d)
+        magnification = MagnificationRecord.from_dict(d.get("magnification", dict())) if "magnification" in d else None
+        scan = ScanRecord.from_dict(d.get("scan", dict())) if "scan" in d else None
+        detector = DetectorRecord.from_dict(d["detector"])
+        duration = typing.cast(float, d["duration"])
+        return cls("view", magnification, scan, detector, duration)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict(super().to_dict())
+        d["detector"] = self.detector.to_dict()
+        d["duration"] = self.duration
+        return d
+
+
+@dataclasses.dataclass
+class IterationRecord:
+    type: str
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> IterationRecord:
+        type = typing.cast(str, d["type"])
+        if type == "basic":
+            return BasicIterationRecord(type)
+        elif type == "sequence":
+            return SequenceIterationRecord.from_dict(d)
+        elif type == "series":
+            return SeriesIterationRecord.from_dict(d)
+        elif type == "multiple-series":
+            return MultipleSeriesIterationRecord.from_dict(d)
+        raise ValueError(f"Unknown iteration type: {type}")
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["type"] = self.type
+        return d
+
+
+@dataclasses.dataclass
+class BasicIterationRecord(IterationRecord):
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> BasicIterationRecord:
+        validate_keys(cls, d)
+        return cls("basic")
+
+    def to_dict(self) -> PersistentDictType:
+        return super().to_dict()
+
+
+@dataclasses.dataclass
+class SequenceIterationRecord(IterationRecord):
+    count: int
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> SequenceIterationRecord:
+        validate_keys(cls, d)
+        count = typing.cast(int, d["count"])
+        return cls("sequence", count)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict(super().to_dict())
+        d["count"] = self.count
+        return d
+
+
+@dataclasses.dataclass
+class ControlValuesRecord:
+    count: int
+    start: float | int
+    step: float | int
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> ControlValuesRecord:
+        validate_keys(cls, d)
+        count = typing.cast(int, d["count"])
+        start = typing.cast(float | int, d["start"])
+        step = typing.cast(float | int, d["step"])
+        return cls(count, start, step)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["count"] = self.count
+        d["start"] = self.start
+        d["step"] = self.step
+        return d
+
+
+@dataclasses.dataclass
+class SeriesIterationRecord(IterationRecord):
+    control_id: str
+    control_values: ControlValuesRecord
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> SeriesIterationRecord:
+        validate_keys(cls, d)
+        control_id = typing.cast(str, d["control_id"])
+        control_values = ControlValuesRecord.from_dict(d["control_values"])
+        return cls("series", control_id, control_values)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict(super().to_dict())
+        d["control_id"] = self.control_id
+        d["control_values"] = self.control_values.to_dict()
+        return d
+
+
+@dataclasses.dataclass
+class MultipleSeriesSectionRecord:
+    offset: float
+    exposure_ms: float
+    count: int
+    include_sum: bool = False
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> MultipleSeriesSectionRecord:
+        validate_keys(cls, d)
+        offset = typing.cast(float, d["offset"])
+        exposure_ms = typing.cast(float, d["exposure_ms"])
+        count = typing.cast(int, d["count"])
+        include_sum = typing.cast(bool, d.get("include_sum", False))
+        return cls(offset, exposure_ms, count, include_sum)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["offset"] = self.offset
+        d["exposure_ms"] = self.exposure_ms
+        d["count"] = self.count
+        if self.include_sum:
+            d["include_sum"] = self.include_sum
+        return d
+
+
+@dataclasses.dataclass
+class MultipleSeriesIterationRecord(IterationRecord):
+    sections: typing.Sequence[MultipleSeriesSectionRecord]
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> MultipleSeriesIterationRecord:
+        validate_keys(cls, d)
+        sections = [MultipleSeriesSectionRecord.from_dict(section_d) for section_d in d["sections"]]
+        return cls("multiple-series", sections)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict(super().to_dict())
+        d["sections"] = [section.to_dict() for section in self.sections]
+        return d
+
+
+@dataclasses.dataclass
+class AcquireProcedureRecord(ProcedureRecord):
+    detectors: typing.Sequence[DetectorRecord]
+    iteration: IterationRecord
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> AcquireProcedureRecord:
+        validate_keys(cls, d)
+        magnification = MagnificationRecord.from_dict(d.get("magnification", dict())) if "magnification" in d else None
+        scan = ScanRecord.from_dict(d.get("scan", dict())) if "scan" in d else None
+        detectors = [DetectorRecord.from_dict(detector_d) for detector_d in typing.cast(typing.Sequence[typing.Mapping[str, typing.Any]], d["detectors"])]
+        iteration = IterationRecord.from_dict(d["iteration"]) if "iteration" in d else BasicIterationRecord("basic")
+        return cls("acquire", magnification, scan, detectors, iteration)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict(super().to_dict())
+        d["detectors"] = [detector.to_dict() for detector in self.detectors]
+        if not isinstance(self.iteration, BasicIterationRecord):
+            d["iteration"] = self.iteration.to_dict()
+        return d
+
+
+@dataclasses.dataclass
+class TestRecord:
+    title: str
+    procedure: ProcedureRecord
+
+    @classmethod
+    def from_dict(cls, d: PersistentDictType) -> TestRecord:
+        validate_keys(cls, d)
+        title = typing.cast(str, d["title"])
+        procedure = ProcedureRecord.from_dict(d["procedure"])
+        return cls(title, procedure)
+
+    def to_dict(self) -> PersistentDictType:
+        d = dict[str, typing.Any]()
+        d["title"] = self.title
+        d["procedure"] = self.procedure.to_dict()
+        return d
+
+
+
 @dataclasses.dataclass
 class ExpectedShapeAndDescriptor:
     data_shape: DataAndMetadata.ShapeType
@@ -108,11 +482,11 @@ def acquisition_test_state_to_string(state: AcquisitionTestState | None) -> str:
         return "\N{LARGE BLUE CIRCLE}"
 
 
-class AcquisitionTest(Observable.Observable):
-    def __init__(self, title: str, acquisition_fn: typing.Callable[[AcquisitionPanel.AcquisitionPanel, STEMController.STEMController, logging.Logger], typing.Awaitable[AcquisitionTestResult]]) -> None:
+class AcquisitionProcedureTest(Observable.Observable):
+    def __init__(self, test: TestRecord) -> None:
         super().__init__()
-        self.title = title
-        self.acquisition_fn = acquisition_fn
+        self.title = test.title
+        self.__test = test
         self.__state = AcquisitionTestState.NOT_STARTED
         self.status_stream = Model.StreamValueModel(Stream.MapStream[AcquisitionTestState, str](Stream.PropertyChangedEventStream(self, "state"), acquisition_test_state_to_string))
         self.__elapsed_time: float | None = None
@@ -173,7 +547,7 @@ class AcquisitionTest(Observable.Observable):
 
             try:
                 start_time = time.time()
-                result = await self.acquisition_fn(ap, stem_controller, logger)
+                result = await self.acquire(ap, stem_controller, logger)
                 self.elapsed_time = time.time() - start_time
             except Exception as e:
                 import traceback
@@ -204,13 +578,18 @@ class AcquisitionTest(Observable.Observable):
         finally:
             is_stopped_model.value = was_stopped
 
-
-all_acquisition_tests = list[AcquisitionTest]()
+    async def acquire(self, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
+        procedure = create_acquisition_procedure(self.__test.procedure, ap, stem_controller, logger)
+        if preflight_result := procedure.preflight():
+            return preflight_result
+        procedure_results = await procedure.run_procedure()
+        expected_results = procedure.get_expected_results()
+        return check_results(procedure_results, logger, expected_results)
 
 
 class AcquisitionProcedure:
-    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
-        self.procedure_d = procedure_d
+    def __init__(self, procedure: ProcedureRecord, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        self.procedure = procedure
         self.ap = ap
         self.stem_controller = stem_controller
         self.logger = logger
@@ -225,8 +604,8 @@ class AcquisitionProcedure:
         raise NotImplementedError()
 
 
-def get_device(d: typing.Mapping[str, typing.Any], stem_controller: STEMController.STEMController) -> HardwareSource.HardwareSource | None:
-    device_type_id = typing.cast(str, d["device_type_id"])
+def get_device(detector_record: DetectorRecord, stem_controller: STEMController.STEMController) -> HardwareSource.HardwareSource | None:
+    device_type_id = detector_record.device_type_id
     match device_type_id:
         case "ronchigram_camera":
             return stem_controller.ronchigram_camera
@@ -271,34 +650,34 @@ class Detector:
         return self.expected_results[channel]
 
 
-def parse_detector_channels(channels_l: typing.Sequence[typing.Mapping[str, typing.Any]], device: HardwareSource.HardwareSource) -> typing.Sequence[Acquisition.Channel]:
+def parse_detector_channels(channel_records: typing.Sequence[ChannelRecord], device: HardwareSource.HardwareSource) -> typing.Sequence[Acquisition.Channel]:
     channels = list[Acquisition.Channel]()
-    for channel_d in channels_l:
+    for channel_record in channel_records:
         channel = Acquisition.Channel(device.hardware_source_id)
-        channel_id = channel_d.get("channel_id", None)
-        if channel_id is None and "channel_index" in channel_d:
-            channel_id = device.get_channel_id(typing.cast(int, channel_d["channel_index"]))
-        if channel_id is None and channel_d.get("channel_type", None) == "primary":
+        channel_id = channel_record.channel_id
+        if channel_id is None and channel_record.channel_index is not None:
+            channel_id = device.get_channel_id(channel_record.channel_index)
+        if channel_id is None and channel_record.channel_type == "primary":
             pass
         if channel_id:
-            channel = channel.join_segment(typing.cast(str, channel_id))
+            channel = channel.join_segment(channel_id)
         channels.append(channel)
     return tuple(channels)
 
 
-def get_detector(detector_d: typing.Mapping[str, typing.Any], stem_controller: STEMController.STEMController, magnification_d: typing.Mapping[str, typing.Any] | None, scan_d: typing.Mapping[str, typing.Any] | None) -> Detector:
-    device_type_id = typing.cast(str, detector_d["device_type_id"])
-    device = get_device(detector_d, stem_controller)
+def get_detector(detector_record: DetectorRecord, stem_controller: STEMController.STEMController, magnification: MagnificationRecord | None, scan: ScanRecord | None) -> Detector:
+    device_type_id = detector_record.device_type_id
+    device = get_device(detector_record, stem_controller)
     if not device:
         raise ValueError(f"Device of type {device_type_id} not found in STEM controller.")
     frame_parameters: HardwareSource.FrameParameters
-    channels = parse_detector_channels(detector_d["channels"], device)
+    channels = parse_detector_channels(detector_record.channels, device)
     expected_results = dict[Acquisition.Channel, ExpectedShapeAndDescriptor]()
     hardware_source_channel_description_map = dict[Acquisition.Channel, str]()
-    match detector_d["device_type_id"]:
+    match device_type_id:
         case "ronchigram_camera":
             assert isinstance(device, CameraBase.CameraHardwareSource)
-            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_d.get("device_parameters", dict()))
+            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_record.device_parameters.parameters)
             channel = Acquisition.Channel(device.hardware_source_id)
             data_shape = device.get_expected_dimensions(camera_frame_parameters)
             expected_results[channel] = ExpectedShapeAndDescriptor(data_shape, DataAndMetadata.DataDescriptor(False, 0, 2))
@@ -306,7 +685,7 @@ def get_detector(detector_d: typing.Mapping[str, typing.Any], stem_controller: S
             frame_parameters = camera_frame_parameters
         case "eels_camera":
             assert isinstance(device, CameraBase.CameraHardwareSource)
-            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_d.get("device_parameters", dict()))
+            camera_frame_parameters = device.get_frame_parameters_from_dict(detector_record.device_parameters.parameters)
             channel = Acquisition.Channel(device.hardware_source_id)
             channel_summed = Acquisition.Channel(device.hardware_source_id, "summed")
             data_shape = device.get_expected_dimensions(camera_frame_parameters)
@@ -318,9 +697,21 @@ def get_detector(detector_d: typing.Mapping[str, typing.Any], stem_controller: S
         case "scan_controller":
             assert isinstance(device, ScanBase.ScanHardwareSource)
             # hack to put together the scan frame parameters
-            frame_parameters_d = dict(magnification_d or dict())
-            frame_parameters_d |= dict(scan_d or dict())
-            frame_parameters_d |= frame_parameters_d.get("clock", dict())
+            frame_parameters_d = dict[str, typing.Any]()
+            if magnification and magnification.fov_nm:
+                frame_parameters_d["fov_nm"] = magnification.fov_nm
+            if magnification and magnification.rotation:
+                frame_parameters_d["rotation"] = magnification.rotation
+            if scan and scan.pixel_size:
+                frame_parameters_d["pixel_size"] = scan.pixel_size
+            if scan and scan.subscan_pixel_size:
+                frame_parameters_d["subscan_pixel_size"] = scan.subscan_pixel_size
+            if scan and scan.subscan_fractional_center:
+                frame_parameters_d["subscan_fractional_center"] = scan.subscan_fractional_center
+            if scan and scan.subscan_fractional_size:
+                frame_parameters_d["subscan_fractional_size"] = scan.subscan_fractional_size
+            if scan and scan.clock and scan.clock.pixel_time_us:
+                frame_parameters_d["pixel_time_us"] = scan.clock.pixel_time_us
             scan_frame_parameters = typing.cast(ScanBase.ScanFrameParameters, device.get_frame_parameters_from_dict(frame_parameters_d))
             enabled_channel_indexes = [device.get_channel_index(channel.segments[1]) for channel in channels]
             for channel_index in enabled_channel_indexes:
@@ -330,17 +721,17 @@ def get_detector(detector_d: typing.Mapping[str, typing.Any], stem_controller: S
             frame_parameters = scan_frame_parameters
         case _:
             raise ValueError(f"Unknown device type: {device_type_id}")
-    assert frame_parameters
+    assert frame_parameters is not None
     return Detector(device_type_id, device, frame_parameters, channels, expected_results, hardware_source_channel_description_map)
 
 
 class ViewAcquisitionProcedure(AcquisitionProcedure):
-    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
-        super().__init__(procedure_d, ap, stem_controller, logger)
-        magnification_d = typing.cast(typing.Mapping[str, typing.Any] | None, procedure_d.get("magnification"))
-        scan_d = typing.cast(typing.Mapping[str, typing.Any] | None, procedure_d.get("scan"))
-        self.detector = get_detector(procedure_d["detector"], stem_controller, magnification_d, scan_d)
-        self.duration = typing.cast(float, procedure_d.get("duration", None))
+    def __init__(self, procedure: ViewProcedureRecord, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        super().__init__(procedure, ap, stem_controller, logger)
+        magnification = procedure.magnification
+        scan = procedure.scan
+        self.detector = get_detector(procedure.detector, stem_controller, magnification, scan)
+        self.duration = procedure.duration
 
     def preflight(self) -> AcquisitionTestResult | None:
         if not self.detector.device:
@@ -450,41 +841,37 @@ class MultipleSeriesIteration(Iteration):
         return results
 
 
-def create_iteration(iteration_d: typing.Mapping[str, typing.Any] | None) -> Iteration:
-    iteration_d = iteration_d or dict()
-    match iteration_d.get("type", "basic"):
-        case "basic":
+def create_iteration(iteration_record: IterationRecord) -> Iteration:
+    match iteration_record:
+        case BasicIterationRecord():
             return BasicIteration()
-        case "sequence":
-            count = typing.cast(int, iteration_d["count"])
-            return SequenceIteration(count)
-        case "series":
-            control_id = typing.cast(str, iteration_d["control_id"])
-            count = typing.cast(int, iteration_d["count"])
-            start = typing.cast(float, iteration_d["start"])
-            step = typing.cast(float, iteration_d["step"])
-            return SeriesIteration(control_id, AcquisitionPanel.ControlValues(count, start, step))
-        case "multiple-series":
-            sections_d = typing.cast(typing.Sequence[typing.Mapping[str, typing.Any]], iteration_d["sections"])
+        case SequenceIterationRecord():
+            return SequenceIteration(iteration_record.count)
+        case SeriesIterationRecord():
+            control_values_record = iteration_record.control_values
+            control_values = AcquisitionPanel.ControlValues(control_values_record.count, control_values_record.start, control_values_record.step)
+            return SeriesIteration(iteration_record.control_id, control_values)
+        case MultipleSeriesIterationRecord():
+            section_records = iteration_record.sections
             sections = list[AcquisitionPanel.MultipleAcquireEntry]()
-            for section_d in sections_d:
-                offset = typing.cast(int, section_d["offset"])
-                exposure_ms = typing.cast(float, section_d["exposure_ms"])
-                count = typing.cast(int, section_d["count"])
-                include_sum = typing.cast(bool, section_d["include_sum"])
+            for section_record in section_records:
+                offset = section_record.offset
+                exposure_ms = section_record.exposure_ms
+                count = section_record.count
+                include_sum = section_record.include_sum
                 sections.append(AcquisitionPanel.MultipleAcquireEntry(offset, exposure_ms / 1e3, count, include_sum))
             return MultipleSeriesIteration(sections)
         case _:
-            raise ValueError(f"Unknown iteration type: {iteration_d['type']}")
+            raise ValueError(f"Unknown iteration type: {iteration_record.type}")
 
 
 class AcquireAcquisitionProcedure(AcquisitionProcedure):
-    def __init__(self, procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
-        super().__init__(procedure_d, ap, stem_controller, logger)
-        magnification_d = procedure_d.get("magnification")
-        scan_d = procedure_d.get("scan")
-        self.detectors = [get_detector(detector_d, stem_controller, magnification_d, scan_d) for detector_d in procedure_d["detectors"]]
-        self.iteration = create_iteration(procedure_d.get("iteration"))
+    def __init__(self, procedure: AcquireProcedureRecord, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> None:
+        super().__init__(procedure, ap, stem_controller, logger)
+        magnification = procedure.magnification
+        scan = procedure.scan
+        self.detectors = [get_detector(detector, stem_controller, magnification, scan) for detector in procedure.detectors]
+        self.iteration = create_iteration(procedure.iteration)
 
     def preflight(self) -> AcquisitionTestResult | None:
         camera_count = 0  # count cameras, only a single camera allowed in detectors
@@ -568,48 +955,28 @@ class AcquireAcquisitionProcedure(AcquisitionProcedure):
         return self.iteration.update_expected_results(expected_results)
 
 
-def create_acquisition_procedure(procedure_d: typing.Mapping[str, typing.Any], ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionProcedure:
-    match procedure_d["type"]:
+def create_acquisition_procedure(procedure_record: ProcedureRecord, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionProcedure:
+    match procedure_record.type:
         case "view":
-            return ViewAcquisitionProcedure(procedure_d, ap, stem_controller, logger)
+            return ViewAcquisitionProcedure(typing.cast(ViewProcedureRecord, procedure_record), ap, stem_controller, logger)
         case "acquire":
-            return AcquireAcquisitionProcedure(procedure_d, ap, stem_controller, logger)
+            return AcquireAcquisitionProcedure(typing.cast(AcquireProcedureRecord, procedure_record), ap, stem_controller, logger)
         case _:
-            raise ValueError(f"Unknown acquisition procedure type: {procedure_d['type']}")
+            raise ValueError(f"Unknown acquisition procedure type: {procedure_record.type}")
 
 
-def parse_expected_result_channel(channel_d: typing.Mapping[str, typing.Any], device: HardwareSource.HardwareSource) -> Acquisition.Channel:
+def parse_expected_result_channel(channel_record: ChannelRecord, device: HardwareSource.HardwareSource) -> Acquisition.Channel:
     channel = Acquisition.Channel(device.hardware_source_id)
-    channel_id = channel_d.get("channel_id", None)
-    if channel_id is None and "channel_index" in channel_d:
-        channel_id = str(typing.cast(int, channel_d["channel_index"]))
+    channel_id = channel_record.channel_id
+    if channel_id is None and channel_record.channel_index is not None:
+        channel_id = str(channel_record.channel_index)
     if channel_id:
-        channel = channel.join_segment(typing.cast(str, channel_id))
+        channel = channel.join_segment(channel_id)
     return channel
 
 
-class AcquisitionProcedureTest(AcquisitionTest):
-    def __init__(self, test_d: typing.Mapping[str, typing.Any]) -> None:
-        super().__init__(test_d["title"], self.acquire)
-        self.__test_d = test_d
-
-    async def acquire(self, ap: AcquisitionPanel.AcquisitionPanel, stem_controller: STEMController.STEMController, logger: logging.Logger) -> AcquisitionTestResult:
-        procedure = create_acquisition_procedure(self.__test_d["procedure"], ap, stem_controller, logger)
-        if preflight_result := procedure.preflight():
-            return preflight_result
-        procedure_results = await procedure.run_procedure()
-        expected_results = procedure.get_expected_results()
-        return check_results(procedure_results, logger, expected_results)
-
-
-json_bytes = pkgutil.get_data(AcquisitionPanel.__name__, "resources/acquisition_tests.json")
-if json_bytes:
-    for test_d in json.loads(json_bytes.decode("utf-8")):
-        all_acquisition_tests.append(AcquisitionProcedureTest(test_d))
-
-
 class AcquisitionTestHandler(Declarative.Handler):
-    def __init__(self, acquisition_test: AcquisitionTest, window: DocumentController.DocumentController, is_stopped_model: Model.ValueModel[bool]) -> None:
+    def __init__(self, acquisition_test: AcquisitionProcedureTest, window: DocumentController.DocumentController, is_stopped_model: Model.ValueModel[bool]) -> None:
         super().__init__()
         self.acquisition_test = acquisition_test
         self.window = window
@@ -653,7 +1020,7 @@ class AcquisitionTestDialog(Declarative.Handler):
     def __init__(self, window: DocumentController.DocumentController) -> None:
         super().__init__()
         self.window = window
-        self.acquisition_tests = all_acquisition_tests
+        self.acquisition_tests = list[AcquisitionProcedureTest]()
         self.is_stopped_model = Model.PropertyModel[bool](True)
 
         self.is_run_all_model = Model.PropertyModel[bool](False)
@@ -671,6 +1038,12 @@ class AcquisitionTestDialog(Declarative.Handler):
 
         self.run_all_enabled_model: Model.ValueModel[bool] = Model.StreamValueModel(Stream.CombineLatestStream([Stream.PropertyChangedEventStream(self.is_stopped_model, "value"), Stream.PropertyChangedEventStream(self.is_run_all_model, "value")], lambda a, b: a or b))
 
+        json_bytes = pkgutil.get_data(AcquisitionPanel.__name__, "resources/acquisition_tests.json")
+        if json_bytes:
+            for test_d in json.loads(json_bytes.decode("utf-8")):
+                test_record = TestRecord.from_dict(test_d)
+                self.acquisition_tests.append(AcquisitionProcedureTest(test_record))
+
         u = Declarative.DeclarativeUI()
         ui_view = u.create_column(
             u.create_scroll_area(u.create_column(items="acquisition_tests", item_component_id="acquisition_test", margin_vertical=4), width=480, height=400),
@@ -684,7 +1057,7 @@ class AcquisitionTestDialog(Declarative.Handler):
 
     def create_handler(self, component_id: str, container: typing.Any = None, item: typing.Any = None, **kwargs: typing.Any) -> typing.Optional[Declarative.HandlerLike]:
         if component_id == "acquisition_test":
-            return AcquisitionTestHandler(typing.cast(AcquisitionTest, item), self.window, self.is_stopped_model)
+            return AcquisitionTestHandler(typing.cast(AcquisitionProcedureTest, item), self.window, self.is_stopped_model)
         return None
 
     def handle_reset_clicked(self, widget: Declarative.UIWidget) -> None:
