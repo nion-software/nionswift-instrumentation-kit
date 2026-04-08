@@ -952,11 +952,6 @@ class CharButtonWidget(UserInterface.Widget):
         canvas_widget = ui.create_canvas_widget()
         canvas_widget.canvas_item.add_canvas_item(canvas_item)
 
-        # ugh. this is a partially working stop-gap when a canvas item is in a widget it will not get mouse exited reliably
-        root_container = canvas_item.root_container
-        if root_container and root_container.canvas_widget:
-            canvas_widget.on_mouse_exited = root_container.canvas_widget.on_mouse_exited
-
         self.__canvas_item = canvas_item
 
         column_widget.add(canvas_widget)
