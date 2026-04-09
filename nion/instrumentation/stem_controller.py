@@ -49,8 +49,7 @@ class PMTTypeEnum(enum.IntEnum):
 
 PMTType = typing.Union[PMTTypeEnum, int]
 
-JSONValue: typing.TypeAlias = str | int | float | bool | None | typing.Sequence["JSONValue"] | typing.Mapping[str, "JSONValue"]
-JSONType: typing.TypeAlias = typing.Mapping[str, JSONValue]
+JSONType: typing.TypeAlias = str | int | float | bool | None | typing.Sequence["JSONType"] | typing.Mapping[str, "JSONType"]
 
 
 class SubscanState(enum.Enum):
