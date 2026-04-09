@@ -736,7 +736,7 @@ class STEMController(Observable.Observable):
 
     # end instrument API
 
-    # required functions (templates). subclasses should override.
+    # required functions. subclasses should override.
 
     def TryGetVal(self, s: str) -> typing.Tuple[bool, typing.Optional[float]]:
         return False, None
@@ -782,6 +782,41 @@ class STEMController(Observable.Observable):
 
     def HasValError(self, s: str) -> bool:
         return False
+
+    # Optional functions. Subclasses can override. These functions should not be considered as part of the stable
+    # public API of the STEMController, and are intended for use in specific circumstances.
+
+    def OptCoeff(self, coeff: str) -> None:
+        raise NotImplementedError()
+
+    def NumBadElements(self) -> int:
+        raise NotImplementedError()
+
+    def NumWobblers(self) -> int:
+        raise NotImplementedError()
+
+    def CreateGroup(self, path: str, options: str) -> None:
+        raise NotImplementedError()
+
+    def GetNumControlsInGroup(self, path: str) -> int:
+        raise NotImplementedError()
+
+    def GetNthControlInGroup(self, path: str, n: int) -> str:
+        raise NotImplementedError()
+
+    def GetDriveStrength(self, s1: str, s2: str) -> float:
+        raise NotImplementedError()
+
+    def SetDriveStrength(self, s1: str, s2: str, val: float) -> bool:
+        raise NotImplementedError()
+
+    def InformDriveStrength(self, s1: str, s2: str, val: float) -> bool:
+        raise NotImplementedError()
+
+    def AddControlDrivesToControl(self, src: str, dst: str, factor: float) -> None:
+        raise NotImplementedError()
+
+    # optional REST API functions. subclasses can override.
 
     def _post_rest_api(self, url: str, *, timeout: float = 5.0, content: JSONType | None = None) -> TryValue[JSONType]:
         """Performs a POST REST call to the specified url.
