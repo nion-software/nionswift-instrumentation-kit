@@ -362,7 +362,7 @@ class STEMController(Observable.Observable):
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__ronchigram_camera_lock = threading.RLock()
-        self._ronchigram_camera_acquired_count = 0 # exposed for tests
+        self._ronchigram_camera_reserved_count = 0 # exposed for tests
         self.__ronchigram_task_id: str | None = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
@@ -397,29 +397,29 @@ class STEMController(Observable.Observable):
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
-    def try_acquire_ronchigram_camera(self, task_id: str) -> TryValue[camera_base.CameraHardwareSource]:
-        """Acquire the ronchigram camera if it is not already acquired by another task.
+    def try_reserve_ronchigram_camera(self, task_id: str) -> TryValue[camera_base.CameraHardwareSource]:
+        """Reserve the ronchigram camera if it is not already reserved by another task.
 
         The first successful call returns the current ronchigram camera and reserves it in a TryValue.
         Later calls return a TryValue with is_valid equal to False with a reason the camera cannot be reserved
         until the release_ronchigram_camera function has been called.
         """
         with self.__ronchigram_camera_lock:
-            if self._ronchigram_camera_acquired_count:
+            if self._ronchigram_camera_reserved_count:
                 return TryValue(None, Exception(f"Ronchigram camera is currently in use by task '{self.__ronchigram_task_id}'"))
             ronchigram_camera = self.ronchigram_camera
             if ronchigram_camera is not None:
-                self._ronchigram_camera_acquired_count += 1
+                self._ronchigram_camera_reserved_count += 1
                 self.__ronchigram_task_id = task_id
                 return TryValue(ronchigram_camera, copy_value=False)
 
             return TryValue(None, Exception("Ronchigram camera is not available"))
 
     def release_ronchigram_camera(self) -> None:
-        """Release a ronchigram camera previously reserved by try_acquire_ronchigram_camera."""
+        """Release a ronchigram camera previously reserved by try_reserve_ronchigram_camera."""
         with self.__ronchigram_camera_lock:
-            if self._ronchigram_camera_acquired_count > 0:
-                self._ronchigram_camera_acquired_count -= 1
+            if self._ronchigram_camera_reserved_count > 0:
+                self._ronchigram_camera_reserved_count -= 1
                 self.__ronchigram_task_id = None
 
     @property

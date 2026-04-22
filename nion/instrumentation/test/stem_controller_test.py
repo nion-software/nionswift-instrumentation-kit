@@ -22,19 +22,19 @@ class TestScanControlClass(unittest.TestCase):
 
     def test_acquire_and_release_ronchigram_camera(self):
         with self._test_context() as test_context:
-            result = test_context.instrument.try_acquire_ronchigram_camera("test")
+            result = test_context.instrument.try_reserve_ronchigram_camera("test")
             self.assertTrue(result.is_valid)
-            self.assertEqual(1, test_context.instrument._ronchigram_camera_acquired_count)
+            self.assertEqual(1, test_context.instrument._ronchigram_camera_reserved_count)
 
             test_context.instrument.release_ronchigram_camera()
-            self.assertEqual(0, test_context.instrument._ronchigram_camera_acquired_count)
+            self.assertEqual(0, test_context.instrument._ronchigram_camera_reserved_count)
 
     def test_acquire_ronchigram_camera_twice(self):
         with self._test_context() as test_context:
-            result = test_context.instrument.try_acquire_ronchigram_camera("test")
+            result = test_context.instrument.try_reserve_ronchigram_camera("test")
             self.assertTrue(result.is_valid)
-            self.assertEqual(1, test_context.instrument._ronchigram_camera_acquired_count)
+            self.assertEqual(1, test_context.instrument._ronchigram_camera_reserved_count)
 
-            result2 = test_context.instrument.try_acquire_ronchigram_camera("test2")
+            result2 = test_context.instrument.try_reserve_ronchigram_camera("test2")
             self.assertFalse(result2.is_valid)
-            self.assertEqual(1, test_context.instrument._ronchigram_camera_acquired_count)
+            self.assertEqual(1, test_context.instrument._ronchigram_camera_reserved_count)
