@@ -14,6 +14,7 @@ import threading
 import time
 import typing
 import uuid
+import weakref
 
 # third party libraries
 # None
@@ -323,6 +324,13 @@ class TryValue(typing.Generic[_TryValueType]):
         return self.exception is None
 
 
+class CameraReservedException(Exception):
+    """ Exception that signifies the selected camera is already reserved by another task. The task_id of the task that has reserved the camera is stored in the exception."""
+    def __init__(self, camera_name: str, task_id: str) -> None:
+        super().__init__(f"{camera_name} camera is currently in use by task '{task_id}'")
+        self.task_id = task_id
+
+
 class STEMController(Observable.Observable):
     """An interface to a STEM microscope.
 
@@ -364,6 +372,7 @@ class STEMController(Observable.Observable):
         self.__ronchigram_camera_lock = threading.RLock()
         self._ronchigram_camera_reserved_count = 0 # exposed for tests
         self.__ronchigram_task_id: str | None = None
+        self.__ronchigram_scope_token: weakref.ReferenceType[object] | None = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -397,18 +406,37 @@ class STEMController(Observable.Observable):
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
-    def try_reserve_ronchigram_camera(self, task_id: str) -> TryValue[camera_base.CameraHardwareSource]:
+    def __clear_ronchigram_camera_reservation(self) -> None:
+        """Clear the reservation of the ronchigram camera. This should be called when the camera is released or when the scope token is garbage collected."""
+        self._ronchigram_camera_reserved_count = 0
+        self.__ronchigram_task_id = None
+        self.__ronchigram_scope_token = None
+
+    def try_reserve_ronchigram_camera(self, task_id: str, scope_token: typing.Any) -> TryValue[camera_base.CameraHardwareSource]:
         """Reserve the ronchigram camera if it is not already reserved by another task.
 
         The first successful call returns the current ronchigram camera and reserves it in a TryValue.
         Later calls return a TryValue with is_valid equal to False with a reason the camera cannot be reserved
         until the release_ronchigram_camera function has been called.
+
+        Parameters:
+        task_id (str): The task id of the current task
+        scope_token (typing.Any): The scope token of the current task - if this object is garbage collected,
+            the reservation will be considered finished
         """
         with self.__ronchigram_camera_lock:
             if self._ronchigram_camera_reserved_count:
-                return TryValue(None, Exception(f"Ronchigram camera is currently in use by task '{self.__ronchigram_task_id}'"))
+                if self.__ronchigram_scope_token is None:
+                    return TryValue(None, CameraReservedException("Ronchigram", self.__ronchigram_task_id or ""))
+                if self.__ronchigram_scope_token() is not None:
+                    return TryValue(None, CameraReservedException("Ronchigram", self.__ronchigram_task_id or ""))
+                self.__clear_ronchigram_camera_reservation()
             ronchigram_camera = self.ronchigram_camera
             if ronchigram_camera is not None:
+                try:
+                    self.__ronchigram_scope_token = weakref.ref(scope_token)
+                except TypeError as e:
+                    raise TypeError("scope_token must support weak references (e.g., class instance)") from e
                 self._ronchigram_camera_reserved_count += 1
                 self.__ronchigram_task_id = task_id
                 return TryValue(ronchigram_camera, copy_value=False)
@@ -420,7 +448,8 @@ class STEMController(Observable.Observable):
         with self.__ronchigram_camera_lock:
             if self._ronchigram_camera_reserved_count > 0:
                 self._ronchigram_camera_reserved_count -= 1
-                self.__ronchigram_task_id = None
+                if self._ronchigram_camera_reserved_count == 0:
+                    self.__clear_ronchigram_camera_reservation()
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
