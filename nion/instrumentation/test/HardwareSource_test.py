@@ -1312,12 +1312,12 @@ class TestHardwareSourceClass(unittest.TestCase):
             self.__acquire_one(document_controller, hardware_source)
             data_item = document_model.data_items[0]
             display_item = document_model.display_items[0]
-            self.assertEqual("rad", display_item.displayed_dimensional_calibrations[0].units)
-            self.assertEqual("counts", display_item.displayed_intensity_calibration.units)
+            self.assertEqual("rad", display_item.display_calibration_info.displayed_dimensional_calibrations[0].units)
+            self.assertEqual("counts", display_item.display_calibration_info.displayed_intensity_calibration.units)
             display_item.calibration_style_id = "spatial"
             display_item.intensity_calibration_style_id = "intensity-e"
-            self.assertEqual("nm", display_item.displayed_dimensional_calibrations[0].units)
-            self.assertEqual("e", display_item.displayed_intensity_calibration.units)
+            self.assertEqual("nm", display_item.display_calibration_info.displayed_dimensional_calibrations[0].units)
+            self.assertEqual("e", display_item.display_calibration_info.displayed_intensity_calibration.units)
 
 
 if __name__ == '__main__':
