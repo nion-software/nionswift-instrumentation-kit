@@ -12,6 +12,7 @@ import logging
 import math
 import threading
 import time
+import types
 import typing
 import uuid
 import weakref
@@ -324,11 +325,48 @@ class TryValue(typing.Generic[_TryValueType]):
         return self.exception is None
 
 
-class CameraReservedException(Exception):
-    """ Exception that signifies the selected camera is already reserved by another task. The task_id of the task that has reserved the camera is stored in the exception."""
-    def __init__(self, camera_name: str, task_id: str) -> None:
-        super().__init__(f"{camera_name} camera is currently in use by task '{task_id}'")
+class ReservedCamera:
+    """Represents a reserved ronchigram camera.
+
+    Can be used as a context manager for automatic release::
+
+        with instrument.try_reserve_ronchigram_camera("my-task") as reservation:
+            if reservation.camera is None:
+                print(f"Failed: {reservation.failure_reason}")
+                return
+            # use reservation.camera here
+
+    Or checked manually::
+
+        reservation = instrument.try_reserve_ronchigram_camera("my-task")
+        if reservation.camera is None:
+            return
+        try:
+            ...
+        finally:
+            reservation = None
+
+    ``camera`` is None if the reservation failed; ``failure_reason`` describes why.
+    """
+
+    def __init__(self, camera: camera_base.CameraHardwareSource | None, task_id: str,
+                 release_fn: typing.Callable[[], None] | None = None,
+                 failure_reason: str | None = None) -> None:
+        self.camera = camera
         self.task_id = task_id
+        self.__release_fn = release_fn
+        self.failure_reason = failure_reason
+
+    def __enter__(self) -> ReservedCamera:
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
+        if self.__release_fn is not None:
+            self.__release_fn()
+        self.camera = None
+        self.task_id = ""
+        self.failure_reason = "Invalid reservation"
+        self.__release_fn = None
 
 
 class STEMController(Observable.Observable):
@@ -370,9 +408,7 @@ class STEMController(Observable.Observable):
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__ronchigram_camera_lock = threading.RLock()
-        self._ronchigram_camera_reserved_count = 0 # exposed for tests
-        self.__ronchigram_task_id: str | None = None
-        self.__ronchigram_scope_token: weakref.ReferenceType[object] | None = None
+        self._reserved_ronchigram_camera: weakref.ReferenceType[ReservedCamera] | None = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -406,50 +442,45 @@ class STEMController(Observable.Observable):
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
-    def __clear_ronchigram_camera_reservation(self) -> None:
-        """Clear the reservation of the ronchigram camera. This should be called when the camera is released or when the scope token is garbage collected."""
-        self._ronchigram_camera_reserved_count = 0
-        self.__ronchigram_task_id = None
-        self.__ronchigram_scope_token = None
-
-    def try_reserve_ronchigram_camera(self, task_id: str, scope_token: typing.Any) -> TryValue[camera_base.CameraHardwareSource]:
+    def try_reserve_ronchigram_camera(self, task_id: str) -> ReservedCamera:
         """Reserve the ronchigram camera if it is not already reserved by another task.
 
-        The first successful call returns the current ronchigram camera and reserves it in a TryValue.
-        Later calls return a TryValue with is_valid equal to False with a reason the camera cannot be reserved
-        until the release_ronchigram_camera function has been called.
+        Always returns a ReservedCamera. Check ``reservation.camera``
+        to determine whether the reservation succeeded.
 
-        Parameters:
-        task_id (str): The task id of the current task
-        scope_token (typing.Any): The scope token of the current task - if this object is garbage collected,
-            the reservation will be considered finished
+        Safe to use as a context manager::
+
+            with instrument.try_reserve_ronchigram_camera("my-task") as reservation:
+                if reservation.camera is None:
+                    return
+                camera = reservation.camera
+                ...  # camera released automatically on exit
+
+        Args:
+            task_id (str): The task id of the current task.
         """
         with self.__ronchigram_camera_lock:
-            if self._ronchigram_camera_reserved_count:
-                if self.__ronchigram_scope_token is None:
-                    return TryValue(None, CameraReservedException("Ronchigram", self.__ronchigram_task_id or ""))
-                if self.__ronchigram_scope_token() is not None:
-                    return TryValue(None, CameraReservedException("Ronchigram", self.__ronchigram_task_id or ""))
-                self.__clear_ronchigram_camera_reservation()
+            if self._reserved_ronchigram_camera is not None:
+                existing_reservation = self._reserved_ronchigram_camera()
+                if existing_reservation is not None:
+                    return ReservedCamera(None, task_id,
+                                          failure_reason=f"Ronchigram camera is currently in use by task '{existing_reservation.task_id}'")
+                else:
+                    self._reserved_ronchigram_camera = None
             ronchigram_camera = self.ronchigram_camera
             if ronchigram_camera is not None:
-                try:
-                    self.__ronchigram_scope_token = weakref.ref(scope_token)
-                except TypeError as e:
-                    raise TypeError("scope_token must support weak references (e.g., class instance)") from e
-                self._ronchigram_camera_reserved_count += 1
-                self.__ronchigram_task_id = task_id
-                return TryValue(ronchigram_camera, copy_value=False)
+                reservation = ReservedCamera(ronchigram_camera, task_id,
+                                             release_fn=self.__release_ronchigram_camera)
+                self._reserved_ronchigram_camera = weakref.ref(reservation)
+                return reservation
 
-            return TryValue(None, Exception("Ronchigram camera is not available"))
+            return ReservedCamera(None, task_id,
+                                  failure_reason="Ronchigram camera is not available")
 
-    def release_ronchigram_camera(self) -> None:
+    def __release_ronchigram_camera(self) -> None:
         """Release a ronchigram camera previously reserved by try_reserve_ronchigram_camera."""
         with self.__ronchigram_camera_lock:
-            if self._ronchigram_camera_reserved_count > 0:
-                self._ronchigram_camera_reserved_count -= 1
-                if self._ronchigram_camera_reserved_count == 0:
-                    self.__clear_ronchigram_camera_reservation()
+            self._reserved_ronchigram_camera = None
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
