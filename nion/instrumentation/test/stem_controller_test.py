@@ -29,10 +29,10 @@ class TestSTEMControllerClass(unittest.TestCase):
             self.assertIsNone(reservation.failure_reason)
             self.assertIsNotNone(test_context.instrument._reserved_ronchigram_camera)
 
-            reservation = None
-            self.assertIsNone(test_context.instrument._reserved_ronchigram_camera())
+            reservation.release()
+            self.assertIsNone(test_context.instrument._reserved_ronchigram_camera)
 
-    def test_reserve_and_out_of_scope_release_ronchigram_camera(self):
+    def test_reserve_and_release_ronchigram_camera_via_context_manager(self):
         with self._test_context() as test_context:
             with test_context.instrument.try_reserve_ronchigram_camera("test") as reservation:
                 self.assertIsNotNone(reservation)
@@ -57,10 +57,10 @@ class TestSTEMControllerClass(unittest.TestCase):
             self.assertIsNotNone(reservation2.failure_reason)
             self.assertIn("test", reservation2.failure_reason)
 
-            reservation = None
-            reservation2 = None
+            reservation.release()
+            reservation2.release()
 
-    def test_leaving_scope_allows_new_reservation(self):
+    def test_leaving_with_scope_allows_new_reservation(self):
         with self._test_context() as test_context:
             with test_context.instrument.try_reserve_ronchigram_camera("test") as reservation:
                 self.assertIsNotNone(reservation)
@@ -74,4 +74,16 @@ class TestSTEMControllerClass(unittest.TestCase):
             self.assertIsNotNone(reservation2.camera)
             self.assertIsNone(reservation2.failure_reason)
 
-            reservation2 = None
+            reservation2.release()
+
+    def test_unreleased_out_of_scope_reservation_allows_new_reservation(self):
+        with self._test_context() as test_context:
+            reservation = test_context.instrument.try_reserve_ronchigram_camera("test")
+            reservation = None
+
+            reservation2 = test_context.instrument.try_reserve_ronchigram_camera("test2")
+            self.assertIsNotNone(reservation2)
+            self.assertIsNotNone(reservation2.camera)
+            self.assertIsNone(reservation2.failure_reason)
+
+            reservation2.release()

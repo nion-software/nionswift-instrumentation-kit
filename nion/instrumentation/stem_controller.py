@@ -326,7 +326,7 @@ class TryValue(typing.Generic[_TryValueType]):
 
 
 class ReservedCamera:
-    """Represents a reserved ronchigram camera.
+    """Represents a reserved camera.
 
     Can be used as a context manager for automatic release::
 
@@ -344,7 +344,7 @@ class ReservedCamera:
         try:
             ...
         finally:
-            reservation = None
+            reservation.release()
 
     ``camera`` is None if the reservation failed; ``failure_reason`` describes why.
     """
@@ -361,12 +361,16 @@ class ReservedCamera:
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
+        self.release()
+
+    def release(self) -> None:
+        """Release this camera so other tasks can reserve it."""
         if self.__release_fn is not None:
             self.__release_fn()
+            self.__release_fn = None
         self.camera = None
         self.task_id = ""
         self.failure_reason = "Invalid reservation"
-        self.__release_fn = None
 
 
 class STEMController(Observable.Observable):
