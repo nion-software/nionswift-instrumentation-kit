@@ -294,6 +294,8 @@ class ScanSpecifier:
 
 
 _TryValueType = typing.TypeVar('_TryValueType', covariant=True)
+_UnwrapType = typing.TypeVar('_UnwrapType')
+
 
 class TryValue(typing.Generic[_TryValueType]):
     """ A value and an exception.
@@ -321,6 +323,19 @@ class TryValue(typing.Generic[_TryValueType]):
     @property
     def is_valid(self) -> bool:
         return self.exception is None
+
+    def unwrap_as(self, typ: type[_UnwrapType]) -> TryValue[_UnwrapType]:
+        """Attempt to unwrap the contained value as the given type.
+
+        Returns a new TryValue containing the value cast to `typ` if this
+        TryValue is valid and the value is an instance of `typ`. Otherwise,
+        returns an invalid TryValue with an appropriate TypeError.
+        """
+        if not self.is_valid:
+            return TryValue(None, self.exception)
+        if not isinstance(self.value, typ):
+            return TryValue(None, TypeError(f"Expected {typ.__name__}, got {type(self.value).__name__}"))
+        return TryValue(typing.cast(_UnwrapType, self.value), None)
 
 
 class STEMController(Observable.Observable):
