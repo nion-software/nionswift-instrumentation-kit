@@ -331,6 +331,7 @@ class ReservedCameraStatus(enum.Enum):
     camera_not_found=1
     camera_already_reserved=2
 
+
 class ReservedCamera:
     """Represents a reserved camera.
 
@@ -368,9 +369,6 @@ class ReservedCamera:
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
-        self.release()
-
-    def __del__(self) -> None:
         self.release()
 
     def release(self) -> None:
@@ -423,6 +421,7 @@ class STEMController(Observable.Observable):
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__ronchigram_camera_lock = threading.RLock()
         self._reserved_ronchigram_camera: weakref.ReferenceType[ReservedCamera] | None = None
+        self.__reserved_ronchigram_camera_finalize: weakref.finalize | None = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -488,6 +487,7 @@ class STEMController(Observable.Observable):
                                              release_fn=self.__release_ronchigram_camera,
                                              status=ReservedCameraStatus.success)
                 self._reserved_ronchigram_camera = weakref.ref(reservation)
+                self.__reserved_ronchigram_camera_finalize = weakref.finalize(reservation, self.__release_ronchigram_camera)
                 return reservation
 
             return ReservedCamera(None,
@@ -498,6 +498,9 @@ class STEMController(Observable.Observable):
         """Release a ronchigram camera previously reserved by try_reserve_ronchigram_camera."""
         with self.__ronchigram_camera_lock:
             self._reserved_ronchigram_camera = None
+            if self.__reserved_ronchigram_camera_finalize is not None:
+                self.__reserved_ronchigram_camera_finalize.detach()
+                self.__reserved_ronchigram_camera_finalize = None
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
