@@ -325,6 +325,12 @@ class TryValue(typing.Generic[_TryValueType]):
         return self.exception is None
 
 
+class ReservedCameraStatus(enum.Enum):
+    invalid_reservation = -1
+    success=0
+    camera_not_found=1
+    camera_already_reserved=2
+
 class ReservedCamera:
     """Represents a reserved camera.
 
@@ -349,12 +355,13 @@ class ReservedCamera:
     ``camera`` is None if the reservation failed; ``failure_reason`` describes why.
     """
 
-    def __init__(self, camera: camera_base.CameraHardwareSource | None, task_id: str,
+    def __init__(self, camera: camera_base.CameraHardwareSource | None,
+                 status: ReservedCameraStatus,
                  release_fn: typing.Callable[[], None] | None = None,
                  failure_reason: str | None = None) -> None:
         self.camera = camera
-        self.task_id = task_id
         self.__release_fn = release_fn
+        self.status = status
         self.failure_reason = failure_reason
 
     def __enter__(self) -> ReservedCamera:
@@ -363,14 +370,17 @@ class ReservedCamera:
     def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: types.TracebackType | None) -> None:
         self.release()
 
+    def __del__(self) -> None:
+        self.release()
+
     def release(self) -> None:
         """Release this camera so other tasks can reserve it."""
         if self.__release_fn is not None:
             self.__release_fn()
             self.__release_fn = None
         self.camera = None
-        self.task_id = ""
-        self.failure_reason = "Invalid reservation"
+        self.status = ReservedCameraStatus.invalid_reservation
+        self.failure_reason = None
 
 
 class STEMController(Observable.Observable):
@@ -446,7 +456,7 @@ class STEMController(Observable.Observable):
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
-    def try_reserve_ronchigram_camera(self, task_id: str) -> ReservedCamera:
+    def try_reserve_ronchigram_camera(self) -> ReservedCamera:
         """Reserve the ronchigram camera if it is not already reserved by another task.
 
         Always returns a ReservedCamera. Check ``reservation.camera``
@@ -467,19 +477,22 @@ class STEMController(Observable.Observable):
             if self._reserved_ronchigram_camera is not None:
                 existing_reservation = self._reserved_ronchigram_camera()
                 if existing_reservation is not None:
-                    return ReservedCamera(None, task_id,
-                                          failure_reason=f"Ronchigram camera is currently in use by task '{existing_reservation.task_id}'")
+                    return ReservedCamera(None,
+                                          failure_reason="Ronchigram camera is currently in use by another process",
+                                          status=ReservedCameraStatus.camera_already_reserved)
                 else:
                     self._reserved_ronchigram_camera = None
             ronchigram_camera = self.ronchigram_camera
             if ronchigram_camera is not None:
-                reservation = ReservedCamera(ronchigram_camera, task_id,
-                                             release_fn=self.__release_ronchigram_camera)
+                reservation = ReservedCamera(ronchigram_camera,
+                                             release_fn=self.__release_ronchigram_camera,
+                                             status=ReservedCameraStatus.success)
                 self._reserved_ronchigram_camera = weakref.ref(reservation)
                 return reservation
 
-            return ReservedCamera(None, task_id,
-                                  failure_reason="Ronchigram camera is not available")
+            return ReservedCamera(None,
+                                  failure_reason="Ronchigram camera is not available",
+                                  status=ReservedCameraStatus.camera_not_found)
 
     def __release_ronchigram_camera(self) -> None:
         """Release a ronchigram camera previously reserved by try_reserve_ronchigram_camera."""
