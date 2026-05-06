@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 import typing
 import unittest
 
@@ -90,3 +92,27 @@ class TestSTEMControllerClass(unittest.TestCase):
             self.assertEqual(reservation2.status, ReservedCameraStatus.success)
 
             reservation2.release()
+
+    def test_cannot_reserve_in_thread(self):
+        with self._test_context() as test_context:
+            exception = None
+            def reserve_camera():
+                nonlocal exception
+                try:
+                    test_context.instrument.try_reserve_ronchigram_camera()
+                except Exception as e:
+                    exception = e
+
+            thread = threading.Thread(target=reserve_camera)
+            thread.start()
+            thread.join()
+            self.assertIsNotNone(exception)
+
+    def test_can_reserve_in_async(self):
+        with self._test_context() as test_context:
+            async def reserve_camera_async():
+                with test_context.instrument.try_reserve_ronchigram_camera() as reservation:
+                    return reservation.status
+
+            result = asyncio.run(reserve_camera_async())
+            self.assertEqual(result, ReservedCameraStatus.success)

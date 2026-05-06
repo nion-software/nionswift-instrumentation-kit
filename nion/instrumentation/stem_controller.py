@@ -337,7 +337,7 @@ class ReservedCamera:
 
     Can be used as a context manager for automatic release::
 
-        with instrument.try_reserve_ronchigram_camera("my-task") as reservation:
+        with instrument.try_reserve_ronchigram_camera() as reservation:
             if reservation.camera is None:
                 print(f"Failed: {reservation.failure_reason}")
                 return
@@ -345,7 +345,7 @@ class ReservedCamera:
 
     Or checked manually::
 
-        reservation = instrument.try_reserve_ronchigram_camera("my-task")
+        reservation = instrument.try_reserve_ronchigram_camera()
         if reservation.camera is None:
             return
         try:
@@ -419,9 +419,8 @@ class STEMController(Observable.Observable):
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
-        self.__ronchigram_camera_lock = threading.RLock()
         self._reserved_ronchigram_camera: weakref.ReferenceType[ReservedCamera] | None = None
-        self.__reserved_ronchigram_camera_finalize: weakref.finalize | None = None
+        self.__reserved_ronchigram_camera_finalize: weakref.finalize[typing.Any, typing.Any] | None = None
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -463,44 +462,40 @@ class STEMController(Observable.Observable):
 
         Safe to use as a context manager::
 
-            with instrument.try_reserve_ronchigram_camera("my-task") as reservation:
+            with instrument.try_reserve_ronchigram_camera() as reservation:
                 if reservation.camera is None:
                     return
                 camera = reservation.camera
                 ...  # camera released automatically on exit
-
-        Args:
-            task_id (str): The task id of the current task.
         """
-        with self.__ronchigram_camera_lock:
-            if self._reserved_ronchigram_camera is not None:
-                existing_reservation = self._reserved_ronchigram_camera()
-                if existing_reservation is not None:
-                    return ReservedCamera(None,
-                                          failure_reason="Ronchigram camera is currently in use by another process",
-                                          status=ReservedCameraStatus.camera_already_reserved)
-                else:
-                    self._reserved_ronchigram_camera = None
-            ronchigram_camera = self.ronchigram_camera
-            if ronchigram_camera is not None:
-                reservation = ReservedCamera(ronchigram_camera,
-                                             release_fn=self.__release_ronchigram_camera,
-                                             status=ReservedCameraStatus.success)
-                self._reserved_ronchigram_camera = weakref.ref(reservation)
-                self.__reserved_ronchigram_camera_finalize = weakref.finalize(reservation, self.__release_ronchigram_camera)
-                return reservation
+        assert threading.current_thread() is threading.main_thread(), "try_reserve_ronchigram_camera must be called on the main thread."
+        if self._reserved_ronchigram_camera is not None:
+            existing_reservation = self._reserved_ronchigram_camera()
+            if existing_reservation is not None:
+                return ReservedCamera(None,
+                                      failure_reason="Ronchigram camera is currently in use by another process",
+                                      status=ReservedCameraStatus.camera_already_reserved)
+            else:
+                self._reserved_ronchigram_camera = None
+        ronchigram_camera = self.ronchigram_camera
+        if ronchigram_camera is not None:
+            reservation = ReservedCamera(ronchigram_camera,
+                                         release_fn=self.__release_ronchigram_camera,
+                                         status=ReservedCameraStatus.success)
+            self._reserved_ronchigram_camera = weakref.ref(reservation)
+            self.__reserved_ronchigram_camera_finalize = weakref.finalize(reservation, self.__release_ronchigram_camera)
+            return reservation
 
-            return ReservedCamera(None,
-                                  failure_reason="Ronchigram camera is not available",
-                                  status=ReservedCameraStatus.camera_not_found)
+        return ReservedCamera(None,
+                              failure_reason="Ronchigram camera is not available",
+                              status=ReservedCameraStatus.camera_not_found)
 
     def __release_ronchigram_camera(self) -> None:
         """Release a ronchigram camera previously reserved by try_reserve_ronchigram_camera."""
-        with self.__ronchigram_camera_lock:
-            self._reserved_ronchigram_camera = None
-            if self.__reserved_ronchigram_camera_finalize is not None:
-                self.__reserved_ronchigram_camera_finalize.detach()
-                self.__reserved_ronchigram_camera_finalize = None
+        self._reserved_ronchigram_camera = None
+        if self.__reserved_ronchigram_camera_finalize is not None:
+            self.__reserved_ronchigram_camera_finalize.detach()
+            self.__reserved_ronchigram_camera_finalize = None
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
