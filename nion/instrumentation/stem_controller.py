@@ -454,7 +454,7 @@ class STEMController(Observable.Observable):
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
 
-    def try_reserve_ronchigram_camera(self) -> ReservedCamera:
+    def _try_reserve_ronchigram_camera(self) -> ReservedCamera:
         """Reserve the ronchigram camera if it is not already reserved by another task.
 
         Always returns a ReservedCamera. Check ``reservation.camera``

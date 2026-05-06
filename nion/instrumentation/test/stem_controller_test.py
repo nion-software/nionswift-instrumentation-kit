@@ -25,7 +25,7 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_reserve_and_release_ronchigram_camera(self):
         with self._test_context() as test_context:
-            reservation = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation = test_context.instrument._try_reserve_ronchigram_camera()
             self.assertIsNotNone(reservation)
             self.assertIsNotNone(reservation.camera)
             self.assertIsNone(reservation.failure_reason)
@@ -37,7 +37,7 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_reserve_and_release_ronchigram_camera_via_context_manager(self):
         with self._test_context() as test_context:
-            with test_context.instrument.try_reserve_ronchigram_camera() as reservation:
+            with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
                 self.assertIsNotNone(reservation)
                 self.assertIsNotNone(reservation.camera)
                 self.assertIsNone(reservation.failure_reason)
@@ -48,14 +48,14 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_reserve_ronchigram_camera_twice(self):
         with self._test_context() as test_context:
-            reservation = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation = test_context.instrument._try_reserve_ronchigram_camera()
             self.assertIsNotNone(reservation)
             self.assertIsNotNone(reservation.camera)
             self.assertIsNone(reservation.failure_reason)
             self.assertIsNotNone(test_context.instrument._reserved_ronchigram_camera)
             self.assertEqual(reservation.status, ReservedCameraStatus.success)
 
-            reservation2 = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
             self.assertIsNone(reservation2.camera)
             self.assertIsNotNone(reservation2.failure_reason)
             self.assertEqual(reservation2.status, ReservedCameraStatus.camera_already_reserved)
@@ -65,14 +65,14 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_leaving_with_scope_allows_new_reservation(self):
         with self._test_context() as test_context:
-            with test_context.instrument.try_reserve_ronchigram_camera() as reservation:
+            with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
                 self.assertIsNotNone(reservation)
                 self.assertIsNotNone(reservation.camera)
                 self.assertIsNone(reservation.failure_reason)
                 self.assertIsNotNone(test_context.instrument._reserved_ronchigram_camera)
                 self.assertEqual(reservation.status, ReservedCameraStatus.success)
 
-            reservation2 = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
             self.assertIsNotNone(reservation2)
             self.assertIsNotNone(reservation2.camera)
             self.assertIsNone(reservation2.failure_reason)
@@ -82,10 +82,10 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_unreleased_out_of_scope_reservation_allows_new_reservation(self):
         with self._test_context() as test_context:
-            reservation = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation = test_context.instrument._try_reserve_ronchigram_camera()
             reservation = None
 
-            reservation2 = test_context.instrument.try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
             self.assertIsNotNone(reservation2)
             self.assertIsNotNone(reservation2.camera)
             self.assertIsNone(reservation2.failure_reason)
@@ -99,7 +99,7 @@ class TestSTEMControllerClass(unittest.TestCase):
             def reserve_camera():
                 nonlocal exception
                 try:
-                    test_context.instrument.try_reserve_ronchigram_camera()
+                    test_context.instrument._try_reserve_ronchigram_camera()
                 except Exception as e:
                     exception = e
 
@@ -111,7 +111,7 @@ class TestSTEMControllerClass(unittest.TestCase):
     def test_can_reserve_in_async(self):
         with self._test_context() as test_context:
             async def reserve_camera_async():
-                with test_context.instrument.try_reserve_ronchigram_camera() as reservation:
+                with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
                     return reservation.status
 
             result = asyncio.run(reserve_camera_async())
