@@ -108,7 +108,7 @@ class ScanAcquisitionController:
         document_model = document_window.library._document_model
         event_loop = document_window._document_window.event_loop
 
-        def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem) -> None:
+        def display_data_item(document_controller: DocumentController.DocumentController, data_item: DataItem.DataItem, channel: Acquisition.Channel) -> None:
             Facade.DocumentWindow(document_controller).display_data_item(Facade.DataItem(data_item))
 
         data_item_data_channel = DataChannel.DataItemDataChannel(document_model, _("Spectrum Image"), channel_names)
