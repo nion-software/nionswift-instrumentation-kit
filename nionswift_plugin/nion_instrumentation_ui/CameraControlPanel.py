@@ -1296,7 +1296,7 @@ class CameraDisplayPanelControllerFactory:
         return None
 
 
-camera_control_panels = dict()
+camera_control_panels = dict[str, str]()
 
 
 def register_camera_panel(hardware_source: HardwareSource.HardwareSource) -> None:

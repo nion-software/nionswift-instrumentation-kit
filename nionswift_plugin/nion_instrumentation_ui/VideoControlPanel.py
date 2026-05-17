@@ -594,7 +594,7 @@ PreferencesDialog.PreferencesManager().register_preference_pane(video_preference
 hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
 hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None
 
-hardware_control_panels = dict()
+hardware_control_panels = dict[str, str]()
 
 
 def register_video_panel(hardware_source: HardwareSource.HardwareSource) -> None:

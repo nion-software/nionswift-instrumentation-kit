@@ -2604,7 +2604,7 @@ PreferencesDialog.PreferencesManager().register_preference_pane(DriftScanPrefere
 
 hardware_source_added_event_listener: typing.Optional[Event.EventListener] = None
 hardware_source_removed_event_listener: typing.Optional[Event.EventListener] = None
-scan_control_panels = dict()
+scan_control_panels = dict[str, str]()
 
 
 def register_scan_panel(hardware_source: HardwareSource.HardwareSource) -> None:
