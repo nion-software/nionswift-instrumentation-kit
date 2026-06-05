@@ -1,6 +1,12 @@
 Changelog (nionswift-instrumentation)
 =====================================
 
+23.8.0 (2026-06-05)
+-------------------
+- Update typing.
+- Remove conda build support.
+- Add REST functions and other internal use functions to base STEMController.
+
 23.7.0 (2026-03-19)
 -------------------
 - Fix issue with larger virtual detector acquisition timeout when using two or more masks.

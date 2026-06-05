@@ -4,8 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nionswift-instrumentation"
-version = "23.7.0"
-# requires nionswift 16.16.3 (declarative thumbnail support)
+version = "23.8.0"
 authors = [
     { name = "Nion Software", email = "swift@nion.com" }
 ]
@@ -22,9 +21,9 @@ classifiers = [
 ]
 urls = { "Homepage" = "https://github.com/nion-software/nionswift-instrumentation-kit" }
 dependencies = [
-    "niondata >=15.9,<16.0",
-    "nionswift >=16.16,<17.0",
-    "nionui >=10.2,<11.0",
+    "niondata >=15.10,<16.0",
+    "nionswift >=16.18,<17.0",
+    "nionui >=11.0,<12.0",
     "nionutils >=4.14,<5.0",
     "numpy >=2.0,<3.0"
 ]
