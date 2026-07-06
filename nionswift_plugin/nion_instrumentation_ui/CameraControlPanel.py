@@ -790,6 +790,18 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         binning_row.add(ui.create_label_widget(_("Binning")))
         binning_row.add_spacing(4)
         binning_row.add(binning_combo)
+
+        cooler_warning_label = ui.create_label_widget(_("⚠ Cooler is OFF"), properties={"margin": 4})
+        cooler_warning_label.text_color = "red"
+
+        cooler_warning_row = ui.create_row_widget(properties={"margin": 4, "spacing": 2})
+        cooler_warning_row.add(cooler_warning_label)
+        cooler_warning_row.add_stretch()
+
+        self.__cooler_warning_row = cooler_warning_row
+        self.__cooler_warning_label = cooler_warning_label
+        self.__update_cooler_warning()
+
         parameters_group2.add(binning_row)
         parameters_group2.add_stretch()
 
@@ -843,6 +855,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column_widget.add(button_row1)
         column_widget.add(parameters_group1)
         column_widget.add(parameters_group2)
+        column_widget.add(cooler_warning_row)
         column_widget.add(status_row)
         column_widget.add(button_row)
         column_widget.add_stretch()
@@ -1014,6 +1027,23 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
     def image_panel_key_released(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
         self.__shift_click_state = None
         return False
+
+    def __get_cooler_enabled(self) -> typing.Optional[bool]:
+
+        camera_device =getattr(self.__camera_hardware_source, "camera", None)
+
+        if camera_device is None:
+            return None
+
+        try:
+            return typing.cast(typing.Optional[bool], camera_device.cooler_enabled)
+        except AttributeError:
+            return None
+
+
+    def __update_cooler_warning(self) -> None:
+        cooler_enabled = self.__get_cooler_enabled()
+        self.__cooler_warning_row.visible = cooler_enabled is False
 
     @property
     def state_controller(self) -> CameraControlStateController:
