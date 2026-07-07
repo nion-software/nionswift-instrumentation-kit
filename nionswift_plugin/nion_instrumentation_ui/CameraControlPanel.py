@@ -33,6 +33,7 @@ from nion.ui import Widgets
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
+from nionswift_plugin.nioncameramanager.NionCameraManager import NCMCamera
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DisplayItem
@@ -1030,16 +1031,17 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
     def __get_cooler_enabled(self) -> typing.Optional[bool]:
 
-        camera_device =getattr(self.__camera_hardware_source, "camera", None)
+        camera = self.__camera_hardware_source.camera
 
-        if camera_device is None:
+        if not isinstance(camera, NCMCamera):
             return None
 
-        try:
-            return typing.cast(typing.Optional[bool], camera_device.cooler_enabled)
-        except AttributeError:
+        cooler_enabled = camera.cooler_enabled
+
+        if cooler_enabled is None:
             return None
 
+        return bool(cooler_enabled)
 
     def __update_cooler_warning(self) -> None:
         cooler_enabled = self.__get_cooler_enabled()
