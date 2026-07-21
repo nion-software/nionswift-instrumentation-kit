@@ -3,6 +3,7 @@ from __future__ import annotations
 # standard libraries
 import abc
 import asyncio
+import contextlib
 import copy
 import dataclasses
 import enum
@@ -321,6 +322,95 @@ class TryValue(typing.Generic[_TryValueType]):
     @property
     def is_valid(self) -> bool:
         return self.exception is None
+
+
+class ModeEndReason(enum.Enum):
+    COMMITTED = "committed"             # completed normally
+    CANCELLED = "cancelled"             # ended without committing
+    DEVICE_ABORTED = "device_aborted"   # device ended it (fault, physical override)
+    SUPERSEDED = "superseded"           # replaced by another activation
+
+
+@dataclasses.dataclass(frozen=True)
+class ModeSession:
+    """One activation episode of a device mode, as seen on the mode stream.
+
+    Reported identically whether this side entered it (via enter_mode) or the
+    device entered it on its own — the stream is the single shared truth about
+    what is currently entered.
+    """
+    mode_id: str                        # kind of mode: "track-control", "demagnetization"
+    payload: typing.Mapping[str, typing.Any]  # parameters: {"control": "C10"}
+    active: bool                        # True on entry, False on exit
+    mode_session_id: str                # unique identity for this one activation
+    end_reason: ModeEndReason | None    # set only when active is False
+
+
+@dataclasses.dataclass(frozen=True)
+class ModeControlSession(ModeSession):
+    """One activation episode of a mode that also tracks a specific control.
+
+    ``control_try_value`` is the authoritative control payload and preserves
+    any current reliability/error state. ``control_value`` is a convenience
+    accessor that returns the float when valid and otherwise raises the
+    underlying exception (falling back to ``ValueError`` if no exception is
+    available).
+    """
+    control_name: str
+    control_try_value: TryValue[float]
+
+    @property
+    def control_value(self) -> float:
+        """Return the control value as a float.
+
+        Raises the underlying exception when ``control_try_value`` is invalid,
+        or ``ValueError`` if the value is unavailable without a specific
+        exception.
+        """
+        control_value = self.control_try_value.value
+        if self.control_try_value.is_valid and control_value is not None:
+            return control_value
+        if self.control_try_value.exception:
+            raise self.control_try_value.exception
+        raise ValueError(f"Control '{self.control_name}' value is not available.")
+
+
+
+class _ModeControlStream(Stream.ValueStream[ModeControlSession]):
+    def __init__(self, mode_stream: Stream.AbstractStream[ModeSession], control_stream: Stream.AbstractStream[TryValue[float]], control_name: str) -> None:
+        self.__mode_stream = mode_stream
+        self.__control_stream = control_stream
+        self.__control_name = control_name
+        self.__mode_session = mode_stream.value
+        self.__control_value = control_stream.value
+        super().__init__(self.__build_value())
+
+        self.__mode_stream_listener = self.__mode_stream.value_stream.listen(ReferenceCounting.weak_partial(_ModeControlStream.__mode_value_changed, self))
+        self.__control_stream_listener = self.__control_stream.value_stream.listen(ReferenceCounting.weak_partial(_ModeControlStream.__control_value_changed, self))
+
+    def __build_value(self) -> typing.Optional[ModeControlSession]:
+        mode = self.__mode_session
+        if mode is None:
+            return None
+        control_value = self.__control_value
+        if control_value is None:
+            return None
+        return ModeControlSession(mode_id=typing.cast(str, mode.mode_id),
+                                  payload=copy.deepcopy(mode.payload),
+                                  active=typing.cast(bool, mode.active),
+                                  mode_session_id=typing.cast(str, mode.mode_session_id),
+                                  end_reason=typing.cast(typing.Optional[ModeEndReason], mode.end_reason),
+                                  control_name=self.__control_name,
+                                  control_try_value=typing.cast(TryValue[float], control_value))
+
+    def __mode_value_changed(self, mode: typing.Optional[ModeSession]) -> None:
+        self.__mode_session = mode
+        self.value = self.__build_value()
+
+    def __control_value_changed(self, control_value: typing.Optional[TryValue[float]]) -> None:
+        self.__control_value = control_value
+        if self.__mode_session and self.__mode_session.active:
+            self.value = self.__build_value()
 
 
 class STEMController(Observable.Observable):
@@ -658,6 +748,74 @@ class STEMController(Observable.Observable):
         If an error is returned, the latest value is set to None.
         """
         raise NotImplementedError()
+
+    def get_mode_stream(self, mode_stream_id: str) -> Stream.AbstractStream[ModeSession]:
+        """Return the read-only mode stream for the given device/sub-system.
+
+        The stream reports mode activations regardless of origin: modes this
+        side enters via enter_mode and modes the device enters on its own both
+        appear here identically. Each activation fires with active=True on entry
+        and active=False (with an end_reason) on exit.
+        """
+        raise NotImplementedError()
+
+    def get_mode_control_stream(self, mode_stream_id: str, control_name: str) -> Stream.AbstractStream[ModeControlSession]:
+        """Return a read-only stream for a control observed while a mode is active.
+
+        The stream reports the same mode session lifecycle as get_mode_stream,
+        while also including the associated control name and its current
+        ``control_try_value``.
+
+        Clients that need reliability/error information should inspect
+        ``control_try_value`` directly. Clients that want a convenient float may
+        use ``control_value``, which raises when the current try-value is not
+        valid.
+        """
+        return typing.cast(Stream.AbstractStream[ModeControlSession], typing.cast(typing.Any, _ModeControlStream(self.get_mode_stream(mode_stream_id), self.get_control_try_value_stream(control_name), control_name)))
+
+    def enter_mode(self, mode_id: str, payload: typing.Mapping[str, typing.Any]) -> str:
+        """Enter a mode from this side and return its mode_session_id.
+
+        Entering drives the corresponding mode stream (an active=True ModeSession is
+        reported to all observers, including us). The returned mode_session_id
+        identifies this specific activation — pass it to exit_mode to end it, and
+        match it against the stream to correlate start and end events.
+        """
+        raise NotImplementedError()
+
+    def exit_mode(self, mode_session_id: str) -> None:
+        """Exit the mode identified by mode_session_id.
+
+        Ends one specific activation (not a kind of mode), driving the mode
+        stream to report active=False. Safe to target only a session that is
+        still active — if the device already ended it (fault, physical override),
+        the stream will have already reported the end and this need not be called.
+        """
+        raise NotImplementedError()
+
+    @contextlib.contextmanager
+    def active_mode(self, mode_id: str, payload: typing.Mapping[str, typing.Any]) -> typing.Iterator[str]:
+        """Context manager for entering and exiting a mode.
+
+        Usage::
+
+            with controller.active_mode("track-control", {"control": "C10"}) as mode_session_id:
+                # perform operations while in mode
+                controller.SetVal("C10", 1.5)
+
+        Args:
+            mode_id: Identifier for the mode being entered
+            payload: Mode-specific configuration data
+
+        Yields:
+            The mode_session_id for the mode session
+
+        """
+        mode_session_id = self.enter_mode(mode_id, payload)
+        try:
+            yield mode_session_id
+        finally:
+            self.exit_mode(mode_session_id)
 
     def get_property(self, name: str) -> typing.Any:
         if name in ("probe_position", "probe_state"):

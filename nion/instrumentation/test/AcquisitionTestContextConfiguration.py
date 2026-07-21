@@ -150,6 +150,7 @@ class ValueManager(InstrumentDevice.ValueManagerLike):
             "EELS_MagneticShift_Offset": -20.0
         }
         self.__streams = dict[str, Stream.ValueStream[stem_controller.TryValue[float]]]()
+        self.__mode_stream = Stream.ValueStream[stem_controller.ModeSession](None)
 
     def get_value(self, name: str) -> typing.Optional[float]:
         return self.__values.get(name)
@@ -187,6 +188,9 @@ class ValueManager(InstrumentDevice.ValueManagerLike):
             try_value = self.get_value(control_name)
             self.__streams[control_name] = Stream.ValueStream(stem_controller.TryValue(try_value, Exception() if try_value is None else None))
         return self.__streams[control_name]
+
+    def get_mode_stream(self, mode_stream_id: str) -> Stream.AbstractStream[stem_controller.ModeSession]:
+        return typing.cast(Stream.AbstractStream[stem_controller.ModeSession], typing.cast(typing.Any, self.__mode_stream))
 
 
 class AxisManager(InstrumentDevice.AxisManagerLike):
