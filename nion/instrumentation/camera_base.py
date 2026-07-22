@@ -5,6 +5,7 @@ import asyncio
 import copy
 import dataclasses
 import datetime
+import enum
 import functools
 import gettext
 import json
@@ -47,6 +48,17 @@ from nion.utils import Stream
 _NDArray = numpy.typing.NDArray[typing.Any]
 
 _ = gettext.gettext
+
+
+class CoolerState(enum.Enum):
+    """Camera cooler state.
+
+    UNAVAILABLE means the camera has no cooler. OFF means a cooler exists but
+    is currently disabled. ON means a cooler exists and is currently enabled.
+    """
+    UNAVAILABLE = "unavailable"
+    OFF = "off"
+    ON = "on"
 
 
 class CameraDevice(typing.Protocol):
@@ -448,6 +460,11 @@ class CameraDevice3(typing.Protocol):
     camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
     signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
     has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
+
+    Cooler properties:
+
+    cooler_state (optional, read-only state of cooler availability/enabled status)
+    cooler_state_stream (optional, stream of cooler_state updates)
     """
 
     def close(self) -> None:
@@ -457,6 +474,23 @@ class CameraDevice3(typing.Protocol):
     @property
     def camera_version(self) -> int:
         return 3
+
+    @property
+    def cooler_state(self) -> CoolerState:
+        """Read-only cooler state.
+
+        Default is UNAVAILABLE to preserve compatibility for cameras that do not
+        expose cooler information.
+        """
+        return CoolerState.UNAVAILABLE
+
+    @property
+    def cooler_state_stream(self) -> Stream.AbstractStream[CoolerState]:
+        """Read-only stream of cooler_state updates.
+
+        Default is a constant stream carrying the current cooler_state.
+        """
+        return Stream.ValueStream(self.cooler_state)
 
     @property
     def sensor_dimensions(self) -> typing.Tuple[int, int]:
@@ -1405,6 +1439,12 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def camera_settings(self) -> CameraSettings: raise NotImplementedError()
 
     @property
+    def cooler_state(self) -> CoolerState: raise NotImplementedError()
+
+    @property
+    def cooler_state_stream(self) -> Stream.AbstractStream[CoolerState]: raise NotImplementedError()
+
+    @property
     def binning_values(self) -> typing.Sequence[int]: raise NotImplementedError()
 
     @property
@@ -1625,6 +1665,14 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def camera(self) -> CameraDevice:
         return self.__camera
+
+    @property
+    def cooler_state(self) -> CoolerState:
+        return typing.cast(CoolerState, getattr(self.__camera, "cooler_state", CoolerState.UNAVAILABLE))
+
+    @property
+    def cooler_state_stream(self) -> Stream.AbstractStream[CoolerState]:
+        return typing.cast(Stream.AbstractStream[CoolerState], getattr(self.__camera, "cooler_state_stream", Stream.ValueStream(CoolerState.UNAVAILABLE)))
 
     @property
     def sensor_dimensions(self) -> typing.Tuple[int, int]:
@@ -2273,6 +2321,14 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def camera(self) -> CameraDevice:
         return self.__camera
+
+    @property
+    def cooler_state(self) -> CoolerState:
+        return self.__camera.cooler_state
+
+    @property
+    def cooler_state_stream(self) -> Stream.AbstractStream[CoolerState]:
+        return self.__camera.cooler_state_stream
 
     @property
     def sensor_dimensions(self) -> typing.Tuple[int, int]:
