@@ -2566,11 +2566,13 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__stem_controller._enter_synchronized_state(self.__scan_hardware_source, camera=self.__camera_hardware_source)
         self.__scan_hardware_source.acquisition_state_changed_event.fire(True)
         self.__old_record_parameters = self.__scan_hardware_source.get_record_frame_parameters()
+        self.__camera_packet_time = time.perf_counter()
+        self.__scan_packet_time = time.perf_counter()
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         super()._start_stream(stream_args)
-        # delay setting camera_packet_time and scan_packet time until stream starts in case of long prepare/start time
+        # update setting camera_packet_time and scan_packet_time once stream starts in case of long prepare/start time
         self.__camera_packet_time = time.perf_counter()
         self.__scan_packet_time = time.perf_counter()
 
