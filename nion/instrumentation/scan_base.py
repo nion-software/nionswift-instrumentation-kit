@@ -1600,7 +1600,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
             subscan_pixel_density = frame_parameters.subscan_pixel_density
             if subscan_pixel_width_override and subscan_region.aspect_ratio > 0.0:
-                subscan_pixel_size = Geometry.IntSize(max(subscan_pixel_width_override, 1), max(int(subscan_pixel_width_override / subscan_region.aspect_ratio), 1))
+                subscan_pixel_size = Geometry.IntSize(max(int(subscan_pixel_width_override / subscan_region.aspect_ratio), 1), max(subscan_pixel_width_override, 1))
             elif subscan_pixel_density and subscan_pixel_density > 0.0:
                 subscan_pixel_size = Geometry.IntSize(max(int(context_size.height * subscan_region.height * subscan_pixel_density), 1), max(int(context_size.width * subscan_region.width * subscan_pixel_density), 1))
             else:

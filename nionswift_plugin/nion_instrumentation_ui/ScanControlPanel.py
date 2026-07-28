@@ -31,6 +31,7 @@ from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
+from nion.swift.model import Feature
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import Declarative
@@ -2168,16 +2169,18 @@ class ScanPanelController(Declarative.Handler):
 
         self.display_item: DisplayItem.DisplayItem | None = document_controller.document_model.display_items[10] if len(document_controller.document_model.display_items) > 10 else None
 
+        if Feature.FeatureManager().is_feature_enabled("feature.subscan_width_override"):
+            size_subscan_column = u.create_column(size_row, subscan_checkbox, line_scan_checkbox, subscan_width_row, u.create_stretch(), spacing=4)
+        else:
+            size_subscan_column = u.create_column(size_row, subscan_checkbox, line_scan_checkbox, u.create_stretch(), spacing=4)
+
         self.ui_view = u.create_column(
             scan_profile_row,
             # region_row,
             # region2_row,
             u.create_row(
                 u.create_column(pixel_time_row, fov_row, rotation_row, u.create_stretch(), spacing=4),
-                u.create_column(
-                    u.create_column(size_row, subscan_checkbox, line_scan_checkbox, subscan_width_row, u.create_stretch(), spacing=4),
-                    u.create_stretch()
-                ),
+                u.create_column(size_subscan_column, u.create_stretch()),
                 spacing=8,
                 margin_horizontal=4
             ),
@@ -2732,3 +2735,6 @@ def stop() -> None:
         hardware_source_removed_event_listener = None
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
         unregister_scan_panel(hardware_source)
+
+
+Feature.FeatureManager().add_feature(Feature.Feature("feature.subscan_width_override", "Subscan Width Override Field in Scan Control Panel.", False))
