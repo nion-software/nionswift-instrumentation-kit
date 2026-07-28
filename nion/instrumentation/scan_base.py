@@ -1597,6 +1597,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
         if self.subscan_enabled and self.subscan_region:
             subscan_region = self.subscan_region
+            # Derive low-level subscan pixel counts from user-facing inputs.
+            # Priority:
+            # 1) `subscan_pixel_width_override` (explicit width in pixels, preserves region aspect ratio),
+            # 2) `subscan_pixel_density` (pixels per context pixel),
+            # 3) default region-scaled context size (or `size` override when supplied).
+            # Note: `frame_parameters` currently carries both user-input fields and low-level scan values.
+            # This dual-use model is a known limitation and should be split/refactored in a future change.
             subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
             subscan_pixel_density = frame_parameters.subscan_pixel_density
             if subscan_pixel_width_override and subscan_region.aspect_ratio > 0.0:
