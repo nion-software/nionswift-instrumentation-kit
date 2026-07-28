@@ -1788,6 +1788,18 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
+    def subscan_width_str(self) -> str | None:
+        subscan_pixel_width_override = self.__frame_parameters.subscan_pixel_width_override
+        return str(subscan_pixel_width_override) if subscan_pixel_width_override else None
+
+    @subscan_width_str.setter
+    def subscan_width_str(self, value_str: str | None) -> None:
+        value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1) if value_str else None
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.subscan_pixel_width_override = value
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
     def width_height_linked(self) -> bool:
         """Whether width and height are linked. If linking is enabled, changing one will change the other to match."""
         return self.__width_height_linked
@@ -2122,6 +2134,7 @@ class ScanPanelController(Declarative.Handler):
         rotation_row = create_line_edit_row(_("Rot. (deg)"), "@binding(_model.rotation_deg_str)", text_width=68)
         width_row = create_line_edit_row(_("Width"), "@binding(_model.width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
         height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), text_width=48)
+        subscan_width_row = create_line_edit_row(_("Size"), "@binding(_model.subscan_width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
 
         size_row = u.create_row(
             u.create_column(width_row, height_row, spacing=2),
@@ -2162,7 +2175,7 @@ class ScanPanelController(Declarative.Handler):
             u.create_row(
                 u.create_column(pixel_time_row, fov_row, rotation_row, u.create_stretch(), spacing=4),
                 u.create_column(
-                    u.create_column(size_row, subscan_checkbox, line_scan_checkbox, u.create_stretch(), spacing=4),
+                    u.create_column(size_row, subscan_checkbox, line_scan_checkbox, subscan_width_row, u.create_stretch(), spacing=4),
                     u.create_stretch()
                 ),
                 spacing=8,

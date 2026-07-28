@@ -248,6 +248,24 @@ class ScanFrameParameters(ParametersBase):
         self.set_parameter("subscan_rotation", value)
 
     @property
+    def subscan_pixel_density(self) -> typing.Optional[float]:
+        # density is in units of pixels per context pixel size; a value of 2.0 means
+        # the subscan has twice the pixel density of the context (full) scan.
+        return typing.cast(typing.Optional[float], self.get_parameter("subscan_density", None))
+
+    @subscan_pixel_density.setter
+    def subscan_pixel_density(self, value: typing.Optional[float]) -> None:
+        self.set_parameter("subscan_density", value)
+
+    @property
+    def subscan_pixel_width_override(self) -> typing.Optional[int]:
+        return typing.cast(typing.Optional[int], self.get_parameter("subscan_pixel_width_override", None))
+
+    @subscan_pixel_width_override.setter
+    def subscan_pixel_width_override(self, value: typing.Optional[int]) -> None:
+        self.set_parameter("subscan_pixel_width_override", value)
+
+    @property
     def ac_line_sync(self) -> bool:
         return typing.cast(bool, self.get_parameter("ac_line_sync", False))
 
@@ -1579,7 +1597,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
         if self.subscan_enabled and self.subscan_region:
             subscan_region = self.subscan_region
-            subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
+            subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
+            subscan_pixel_density = frame_parameters.subscan_pixel_density
+            if subscan_pixel_width_override and subscan_region.aspect_ratio > 0.0:
+                subscan_pixel_size = Geometry.IntSize(max(subscan_pixel_width_override, 1), max(int(subscan_pixel_width_override / subscan_region.aspect_ratio), 1))
+            elif subscan_pixel_density and subscan_pixel_density > 0.0:
+                subscan_pixel_size = Geometry.IntSize(max(int(context_size.height * subscan_region.height * subscan_pixel_density), 1), max(int(context_size.width * subscan_region.width * subscan_pixel_density), 1))
+            else:
+                subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
             frame_parameters.subscan_pixel_size = subscan_pixel_size
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width))
             frame_parameters.subscan_fractional_center = subscan_region.center
