@@ -323,6 +323,55 @@ class TryValue(typing.Generic[_TryValueType]):
         return self.exception is None
 
 
+@dataclasses.dataclass(frozen=True)
+class ResourceId:
+    """An extensible identifier for a resource."""
+    key: str
+    namespace: str = "common"
+    def __str__(self) -> str:
+        return f"{self.namespace}:{self.key}"
+
+
+class CommonResources:
+    """Namespace of generic resource identifiers available on every STEM controller.
+
+    Concrete controllers should support reading (``get_resource_stream``) all identifiers defined here and may
+    support setting (``set_resource``) a subset of them. Controllers may also define additional identifiers of
+    their own by subclassing.
+    """
+    STATUS = ResourceId("status")
+    BEAM_ON = ResourceId("beam_on")
+    BEAM_STOP = ResourceId("beam_stop")
+
+    SAMPLE = ResourceId("sample")
+    SAMPLE_CARTRIDGE = ResourceId("sample_cartridge")
+
+    MODE = ResourceId("mode")
+
+    SELECTED_CONTROL = ResourceId("selected_control")
+    SELECTED_CONTROLS = ResourceId("selected_controls")
+    WOBBLERS = ResourceId("wobblers")
+
+    CONDENSER = ResourceId("condenser")
+
+    SETTINGS = ResourceId("settings")
+
+
+@dataclasses.dataclass
+class ResourceSetRequest:
+    """Base request for ``STEMController.set_resource``.
+
+    ``args`` contains controller-specific parameters. Subclasses may add
+    well-defined fields by extending ``to_json()``.
+    """
+
+    args: dict[str, JSONType] = dataclasses.field(default_factory=dict)
+
+    def to_json(self) -> dict[str, JSONType]:
+        """Return the JSON payload for this request."""
+        return dict(self.args)
+
+
 class STEMController(Observable.Observable):
     """An interface to a STEM microscope.
 
@@ -658,6 +707,25 @@ class STEMController(Observable.Observable):
         If an error is returned, the latest value is set to None.
         """
         raise NotImplementedError()
+
+    # common resource interface
+
+    def get_resource_stream(self, identifier: ResourceId) -> Stream.AbstractStream[TryValue[JSONType]]:
+        """Returns a stream for the resource identified by `identifier`.
+
+        The stream yields `TryValue[JSONType]` instances containing either the resource value or an exception.
+        Raises `KeyError` if the identifier is unsupported.
+        """
+        raise NotImplementedError()
+
+    def set_resource(self, identifier: ResourceId, request: typing.Optional[ResourceSetRequest] = None) -> TryValue[JSONType]:
+        """Sets the resource identified by `identifier`.
+
+        `request` contains resource-specific parameters. If omitted, `ResourceSetRequest` is created from `kwargs`.
+        Returns a `TryValue` containing either the result or an exception.
+        """
+        raise NotImplementedError()
+
 
     def get_property(self, name: str) -> typing.Any:
         if name in ("probe_position", "probe_state"):
