@@ -46,6 +46,7 @@ from nion.utils import ListModel
 from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import Registry
+from nion.utils import Stream
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
@@ -710,6 +711,103 @@ class ScanControlStateController:
         if was_any_channel_enabled != is_any_channel_enabled:
             self.__update_scan_button_state()
             self.__update_record_button_state()
+
+
+class DoseCalculator:
+    def __init__(self) -> None:
+        self._step_size = Model.PropertyModel[float]()
+        self._step_size_placeholder = Model.PropertyModel[float]()
+        self._scan_time = Model.PropertyModel[float]()
+        self._scan_time_placeholder = Model.PropertyModel[float]()
+        self._dwell_time = Model.PropertyModel[float]()
+        self._current_pa = Model.PropertyModel[float]()
+        self._current_pa_placeholder = Model.PropertyModel[float](70.0)
+        self._frame_parameters_stream = Stream.ValueStream[scan_base.ScanFrameParameters]()
+
+        def update_dose_str(scan_frame_parameters: scan_base.ScanFrameParameters | None, step_size_str: str | None, scan_time_str: str | None, current_pa_str: str | None) -> str:
+            if not scan_frame_parameters:
+                return _("N/A")
+            if not scan_frame_parameters.fov_size_nm:
+                return _("N/A")
+            step_size = float(step_size_str) if step_size_str else None
+            scan_time = float(scan_time_str) if scan_time_str else None
+            current_pa = float(current_pa_str) if current_pa_str else None
+            scan_x = scan_frame_parameters.scan_size.width
+            scan_y = scan_frame_parameters.scan_size.height
+            fov_x = scan_frame_parameters.fov_size_nm.width * 10.0  # Angstroms
+            fov_y = scan_frame_parameters.fov_size_nm.height * 10.0  # Angstroms
+            dwell_time = scan_frame_parameters.pixel_time_us / 1E6  # seconds
+            if step_size:
+                # If user overrides step_size, calculate:
+                fov_x = scan_x * step_size  # Angstroms
+                fov_y = scan_y * step_size  # Angstroms
+            if scan_time:
+                # If user overrides scan_time, calculate:
+                dwell_time = scan_time / (scan_x * scan_y)  # seconds
+            else:
+                scan_time = scan_x * scan_y * dwell_time  # seconds
+            scan_area = fov_x * fov_y  # square angstroms
+            pA = current_pa or 70
+            electrons_total = 6.242e6 * pA * scan_time
+            electrons_per_square_angstrom = electrons_total / scan_area
+            # electrons_per_square_angstrom_per_second = electrons_total / (scan_area * scan_time)
+
+            # Display electrons_per_square_angstrom
+            return f"{electrons_per_square_angstrom:.2f} e/Å^2"
+
+        self._dose_value = Stream.CombineLatestStream[typing.Any, str](
+            [
+                self._frame_parameters_stream,
+                Stream.PropertyChangedEventStream(typing.cast(Observable.Observable, typing.cast(typing.Any, self._step_size)), "value"),
+                Stream.PropertyChangedEventStream(typing.cast(Observable.Observable, typing.cast(typing.Any, self._scan_time)), "value"),
+                Stream.PropertyChangedEventStream(typing.cast(Observable.Observable, typing.cast(typing.Any, self._current_pa)), "value")
+            ],
+            update_dose_str
+        )
+        self.dose_str_model = Model.StreamValueModel(self._dose_value)
+
+    def update(self, scan_frame_parameters: scan_base.ScanFrameParameters) -> None:
+        # Scan parameters
+        scan_x = scan_frame_parameters.scan_size.width
+        scan_y = scan_frame_parameters.scan_size.height
+        fov_size_nm = scan_frame_parameters.fov_size_nm
+        assert fov_size_nm is not None
+        fov_x = fov_size_nm.width * 10.0  # Angstroms
+        dwell_time = scan_frame_parameters.pixel_time_us / 1E6  # seconds
+
+        # step_size should be shown as a grey text driven value, unless the user enters text in the field in which case it becomes driving and fov becomes grey and driven.
+        if step_size_str := self._step_size.value:
+            step_size = float(step_size_str)
+        else:
+            step_size = fov_x / scan_x
+
+        self._step_size_placeholder.value = step_size
+
+        # Similar to above, scan_time is a driven value unless the user override it, in which case dwell_time becomes driven.
+        if scan_time_str := self._scan_time.value:
+            # If user overrides scan_time, calculate:
+            scan_time = float(scan_time_str)
+            dwell_time = scan_time / (scan_x * scan_y)  # seconds
+        else:
+            scan_time = scan_x * scan_y * dwell_time  # seconds
+
+        self._scan_time_placeholder.value = scan_time
+
+        self._dwell_time.value = dwell_time
+
+        # Simple version: user types in the current.
+        # More complex version: take current from camera if the camera is running AND the mode for that camera is selected in AS2.
+        # i.e. if EELS radio button is checked, and ELA EELS camera is running, current value is read from the ELA.
+        # The user should still be able to overide the automatically determined value and type in a current number.
+        if pA_str := self._current_pa.value:
+            pA = float(pA_str)
+        else:
+            pA = 70
+
+        self._current_pa_placeholder.value = pA
+
+        # Display electrons_per_square_angstrom
+        self._frame_parameters_stream.value = scan_frame_parameters
 
 
 class ButtonCell(CanvasItem.Cell):
@@ -1554,6 +1652,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__fov_label_color = "black"
         self.__fov_label_tool_tip = str()
 
+        self._dose_calculator = DoseCalculator()
+
         self.__handle_state_changed_on_ui_thread()
 
     def close(self) -> None:
@@ -1712,6 +1812,7 @@ class ScanControlPanelModel(Observable.Observable):
         if fov_label_tool_tip != self.__fov_label_tool_tip:
             self.__fov_label_tool_tip = fov_label_tool_tip
             self.notify_property_changed("fov_label_tool_tip")
+        self._dose_calculator.update(frame_parameters)
 
     def __handle_state_changed(self) -> None:
         # use async to call handle_property_changed on the main thread if an existing call is not pending.
@@ -1917,6 +2018,10 @@ class ScanControlPanelModel(Observable.Observable):
     def line_scan_checkbox_checked(self, value: bool) -> None:
         self.__scan_hardware_source.subscan_enabled = False
         self.__scan_hardware_source.line_scan_enabled = value
+
+    @property
+    def dose_str_model(self) -> Model.ValueModel[str]:
+        return self._dose_calculator.dose_str_model
 
     @property
     def drift_controls_enabled(self) -> bool:
@@ -2170,6 +2275,14 @@ class ScanPanelController(Declarative.Handler):
             ),
             u.create_spacing(4),
             u.create_row(
+                u.create_label(text="Dose"),
+                u.create_push_button(text="@binding(_model.dose_str_model.value)", style="minimal", min_width=100, on_clicked="handle_dose_button"),
+                u.create_stretch(),
+                spacing=8,
+                margin_horizontal=8
+            ),
+            u.create_spacing(4),
+            u.create_row(
                 drift_correction_checkbox,
                 u.create_spacing(8),
                 drift_correction_edit,
@@ -2254,6 +2367,77 @@ class ScanPanelController(Declarative.Handler):
 
     def handle_record_abort_button(self, widget: UserInterface.Widget) -> None:
         self._model.handle_record_abort_clicked()
+
+    def handle_dose_button(self, widget: UserInterface.Widget) -> None:
+        class Handler(Declarative.Handler):
+
+            def __init__(self, dose_calculator: DoseCalculator) -> None:
+                super().__init__()
+                self._dose_calculator = dose_calculator
+                self.ui_view = self.__make_ui()
+
+            def __make_ui(self) -> Declarative.UIDescription:
+                u = Declarative.DeclarativeUI()
+
+                step_size_row = u.create_row(
+                    u.create_label(text="Step Size (Å)", width=100),
+                    u.create_line_edit(text="@binding(_dose_calculator._step_size.value)", placeholder_text="@binding(_dose_calculator._step_size_placeholder.value)"),
+                    u.create_stretch()
+                )
+
+                scan_time_row = u.create_row(
+                    u.create_label(text="Scan Time (s)", width=100),
+                    u.create_line_edit(text="@binding(_dose_calculator._scan_time.value)", placeholder_text="@binding(_dose_calculator._scan_time_placeholder.value)"),
+                    u.create_stretch()
+                )
+
+                dwell_time_row = u.create_row(
+                    u.create_label(text="Dwell Time", width=100),
+                    u.create_label(text="@binding(_dose_calculator._dwell_time.value)"),
+                )
+
+                current_pa_row = u.create_row(
+                    u.create_label(text="Current (pA)", width=100),
+                    u.create_line_edit(text="@binding(_dose_calculator._current_pa.value)", placeholder_text="@binding(_dose_calculator._current_pa_placeholder.value)"),
+                )
+
+                dose_row = u.create_row(
+                    u.create_label(text="Dose", width=100),
+                    u.create_label(text="@binding(_dose_calculator.dose_str_model.value)"),
+                )
+
+                button_row = u.create_row(u.create_stretch(),
+                                          u.create_push_button(text=_("Cancel"), on_clicked="handle_cancel"),
+                                          u.create_push_button(text=_("Done"), on_clicked="handle_done"), spacing=8)
+
+                return u.create_group(u.create_column(
+                    step_size_row,
+                    scan_time_row,
+                    dwell_time_row,
+                    current_pa_row,
+                    dose_row,
+                    button_row,
+                    spacing=8,
+                    margin=8
+                ))
+
+            def init_popup(self, request_close_fn: typing.Callable[[], None]) -> None:
+                self.__request_close_fn = request_close_fn
+
+            def handle_done(self, widget: UserInterface.Widget) -> bool:
+                self.__request_close_fn()
+                return True
+
+            def handle_cancel(self, widget: UserInterface.Widget) -> bool:
+                self.__request_close_fn()
+                return True
+
+        ui_handler = Handler(self._model._dose_calculator)
+        from nion.ui import Dialog
+        popup = Dialog.PopupWindow(self.__document_controller, ui_handler.ui_view, ui_handler)
+        position = widget._behavior.map_to_global(Geometry.IntPoint() + Geometry.IntSize(width=widget.size.width + 4))
+        size = Geometry.IntSize(100, 100)
+        popup.show(position=position, size=size)
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
