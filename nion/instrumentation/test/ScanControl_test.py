@@ -1303,6 +1303,62 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(2, len(display_item.graphics))  # subscan and position
             self.assertEqual(0, len(display_item1.graphics))
 
+    def test_subscan_graphic_updates_when_subscan_region_is_set(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.start_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            subscan_graphic = next(graphic for graphic in display_item.graphics if graphic.graphic_id == "subscan")
+            self.assertEqual(scan_hardware_source.subscan_region, subscan_graphic.bounds)
+
+            subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+            scan_hardware_source.subscan_region = subscan_region
+            document_controller.periodic()
+
+            self.assertEqual(subscan_region, scan_hardware_source.subscan_region)
+            self.assertEqual(subscan_region, subscan_graphic.bounds)
+
+    def test_subscan_graphic_updates_when_current_frame_parameters_change_subscan_region(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.start_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            subscan_graphic = next(graphic for graphic in display_item.graphics if graphic.graphic_id == "subscan")
+
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            subscan_fractional_center = typing.cast(Geometry.FloatPoint, frame_parameters.subscan_fractional_center)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(0.3, 0.4)
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            document_controller.periodic()
+
+            expected_subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, Geometry.FloatSize(0.3, 0.4))
+            self.assertEqual(expected_subscan_region, scan_hardware_source.subscan_region)
+            self.assertEqual(expected_subscan_region, subscan_graphic.bounds)
+
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            subscan_fractional_size = typing.cast(Geometry.FloatSize, frame_parameters.subscan_fractional_size)
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(0.35, 0.65)
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            document_controller.periodic()
+
+            expected_subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.35, 0.65), subscan_fractional_size)
+            self.assertEqual(expected_subscan_region, scan_hardware_source.subscan_region)
+            self.assertEqual(expected_subscan_region, subscan_graphic.bounds)
+
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
