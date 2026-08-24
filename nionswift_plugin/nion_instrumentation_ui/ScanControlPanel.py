@@ -803,7 +803,7 @@ class ChannelModel(Observable.Observable):
             self.notify_property_changed("enabled")
         subscan_state = self.__scan_hardware_source.stem_controller.subscan_state
         line_scan_state = self.__scan_hardware_source.stem_controller.line_scan_state
-        is_subscan_channel = subscan_state == stem_controller.SubscanState.ENABLED_VISIBLE or line_scan_state == stem_controller.LineScanState.ENABLED
+        is_subscan_channel = subscan_state == stem_controller.SubscanState.ENABLED_VISIBLE or line_scan_state == stem_controller.LineScanState.ENABLED_VISIBLE
         actual_channel_id = self.__channel_id if not is_subscan_channel else self.__channel_id + "_subscan"
         if actual_channel_id != self.__actual_channel_id:
             self.__actual_channel_id = actual_channel_id
@@ -902,7 +902,6 @@ class ScanControlPanelModel(Observable.Observable):
     - fov_str (read/write)
     - rotation_deg_str (read/write)
     - subscan_checkbox_checked (read/write)
-    - line_scan_checkbox_enabled (read only)
     - line_scan_checkbox_checked (read/write)
     - drift_controls_enabled (read only)
     - drift_checkbox_checked (read/write)
@@ -976,7 +975,6 @@ class ScanControlPanelModel(Observable.Observable):
         self.__fov_str = str()
         self.__rotation_deg_str = str()
         self.__subscan_checkbox_checked = False
-        self.__line_scan_checkbox_enabled = True
         self.__line_scan_checkbox_checked = False
         self.__drift_controls_enabled = True
         self.__drift_checkbox_checked = False
@@ -1061,11 +1059,7 @@ class ScanControlPanelModel(Observable.Observable):
             self.__subscan_checkbox_checked = subscan_checkbox_checked
             self.notify_property_changed("subscan_checkbox_checked")
         line_scan_state = self.__scan_hardware_source.stem_controller.line_scan_state
-        line_scan_checkbox_enabled = line_scan_state != stem_controller.LineScanState.INVALID
-        if line_scan_checkbox_enabled != self.__line_scan_checkbox_enabled:
-            self.__line_scan_checkbox_enabled = line_scan_checkbox_enabled
-            self.notify_property_changed("line_scan_checkbox_enabled")
-        line_scan_checkbox_checked = line_scan_state == stem_controller.LineScanState.ENABLED
+        line_scan_checkbox_checked = line_scan_state == stem_controller.LineScanState.ENABLED_VISIBLE
         if line_scan_checkbox_checked != self.__line_scan_checkbox_checked:
             self.__line_scan_checkbox_checked = line_scan_checkbox_checked
             self.notify_property_changed("line_scan_checkbox_checked")
@@ -1362,12 +1356,8 @@ class ScanControlPanelModel(Observable.Observable):
 
     @subscan_checkbox_checked.setter
     def subscan_checkbox_checked(self, value: bool) -> None:
-        self.__scan_hardware_source.line_scan_enabled = False
+        self.__scan_hardware_source.line_scan_state = stem_controller.LineScanState.DISABLED_HIDDEN
         self.__scan_hardware_source.subscan_enabled = value
-
-    @property
-    def line_scan_checkbox_enabled(self) -> bool:
-        return self.__line_scan_checkbox_enabled
 
     @property
     def line_scan_checkbox_checked(self) -> bool:
@@ -1375,7 +1365,7 @@ class ScanControlPanelModel(Observable.Observable):
 
     @line_scan_checkbox_checked.setter
     def line_scan_checkbox_checked(self, value: bool) -> None:
-        self.__scan_hardware_source.subscan_enabled = False
+        self.__scan_hardware_source.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
         self.__scan_hardware_source.line_scan_enabled = value
 
     @property
@@ -1660,7 +1650,7 @@ class ScanPanelController(Declarative.Handler):
         )
 
         subscan_checkbox = u.create_check_box(text=_("Subscan"), checked="@binding(_model.subscan_checkbox_checked)")
-        line_scan_checkbox = u.create_check_box(text=_("Line Scan"), checked="@binding(_model.line_scan_checkbox_checked)", enabled="@binding(_model.line_scan_checkbox_enabled)")
+        line_scan_checkbox = u.create_check_box(text=_("Line Scan"), checked="@binding(_model.line_scan_checkbox_checked)")
 
         drift_correction_checkbox = u.create_check_box(text=_("Drift Correct Every"), checked="@binding(_model.drift_checkbox_checked)", enabled="@binding(_model.drift_controls_enabled)")
         drift_correction_edit = u.create_line_edit(width=44, text="@binding(_model.drift_settings_interval_str)", enabled="@binding(_model.drift_controls_enabled)")
