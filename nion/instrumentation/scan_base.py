@@ -780,10 +780,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def subscan_enabled(self, enabled: bool) -> None: ...
 
     @property
-    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]: raise NotImplementedError()
+    def subscan_region(self) -> Geometry.FloatRect: raise NotImplementedError()
 
     @subscan_region.setter
-    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None: ...
+    def subscan_region(self, value: Geometry.FloatRect) -> None: ...
 
     @property
     def subscan_rotation(self) -> float: raise NotImplementedError()
@@ -1262,8 +1262,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
         self.__stem_controller = stem_controller_
-        self.__subscan_state = STEMController.SubscanState.INVALID
-        self.__subscan_region: typing.Optional[Geometry.FloatRect] = None
+        self.__subscan_state = STEMController.SubscanState.DISABLED_HIDDEN
+        self.__subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
         self.__subscan_rotation = 0.0
         self.__line_scan_state = STEMController.LineScanState.INVALID
         self.__line_scan_vector: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]] = None
@@ -1553,22 +1553,22 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     @property
     def subscan_enabled(self) -> bool:
-        return self.subscan_state == STEMController.SubscanState.ENABLED
+        return self.subscan_state == STEMController.SubscanState.ENABLED_VISIBLE
 
     @subscan_enabled.setter
     def subscan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.subscan_state = STEMController.SubscanState.ENABLED
+            self.subscan_state = STEMController.SubscanState.ENABLED_VISIBLE
         else:
-            self.subscan_state = STEMController.SubscanState.DISABLED
+            self.subscan_state = STEMController.SubscanState.DISABLED_VISIBLE
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
-    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
+    def subscan_region(self) -> Geometry.FloatRect:
         return self.__subscan_region
 
     @subscan_region.setter
-    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
+    def subscan_region(self, value: Geometry.FloatRect) -> None:
         if self.__subscan_region != value:
             self.__subscan_region = value
             self.notify_property_changed("subscan_region")
@@ -1630,7 +1630,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         context_size = frame_parameters.pixel_size.to_float_size()
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
-        if self.subscan_enabled and self.subscan_region:
+        if self.subscan_enabled:
             subscan_region = self.subscan_region
             subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
             frame_parameters.subscan_pixel_size = subscan_pixel_size
@@ -1663,10 +1663,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if name == "subscan_state":
             if self.__syncing_scan_properties:
                 return
-            # if subscan enabled, ensure there is a subscan region
-            if self.subscan_state == STEMController.SubscanState.ENABLED and not self.subscan_region:
-                self.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-                self.subscan_rotation = 0.0
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
@@ -1674,9 +1670,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if name == "subscan_region":
             if self.__syncing_scan_properties:
                 return
-            subscan_region = self.subscan_region
-            if not subscan_region:
-                self.subscan_enabled = False
             self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __subscan_rotation_changed(self, name: str) -> None:
@@ -1718,16 +1711,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 if self.__line_scan_vector != line_scan_vector:
                     self.__line_scan_vector = line_scan_vector
                     changed_names.append("line_scan_vector")
-                if self.__subscan_state != STEMController.SubscanState.DISABLED:
-                    self.__subscan_state = STEMController.SubscanState.DISABLED
+                if self.__subscan_state != STEMController.SubscanState.DISABLED_HIDDEN:
+                    self.__subscan_state = STEMController.SubscanState.DISABLED_HIDDEN
                     changed_names.append("subscan_state")
-                if self.__subscan_region is not None:
-                    self.__subscan_region = None
-                    changed_names.append("subscan_region")
             elif subscan_fractional_size and subscan_fractional_center:
                 subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, subscan_fractional_size)
-                if self.__subscan_state != STEMController.SubscanState.ENABLED:
-                    self.__subscan_state = STEMController.SubscanState.ENABLED
+                if self.__subscan_state != STEMController.SubscanState.ENABLED_VISIBLE:
+                    self.__subscan_state = STEMController.SubscanState.ENABLED_VISIBLE
                     changed_names.append("subscan_state")
                 if self.__subscan_region != subscan_region:
                     self.__subscan_region = subscan_region

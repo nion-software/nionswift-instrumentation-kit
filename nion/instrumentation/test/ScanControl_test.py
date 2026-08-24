@@ -1203,13 +1203,13 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing(sync_timeout=3.0)
             ScanControlPanel.stop()
 
-    def test_subscan_state_goes_from_invalid_to_disabled_upon_first_acquisition(self):
+    def test_subscan_state_starts_hidden_upon_first_acquisition(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
-            self.assertEqual(stem_controller.SubscanState.INVALID, scan_hardware_source.subscan_state)
+            self.assertEqual(stem_controller.SubscanState.DISABLED_HIDDEN, scan_hardware_source.subscan_state)
             self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(stem_controller.SubscanState.DISABLED, scan_hardware_source.subscan_state)
+            self.assertEqual(stem_controller.SubscanState.DISABLED_HIDDEN, scan_hardware_source.subscan_state)
 
     def test_subscan_properties_are_observable_on_stem_controller_and_scan_hardware_source(self):
         with self._test_context() as test_context:
@@ -1220,8 +1220,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_listener = scan_hardware_source.property_changed_event.listen(scan_notifications.append)
             instrument_listener = instrument.property_changed_event.listen(instrument_notifications.append)
             try:
-                scan_hardware_source.subscan_state = stem_controller.SubscanState.ENABLED
-                self.assertEqual(stem_controller.SubscanState.ENABLED, instrument.subscan_state)
+                scan_hardware_source.subscan_state = stem_controller.SubscanState.ENABLED_VISIBLE
+                self.assertEqual(stem_controller.SubscanState.ENABLED_VISIBLE, instrument.subscan_state)
                 self.assertEqual(scan_hardware_source.subscan_region, instrument.subscan_region)
                 self.assertIn("subscan_state", scan_notifications)
                 self.assertIn("subscan_state", instrument_notifications)
@@ -1358,6 +1358,28 @@ class TestScanControlClass(unittest.TestCase):
             expected_subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(0.35, 0.65), subscan_fractional_size)
             self.assertEqual(expected_subscan_region, scan_hardware_source.subscan_region)
             self.assertEqual(expected_subscan_region, subscan_graphic.bounds)
+
+    def test_reenabling_subscan_after_deleting_region_restores_previous_region(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            instrument = test_context.instrument
+            self._acquire_one(document_controller, scan_hardware_source)
+
+            saved_subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = saved_subscan_region
+            document_controller.periodic()
+
+            instrument.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
+            document_controller.periodic()
+            self.assertFalse(scan_hardware_source.subscan_enabled)
+            self.assertEqual(stem_controller.SubscanState.DISABLED_HIDDEN, instrument.subscan_state)
+            self.assertEqual(saved_subscan_region, scan_hardware_source.subscan_region)
+
+            scan_hardware_source.subscan_enabled = True
+            document_controller.periodic()
+            self.assertEqual(saved_subscan_region, scan_hardware_source.subscan_region)
 
     def test_removing_subscan_graphic_disables_subscan_when_acquisition_running(self):
         with self._test_context() as test_context:
@@ -1965,7 +1987,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.close()
             test_context.instrument.probe_position = None
             scan_hardware_source.subscan_enabled = False
-            test_context.instrument.subscan_region = None
+            test_context.instrument.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
             scan_hardware_source.line_scan_enabled = False
             test_context.instrument.line_scan_vector = None
             scan_hardware_source.drift_enabled = False
@@ -1999,7 +2021,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.close()
             test_context.instrument.probe_position = None
             scan_hardware_source.subscan_enabled = False
-            test_context.instrument.subscan_region = None
+            test_context.instrument.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
             scan_hardware_source.line_scan_enabled = False
             test_context.instrument.line_scan_vector = None
             scan_hardware_source.drift_enabled = False
