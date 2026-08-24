@@ -1211,6 +1211,76 @@ class TestScanControlClass(unittest.TestCase):
             self._acquire_one(document_controller, scan_hardware_source)
             self.assertEqual(stem_controller.SubscanState.DISABLED, scan_hardware_source.subscan_state)
 
+    def test_subscan_properties_are_observable_on_stem_controller_and_scan_hardware_source(self):
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            instrument = scan_hardware_source.stem_controller
+            scan_notifications: typing.List[str] = list()
+            instrument_notifications: typing.List[str] = list()
+            scan_listener = scan_hardware_source.property_changed_event.listen(scan_notifications.append)
+            instrument_listener = instrument.property_changed_event.listen(instrument_notifications.append)
+            try:
+                scan_hardware_source.subscan_state = stem_controller.SubscanState.ENABLED
+                self.assertEqual(stem_controller.SubscanState.ENABLED, instrument.subscan_state)
+                self.assertEqual(scan_hardware_source.subscan_region, instrument.subscan_region)
+                self.assertIn("subscan_state", scan_notifications)
+                self.assertIn("subscan_state", instrument_notifications)
+
+                scan_notifications.clear()
+                instrument_notifications.clear()
+
+                subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+                instrument.subscan_region = subscan_region
+                self.assertEqual(subscan_region, scan_hardware_source.subscan_region)
+                self.assertIn("subscan_region", scan_notifications)
+                self.assertIn("subscan_region", instrument_notifications)
+
+                scan_notifications.clear()
+                instrument_notifications.clear()
+
+                instrument.subscan_rotation = 0.125
+                self.assertEqual(0.125, scan_hardware_source.subscan_rotation)
+                self.assertIn("subscan_rotation", scan_notifications)
+                self.assertIn("subscan_rotation", instrument_notifications)
+            finally:
+                scan_listener.close()
+                instrument_listener.close()
+
+    def test_stem_controller_scan_properties_raise_without_scan_controller(self):
+        instrument = stem_controller.STEMController()
+        self.addCleanup(instrument.close)
+        with self.assertRaises(RuntimeError):
+            _ = instrument.subscan_state
+        with self.assertRaises(RuntimeError):
+            instrument.subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+
+    def test_line_scan_properties_are_observable_on_stem_controller_and_scan_hardware_source(self):
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            instrument = scan_hardware_source.stem_controller
+            scan_notifications: typing.List[str] = list()
+            instrument_notifications: typing.List[str] = list()
+            scan_listener = scan_hardware_source.property_changed_event.listen(scan_notifications.append)
+            instrument_listener = instrument.property_changed_event.listen(instrument_notifications.append)
+            try:
+                instrument.line_scan_state = stem_controller.LineScanState.ENABLED
+                self.assertEqual(stem_controller.LineScanState.ENABLED, scan_hardware_source.line_scan_state)
+                self.assertEqual(scan_hardware_source.line_scan_vector, instrument.line_scan_vector)
+                self.assertIn("line_scan_state", scan_notifications)
+                self.assertIn("line_scan_state", instrument_notifications)
+
+                scan_notifications.clear()
+                instrument_notifications.clear()
+
+                vector = ((0.1, 0.2), (0.3, 0.4))
+                scan_hardware_source.line_scan_vector = vector
+                self.assertEqual(vector, instrument.line_scan_vector)
+                self.assertIn("line_scan_vector", scan_notifications)
+                self.assertIn("line_scan_vector", instrument_notifications)
+            finally:
+                scan_listener.close()
+                instrument_listener.close()
+
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
