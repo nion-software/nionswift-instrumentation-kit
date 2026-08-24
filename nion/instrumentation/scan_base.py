@@ -1254,6 +1254,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__subscan_rotation = 0.0
         self.__line_scan_state = STEMController.LineScanState.INVALID
         self.__line_scan_vector: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]] = None
+        self.__syncing_scan_properties = False
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
 
@@ -1644,38 +1645,70 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
+            if self.__syncing_scan_properties:
+                return
             # if subscan enabled, ensure there is a subscan region
             if self.subscan_state == STEMController.SubscanState.ENABLED and not self.subscan_region:
                 self.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
                 self.subscan_rotation = 0.0
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
-            self.__set_current_frame_parameters(self.__frame_parameters)
+            self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __subscan_region_changed(self, name: str) -> None:
         if name == "subscan_region":
+            if self.__syncing_scan_properties:
+                return
             subscan_region = self.subscan_region
             if not subscan_region:
                 self.subscan_enabled = False
-            self.__set_current_frame_parameters(self.__frame_parameters)
+            self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __subscan_rotation_changed(self, name: str) -> None:
         if name == "subscan_rotation":
-            self.__set_current_frame_parameters(self.__frame_parameters)
+            if self.__syncing_scan_properties:
+                return
+            self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __line_scan_state_changed(self, name: str) -> None:
         if name == "line_scan_state":
+            if self.__syncing_scan_properties:
+                return
             # if line scan enabled, ensure there is a line scan region
             if self.line_scan_state == STEMController.LineScanState.ENABLED and not self.line_scan_vector:
                 self.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
-            self.__set_current_frame_parameters(self.__frame_parameters)
+            self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __line_scan_vector_changed(self, name: str) -> None:
         if name == "line_scan_vector":
+            if self.__syncing_scan_properties:
+                return
             line_scan_vector = self.line_scan_vector
             if not line_scan_vector:
                 self.line_scan_enabled = False
-            self.__set_current_frame_parameters(self.__frame_parameters)
+            self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
+
+    def __sync_scan_properties_from_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+        changed_names: typing.List[str] = list()
+        subscan_fractional_size = frame_parameters.subscan_fractional_size
+        subscan_fractional_center = frame_parameters.subscan_fractional_center
+        self.__syncing_scan_properties = True
+        try:
+            if subscan_fractional_size and subscan_fractional_center:
+                subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, subscan_fractional_size)
+                if self.__subscan_state != STEMController.SubscanState.ENABLED:
+                    self.__subscan_state = STEMController.SubscanState.ENABLED
+                    changed_names.append("subscan_state")
+                if self.__subscan_region != subscan_region:
+                    self.__subscan_region = subscan_region
+                    changed_names.append("subscan_region")
+                if self.__subscan_rotation != frame_parameters.subscan_rotation:
+                    self.__subscan_rotation = frame_parameters.subscan_rotation
+                    changed_names.append("subscan_rotation")
+            for changed_name in changed_names:
+                self.notify_property_changed(changed_name)
+        finally:
+            self.__syncing_scan_properties = False
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
@@ -1855,8 +1888,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         self.__set_current_frame_parameters(scan_frame_parameters)
 
-    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
+    def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, *, sync_scan_properties: bool = True) -> None:
         frame_parameters = copy.copy(frame_parameters)
+        if sync_scan_properties:
+            self.__sync_scan_properties_from_frame_parameters(frame_parameters)
         self.__apply_subscan_parameters(frame_parameters)
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, ScanAcquisitionTask):
