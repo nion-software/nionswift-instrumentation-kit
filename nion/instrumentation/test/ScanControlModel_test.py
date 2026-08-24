@@ -244,18 +244,14 @@ class TestScanControlClass(unittest.TestCase):
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
 
             # check assumptions
-            self.assertFalse(model.subscan_checkbox_enabled)
             self.assertFalse(model.line_scan_checkbox_enabled)
             self.assertFalse(model.subscan_checkbox_checked)
             self.assertFalse(model.line_scan_checkbox_checked)
             self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_fractional_size)
 
             # acquire one scan
-            with PropertyChangedEventWatcher(model, "subscan_checkbox_enabled") as watcher:
-                self._acquire_one(document_controller, scan_hardware_source)
-                self.assertTrue(model.subscan_checkbox_enabled)
-                self.assertTrue(model.line_scan_checkbox_enabled)
-                self.assertTrue(watcher.changed)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertTrue(model.line_scan_checkbox_enabled)
 
             # enable subscan mode
             with PropertyChangedEventWatcher(model, "subscan_checkbox_checked") as watcher:
@@ -280,13 +276,12 @@ class TestScanControlClass(unittest.TestCase):
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
 
             # check assumptions
-            self.assertFalse(model.drift_controls_enabled)
+            self.assertTrue(model.drift_controls_enabled)
             self.assertFalse(model.drift_checkbox_checked)
 
             # acquire one scan
-            with PropertyChangedEventWatcher(model, "drift_controls_enabled") as watcher:
-                self._acquire_one(document_controller, scan_hardware_source)
-                self.assertTrue(watcher.changed)
+            self._acquire_one(document_controller, scan_hardware_source)
+            self.assertTrue(model.drift_controls_enabled)
 
             # enable drift correction
             with PropertyChangedEventWatcher(model, "drift_checkbox_checked") as watcher:
@@ -307,7 +302,7 @@ class TestScanControlClass(unittest.TestCase):
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
 
             # check assumptions
-            self.assertFalse(model.drift_controls_enabled)
+            self.assertTrue(model.drift_controls_enabled)
             self.assertEqual(model.drift_settings_interval_str, "0")
 
             # acquire one scan

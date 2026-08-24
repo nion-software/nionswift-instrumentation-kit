@@ -53,9 +53,15 @@ JSONType: typing.TypeAlias = str | int | float | bool | None | typing.Sequence["
 
 
 class SubscanState(enum.Enum):
-    INVALID = -1
-    DISABLED = 0
-    ENABLED = 1
+    DISABLED_HIDDEN = -1
+    DISABLED_VISIBLE = 0
+    ENABLED_VISIBLE = 1
+
+    # compatibility aliases
+    INVALID = DISABLED_HIDDEN
+    DISABLED_NOT_VISIBLE = DISABLED_HIDDEN
+    DISABLED = DISABLED_VISIBLE
+    ENABLED = ENABLED_VISIBLE
 
 
 class LineScanState(enum.Enum):
@@ -235,7 +241,7 @@ class ScanSpecifier:
             self.drift_interval_lines = 0
             self.drift_interval_scans = drift_scans
             self.drift_correction_enabled = drift_correction_enabled
-        elif scan_hardware_source.subscan_enabled and scan_hardware_source.subscan_region:
+        elif scan_hardware_source.subscan_enabled:
             assert scan_context_size
             calibration = scan_context.calibration
             width = scan_hardware_source.subscan_region.width * scan_context_size.width
@@ -479,9 +485,6 @@ class STEMController(Observable.Observable):
         self.__probe_state_stack.append("scanning")
         # fire off the probe state changed event.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
-        # ensure that SubscanState is valid (ENABLED or DISABLED, not INVALID)
-        if self.subscan_state == SubscanState.INVALID:
-            self.subscan_state = SubscanState.DISABLED
         if self.line_scan_state == LineScanState.INVALID:
             self.line_scan_state = LineScanState.DISABLED
 
@@ -505,11 +508,11 @@ class STEMController(Observable.Observable):
         self.__require_scan_controller().subscan_state = value
 
     @property
-    def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
+    def subscan_region(self) -> Geometry.FloatRect:
         return self.__require_scan_controller().subscan_region
 
     @subscan_region.setter
-    def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
+    def subscan_region(self, value: Geometry.FloatRect) -> None:
         self.__require_scan_controller().subscan_region = value
 
     @property
@@ -1250,7 +1253,7 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
 
 class SubscanSettings(typing.Protocol):
     subscan_state: SubscanState
-    subscan_region: typing.Optional[Geometry.FloatRect]
+    subscan_region: Geometry.FloatRect
     subscan_rotation: float
     line_scan_state: LineScanState
     line_scan_vector: typing.Optional[_VectorType]
@@ -1300,12 +1303,12 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
 
     def __subscan_settings_changed(self, name: str) -> None:
         # must be thread safe
-        if name in ("subscan_region", "subscan_rotation"):
+        if name in ("subscan_state", "subscan_region", "subscan_rotation"):
             self.__safe_event_loop._call_soon_threadsafe(self.__update_subscan_region)
 
     def __update_subscan_region(self) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if self.__subscan_settings.subscan_region:
+        if self.__subscan_settings.subscan_state != SubscanState.DISABLED_HIDDEN:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
             self.__graphic_set.remove_all_graphics()
@@ -1326,16 +1329,14 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
     # implement methods for the graphic set handler
 
     def _graphic_removed(self, subscan_graphic: Graphics.Graphic) -> None:
-        # clear subscan state
-        self.__subscan_settings.subscan_state = SubscanState.DISABLED
-        self.__subscan_settings.subscan_region = None
-        self.__subscan_settings.subscan_rotation = 0
+        # hide subscan while preserving region geometry for later setup/re-enable.
+        self.__subscan_settings.subscan_state = SubscanState.DISABLED_HIDDEN
 
     def _create_graphic(self) -> Graphics.RectangleGraphic:
         subscan_graphic = Graphics.RectangleGraphic()
         subscan_graphic.graphic_id = "subscan"
         subscan_graphic.label = _("Subscan")
-        subscan_graphic.bounds = self.__subscan_settings.subscan_region or Geometry.FloatRect.empty_rect()
+        subscan_graphic.bounds = self.__subscan_settings.subscan_region
         subscan_graphic.rotation = self.__subscan_settings.subscan_rotation
         subscan_graphic.is_bounds_constrained = True
         return subscan_graphic
@@ -1343,7 +1344,7 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
     def _update_graphic(self, subscan_graphic: Graphics.Graphic) -> None:
         assert isinstance(subscan_graphic, Graphics.RectangleGraphic)
         subscan_region = self.__subscan_settings.subscan_region
-        if subscan_region and subscan_graphic.bounds != subscan_region:
+        if subscan_graphic.bounds != subscan_region:
             subscan_graphic.bounds = subscan_region
         if subscan_graphic.rotation != self.__subscan_settings.subscan_rotation:
             subscan_graphic.rotation = self.__subscan_settings.subscan_rotation
