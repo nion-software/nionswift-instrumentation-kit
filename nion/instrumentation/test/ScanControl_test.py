@@ -1397,6 +1397,52 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing()
             self.assertFalse(scan_hardware_source.line_scan_enabled)
 
+    def test_line_scan_graphic_updates_when_line_scan_vector_is_set(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.start_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            scan_hardware_source.line_scan_enabled = True
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            line_scan_graphic = next(graphic for graphic in display_item.graphics if graphic.graphic_id == "line_scan")
+
+            line_scan_vector = ((0.2, 0.3), (0.8, 0.7))
+            scan_hardware_source.line_scan_vector = line_scan_vector
+            document_controller.periodic()
+
+            self.assertEqual(line_scan_vector, scan_hardware_source.line_scan_vector)
+            line_scan_graphic_vector = line_scan_graphic.vector
+            self.assertEqual(line_scan_vector, (line_scan_graphic_vector[0].as_tuple(), line_scan_graphic_vector[1].as_tuple()))
+
+    def test_line_scan_graphic_updates_when_current_frame_parameters_change_line_scan_vector(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.start_playing()
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            scan_hardware_source.line_scan_enabled = True
+            scan_hardware_source.get_next_xdatas_to_finish()
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            line_scan_graphic = next(graphic for graphic in display_item.graphics if graphic.graphic_id == "line_scan")
+
+            line_scan_vector = ((0.15, 0.25), (0.75, 0.65))
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.line_scan_vector = line_scan_vector
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            document_controller.periodic()
+
+            self.assertEqual(line_scan_vector, scan_hardware_source.line_scan_vector)
+            line_scan_graphic_vector = line_scan_graphic.vector
+            self.assertEqual(line_scan_vector, (line_scan_graphic_vector[0].as_tuple(), line_scan_graphic_vector[1].as_tuple()))
+
     def test_removing_subscan_graphic_disables_subscan(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller

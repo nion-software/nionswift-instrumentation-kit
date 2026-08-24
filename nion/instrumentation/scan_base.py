@@ -248,6 +248,19 @@ class ScanFrameParameters(ParametersBase):
         self.set_parameter("subscan_rotation", value)
 
     @property
+    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
+        return typing.cast(typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]], self.get_parameter("line_scan_vector", None))
+
+    @line_scan_vector.setter
+    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+        if value:
+            start = Geometry.FloatPoint.make(value[0])
+            end = Geometry.FloatPoint.make(value[1])
+            self.set_parameter("line_scan_vector", (start.as_tuple(), end.as_tuple()))
+        else:
+            self.set_parameter("line_scan_vector", None)
+
+    @property
     def ac_line_sync(self) -> bool:
         return typing.cast(bool, self.get_parameter("ac_line_sync", False))
 
@@ -1624,6 +1637,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width))
             frame_parameters.subscan_fractional_center = subscan_region.center
             frame_parameters.subscan_rotation = self.subscan_rotation
+            frame_parameters.line_scan_vector = None
         elif self.line_scan_enabled and self.line_scan_vector:
             line_scan_vector = self.line_scan_vector
             start = Geometry.FloatPoint.make(line_scan_vector[0])
@@ -1636,12 +1650,14 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(1 / context_size.height, length)
             frame_parameters.subscan_fractional_center = Geometry.midpoint(start, end)
             frame_parameters.subscan_rotation = -math.atan2(end.y - start.y, end.x - start.x)
+            frame_parameters.line_scan_vector = line_scan_vector
         else:
             frame_parameters.pixel_size = size if size else frame_parameters.pixel_size
             frame_parameters.subscan_pixel_size = None
             frame_parameters.subscan_fractional_size = None
             frame_parameters.subscan_fractional_center = None
             frame_parameters.subscan_rotation = 0.0
+            frame_parameters.line_scan_vector = None
 
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
@@ -1690,11 +1706,25 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     def __sync_scan_properties_from_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
         changed_names: typing.List[str] = list()
+        line_scan_vector = frame_parameters.line_scan_vector
         subscan_fractional_size = frame_parameters.subscan_fractional_size
         subscan_fractional_center = frame_parameters.subscan_fractional_center
         self.__syncing_scan_properties = True
         try:
-            if subscan_fractional_size and subscan_fractional_center:
+            if line_scan_vector:
+                if self.__line_scan_state != STEMController.LineScanState.ENABLED:
+                    self.__line_scan_state = STEMController.LineScanState.ENABLED
+                    changed_names.append("line_scan_state")
+                if self.__line_scan_vector != line_scan_vector:
+                    self.__line_scan_vector = line_scan_vector
+                    changed_names.append("line_scan_vector")
+                if self.__subscan_state != STEMController.SubscanState.DISABLED:
+                    self.__subscan_state = STEMController.SubscanState.DISABLED
+                    changed_names.append("subscan_state")
+                if self.__subscan_region is not None:
+                    self.__subscan_region = None
+                    changed_names.append("subscan_region")
+            elif subscan_fractional_size and subscan_fractional_center:
                 subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, subscan_fractional_size)
                 if self.__subscan_state != STEMController.SubscanState.ENABLED:
                     self.__subscan_state = STEMController.SubscanState.ENABLED
@@ -1705,6 +1735,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 if self.__subscan_rotation != frame_parameters.subscan_rotation:
                     self.__subscan_rotation = frame_parameters.subscan_rotation
                     changed_names.append("subscan_rotation")
+                if self.__line_scan_state != STEMController.LineScanState.DISABLED:
+                    self.__line_scan_state = STEMController.LineScanState.DISABLED
+                    changed_names.append("line_scan_state")
+                if self.__line_scan_vector is not None:
+                    self.__line_scan_vector = None
+                    changed_names.append("line_scan_vector")
             for changed_name in changed_names:
                 self.notify_property_changed(changed_name)
         finally:
