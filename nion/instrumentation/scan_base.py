@@ -757,6 +757,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     @property
     def subscan_state(self) -> STEMController.SubscanState: raise NotImplementedError()
 
+    @subscan_state.setter
+    def subscan_state(self, value: STEMController.SubscanState) -> None: ...
+
     @property
     def subscan_enabled(self) -> bool: raise NotImplementedError()
 
@@ -770,7 +773,16 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None: ...
 
     @property
+    def subscan_rotation(self) -> float: raise NotImplementedError()
+
+    @subscan_rotation.setter
+    def subscan_rotation(self, value: float) -> None: ...
+
+    @property
     def line_scan_state(self) -> STEMController.LineScanState: raise NotImplementedError()
+
+    @line_scan_state.setter
+    def line_scan_state(self, value: STEMController.LineScanState) -> None: ...
 
     @property
     def line_scan_enabled(self) -> bool: raise NotImplementedError()
@@ -780,6 +792,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     @property
     def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]: raise NotImplementedError()
+
+    @line_scan_vector.setter
+    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None: ...
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]: raise NotImplementedError()
@@ -860,6 +875,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     probe_state_changed_event: Event.Event
     channel_state_changed_event: Event.Event
     scan_frame_parameters_changed_event: Event.Event
+    property_changed_event: Event.Event
 
     max_field_of_view_nm_stream: Stream.ValueStream[float]
 
@@ -1233,15 +1249,20 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
         self.__stem_controller = stem_controller_
+        self.__subscan_state = STEMController.SubscanState.INVALID
+        self.__subscan_region: typing.Optional[Geometry.FloatRect] = None
+        self.__subscan_rotation = 0.0
+        self.__line_scan_state = STEMController.LineScanState.INVALID
+        self.__line_scan_vector: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]] = None
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
 
-        self.__subscan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_state_changed)
-        self.__subscan_region_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_region_changed)
-        self.__subscan_rotation_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__subscan_rotation_changed)
+        self.__subscan_state_changed_event_listener = self.property_changed_event.listen(self.__subscan_state_changed)
+        self.__subscan_region_changed_event_listener = self.property_changed_event.listen(self.__subscan_region_changed)
+        self.__subscan_rotation_changed_event_listener = self.property_changed_event.listen(self.__subscan_rotation_changed)
 
-        self.__line_scan_state_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_state_changed)
-        self.__line_scan_vector_changed_event_listener = self.__stem_controller.property_changed_event.listen(self.__line_scan_vector_changed)
+        self.__line_scan_state_changed_event_listener = self.property_changed_event.listen(self.__line_scan_state_changed)
+        self.__line_scan_vector_changed_event_listener = self.property_changed_event.listen(self.__line_scan_vector_changed)
 
         ChannelInfo = collections.namedtuple("ChannelInfo", ["channel_id", "name"])
         self.__device = device
@@ -1283,15 +1304,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if self.__probe_state_changed_event_listener:
             self.__probe_state_changed_event_listener.close()
             self.__probe_state_changed_event_listener = typing.cast(typing.Any, None)
-        if self.__subscan_region_changed_event_listener:
-            self.__subscan_region_changed_event_listener.close()
-            self.__subscan_region_changed_event_listener = typing.cast(typing.Any, None)
-        if self.__subscan_rotation_changed_event_listener:
-            self.__subscan_rotation_changed_event_listener.close()
-            self.__subscan_rotation_changed_event_listener = typing.cast(typing.Any, None)
-        if self.__line_scan_vector_changed_event_listener:
-            self.__line_scan_vector_changed_event_listener.close()
-            self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
+        self.__subscan_state_changed_event_listener = typing.cast(typing.Any, None)
+        self.__subscan_region_changed_event_listener = typing.cast(typing.Any, None)
+        self.__subscan_rotation_changed_event_listener = typing.cast(typing.Any, None)
+        self.__line_scan_state_changed_event_listener = typing.cast(typing.Any, None)
+        self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
         super().close()
         if self.__settings_changed_event_listener:
             self.__settings_changed_event_listener.close()
@@ -1512,55 +1529,77 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
     @property
     def subscan_state(self) -> STEMController.SubscanState:
-        return self.__stem_controller.subscan_state
+        return self.__subscan_state
+
+    @subscan_state.setter
+    def subscan_state(self, value: STEMController.SubscanState) -> None:
+        if self.__subscan_state != value:
+            self.__subscan_state = value
+            self.notify_property_changed("subscan_state")
 
     @property
     def subscan_enabled(self) -> bool:
-        return self.__stem_controller.subscan_state == STEMController.SubscanState.ENABLED
+        return self.subscan_state == STEMController.SubscanState.ENABLED
 
     @subscan_enabled.setter
     def subscan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.subscan_state = STEMController.SubscanState.ENABLED
+            self.subscan_state = STEMController.SubscanState.ENABLED
         else:
-            self.__stem_controller.subscan_state = STEMController.SubscanState.DISABLED
+            self.subscan_state = STEMController.SubscanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
-        return self.__stem_controller.subscan_region
+        return self.__subscan_region
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        self.__stem_controller.subscan_region = value
+        if self.__subscan_region != value:
+            self.__subscan_region = value
+            self.notify_property_changed("subscan_region")
 
     @property
     def subscan_rotation(self) -> float:
-        return self.__stem_controller.subscan_rotation
+        return self.__subscan_rotation
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float) -> None:
-        self.__stem_controller.subscan_rotation = value
+        if self.__subscan_rotation != value:
+            self.__subscan_rotation = value
+            self.notify_property_changed("subscan_rotation")
 
     @property
     def line_scan_state(self) -> STEMController.LineScanState:
-        return self.__stem_controller.line_scan_state
+        return self.__line_scan_state
+
+    @line_scan_state.setter
+    def line_scan_state(self, value: STEMController.LineScanState) -> None:
+        if self.__line_scan_state != value:
+            self.__line_scan_state = value
+            self.notify_property_changed("line_scan_state")
 
     @property
     def line_scan_enabled(self) -> bool:
-        return self.__stem_controller.line_scan_state == STEMController.LineScanState.ENABLED
+        return self.line_scan_state == STEMController.LineScanState.ENABLED
 
     @line_scan_enabled.setter
     def line_scan_enabled(self, enabled: bool) -> None:
         if enabled:
-            self.__stem_controller.line_scan_state = STEMController.LineScanState.ENABLED
+            self.line_scan_state = STEMController.LineScanState.ENABLED
         else:
-            self.__stem_controller.line_scan_state = STEMController.LineScanState.DISABLED
+            self.line_scan_state = STEMController.LineScanState.DISABLED
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
     def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
-        return self.__stem_controller.line_scan_vector
+        return self.__line_scan_vector
+
+    @line_scan_vector.setter
+    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+        if self.__line_scan_vector != value:
+            self.__line_scan_vector = value
+            self.notify_property_changed("line_scan_vector")
 
     def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
         scan_context = self.scan_context
@@ -1606,9 +1645,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
             # if subscan enabled, ensure there is a subscan region
-            if self.__stem_controller.subscan_state == STEMController.SubscanState.ENABLED and not self.__stem_controller.subscan_region:
-                self.__stem_controller.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-                self.__stem_controller.subscan_rotation = 0.0
+            if self.subscan_state == STEMController.SubscanState.ENABLED and not self.subscan_region:
+                self.subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+                self.subscan_rotation = 0.0
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters)
 
@@ -1626,8 +1665,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __line_scan_state_changed(self, name: str) -> None:
         if name == "line_scan_state":
             # if line scan enabled, ensure there is a line scan region
-            if self.__stem_controller.line_scan_state == STEMController.LineScanState.ENABLED and not self.__stem_controller.line_scan_vector:
-                self.__stem_controller.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
+            if self.line_scan_state == STEMController.LineScanState.ENABLED and not self.line_scan_vector:
+                self.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters)
 

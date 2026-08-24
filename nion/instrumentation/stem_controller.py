@@ -349,11 +349,6 @@ class STEMController(Observable.Observable):
         self.__probe_state_stack.append("parked")
         self.__scan_context = ScanContext(Geometry.IntSize(256, 256), Geometry.FloatPoint(0.0, 0.0), 100.0, 0.0)
         self.probe_state_changed_event = Event.Event()
-        self.__subscan_state = SubscanState.INVALID
-        self.__subscan_region: typing.Optional[Geometry.FloatRect] = None
-        self.__subscan_rotation = 0.0
-        self.__line_scan_state = LineScanState.INVALID
-        self.__line_scan_vector: typing.Optional[_VectorType] = None
         self.__drift_channel_id: typing.Optional[str] = None
         self.__drift_region: typing.Optional[Geometry.FloatRect] = None
         self.__drift_rotation = 0.0
@@ -364,22 +359,66 @@ class STEMController(Observable.Observable):
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
+        self.__scan_controller_is_explicit = False
+        self.__scan_controller_property_changed_listener: typing.Optional[Event.EventListener] = None
 
-        # very ugly solution to synchronizing the scan context with the scan controller. this is necessary since scan
-        # state is stored both in the scan controller and the stem controller. this is a bit of a hack, but it works.
+        # keep the scan context synchronized with whichever scan controller currently owns the observable scan state.
 
         def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
             if "scan_hardware_source" in component_types:
-                scan_controller = self.scan_controller
-                if scan_controller and not self.__scan_controller:  # not manually registered?
+                scan_controller = self.__refresh_scan_controller()
+                if scan_controller and not self.__scan_controller_is_explicit:
                     # update initial scan context
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
                     self._update_scan_context(scan_frame_parameters.pixel_size, scan_frame_parameters.center_nm, scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
         self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
+        self.__refresh_scan_controller()
 
     def close(self) -> None:
+        self.__scan_controller_property_changed_listener = None
+        self.__scan_controller = None
+        self.__scan_controller_is_explicit = False
         self.__component_registered_listener = typing.cast(typing.Any, None)
+
+    def __set_scan_controller(self, scan_controller: typing.Optional[scan_base.ScanHardwareSource], *, is_explicit: bool) -> None:
+        if scan_controller is self.__scan_controller and is_explicit == self.__scan_controller_is_explicit:
+            return
+        self.__scan_controller_property_changed_listener = None
+        self.__scan_controller = scan_controller
+        self.__scan_controller_is_explicit = is_explicit
+        if scan_controller:
+            self.__scan_controller_property_changed_listener = scan_controller.property_changed_event.listen(self.__scan_controller_property_changed)
+
+    def __lookup_scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
+        # prefer the primary scan_hardware_source. this is implemented a bit funny for
+        # backwards compatibility, with reverse logic.
+        for component in Registry.get_components_by_type("scan_hardware_source"):
+            scan_hardware_source = typing.cast("scan_base.ScanHardwareSource", component)
+            if not scan_hardware_source.scan_device.scan_device_is_secondary:
+                return scan_hardware_source
+        # otherwise return the only registered hardware source
+        return typing.cast(typing.Optional["scan_base.ScanHardwareSource"],
+                           Registry.get_component("scan_hardware_source"))
+
+    def __refresh_scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
+        if self.__scan_controller_is_explicit:
+            scan_controller = self.__scan_controller
+        else:
+            scan_controller = self.__lookup_scan_controller()
+        self.__set_scan_controller(scan_controller, is_explicit=self.__scan_controller_is_explicit)
+        return self.__scan_controller
+
+    def __require_scan_controller(self) -> scan_base.ScanHardwareSource:
+        scan_controller = self.__refresh_scan_controller()
+        if not scan_controller:
+            raise RuntimeError("scan controller is not available")
+        return scan_controller
+
+    def __scan_controller_property_changed(self, name: str) -> None:
+        if name not in {"subscan_state", "subscan_region", "subscan_rotation", "line_scan_state", "line_scan_vector"}:
+            return
+        self.notify_property_changed(name)
 
     # configuration methods
 
@@ -418,21 +457,11 @@ class STEMController(Observable.Observable):
 
     @property
     def scan_controller(self) -> typing.Optional[scan_base.ScanHardwareSource]:
-        # for testing
-        if self.__scan_controller:
-            return self.__scan_controller
-        # prefer the primary scan_hardware_source. this is implemented a bit funny for
-        # backwards compatibility, with reverse logic.
-        for component in Registry.get_components_by_type("scan_hardware_source"):
-            scan_hardware_source = typing.cast("scan_base.ScanHardwareSource", component)
-            if not scan_hardware_source.scan_device.scan_device_is_secondary:
-                return scan_hardware_source
-        # otherwise return the only registered hardware source
-        return typing.cast(typing.Optional["scan_base.ScanHardwareSource"],
-                           Registry.get_component("scan_hardware_source"))
+        return self.__refresh_scan_controller()
 
     def set_scan_controller(self, scan_controller: typing.Optional[HardwareSource.HardwareSource]) -> None:
-        self.__scan_controller = typing.cast(typing.Optional["scan_base.ScanHardwareSource"], scan_controller)
+        typed_scan_controller = typing.cast(typing.Optional["scan_base.ScanHardwareSource"], scan_controller)
+        self.__set_scan_controller(typed_scan_controller, is_explicit=typed_scan_controller is not None)
         if self.__scan_controller:
             # update initial scan context
             scan_frame_parameters = self.__scan_controller.get_current_frame_parameters()
@@ -469,53 +498,43 @@ class STEMController(Observable.Observable):
 
     @property
     def subscan_state(self) -> SubscanState:
-        return self.__subscan_state
+        return self.__require_scan_controller().subscan_state
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
-        if self.__subscan_state != value:
-            self.__subscan_state = value
-            self.notify_property_changed("subscan_state")
+        self.__require_scan_controller().subscan_state = value
 
     @property
     def subscan_region(self) -> typing.Optional[Geometry.FloatRect]:
-        return self.__subscan_region
+        return self.__require_scan_controller().subscan_region
 
     @subscan_region.setter
     def subscan_region(self, value: typing.Optional[Geometry.FloatRect]) -> None:
-        if self.__subscan_region != value:
-            self.__subscan_region = value
-            self.notify_property_changed("subscan_region")
+        self.__require_scan_controller().subscan_region = value
 
     @property
     def subscan_rotation(self) -> float:
-        return self.__subscan_rotation
+        return self.__require_scan_controller().subscan_rotation
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float) -> None:
-        if self.__subscan_rotation != value:
-            self.__subscan_rotation = value
-            self.notify_property_changed("subscan_rotation")
+        self.__require_scan_controller().subscan_rotation = value
 
     @property
     def line_scan_state(self) -> LineScanState:
-        return self.__line_scan_state
+        return self.__require_scan_controller().line_scan_state
 
     @line_scan_state.setter
     def line_scan_state(self, value: LineScanState) -> None:
-        if self.__line_scan_state != value:
-            self.__line_scan_state = value
-            self.notify_property_changed("line_scan_state")
+        self.__require_scan_controller().line_scan_state = value
 
     @property
     def line_scan_vector(self) -> typing.Optional[_VectorType]:
-        return self.__line_scan_vector
+        return self.__require_scan_controller().line_scan_vector
 
     @line_scan_vector.setter
     def line_scan_vector(self, value: typing.Optional[_VectorType]) -> None:
-        if self.__line_scan_vector != value:
-            self.__line_scan_vector = value
-            self.notify_property_changed("line_scan_vector")
+        self.__require_scan_controller().line_scan_vector = value
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
@@ -1611,19 +1630,19 @@ class ScanContextController:
 
     def register_instrument(self, instrument: typing.Any) -> None:
         # if this is a stem controller, add a probe view
-        if hasattr(instrument, "probe_position"):
+        if hasattr(type(instrument), "probe_position"):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             self.__m.setdefault(instrument, dict())["probe_view"] = ProbeView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
-        if hasattr(instrument, "subscan_region"):
+        if hasattr(type(instrument), "subscan_region"):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             self.__m.setdefault(instrument, dict())["subscan_view"] = SubscanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
-        if hasattr(instrument, "line_scan_vector"):
+        if hasattr(type(instrument), "line_scan_vector"):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             self.__m.setdefault(instrument, dict())["line_scan_view"] = LineScanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
-        if hasattr(instrument, "drift_region"):
+        if hasattr(type(instrument), "drift_region"):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             scan_hardware_source_id = instrument.scan_controller.hardware_source_id
