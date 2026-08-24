@@ -47,6 +47,8 @@ if typing.TYPE_CHECKING:
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
+_VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
+
 _ = gettext.gettext
 
 SYNCHRONIZED_SCAN_TIMEOUT = 20.0  # not typed as 'final', since this is changed during testing
@@ -248,11 +250,11 @@ class ScanFrameParameters(ParametersBase):
         self.set_parameter("subscan_rotation", value)
 
     @property
-    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
-        return typing.cast(typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]], self.get_parameter("line_scan_vector", None))
+    def line_scan_vector(self) -> _VectorType | None:
+        return typing.cast(_VectorType | None, self.get_parameter("line_scan_vector", None))
 
     @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+    def line_scan_vector(self, value: _VectorType | None) -> None:
         if value:
             start = Geometry.FloatPoint.make(value[0])
             end = Geometry.FloatPoint.make(value[1])
@@ -804,10 +806,10 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def line_scan_enabled(self, enabled: bool) -> None: ...
 
     @property
-    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]: raise NotImplementedError()
+    def line_scan_vector(self) -> _VectorType: raise NotImplementedError()
 
     @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None: ...
+    def line_scan_vector(self, value: _VectorType) -> None: ...
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]: raise NotImplementedError()
@@ -1266,7 +1268,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
         self.__subscan_rotation = 0.0
         self.__line_scan_state = STEMController.LineScanState.INVALID
-        self.__line_scan_vector: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]] = None
+        self.__line_scan_vector = ((0.25, 0.25), (0.75, 0.75))
         self.__syncing_scan_properties = False
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
@@ -1606,11 +1608,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
 
     @property
-    def line_scan_vector(self) -> typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]:
+    def line_scan_vector(self) -> _VectorType:
         return self.__line_scan_vector
 
     @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]]) -> None:
+    def line_scan_vector(self, value: _VectorType) -> None:
         if self.__line_scan_vector != value:
             self.__line_scan_vector = value
             self.notify_property_changed("line_scan_vector")
@@ -1638,7 +1640,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_center = subscan_region.center
             frame_parameters.subscan_rotation = self.subscan_rotation
             frame_parameters.line_scan_vector = None
-        elif self.line_scan_enabled and self.line_scan_vector:
+        elif self.line_scan_enabled:
             line_scan_vector = self.line_scan_vector
             start = Geometry.FloatPoint.make(line_scan_vector[0])
             end = Geometry.FloatPoint.make(line_scan_vector[1])
@@ -1682,9 +1684,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if name == "line_scan_state":
             if self.__syncing_scan_properties:
                 return
-            # if line scan enabled, ensure there is a line scan region
-            if self.line_scan_state == STEMController.LineScanState.ENABLED and not self.line_scan_vector:
-                self.line_scan_vector = (0.25, 0.25), (0.75, 0.75)
             # otherwise let __set_current_frame_parameters clean up existing __frame_parameters
             self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
@@ -1692,9 +1691,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if name == "line_scan_vector":
             if self.__syncing_scan_properties:
                 return
-            line_scan_vector = self.line_scan_vector
-            if not line_scan_vector:
-                self.line_scan_enabled = False
             self.__set_current_frame_parameters(self.__frame_parameters, sync_scan_properties=False)
 
     def __sync_scan_properties_from_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
@@ -1728,9 +1724,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                 if self.__line_scan_state != STEMController.LineScanState.DISABLED:
                     self.__line_scan_state = STEMController.LineScanState.DISABLED
                     changed_names.append("line_scan_state")
-                if self.__line_scan_vector is not None:
-                    self.__line_scan_vector = None
-                    changed_names.append("line_scan_vector")
             for changed_name in changed_names:
                 self.notify_property_changed(changed_name)
         finally:

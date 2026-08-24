@@ -65,9 +65,14 @@ class SubscanState(enum.Enum):
 
 
 class LineScanState(enum.Enum):
-    INVALID = -1
-    DISABLED = 0
-    ENABLED = 1
+    DISABLED_HIDDEN = -1
+    DISABLED_VISIBLE = 0
+    ENABLED_VISIBLE = 1
+
+    # compatibility aliases
+    INVALID = DISABLED_HIDDEN
+    DISABLED = DISABLED_VISIBLE
+    ENABLED = ENABLED_VISIBLE
 
 
 class DriftIntervalUnit(enum.IntEnum):
@@ -215,7 +220,7 @@ class ScanSpecifier:
     def update(self, scan_hardware_source: scan_base.ScanHardwareSource, exposure_ms: float, scan_width: int, scan_count: int, drift_correction_enabled: bool) -> None:
         scan_context = scan_hardware_source.scan_context
         scan_context_size = scan_context.size
-        if scan_hardware_source.line_scan_enabled and scan_hardware_source.line_scan_vector:
+        if scan_hardware_source.line_scan_enabled:
             assert scan_context_size
             calibration = scan_context.calibration
             start = Geometry.FloatPoint.make(scan_hardware_source.line_scan_vector[0])
@@ -485,8 +490,6 @@ class STEMController(Observable.Observable):
         self.__probe_state_stack.append("scanning")
         # fire off the probe state changed event.
         self.probe_state_changed_event.fire(self.probe_state, self.probe_position)
-        if self.line_scan_state == LineScanState.INVALID:
-            self.line_scan_state = LineScanState.DISABLED
 
     def _exit_scanning_state(self) -> None:
         # pop the 'scanning' probe state and fire off the probe state changed event.
@@ -532,11 +535,11 @@ class STEMController(Observable.Observable):
         self.__require_scan_controller().line_scan_state = value
 
     @property
-    def line_scan_vector(self) -> typing.Optional[_VectorType]:
+    def line_scan_vector(self) -> _VectorType:
         return self.__require_scan_controller().line_scan_vector
 
     @line_scan_vector.setter
-    def line_scan_vector(self, value: typing.Optional[_VectorType]) -> None:
+    def line_scan_vector(self, value: _VectorType) -> None:
         self.__require_scan_controller().line_scan_vector = value
 
     @property
@@ -1256,7 +1259,7 @@ class SubscanSettings(typing.Protocol):
     subscan_region: Geometry.FloatRect
     subscan_rotation: float
     line_scan_state: LineScanState
-    line_scan_vector: typing.Optional[_VectorType]
+    line_scan_vector: _VectorType
 
     @property
     def property_changed_event(self) -> Event.Event:
@@ -1404,12 +1407,12 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
 
     def __line_scan_vector_changed(self, name: str) -> None:
         # must be thread safe
-        if name == "line_scan_vector":
+        if name in ("line_scan_state", "line_scan_vector"):
             self.__safe_event_loop._call_soon_threadsafe(self.__update_line_scan_vector)
 
     def __update_line_scan_vector(self) -> None:
         assert threading.current_thread() == threading.main_thread()
-        if self.__subscan_settings.line_scan_vector:
+        if self.__subscan_settings.line_scan_state != LineScanState.DISABLED_HIDDEN:
             self.__graphic_set.synchronize_graphics(self.__scan_display_items_model.display_items)
         else:
             self.__graphic_set.remove_all_graphics()
@@ -1430,9 +1433,8 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
     # implement methods for the graphic set handler
 
     def _graphic_removed(self, line_scan_graphic: Graphics.Graphic) -> None:
-        # clear line scan state
-        self.__subscan_settings.line_scan_state = LineScanState.DISABLED
-        self.__subscan_settings.line_scan_vector = None
+        # hide line scan while preserving vector geometry for later setup/re-enable.
+        self.__subscan_settings.line_scan_state = LineScanState.DISABLED_HIDDEN
 
     def _create_graphic(self) -> Graphics.LineGraphic:
         line_scan_graphic = Graphics.LineGraphic()
@@ -1447,7 +1449,7 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
         line_scan_vector = self.__subscan_settings.line_scan_vector
         graphic_vector = line_scan_graphic.vector
         graphic_vector_tuple = graphic_vector[0].as_tuple(), graphic_vector[1].as_tuple()
-        if line_scan_vector and graphic_vector_tuple != line_scan_vector:
+        if graphic_vector_tuple != line_scan_vector:
             line_scan_graphic.vector = Geometry.FloatPoint.make(line_scan_vector[0]), Geometry.FloatPoint.make(line_scan_vector[1])
 
     def _graphic_property_changed(self, line_scan_graphic: Graphics.Graphic, name: str) -> None:

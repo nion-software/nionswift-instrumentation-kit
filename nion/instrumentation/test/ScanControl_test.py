@@ -1263,8 +1263,8 @@ class TestScanControlClass(unittest.TestCase):
             scan_listener = scan_hardware_source.property_changed_event.listen(scan_notifications.append)
             instrument_listener = instrument.property_changed_event.listen(instrument_notifications.append)
             try:
-                instrument.line_scan_state = stem_controller.LineScanState.ENABLED
-                self.assertEqual(stem_controller.LineScanState.ENABLED, scan_hardware_source.line_scan_state)
+                instrument.line_scan_state = stem_controller.LineScanState.ENABLED_VISIBLE
+                self.assertEqual(stem_controller.LineScanState.ENABLED_VISIBLE, scan_hardware_source.line_scan_state)
                 self.assertEqual(scan_hardware_source.line_scan_vector, instrument.line_scan_vector)
                 self.assertIn("line_scan_state", scan_notifications)
                 self.assertIn("line_scan_state", instrument_notifications)
@@ -1989,7 +1989,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.subscan_enabled = False
             test_context.instrument.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
             scan_hardware_source.line_scan_enabled = False
-            test_context.instrument.line_scan_vector = None
+            test_context.instrument.line_scan_state = stem_controller.LineScanState.DISABLED_HIDDEN
             scan_hardware_source.drift_enabled = False
             test_context.document_controller = test_context.create_document_controller(auto_close=False)
             test_context.document_model = test_context.document_controller.document_model
@@ -2023,7 +2023,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.subscan_enabled = False
             test_context.instrument.subscan_state = stem_controller.SubscanState.DISABLED_HIDDEN
             scan_hardware_source.line_scan_enabled = False
-            test_context.instrument.line_scan_vector = None
+            test_context.instrument.line_scan_state = stem_controller.LineScanState.DISABLED_HIDDEN
             scan_hardware_source.drift_enabled = False
             test_context.document_controller = test_context.create_document_controller(auto_close=False)
             test_context.document_model = test_context.document_controller.document_model

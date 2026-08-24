@@ -244,14 +244,12 @@ class TestScanControlClass(unittest.TestCase):
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
 
             # check assumptions
-            self.assertFalse(model.line_scan_checkbox_enabled)
             self.assertFalse(model.subscan_checkbox_checked)
             self.assertFalse(model.line_scan_checkbox_checked)
             self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_fractional_size)
 
             # acquire one scan
             self._acquire_one(document_controller, scan_hardware_source)
-            self.assertTrue(model.line_scan_checkbox_enabled)
 
             # enable subscan mode
             with PropertyChangedEventWatcher(model, "subscan_checkbox_checked") as watcher:
