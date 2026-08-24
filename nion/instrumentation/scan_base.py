@@ -1735,29 +1735,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__syncing_scan_properties = True
         try:
             if line_scan_vector:
-                if self.__line_scan_state != STEMController.LineScanState.ENABLED:
-                    self.__line_scan_state = STEMController.LineScanState.ENABLED
-                    changed_names.append("line_scan_state")
                 if self.__line_scan_vector != line_scan_vector:
                     self.__line_scan_vector = line_scan_vector
                     changed_names.append("line_scan_vector")
-                if self.__subscan_state != STEMController.SubscanState.DISABLED_HIDDEN:
-                    self.__subscan_state = STEMController.SubscanState.DISABLED_HIDDEN
-                    changed_names.append("subscan_state")
             elif subscan_fractional_size and subscan_fractional_center:
                 subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, subscan_fractional_size)
-                if self.__subscan_state != STEMController.SubscanState.ENABLED_VISIBLE:
-                    self.__subscan_state = STEMController.SubscanState.ENABLED_VISIBLE
-                    changed_names.append("subscan_state")
                 if self.__subscan_region != subscan_region:
                     self.__subscan_region = subscan_region
                     changed_names.append("subscan_region")
                 if self.__subscan_rotation != frame_parameters.subscan_rotation:
                     self.__subscan_rotation = frame_parameters.subscan_rotation
                     changed_names.append("subscan_rotation")
-                if self.__line_scan_state != STEMController.LineScanState.DISABLED:
-                    self.__line_scan_state = STEMController.LineScanState.DISABLED
-                    changed_names.append("line_scan_state")
             for changed_name in changed_names:
                 self.notify_property_changed(changed_name)
         finally:
