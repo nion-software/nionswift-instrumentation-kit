@@ -79,8 +79,10 @@ def _make_synchronized_device(test_context: AcquisitionTestContext.test_context,
     scan_context_description = stem_controller.ScanSpecifier()
     scan_context_description.scan_context_valid = True
     scan_context_description.scan_size = Geometry.IntSize(6, 4)
-    scan_frame_parameters = test_context.scan_hardware_source.get_current_frame_parameters()
-    test_context.scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+    scan_frame_parameters = test_context.scan_hardware_source.apply_scan_context_subscan(
+        test_context.scan_hardware_source.get_current_frame_parameters(),
+        typing.cast(typing.Tuple[int, int], scan_context_description.scan_size)
+    )
     return scan_base.SynchronizedScanAcquisitionDevice(test_context.scan_hardware_source, scan_frame_parameters,
                                                        test_context.camera_hardware_source,
                                                        test_context.camera_hardware_source.get_frame_parameters(0),

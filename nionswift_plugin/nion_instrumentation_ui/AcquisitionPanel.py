@@ -1576,10 +1576,8 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
                       scan_base.ScanHardwareSource) and scan_frame_parameters and camera_frame_parameters:
             scan_context_description = self.__scan_context_description_value_stream.value
             assert scan_context_description
-            scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int],
-                                                                                               scan_context_description.scan_size))
-            scan_size = scan_frame_parameters.scan_size
-            scan_frame_parameters_with_camera_exposure = copy.copy(scan_frame_parameters)
+            scan_frame_parameters_with_camera_exposure = scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+            scan_size = scan_frame_parameters_with_camera_exposure.scan_size
             scan_frame_parameters_with_camera_exposure.pixel_time_us = camera_frame_parameters.exposure * 1E6 if camera_frame_parameters.exposure is not None else scan_frame_parameters.pixel_time_us
             flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_frame_parameters_with_camera_exposure)
             assert camera_frame_time is not None
@@ -1601,8 +1599,7 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source_choice_model.hardware_source)
         scan_context_description = self.__scan_context_description_value_stream.value
         assert scan_context_description
-        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
+        scan_frame_parameters = scan_hardware_source.apply_scan_context_subscan(scan_hardware_source.get_current_frame_parameters(), typing.cast(typing.Tuple[int, int], scan_context_description.scan_size))
         assert scan_frame_parameters.pixel_size.width > 0 and scan_frame_parameters.pixel_size.height > 0
         return scan_base.SynchronizedScanAcquisitionDevice(scan_hardware_source,
                                                            scan_frame_parameters,
@@ -1899,8 +1896,7 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         scan_hardware_source = typing.cast(typing.Optional[scan_base.ScanHardwareSource], self.__scan_hardware_source_choice_model.hardware_source)
         assert scan_hardware_source is not None
 
-        scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters)
+        scan_frame_parameters = scan_hardware_source.apply_scan_context_subscan(scan_hardware_source.get_current_frame_parameters())
 
         return scan_base.ScanAcquisitionDevice(scan_hardware_source, scan_frame_parameters)
 

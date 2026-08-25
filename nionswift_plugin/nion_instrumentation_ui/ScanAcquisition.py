@@ -79,9 +79,7 @@ class ScanAcquisitionController:
 
         scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, self.__scan_hardware_source._hardware_source)
 
-        scan_frame_parameters = scan_hardware_source.get_frame_parameters(2)
-
-        scan_hardware_source.apply_scan_context_subscan(scan_frame_parameters, self.__scan_specifier.size)
+        scan_frame_parameters = scan_hardware_source.apply_scan_context_subscan(scan_hardware_source.get_frame_parameters(2), self.__scan_specifier.size)
 
         # useful code for testing to exit cleanly at this point.
         # self.acquisition_state_changed_event.fire(SequenceState.scanning)
