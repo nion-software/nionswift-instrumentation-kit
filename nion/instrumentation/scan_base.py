@@ -242,6 +242,14 @@ class ScanFrameParameters(ParametersBase):
             )
 
     @property
+    def subscan_pixel_width_override(self) -> typing.Optional[int]:
+        return typing.cast(typing.Optional[int], self.get_parameter("subscan_pixel_width_override", None))
+
+    @subscan_pixel_width_override.setter
+    def subscan_pixel_width_override(self, value: typing.Optional[int]) -> None:
+        self.set_parameter("subscan_pixel_width_override", value)
+
+    @property
     def subscan_rotation(self) -> float:
         return typing.cast(float, self.get_parameter("subscan_rotation", 0.0))
 
@@ -261,6 +269,16 @@ class ScanFrameParameters(ParametersBase):
             self.set_parameter("line_scan_vector", (start.as_tuple(), end.as_tuple()))
         else:
             self.set_parameter("line_scan_vector", None)
+
+    @property
+    def line_scan_pixel_length(self) -> typing.Optional[int]:
+        # parameters must be convertible to JSON; line_scan_pixel_length is stored as an int.
+        return typing.cast(typing.Optional[int], self.get_parameter("line_scan_pixel_length", None))
+
+    @line_scan_pixel_length.setter
+    def line_scan_pixel_length(self, value: typing.Optional[int]) -> None:
+        # parameters must be convertible to JSON; line_scan_pixel_length is stored as an int.
+        self.set_parameter("line_scan_pixel_length", value)
 
     @property
     def ac_line_sync(self) -> bool:
@@ -370,6 +388,8 @@ def update_scan_properties(properties: typing.MutableMapping[str, typing.Any], s
                                    int(scan_frame_parameters.pixel_size.height * scan_frame_parameters.subscan_fractional_size.width))
     else:
         properties["scan_size"] = scan_frame_parameters.pixel_size.as_tuple()
+    if scan_frame_parameters.line_scan_pixel_length is not None:
+        properties["scan_length"] = scan_frame_parameters.line_scan_pixel_length
     if scan_frame_parameters.subscan_fractional_center is not None:
         properties["subscan_fractional_center"] = scan_frame_parameters.subscan_fractional_center.as_tuple()
     if scan_frame_parameters.subscan_rotation:
@@ -849,7 +869,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def periodic(self) -> None: ...
     def get_enabled_channel_indexes(self) -> typing.Sequence[int]: ...
     def get_channel_state(self, channel_index: int) -> ChannelState: ...
-    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None: ...
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> ScanFrameParameters: ...
     def calculate_drift_lines(self, width: int, frame_time: float) -> int: ...
     def calculate_drift_scans(self) -> int: ...
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
@@ -1617,7 +1637,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__line_scan_vector = value
             self.notify_property_changed("line_scan_vector")
 
-    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> None:
+    def apply_scan_context_subscan(self, frame_parameters: ScanFrameParameters, size: typing.Optional[typing.Tuple[int, int]] = None) -> ScanFrameParameters:
+        frame_parameters = copy.copy(frame_parameters)
         scan_context = self.scan_context
         scan_context_size = scan_context.size
         scan_context_center_nm = scan_context.center_nm
@@ -1627,14 +1648,25 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         frame_parameters.center_nm = scan_context_center_nm
         frame_parameters.fov_nm = scan_context.fov_nm or 8.0
         frame_parameters.rotation_rad = scan_context.rotation_rad or 0.0
-        self.__apply_subscan_parameters(frame_parameters, size)
+        return self.__apply_subscan_parameters(frame_parameters, size)
 
-    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> None:
+    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> ScanFrameParameters:
+        frame_parameters = copy.copy(frame_parameters)
         context_size = frame_parameters.pixel_size.to_float_size()
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
         if self.subscan_enabled:
             subscan_region = self.subscan_region
-            subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
+            # Derive low-level subscan pixel counts from user-facing inputs.
+            # Priority:
+            # 1) `subscan_pixel_width_override` (explicit width in pixels, preserves region aspect ratio),
+            # 2) default region-scaled context size (or `size` override when supplied).
+            # Note: `frame_parameters` currently carries both user-input fields and low-level scan values.
+            # This dual-use model is a known limitation and should be split/refactored in a future change.
+            subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
+            if subscan_pixel_width_override and subscan_region.aspect_ratio > 0.0:
+                subscan_pixel_size = Geometry.IntSize(max(int(subscan_pixel_width_override / subscan_region.aspect_ratio), 1), max(subscan_pixel_width_override, 1))
+            else:
+                subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
             frame_parameters.subscan_pixel_size = subscan_pixel_size
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width))
             frame_parameters.subscan_fractional_center = subscan_region.center
@@ -1646,7 +1678,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             end = Geometry.FloatPoint.make(line_scan_vector[1])
             length = Geometry.distance(start, end)
             length = max(length, max(1 / context_size.width, 1 / context_size.height))
-            subscan_pixel_length = max(int(context_size.width * length), 1)
+            subscan_pixel_length = frame_parameters.line_scan_pixel_length
+            subscan_pixel_length = subscan_pixel_length or max(int(context_size.width * length), 1)
             subscan_pixel_size = size or Geometry.IntSize(1, subscan_pixel_length)
             frame_parameters.subscan_pixel_size = subscan_pixel_size
             frame_parameters.subscan_fractional_size = Geometry.FloatSize(1 / context_size.height, length)
@@ -1660,6 +1693,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_fractional_center = None
             frame_parameters.subscan_rotation = 0.0
             frame_parameters.line_scan_vector = None
+        return frame_parameters
 
     def __subscan_state_changed(self, name: str) -> None:
         if name == "subscan_state":
@@ -1908,10 +1942,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__set_current_frame_parameters(scan_frame_parameters)
 
     def __set_current_frame_parameters(self, frame_parameters: ScanFrameParameters, *, sync_scan_properties: bool = True) -> None:
-        frame_parameters = copy.copy(frame_parameters)
         if sync_scan_properties:
             self.__sync_scan_properties_from_frame_parameters(frame_parameters)
-        self.__apply_subscan_parameters(frame_parameters)
+        frame_parameters = self.__apply_subscan_parameters(frame_parameters)
         acquisition_task = self.__acquisition_task
         if isinstance(acquisition_task, ScanAcquisitionTask):
             acquisition_task.set_frame_parameters(frame_parameters)
