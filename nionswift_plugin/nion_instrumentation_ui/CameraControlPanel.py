@@ -33,6 +33,7 @@ from nion.ui import Widgets
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
+from nion.utils import Stream
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DisplayItem
@@ -675,7 +676,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
-        self.__cooler_state_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__cooler_state_action: Stream.ValueStreamAction[camera_base.CoolerState | None] | None = None
 
         help_widget = None
         if self.__delegate and self.__delegate.has_feature("help"):
@@ -799,8 +800,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__cooler_warning_row = cooler_warning_row
         self.__cooler_warning_label = cooler_warning_label
         cooler_state_stream = self.__camera_hardware_source.cooler_state_stream
-        self.__cooler_state_changed_listener = cooler_state_stream.value_stream.listen(lambda value: self.__update_cooler_warning())
-        self.__update_cooler_warning()
+        async_cooler_state_stream = Stream.AsyncRelayStream(document_controller.event_loop, cooler_state_stream)
         parameters_group2.add(binning_row)
         parameters_group2.add_stretch()
 
@@ -858,6 +858,13 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         column_widget.add(status_row)
         column_widget.add(button_row)
         column_widget.add_stretch()
+
+        def update_cooler_warning(cooler_warning_row: UserInterface.BoxWidget, cooler_state: camera_base.CoolerState | None) -> None:
+            # Do not reference self here. ValueStreamAction must not retain CameraControlWidget.
+            cooler_warning_row.visible = cooler_state == camera_base.CoolerState.OFF
+
+        self.__cooler_state_action = Stream.ValueStreamAction(async_cooler_state_stream, functools.partial(update_cooler_warning, self.__cooler_warning_row),)
+        update_cooler_warning(self.__cooler_warning_row, self.__camera_hardware_source.cooler_state)
 
         def profile_combo_text_changed(text: str) -> None:
             if not self.__changes_blocked:
@@ -967,9 +974,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = typing.cast(typing.Any, None)
         self.__image_display_mouse_released_event_listener.close()
         self.__image_display_mouse_released_event_listener = typing.cast(typing.Any, None)
-        if self.__cooler_state_changed_listener:
-            self.__cooler_state_changed_listener.close()
-            self.__cooler_state_changed_listener = None
+        self.__cooler_state_action = None
         self.__acquisition_state_changed_listener = typing.cast(typing.Any, None)
         self.__state_controller.close()
         self.__state_controller = typing.cast(typing.Any, None)
@@ -1029,14 +1034,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
     def image_panel_key_released(self, display_panel: DisplayPanel.DisplayPanel, key: UserInterface.Key) -> bool:
         self.__shift_click_state = None
         return False
-
-    def __get_cooler_enabled(self) -> bool:
-        cooler_state = self.__camera_hardware_source.cooler_state_stream.value
-        return cooler_state != camera_base.CoolerState.OFF
-
-    def __update_cooler_warning(self) -> None:
-        cooler_enabled = self.__get_cooler_enabled()
-        self.__cooler_warning_row.visible = not cooler_enabled
 
     @property
     def state_controller(self) -> CameraControlStateController:
