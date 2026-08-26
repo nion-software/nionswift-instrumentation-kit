@@ -676,7 +676,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         self.__image_display_mouse_pressed_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_pressed_event.listen(self.image_panel_mouse_pressed)
         self.__image_display_mouse_released_event_listener = DisplayPanel.DisplayPanelManager().image_display_mouse_released_event.listen(self.image_panel_mouse_released)
         self.__mouse_pressed = False
-        self.__cooler_state_action: Stream.ValueStreamAction[camera_base.CoolerState | None] | None = None
+        self.__cooler_state_action: Stream.ValueStreamAction[camera_base.CoolerState] | None = None
 
         help_widget = None
         if self.__delegate and self.__delegate.has_feature("help"):
