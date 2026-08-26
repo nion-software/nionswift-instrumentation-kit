@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nionswift-instrumentation"
 version = "23.8.0"
+# requires nionui 11.2 or later (canvas user interface)
 authors = [
     { name = "Nion Software", email = "swift@nion.com" }
 ]
