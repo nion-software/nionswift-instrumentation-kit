@@ -861,7 +861,8 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         def update_cooler_warning(cooler_warning_row: UserInterface.BoxWidget, cooler_state: camera_base.CoolerState | None) -> None:
             # Do not reference self here. ValueStreamAction must not retain CameraControlWidget.
-            cooler_warning_row.visible = cooler_state == camera_base.CoolerState.OFF
+            # NOTE: hard coded to this to NOT VISIBLE until underlying cooler state stream works properly.
+            cooler_warning_row.visible = False  # cooler_state == camera_base.CoolerState.OFF
 
         self.__cooler_state_action = Stream.ValueStreamAction(async_cooler_state_stream, functools.partial(update_cooler_warning, self.__cooler_warning_row),)
         update_cooler_warning(self.__cooler_warning_row, self.__camera_hardware_source.cooler_state)
