@@ -3011,19 +3011,52 @@ class CameraDataStream(Acquisition.DataStream):
                     data_descriptor=DataAndMetadata.DataDescriptor(False, 0, xdata.datum_dimension_count),
                     timezone=xdata.timezone,
                     timezone_offset=xdata.timezone_offset)
-                # data_count is the total for the data provided by the child data stream. some data streams will
-                # provide a slice into a chunk of data representing the entire stream; whereas others will provide
-                # smaller chunks.
-                data_count = int(numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64))
-                data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
-                source_slice = (slice(start_index, stop_index),) + (slice(None),) * len(xdata.datum_dimension_shape)
-                data_stream_event = Acquisition.DataStreamEventArgs(channel,
-                                                                    data_metadata,
-                                                                    data,
-                                                                    count,
-                                                                    source_slice,
-                                                                    Acquisition.DataStreamStateEnum.COMPLETE)
-                raw_data_stream_events.append((weakref.ref(self), data_stream_event))
+                if xdata.is_navigable and len(xdata.navigation_dimension_shape) == 2 and not data_channel_data.flags['C_CONTIGUOUS']:
+                    # Non-contiguous navigable data: flyback columns have been removed by slicing, leaving
+                    # a strided array where rows are individually contiguous but cross-row flattening is not.
+                    # Flattening via reshape would force a copy; instead emit one event per row so that
+                    # each passed array is a contiguous view - zero copy throughout.
+                    width = xdata.navigation_dimension_shape[1]
+                    start_row, start_col = divmod(start_index, width)
+                    stop_row, stop_col = divmod(stop_index, width)
+
+                    def _append_row_event(row_data: _NDArray, frame_count: int) -> None:
+                        # row_data is shaped (frame_count, *datum_shape) and is contiguous
+                        row_source_slice = (slice(0, frame_count),) + (slice(None),) * xdata.datum_dimension_count
+                        event = Acquisition.DataStreamEventArgs(
+                            channel, data_metadata, row_data, frame_count, row_source_slice,
+                            Acquisition.DataStreamStateEnum.COMPLETE)
+                        raw_data_stream_events.append((weakref.ref(self), event))
+
+                    if start_row == stop_row:
+                        # all new pixels are within a single row
+                        _append_row_event(data_channel_data[start_row, start_col:stop_col], stop_col - start_col)
+                    else:
+                        # first partial row (if we didn't start at column 0)
+                        if start_col != 0:
+                            _append_row_event(data_channel_data[start_row, start_col:], width - start_col)
+                        # complete rows
+                        first_full_row = start_row + 1 if start_col != 0 else start_row
+                        for row in range(first_full_row, stop_row):
+                            _append_row_event(data_channel_data[row], width)
+                        # last partial row (if we didn't stop exactly at a row boundary)
+                        if stop_col != 0:
+                            _append_row_event(data_channel_data[stop_row, :stop_col], stop_col)
+                else:
+                    # Contiguous data (no flyback gaps, or non-navigable): reshape is a zero-copy view.
+                    # data_count is the total for the data provided by the child data stream. some data streams will
+                    # provide a slice into a chunk of data representing the entire stream; whereas others will provide
+                    # smaller chunks.
+                    data_count = int(numpy.prod(xdata.navigation_dimension_shape, dtype=numpy.int64))
+                    data = data_channel_data.reshape((data_count,) + tuple(xdata.datum_dimension_shape))
+                    source_slice = (slice(start_index, stop_index),) + (slice(None),) * xdata.datum_dimension_count
+                    data_stream_event = Acquisition.DataStreamEventArgs(channel,
+                                                                        data_metadata,
+                                                                        data,
+                                                                        count,
+                                                                        source_slice,
+                                                                        Acquisition.DataStreamStateEnum.COMPLETE)
+                    raw_data_stream_events.append((weakref.ref(self), data_stream_event))
                 # total_count is the total for this entire stream.
                 self.__progress = valid_index / self.__total_count
             self.__last_index = valid_index
