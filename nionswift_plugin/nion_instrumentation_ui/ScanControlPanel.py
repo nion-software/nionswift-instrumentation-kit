@@ -31,6 +31,7 @@ from nion.swift import Workspace
 from nion.swift.model import ApplicationData
 from nion.swift.model import DataItem
 from nion.swift.model import DocumentModel
+from nion.swift.model import Feature
 from nion.swift.model import PlugInManager
 from nion.ui import CanvasItem
 from nion.ui import CanvasUserInterface
@@ -971,6 +972,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__width = 0
         self.__height = 0
         self.__width_height_linked = self.__frame_parameters.pixel_size.width == self.__frame_parameters.pixel_size.height
+        self.__subscan_pixel_width_override: int | None = None
+        self.__placeholder_subscan_pixel_width_override = 0
         self.__pixel_time_str = str()
         self.__fov_str = str()
         self.__rotation_deg_str = str()
@@ -1037,6 +1040,14 @@ class ScanControlPanelModel(Observable.Observable):
         if self.__height != frame_parameters.pixel_size.height:
             self.__height = frame_parameters.pixel_size.height
             self.notify_property_changed("height_str")
+        if self.__subscan_pixel_width_override != frame_parameters.subscan_pixel_width_override:
+            self.__subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
+            self.notify_property_changed("subscan_width_str")
+        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
+        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
+        if self.__placeholder_subscan_pixel_width_override != subscan_width:
+            self.__placeholder_subscan_pixel_width_override = subscan_width
+            self.notify_property_changed("placeholder_subscan_width_str")
         pixel_time_str = f"{frame_parameters.pixel_time_us:.2f}"
         if pixel_time_str != self.__pixel_time_str:
             self.__pixel_time_str = pixel_time_str
@@ -1246,6 +1257,21 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
+    def subscan_width_str(self) -> str | None:
+        return str(self.__subscan_pixel_width_override) if self.__subscan_pixel_width_override else None
+
+    @subscan_width_str.setter
+    def subscan_width_str(self, value_str: str | None) -> None:
+        value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1) if value_str else None
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.subscan_pixel_width_override = value
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    @property
+    def placeholder_subscan_width_str(self) -> str | None:
+        return str(self.__placeholder_subscan_pixel_width_override) if self.__placeholder_subscan_pixel_width_override else None
+
+    @property
     def width_height_linked(self) -> bool:
         """Whether width and height are linked. If linking is enabled, changing one will change the other to match."""
         return self.__width_height_linked
@@ -1295,6 +1321,20 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def increase_subscan_width(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
+        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
+        frame_parameters.subscan_pixel_width_override = subscan_width * 2
+        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+
+    def decrease_subscan_width(self) -> None:
+        frame_parameters = copy.copy(self.__frame_parameters)
+        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
+        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
+        frame_parameters.subscan_pixel_width_override = subscan_width // 2
         self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
@@ -1618,12 +1658,13 @@ class ScanPanelController(Declarative.Handler):
                                  upper: KeyAndAction | None = None,
                                  color_binding: str | None = None,
                                  tool_tip_binding: str | None = None,
-                                 text_width: int | None = None) -> Declarative.UIDescription:
+                                 text_width: int | None = None,
+                                 placeholder_text_binding: str | None = None) -> Declarative.UIDescription:
             return u.create_row(
                 u.create_label(text=label, color=color_binding, tool_tip=tool_tip_binding, width=text_width, text_alignment_vertical="vcenter", text_alignment_horizontal="right"),
                 u.create_row(
                     CharButtonFactory.create_char_button(text=lower.key, on_clicked=lower.action) if lower else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
-                    u.create_line_edit(text=text_binding, width=44),
+                    u.create_line_edit(text=text_binding, placeholder_text=placeholder_text_binding, width=44),
                     CharButtonFactory.create_char_button(text=upper.key, on_clicked=upper.action) if upper else u.create_spacing(CharButtonFactory.DEFAULT_WIDTH),
                     u.create_stretch(),
                     spacing=2
@@ -1636,6 +1677,7 @@ class ScanPanelController(Declarative.Handler):
         rotation_row = create_line_edit_row(_("Rot. (deg)"), "@binding(_model.rotation_deg_str)", text_width=68)
         width_row = create_line_edit_row(_("Width"), "@binding(_model.width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
         height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), text_width=48)
+        subscan_width_row = create_line_edit_row(_("Size"), "@binding(_model.subscan_width_str)", KeyAndAction("D", "handle_decrease_subscan_width"), KeyAndAction("R", "handle_increase_subscan_width"), text_width=48, placeholder_text_binding="@binding(_model.placeholder_subscan_width_str)")
 
         size_row = u.create_row(
             u.create_column(width_row, height_row, spacing=2),
@@ -1669,16 +1711,18 @@ class ScanPanelController(Declarative.Handler):
 
         self.display_item: DisplayItem.DisplayItem | None = document_controller.document_model.display_items[10] if len(document_controller.document_model.display_items) > 10 else None
 
+        if Feature.FeatureManager().is_feature_enabled("feature.subscan_width_override"):
+            size_subscan_column = u.create_column(size_row, subscan_checkbox, line_scan_checkbox, subscan_width_row, u.create_stretch(), spacing=4)
+        else:
+            size_subscan_column = u.create_column(size_row, subscan_checkbox, line_scan_checkbox, u.create_stretch(), spacing=4)
+
         self.ui_view = u.create_column(
             scan_profile_row,
             # region_row,
             # region2_row,
             u.create_row(
                 u.create_column(pixel_time_row, fov_row, rotation_row, u.create_stretch(), spacing=4),
-                u.create_column(
-                    u.create_column(size_row, subscan_checkbox, line_scan_checkbox, u.create_stretch(), spacing=4),
-                    u.create_stretch()
-                ),
+                u.create_column(size_subscan_column, u.create_stretch()),
                 spacing=8,
                 margin_horizontal=4
             ),
@@ -1756,6 +1800,12 @@ class ScanPanelController(Declarative.Handler):
 
     def handle_decrease_height(self, widget: UserInterface.Widget) -> None:
         self._model.decrease_height()
+
+    def handle_increase_subscan_width(self, widget: UserInterface.Widget) -> None:
+        self._model.increase_subscan_width()
+
+    def handle_decrease_subscan_width(self, widget: UserInterface.Widget) -> None:
+        self._model.decrease_subscan_width()
 
     def handle_scan_button(self, widget: UserInterface.Widget) -> None:
         self._model.handle_scan_button_clicked()
@@ -2136,3 +2186,6 @@ def stop() -> None:
         hardware_source_removed_event_listener = None
     for hardware_source in HardwareSource.HardwareSourceManager().hardware_sources:
         unregister_scan_panel(hardware_source)
+
+
+Feature.FeatureManager().add_feature(Feature.Feature("feature.subscan_width_override", "Subscan Width Override Field in Scan Control Panel.", False))

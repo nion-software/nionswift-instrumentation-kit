@@ -137,6 +137,24 @@ class TestScanControlClass(unittest.TestCase):
                 model.height_str = "516"
                 self.assertTrue(watcher.changed)
 
+            # test changing subscan width
+            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
+            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertIsNone(model.subscan_width_str)
+            model.subscan_width_str = "128"
+            self.assertEqual(128, scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertEqual("128", model.subscan_width_str)
+            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
+            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            # test that property changed event is emitted
+            with PropertyChangedEventWatcher(model, "subscan_width_str") as watcher:
+                model.subscan_width_str = "129"
+                self.assertTrue(watcher.changed)
+            # test clearing the override
+            model.subscan_width_str = None
+            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertIsNone(model.subscan_width_str)
+
             # test changing rotation
             profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
             self.assertAlmostEqual(scan_settings.get_frame_parameters(0).rotation_deg, float(model.rotation_deg_str))
@@ -200,6 +218,39 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
 
+    def test_subscan_width_placeholder(self):
+        # test that the subscan width placeholder tracks the effective subscan width (override or pixel width)
+        # and that setting/clearing the override behaves correctly
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
+            model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
+            scan_settings = scan_hardware_source.scan_settings
+
+            # initial assumptions: no override, placeholder tracks pixel width
+            self.assertIsNone(model.subscan_width_str)
+            self.assertEqual(str(scan_settings.get_frame_parameters(0).pixel_size.width), model.placeholder_subscan_width_str)
+
+            # changing width (with no override) should update the placeholder
+            with PropertyChangedEventWatcher(model, "placeholder_subscan_width_str") as watcher:
+                model.width_str = "600"
+                self.assertTrue(watcher.changed)
+                self.assertEqual("600", model.placeholder_subscan_width_str)
+
+            # setting an explicit override should update subscan_width_str and be reflected on the model
+            model.subscan_width_str = "200"
+            self.assertEqual("200", model.subscan_width_str)
+            self.assertEqual(200, scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+
+            # changing width further should not affect the explicit override or its str representation
+            model.width_str = "700"
+            self.assertEqual("200", model.subscan_width_str)
+
+            # clearing the override falls back to tracking the pixel width again via the placeholder
+            model.subscan_width_str = None
+            self.assertIsNone(model.subscan_width_str)
+            self.assertEqual("700", model.placeholder_subscan_width_str)
+
     def test_increase_decrease_fields(self):
         # test that the increase/decrease methods work for pixel time, fov, width, and height
         with self._test_context() as test_context:
@@ -235,6 +286,14 @@ class TestScanControlClass(unittest.TestCase):
             self.assertGreater(scan_settings.get_frame_parameters(0).pixel_size.height, initial_height)
             model.decrease_height()
             self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, initial_height)
+
+            # test increase/decrease subscan width, starting from no override (defaults to pixel width)
+            initial_width = scan_settings.get_frame_parameters(0).pixel_size.width
+            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            model.increase_subscan_width()
+            self.assertEqual(scan_settings.get_frame_parameters(0).subscan_pixel_width_override, initial_width * 2)
+            model.decrease_subscan_width()
+            self.assertEqual(scan_settings.get_frame_parameters(0).subscan_pixel_width_override, initial_width)
 
     def test_subscan_and_line_scan_checkboxes(self):
         # test that the increase/decrease methods work for pixel time, fov, width, and height
