@@ -15,6 +15,7 @@ from nion.utils import Stream
 _NDArray = numpy.typing.NDArray[typing.Any]
 
 
+
 class ValueManagerLike(typing.Protocol):
     def get_value(self, name: str) -> typing.Optional[float]:
         ...
@@ -39,6 +40,9 @@ class ValueManagerLike(typing.Protocol):
         ...
 
     def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
+        ...
+
+    def get_mode_stream(self, mode_stream_id: str) -> Stream.AbstractStream[stem_controller.ModeSession]:
         ...
 
 
@@ -75,6 +79,10 @@ class Instrument(stem_controller.STEMController):
         self.__probe_position: typing.Optional[Geometry.FloatPoint] = None
         self.__live_probe_position: typing.Optional[Geometry.FloatPoint] = None
         self._is_synchronized = False
+
+        # mode tracking for enter_mode/exit_mode
+        self.__active_modes: dict[str, stem_controller.ModeSession] = {}
+        self.__mode_session_counter = 0
 
     def _get_config_property(self, name: str) -> typing.Any:
         if name in ("stage_size_nm", "max_defocus"):
@@ -243,6 +251,90 @@ class Instrument(stem_controller.STEMController):
 
     def get_control_try_value_stream(self, control_name: str) -> Stream.AbstractStream[stem_controller.TryValue[float]]:
         return self.__value_manager.get_control_try_value_stream(control_name)
+
+    def _enter_mode(self, mode_id: str, payload: typing.Mapping[str, typing.Any]) -> str:
+        """
+        Lower-level method to handle mode entry. Subclasses can override this to implement
+        mode-specific behavior. The default implementation allows arbitrary modes for testing.
+
+        Args:
+            mode_id: Identifier for the mode being entered
+            payload: Mode-specific configuration data
+
+        Returns:
+            A unique mode_session_id identifying this mode session
+        """
+        # Default implementation: generate a unique session ID and track the mode
+        self.__mode_session_counter += 1
+        mode_session_id = f"{mode_id}_{self.__mode_session_counter}"
+        mode_session = stem_controller.ModeSession(
+            mode_id=mode_id,
+            payload=dict(payload),
+            active=True,
+            mode_session_id=mode_session_id,
+            end_reason=None
+        )
+        self.__active_modes[mode_session_id] = mode_session
+        # Send the mode entry event to the mode stream
+        mode_stream = typing.cast(Stream.ValueStream[stem_controller.ModeSession], typing.cast(typing.Any, self.__value_manager.get_mode_stream("default")))
+        mode_stream.value = mode_session
+        return mode_session_id
+
+    def _exit_mode(self, mode_session_id: str) -> stem_controller.ModeEndReason | None:
+        """
+        Lower-level method to handle mode exit. Subclasses can override this to implement
+        mode-specific cleanup behavior. The default implementation allows arbitrary modes for testing.
+
+        Args:
+            mode_session_id: The session ID returned by _enter_mode
+
+        Returns:
+            The reason the mode ended, or None if exited normally
+        """
+        # Default implementation: mark the mode as inactive
+        end_reason = stem_controller.ModeEndReason.COMMITTED
+        if mode_session_id in self.__active_modes:
+            old_session = self.__active_modes[mode_session_id]
+            # Create updated session with active=False
+            updated_session = stem_controller.ModeSession(
+                mode_id=old_session.mode_id,
+                payload=old_session.payload,
+                active=False,
+                mode_session_id=old_session.mode_session_id,
+                end_reason=end_reason
+            )
+            self.__active_modes[mode_session_id] = updated_session
+            # Send the mode exit event to the mode stream
+            mode_stream = typing.cast(Stream.ValueStream[stem_controller.ModeSession], typing.cast(typing.Any, self.__value_manager.get_mode_stream("default")))
+            mode_stream.value = updated_session
+        return end_reason
+
+    def enter_mode(self, mode_id: str, payload: typing.Mapping[str, typing.Any]) -> str:
+        """
+        Enter a mode with the given mode_id and payload. This calls _enter_mode which
+        can be overridden by subclasses for mode-specific behavior.
+
+        Args:
+            mode_id: Identifier for the mode being entered
+            payload: Mode-specific configuration data
+
+        Returns:
+            A unique mode_session_id identifying this mode session
+        """
+        return self._enter_mode(mode_id, payload)
+
+    def exit_mode(self, mode_session_id: str) -> None:
+        """
+        Exit the mode associated with the given mode_session_id. This calls _exit_mode
+        which can be overridden by subclasses for mode-specific cleanup.
+
+        Args:
+            mode_session_id: The session ID returned by enter_mode
+        """
+        self._exit_mode(mode_session_id)
+
+    def get_mode_stream(self, mode_stream_id: str) -> Stream.AbstractStream[stem_controller.ModeSession]:
+        return self.__value_manager.get_mode_stream(mode_stream_id)
 
     @property
     def axis_descriptions(self) -> typing.Sequence[stem_controller.AxisDescription]:
