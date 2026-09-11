@@ -1390,7 +1390,7 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
-        self.__subscan_settings_changed_listener = typing.cast(typing.Any, None)
+        self.__line_scan_vector_changed_listener = typing.cast(typing.Any, None)
         self.__document_model.unregister_implicit_dependency(self)
         self.__graphic_set.close()
         self.__graphic_set = typing.cast(typing.Any, None)
