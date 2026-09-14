@@ -159,9 +159,15 @@ class TestScanControlClass(unittest.TestCase):
             profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
             self.assertAlmostEqual(scan_settings.get_frame_parameters(0).rotation_deg, float(model.rotation_deg_str))
             model.rotation_deg_str = "12.3"
+
             self.assertAlmostEqual(12.3, scan_settings.get_frame_parameters(0).rotation_deg)
+            # check rotation has changed for profile 1 to ensure it is shared amongst all profiles
+            self.assertAlmostEqual(12.3, scan_settings.get_frame_parameters(1).rotation_deg)
             self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            frame_parameters_dict = scan_settings.get_frame_parameters(1).as_dict()
+            frame_parameters_dict.pop('rotation_rad')
+            # check that other parameters have not changed (rotation is shared accross all profiles)
+            self.assertEqual(profile_frame_parameters_list[1].as_dict(), frame_parameters_dict)
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "rotation_deg_str") as watcher:
                 model.rotation_deg_str = "12.4"
