@@ -1386,9 +1386,13 @@ class ScanControlPanelModel(Observable.Observable):
     @rotation_deg_str.setter
     def rotation_deg_str(self, value: str) -> None:
         rotation_deg = Converter.FloatToStringConverter().convert_back(value) or 0.0
-        frame_parameters = copy.copy(self.__frame_parameters)
-        frame_parameters.rotation_rad = rotation_deg * math.pi / 180.0
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        rotation_rad = rotation_deg * math.pi / 180.0
+        # Set rotation for all profiles so that the rotation is consistent across profiles.
+        for profile_index in range(self.profiles_model.count):
+            frame_parameters = copy.copy(self.__scan_hardware_source.get_frame_parameters(profile_index))
+            if frame_parameters.rotation_rad != rotation_rad:
+                frame_parameters.rotation_rad = rotation_rad
+                self.__scan_hardware_source.set_frame_parameters(profile_index, frame_parameters)
 
     @property
     def subscan_checkbox_checked(self) -> bool:
