@@ -1388,6 +1388,7 @@ class ScanControlPanelModel(Observable.Observable):
         rotation_deg = Converter.FloatToStringConverter().convert_back(value) or 0.0
         rotation_rad = rotation_deg * math.pi / 180.0
         # Set rotation for all profiles so that the rotation is consistent across profiles.
+        # This is needed to ensure the rotation is updated for all profiles on the UI  even when no scan is currently running
         for profile_index in range(self.profiles_model.count):
             frame_parameters = copy.copy(self.__scan_hardware_source.get_frame_parameters(profile_index))
             if frame_parameters.rotation_rad != rotation_rad:
