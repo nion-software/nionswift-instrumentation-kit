@@ -88,6 +88,10 @@ class ParametersBase:
     def clear_parameter(self, name: str) -> None:
         self.__d.pop(name, None)
 
+    def _copy_parameters_from(self, parameters: ParametersBase) -> None:
+        # Copy the backing parameter map directly so conversions do not depend on dictionary serialization.
+        self.__d = copy.deepcopy(parameters.__d)
+
 
 # subclass of ScanFrameParameters when mypy #13954 is fixed.
 class ScanFrameParameters(ParametersBase):

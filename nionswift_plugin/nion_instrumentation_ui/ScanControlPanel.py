@@ -1189,7 +1189,7 @@ class ScanControlPanelModel(Observable.Observable):
         return scan_profile.ScanProfile.from_scan_frame_parameters(self.__scan_hardware_source.get_frame_parameters(profile_index))
 
     def __set_profile_frame_parameters(self, profile_index: int, frame_parameters: scan_profile.ScanProfile) -> None:
-        self.__scan_hardware_source.set_frame_parameters(profile_index, frame_parameters.to_scan_frame_parameters(self.__scan_hardware_source.scan_settings.get_scan_frame_parameters_from_dict))
+        self.__scan_hardware_source.set_frame_parameters(profile_index, frame_parameters.to_scan_frame_parameters())
 
     def __update_profile_index(self, profile_index: int) -> None:
         self.__handle_state_changed()

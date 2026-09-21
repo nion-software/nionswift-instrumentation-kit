@@ -12,46 +12,7 @@ from nion.instrumentation import scan_base
 _VectorType = typing.Tuple[typing.Tuple[float, float], typing.Tuple[float, float]]
 
 
-class ParametersBase:
-    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        self.__d: typing.Dict[str, typing.Any] = dict()
-        assert not args or isinstance(args[0], dict)
-        if args and isinstance(args[0], dict):
-            self.__d.update(args[0])
-        self.__d.update(kwargs)
-
-    def __copy__(self) -> ParametersBase:
-        return copy.deepcopy(self)
-
-    def __deepcopy__(self, memo: typing.Dict[typing.Any, typing.Any]) -> ParametersBase:
-        deepcopy = self.__class__(copy.deepcopy(self.as_dict()))
-        memo[id(self)] = deepcopy
-        return deepcopy
-
-    def as_dict(self) -> typing.Dict[str, typing.Any]:
-        return copy.deepcopy(self.__d)
-
-    def has_parameter(self, name: str) -> bool:
-        return name in self.__d
-
-    def get_parameter(self, name: str, default_value: typing.Any = None) -> typing.Any:
-        return self.__d.get(name, default_value)
-
-    def set_parameter(self, name: str, value: typing.Any) -> None:
-        if value is not None:
-            self.__d[name] = value
-        else:
-            self.__d.pop(name, None)
-
-    def clear_parameter(self, name: str) -> None:
-        self.__d.pop(name, None)
-
-    def _copy_parameters_from(self, parameters: ParametersBase) -> None:
-        # Copy the backing parameter map directly so conversions do not depend on dictionary serialization.
-        self.__d = copy.deepcopy(parameters.__d)
-
-
-class ScanProfile(ParametersBase):
+class ScanProfile(scan_base.ParametersBase):
     """High-level scan profile.
 
     This is the UI-facing representation of scan settings and is intended for use by the UI and layers above the
