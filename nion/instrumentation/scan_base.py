@@ -956,7 +956,7 @@ class ScanSettingsMode:
 
     mode_id is used for storing the mode reference in a file. it is not user visible and should be an identifier.
 
-    frame_parameters are the associated frame parameters. these may be a subclass of ScanFrameParameters.
+    frame_parameters are the associated scan frame parameters. This stores the default frame parameters for this mode.
     """
     name: str
     mode_id: str
@@ -1157,10 +1157,10 @@ class ScanSettings(ScanSettingsProtocol):
         # self.settings_changed_event.fire(self.__save_settings())
         self.frame_parameters_changed_event.fire(settings_index, frame_parameters)
         # update the local frame parameters.
-        # in order to facilitate profile changes from the SuperScan, which are sent partially
-        # when setting the frame parameters, do this _after_ the profile parameters have changed
+        # in order to facilitate parameter changes from the SuperScan, which are sent partially
+        # when setting the frame parameters, do this _after_ the parameters have changed
         # (in the frame_parameters_changed_event). this way, setting the current frame parameters
-        # shouldn't cause partially updated profile parameters to be sent from the low level.
+        # shouldn't cause partially updated parameters to be sent from the low level.
         # this all needs to be reworked once the SuperScan UI behaves properly.
         if settings_index == self.__current_settings_index:
             self.__set_current_frame_parameters(frame_parameters)
