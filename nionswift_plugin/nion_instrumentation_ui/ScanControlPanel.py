@@ -2507,7 +2507,24 @@ class ScanDisplayPanelController:
         decrease_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_decrease_pmt_clicked, self.__channel_index)
         increase_pmt_button.on_button_clicked = functools.partial(self.__state_controller.handle_increase_pmt_clicked, self.__channel_index)
 
+        # call the state controller periodic handler regularly on the event loop.
+        self.__event_loop = display_panel.document_controller.event_loop
+        self.__periodic_handle: asyncio.TimerHandle | None = None
+        self.__schedule_periodic()
+
+    def __schedule_periodic(self) -> None:
+        self.__periodic_handle = self.__event_loop.call_later(0.25, self.__handle_periodic)
+
+    def __handle_periodic(self) -> None:
+        try:
+            self.__state_controller.handle_periodic()
+        finally:
+            self.__schedule_periodic()
+
     def close(self) -> None:
+        if self.__periodic_handle:
+            self.__periodic_handle.cancel()
+            self.__periodic_handle = None
         self.__thread_helper.close()
         self.__thread_helper = typing.cast(typing.Any, None)
         self.__display_panel.footer_canvas_item.remove_canvas_item(self.__playback_controls_composition)
