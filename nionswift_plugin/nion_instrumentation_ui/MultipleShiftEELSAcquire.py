@@ -115,7 +115,7 @@ class AcquireController(metaclass=Utility.Singleton):
                 if task_object is not None:
                     # Update task panel with progress acquiring dark
                     # reference
-                    task_object.update_progress(_("Grabbing dark data frame {}.").format(frame_index + 1),
+                    task_object.update_progress(_("Grabbing dark data frame {frame_number}.").format(frame_number=frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
             return dark_sum
 
@@ -162,7 +162,7 @@ class AcquireController(metaclass=Utility.Singleton):
                     image_stack_data[frame_index] = data
                 if task_object is not None:
                     # Update the task panel with the progress
-                    task_object.update_progress(_("Grabbing EELS data frame {}.").format(frame_index + 1),
+                    task_object.update_progress(_("Grabbing EELS data frame {frame_number}.").format(frame_number=frame_index + 1),
                                                 (frame_index + 1, number_frames), None)
 
             logging.getLogger("camera_control_ui").info(f"Finishing image acquisition.")
@@ -221,7 +221,7 @@ class AcquireController(metaclass=Utility.Singleton):
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(
-                        _("Cross correlating frame {}.").format(index),
+                        _("Cross correlating frame {frame_number}.").format(frame_number=index),
                         (index + 1, number_frames), None)
                 # TODO: make interpolation factor variable
                 # (it is hard-coded to 100 here.)
@@ -238,7 +238,7 @@ class AcquireController(metaclass=Utility.Singleton):
             for index, _slice in enumerate(stack):
                 if task_object is not None:
                     task_object.update_progress(
-                        _("Summing frame {}.").format(index),
+                        _("Summing frame {frame_number}.").format(frame_number=index),
                         (index + 1, number_frames), None)
                 _slice_xdata = DataAndMetadata.new_data_and_metadata(_slice)
                 shifted_slice_data = xd.shift(_slice_xdata, shifts[index])
