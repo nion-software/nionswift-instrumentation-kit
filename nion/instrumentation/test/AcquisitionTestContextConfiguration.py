@@ -262,3 +262,6 @@ class AcquisitionTestContextConfiguration:
             Registry.unregister_component(component, {"camera_module"})
         Registry.unregister_component(Registry.get_component("scan_module"), {"scan_module"})
         Registry.unregister_component(Registry.get_component("stem_controller"), {"instrument_controller", "stem_controller"})
+        # remove the configuration files written during the test run so no residue is left in the working directory.
+        if self.configuration_location.exists():
+            shutil.rmtree(self.configuration_location)
