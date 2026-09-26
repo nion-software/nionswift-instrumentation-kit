@@ -24,6 +24,7 @@ from nion.instrumentation import DriftTracker
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.instrumentation.test import HardwareSource_test
 from nion.swift import DocumentController
 from nion.swift import Facade
@@ -1960,6 +1961,23 @@ class TestCameraControlClass(unittest.TestCase):
 
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(), intensity_calibration))
+
+    def test_camera_control_panel_periodic_delivers_camera_log_messages(self) -> None:
+        configuration = AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration()
+        # the camera hardware source reads the logger function from the camera device when it is created.
+        setattr(configuration.ronchigram_camera_device, "periodic_logger_fn", lambda: (["message"], list()))
+        with AcquisitionTestContext.test_context(configuration) as test_context:
+            logged_messages: list[str] = list()
+
+            def handle_log_messages(messages: typing.Sequence[str], data_elements: typing.Sequence[typing.Any]) -> None:
+                logged_messages.extend(messages)
+
+            log_messages_listener = test_context.camera_hardware_source.log_messages_event.listen(handle_log_messages)
+            panel = CameraControlPanel.CameraControlPanel(test_context.document_controller, "camera-control-panel", {"hardware_source_id": test_context.camera_hardware_source.hardware_source_id})
+            with contextlib.closing(panel):
+                panel.create_dock_widget("Camera", ["left"], "left")
+                panel.periodic()
+            self.assertEqual(["message"], logged_messages)
 
     def planned_test_custom_view_followed_by_ui_view_uses_ui_frame_parameters(self):
         pass

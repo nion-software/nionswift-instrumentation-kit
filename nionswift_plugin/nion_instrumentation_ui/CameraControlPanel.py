@@ -957,11 +957,6 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
 
         acquisition_state_changed("value")
 
-    # HACK: this is used to dump log messages to Swift.
-    def periodic(self) -> None:
-        self.__state_controller.handle_periodic()
-        super().periodic()
-
     def close(self) -> None:
         self.__thread_helper.close()
         self.__thread_helper = typing.cast(typing.Any, None)
@@ -1047,13 +1042,21 @@ class CameraControlPanel(Panel.Panel):
         ui = document_controller.ui
         self.widget = ui.create_column_widget()
         self.hardware_source_id = properties["hardware_source_id"]
+        self.__camera_control_widget: CameraControlWidget | None = None
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.hardware_source_id)
         if hardware_source:
             camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
             camera_control_widget = CameraControlWidget(self.document_controller, camera_hardware_source)
+            self.__camera_control_widget = camera_control_widget
             self.widget.add(camera_control_widget)
             self.widget.add_spacing(12)
             self.widget.add_stretch()
+
+    # periodic is used to deliver camera log messages to Swift.
+    def periodic(self) -> None:
+        if self.__camera_control_widget:
+            self.__camera_control_widget.state_controller.handle_periodic()
+        super().periodic()
 
 
 def create_camera_panel(document_controller: DocumentController.DocumentController, panel_id: str, properties: typing.Mapping[str, typing.Any]) -> Panel.Panel:
