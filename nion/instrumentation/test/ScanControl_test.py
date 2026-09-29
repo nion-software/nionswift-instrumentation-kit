@@ -16,6 +16,7 @@ import uuid
 import numpy
 
 from nion.data import Calibration
+from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
@@ -1319,6 +1320,24 @@ class TestScanControlClass(unittest.TestCase):
             finally:
                 scan_listener.close()
                 instrument_listener.close()
+
+    def test_sequence_mode_is_observable_on_scan_hardware_source(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            # record the sequence mode at each notification, which arrives on the thread running the acquisition.
+            in_sequence_mode_list: list[bool] = list()
+
+            def handle_property_changed(property_name: str) -> None:
+                if property_name == "is_in_sequence_mode":
+                    in_sequence_mode_list.append(scan_hardware_source.is_in_sequence_mode)
+
+            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            Acquisition.acquire(Acquisition.MakerDataStream(data_stream))
+            self.assertEqual([True, False], in_sequence_mode_list)
+            property_changed_event_listener = None
 
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
         with self._test_context() as test_context:
