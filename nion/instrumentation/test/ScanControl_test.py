@@ -17,6 +17,7 @@ import numpy
 
 from nion.data import Calibration
 from nion.instrumentation import AcquisitionPreferences
+from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
@@ -747,6 +748,44 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[1].dimensional_shape, (200, 200))
             self.assertEqual(recorded_extended_data_list[0].data.shape, (200, 200))
             self.assertEqual(recorded_extended_data_list[1].data.shape, (200, 200))
+
+    def test_record_async_records_with_the_given_frame_parameters(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            frame_parameters = typing.cast(scan_base.ScanFrameParameters, scan_hardware_source.get_record_frame_parameters())
+            frame_parameters.pixel_size = Geometry.IntSize(100, 120)
+            recorded_shapes: list[tuple[int, ...]] = list()
+            recorded_event = threading.Event()
+
+            def handle_record(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:  # called from thread
+                recorded_shapes.extend(data_promise.xdata.data_shape for data_promise in data_promises if data_promise.xdata)
+                recorded_event.set()
+
+            scan_hardware_source.record_async(handle_record, frame_parameters=frame_parameters)
+            self.assertTrue(recorded_event.wait(10.0))
+            self.assertEqual([(100, 120)], recorded_shapes)
+
+    def test_record_async_records_the_subscan_which_the_given_frame_parameters_would_scan(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.25, w=0.125)
+            recorded_shapes: list[tuple[int, ...]] = list()
+            recorded_event = threading.Event()
+
+            def handle_record(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:  # called from thread
+                recorded_shapes.extend(data_promise.xdata.data_shape for data_promise in data_promises if data_promise.xdata)
+                recorded_event.set()
+
+            scan_hardware_source.record_async(handle_record, frame_parameters=frame_parameters)
+            self.assertTrue(recorded_event.wait(10.0))
+            self.assertEqual(current_frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            subscan_pixel_size = scan_hardware_source.get_current_frame_parameters().subscan_pixel_size
+            assert subscan_pixel_size
+            self.assertEqual([tuple(subscan_pixel_size)], recorded_shapes)
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:

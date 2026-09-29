@@ -875,7 +875,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def shift_click(self, mouse_position: Geometry.FloatPoint, camera_shape: DataAndMetadata.Shape2dType, logger: logging.Logger) -> None: ...
     def grab_synchronized_abort(self) -> None: ...
     def set_selected_profile_index(self, profile_index: int) -> None: ...
-    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None]) -> None: ...
+    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None], *, frame_parameters: ScanFrameParameters | None = None) -> None: ...
     def open_configuration_interface(self, api_broker: typing.Any) -> None: ...
     def validate_probe_position(self) -> None: ...
     def increase_pmt(self, channel_index: int) -> None: ...
@@ -1650,12 +1650,27 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         frame_parameters.rotation_rad = scan_context.rotation_rad or 0.0
         return self.__apply_subscan_parameters(frame_parameters, size)
 
-    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None) -> ScanFrameParameters:
+    def __calculate_subscan_parameters(self, frame_parameters: ScanFrameParameters) -> ScanFrameParameters:
+        """Return a copy of the frame parameters with their subscan fields calculated as if they became the current frame parameters.
+
+        The scan device does not change. It decides whether the subscan or the line scan is on. The subscan region and
+        rotation are taken from the frame parameters when they have them, and otherwise from the scan device. The line scan
+        always comes from the scan device. The subscan fields are cleared when neither the subscan nor the line scan is on.
+        """
+        subscan_fractional_size = frame_parameters.subscan_fractional_size
+        subscan_fractional_center = frame_parameters.subscan_fractional_center
+        if subscan_fractional_size and subscan_fractional_center and not frame_parameters.line_scan_vector:
+            subscan_region = Geometry.FloatRect.from_center_and_size(subscan_fractional_center, subscan_fractional_size)
+            return self.__apply_subscan_parameters(frame_parameters, subscan_region=subscan_region, subscan_rotation=frame_parameters.subscan_rotation)
+        return self.__apply_subscan_parameters(frame_parameters)
+
+    def __apply_subscan_parameters(self, frame_parameters: ScanFrameParameters, size_tuple: typing.Optional[typing.Tuple[int, int]] = None, *,
+                                   subscan_region: Geometry.FloatRect | None = None, subscan_rotation: float | None = None) -> ScanFrameParameters:
         frame_parameters = copy.copy(frame_parameters)
         context_size = frame_parameters.pixel_size.to_float_size()
         size = Geometry.IntSize.make(size_tuple) if size_tuple else None
         if self.subscan_enabled:
-            subscan_region = self.subscan_region
+            subscan_region = subscan_region or self.subscan_region
             # Derive low-level subscan pixel counts from user-facing inputs.
             # Priority:
             # 1) `subscan_pixel_width_override` (explicit width in pixels, preserves the clamped region's aspect ratio),
@@ -1673,7 +1688,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             frame_parameters.subscan_pixel_size = subscan_pixel_size
             frame_parameters.subscan_fractional_size = subscan_fractional_size
             frame_parameters.subscan_fractional_center = subscan_region.center
-            frame_parameters.subscan_rotation = self.subscan_rotation
+            frame_parameters.subscan_rotation = subscan_rotation if subscan_rotation is not None else self.subscan_rotation
             frame_parameters.line_scan_vector = None
         elif self.line_scan_enabled:
             line_scan_vector = self.line_scan_vector
@@ -2015,9 +2030,17 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def get_channel_index_for_data_channel_index(self, data_channel_index: int) -> int:
         return data_channel_index % self.channel_count
 
-    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None]) -> None:
-        """ Call this when the user clicks the record button. """
+    def record_async(self, callback_fn: typing.Callable[[typing.Sequence[HardwareSource.DataAndMetadataPromise]], None], *, frame_parameters: ScanFrameParameters | None = None) -> None:
+        """Record one scan on a thread and pass the results to the callback.
+
+        The scan uses the frame parameters, if given, with their subscan fields calculated as if they became the current
+        frame parameters, or otherwise the record frame parameters unchanged.
+        """
         assert callable(callback_fn)
+
+        # a recording uses its frame parameters as given, so calculate their subscan here.
+        if frame_parameters is not None:
+            frame_parameters = self.__calculate_subscan_parameters(frame_parameters)
 
         def record_thread() -> None:
             current_frame_time = self.get_current_frame_time()
@@ -2025,7 +2048,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             def handle_finished(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
                 callback_fn(data_promises)
 
-            self.start_recording(sync_timeout=max(current_frame_time * 4, 1.0), finished_callback_fn=handle_finished)
+            self.start_recording(sync_timeout=max(current_frame_time * 4, 1.0), finished_callback_fn=handle_finished, frame_parameters=frame_parameters)
 
         self.__thread = threading.Thread(target=record_thread)
         self.__thread.start()
