@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!--
+batik-rasterizer -h 24 -w 24 -a -2,-2,24,24 artwork/swap_icon.svg -d nionswift_plugin/nion_instrumentation_ui/resources/swap_icon_24.png
+  -->
+<svg width="20" height="20"
+     viewPort="0 0 20 20" version="1.1"
+     xmlns="http://www.w3.org/2000/svg">
+
+    <path d="M 4,8.5 L 16,8.5 L 13,5.5" fill="none" stroke="black" stroke-width="1.0px" stroke-linejoin="round" />
+    <path d="M 16,11.5 L 4,11.5 L 7,14.5" fill="none" stroke="black" stroke-width="1.0px" stroke-linejoin="round" />
+
+</svg>

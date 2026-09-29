@@ -22,6 +22,7 @@ from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
+from nion.instrumentation import ScanProfiles
 from nion.instrumentation import stem_controller
 from nion.instrumentation import AcquisitionPreferences
 from nion.swift import DataItemThumbnailWidget
@@ -43,12 +44,13 @@ from nion.ui import Widgets
 from nion.ui import Window
 from nion.utils import Binding
 from nion.utils import Converter
+from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import ListModel
-from nion.utils import Model
 from nion.utils import Observable
 from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import InstrumentationWidgets
+from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
 if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
@@ -734,6 +736,8 @@ class ScanControlPanelModel(Observable.Observable):
     - stem controller property changes (to track subscan and line scan state changes)
     - scan hardware source data channel state changes (to track acquisition state for enabling/disabling buttons)
     - scan hardware source acquisition state changes (to track acquisition state for enabling/disabling buttons)
+    - scan hardware source sequence mode changes (to track whether a scan profile can be activated)
+    - scan profiles previous profile changes (to track whether the previous profile button is enabled)
     - stem controller probe state changes (to track probe state text and position)
     - scan hardware source channel state changes (to track channel enabled state)
     - scan hardware source scan frame parameters changes (to track max fov color changes)
@@ -764,6 +768,8 @@ class ScanControlPanelModel(Observable.Observable):
     - scan_abort_button_enabled (read only)
     - record_button_enabled (read only)
     - record_abort_button_enabled (read only)
+    - profile_activation_enabled (read only)
+    - previous_profile_button_enabled (read only)
     - play_state_text (read only)
     - probe_state_text (read only)
     - probe_position_enabled (read/write)
@@ -800,6 +806,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_settings.current_frame_parameters_changed_event.listen(self.__update_frame_parameters)
         self.__data_channel_state_changed_event_listener = self.__scan_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
         self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
+        self.__scan_hardware_source_property_changed_event_listener = self.__scan_hardware_source.property_changed_event.listen(self.__handle_scan_hardware_source_property_changed)
+        self.__scan_profiles_property_changed_event_listener = self.__scan_hardware_source.scan_profiles.property_changed_event.listen(self.__handle_scan_profiles_property_changed)
         self.__probe_state_changed_event_listener = stem_controller_.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
         self.__scan_frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_frame_parameters_changed_event.listen(self.__scan_frame_parameters_changed)
@@ -811,9 +819,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__pending_call: typing.Optional[asyncio.Handle] = None
 
         self.profiles_model = ListModel.ListModel[str]()
-        self.profiles_model.append_item(_("Puma"))
-        self.profiles_model.append_item(_("Rabbit"))
-        self.profiles_model.append_item(_("Frame"))
+        for profile_name in ScanProfiles.hardware_profile_slot_names:
+            self.profiles_model.append_item(profile_name)
 
         self.channels = [ChannelModel(scan_hardware_source, i, document_controller.document_model, self.__event_loop) for i in range(scan_hardware_source.channel_count)]
 
@@ -839,6 +846,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_abort_button_enabled = False
         self.__record_button_enabled = False
         self.__record_abort_button_enabled = False
+        self.__profile_activation_enabled = False
+        self.__previous_profile_button_enabled = False
         self.__capture_button_visible = False
         self.__capture_button_enabled = False
         self.__play_state_text = map_channel_state_to_text["stopped"]
@@ -863,6 +872,8 @@ class ScanControlPanelModel(Observable.Observable):
             self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
             self.__data_channel_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__acquisition_state_changed_event_listener = typing.cast(typing.Any, None)
+            self.__scan_hardware_source_property_changed_event_listener = typing.cast(typing.Any, None)
+            self.__scan_profiles_property_changed_event_listener = typing.cast(typing.Any, None)
             self.__probe_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__channel_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__scan_frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
@@ -968,6 +979,15 @@ class ScanControlPanelModel(Observable.Observable):
         if record_abort_button_enabled != self.__record_abort_button_enabled:
             self.__record_abort_button_enabled = record_abort_button_enabled
             self.notify_property_changed("record_abort_button_enabled")
+        profile_configuration_model = self.__scan_hardware_source.scan_profiles
+        profile_activation_enabled = profile_configuration_model.can_activate_profile
+        if profile_activation_enabled != self.__profile_activation_enabled:
+            self.__profile_activation_enabled = profile_activation_enabled
+            self.notify_property_changed("profile_activation_enabled")
+        previous_profile_button_enabled = profile_activation_enabled and profile_configuration_model.has_previous_profile
+        if previous_profile_button_enabled != self.__previous_profile_button_enabled:
+            self.__previous_profile_button_enabled = previous_profile_button_enabled
+            self.notify_property_changed("previous_profile_button_enabled")
         capture_button_visible = is_playing
         if capture_button_visible != self.__capture_button_visible:
             self.__capture_button_visible = capture_button_visible
@@ -1048,6 +1068,14 @@ class ScanControlPanelModel(Observable.Observable):
 
     def __acquisition_state_changed(self, acquisition_state: str) -> None:
         self.__handle_state_changed()
+
+    def __handle_scan_hardware_source_property_changed(self, property_name: str) -> None:
+        if property_name == "is_in_sequence_mode":
+            self.__handle_state_changed()
+
+    def __handle_scan_profiles_property_changed(self, property_name: str) -> None:
+        if property_name == "has_previous_profile":
+            self.__handle_state_changed()
 
     def __probe_state_changed(self, probe_state: str, probe_position: Geometry.FloatPoint | None) -> None:
         self.__handle_state_changed()
@@ -1319,6 +1347,15 @@ class ScanControlPanelModel(Observable.Observable):
         return self.__record_abort_button_enabled
 
     @property
+    def profile_activation_enabled(self) -> bool:
+        """Return whether the controls which activate a scan profile are enabled, which they are not while recording or in sequence mode."""
+        return self.__profile_activation_enabled
+
+    @property
+    def previous_profile_button_enabled(self) -> bool:
+        return self.__previous_profile_button_enabled
+
+    @property
     def capture_button_visible(self) -> bool:
         return self.__capture_button_visible
 
@@ -1488,6 +1525,12 @@ class ScanPanelController(Declarative.Handler):
         self.__scan_hardware_source = scan_hardware_source
 
         self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
+        self._profile_configuration_model = scan_hardware_source.scan_profiles
+
+        # the open profile configuration dialog, if any, which the profile configuration button brings to the front
+        # rather than opening another. the listener clears it when the dialog closes.
+        self.__profile_configuration_dialog: ScanProfilesDialog.ProfileConfigurationDialog | None = None
+        self.__profile_configuration_dialog_close_listener: Event.EventListener | None = None
 
         self.__shift_click_state: str | None = None
         self.__mouse_pressed = False
@@ -1499,7 +1542,15 @@ class ScanPanelController(Declarative.Handler):
 
         sliders_icon_24_png = pkgutil.get_data(__name__, "resources/sliders_icon_24.png")
         assert sliders_icon_24_png is not None
-        self._config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
+        self._profile_config_icon = CanvasItem.load_rgba_data_from_bytes(sliders_icon_24_png, "png")
+
+        gear_icon_24_png = pkgutil.get_data(__name__, "resources/gear_icon_24.png")
+        assert gear_icon_24_png is not None
+        self._hardware_config_icon = CanvasItem.load_rgba_data_from_bytes(gear_icon_24_png, "png")
+
+        swap_icon_24_png = pkgutil.get_data(__name__, "resources/swap_icon_24.png")
+        assert swap_icon_24_png is not None
+        self._previous_profile_icon = CanvasItem.load_rgba_data_from_bytes(swap_icon_24_png, "png")
 
         u = Declarative.DeclarativeUI()
 
@@ -1542,9 +1593,13 @@ class ScanPanelController(Declarative.Handler):
         )
 
         scan_profile_row = u.create_row(
-            u.create_label(text=_("Scan Profile")),
-            u.create_combo_box(items_ref="@binding(_model.profiles_model.items)", current_index="@binding(_model.profile_index)"), u.create_stretch(),
-            u.create_image(image="@binding(_config_icon)", width=24, height=24, on_clicked="handle_config_button"), spacing=8, margin=4
+            u.create_image(image="@binding(_profile_config_icon)", width=24, height=24, tool_tip=_("Configure scan profiles."), on_clicked="handle_profile_config_button"),
+            u.create_label(text=_("Profile")),
+            u.create_combo_box(name="profile_combo_box", items_ref="@binding(_profile_configuration_model.profile_names)", current_index="@binding(_profile_configuration_model.active_profile_index)", enabled="@binding(_model.profile_activation_enabled)"),
+            u.create_image(name="previous_profile_button", image="@binding(_previous_profile_icon)", enabled="@binding(_model.previous_profile_button_enabled)", width=24, height=24, tool_tip=_("Activate the previously active scan profile."), on_clicked="handle_previous_profile_button"),
+            u.create_stretch(),
+            u.create_image(image="@binding(_hardware_config_icon)", width=24, height=24, tool_tip=_("Configure scan hardware settings."), on_clicked="handle_config_button"),
+            spacing=8, margin=4
         )
 
         subscan_checkbox = u.create_check_box(text=_("Subscan"), checked="@binding(_model.subscan_checkbox_checked)")
@@ -1620,6 +1675,9 @@ class ScanPanelController(Declarative.Handler):
         )
 
     def close(self) -> None:
+        # the dialog records with the model of this panel, so it closes with the panel.
+        if self.__profile_configuration_dialog:
+            self.__profile_configuration_dialog.request_close()
         self._model.close()
         super().close()
 
@@ -1633,6 +1691,29 @@ class ScanPanelController(Declarative.Handler):
 
     def handle_config_button(self, widget: UserInterface.Widget) -> None:
         self.__scan_hardware_source.scan_settings.open_configuration_interface(PlugInManager.APIBroker())
+
+    @property
+    def profile_configuration_dialog(self) -> ScanProfilesDialog.ProfileConfigurationDialog | None:
+        """Return the open profile configuration dialog, or None if it is not open."""
+        return self.__profile_configuration_dialog
+
+    def handle_profile_config_button(self, widget: UserInterface.Widget) -> None:
+        if self.__profile_configuration_dialog:
+            self.__profile_configuration_dialog.activate()
+            return
+        dialog = ScanProfilesDialog.ProfileConfigurationDialog(self.__document_controller.ui, self.__document_controller.event_loop, self.__scan_hardware_source.display_name,
+                                                               self._profile_configuration_model, self._model, parent_window=self.__document_controller)
+
+        def handle_window_close(window: Window.Window) -> None:
+            self.__profile_configuration_dialog = None
+            self.__profile_configuration_dialog_close_listener = None
+
+        self.__profile_configuration_dialog = dialog
+        self.__profile_configuration_dialog_close_listener = dialog.window_close_event.listen(handle_window_close)
+        dialog.show()
+
+    def handle_previous_profile_button(self, widget: UserInterface.Widget) -> None:
+        self._profile_configuration_model.activate_previous_profile()
 
     def handle_increase_time(self, widget: UserInterface.Widget) -> None:
         self._model.increase_pixel_time()
