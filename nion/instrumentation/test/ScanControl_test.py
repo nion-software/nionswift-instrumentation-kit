@@ -20,6 +20,7 @@ from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
+from nion.instrumentation import ScanProfiles
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import HardwareSource_test
@@ -31,8 +32,14 @@ from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
+from nion.ui import Declarative
+from nion.ui import TestUI
+from nion.ui import UserInterface
+from nion.ui import Window
 from nion.utils import Geometry
+from nion.utils import Observable
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
+from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
 """
 # running in Swift
@@ -42,6 +49,20 @@ suite = unittest.TestLoader().loadTestsFromTestCase(SimulatorScanControl_test.Te
 result = unittest.TextTestResult(sys.stdout, True, True)
 suite.run(result)
 """
+
+
+class FrameParametersScanRecorder(Observable.Observable):
+    """A scan recorder for the scan profile dialog which keeps the frame parameters it is asked to record with, instead of recording."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.record_button_enabled = True
+        self.profile_activation_enabled = True
+        self.recorded_frame_parameters_list: list[scan_base.ScanFrameParameters | None] = list()
+
+    def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None) -> None:
+        self.recorded_frame_parameters_list.append(frame_parameters)
+
 
 class TestScanControlClass(unittest.TestCase):
 
@@ -271,6 +292,542 @@ class TestScanControlClass(unittest.TestCase):
             subscan_pixel_size = scan_hardware_source.get_current_frame_parameters().subscan_pixel_size
             recorded_data_items = self._record_one(document_controller, scan_hardware_source, scan_control_model)
             self.assertEqual(subscan_pixel_size, Geometry.IntSize.make(recorded_data_items[0].dimensional_shape))
+
+    def test_record_from_scan_profile_dialog_uses_profile_without_activating_it(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_control_model = self.__create_scan_control_model(test_context)
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            active_index = profile_configuration_model.active_profile_index
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            profile = profile_configuration_model.profiles[2]
+            profile.size_linked = False
+            profile.width = 64
+            profile.height = 32
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            try:
+                handler.show_profile_actions_menu(profile, Geometry.IntPoint())
+                ui = document_controller.ui
+                assert isinstance(ui, TestUI.UserInterface) and ui.popup
+                record_callback = next(item.callback for item in ui.popup.items if item.title == "Record Once")
+                assert record_callback
+                record_callback()
+                # the record adds its result as a data item apart from the scan channel's live data item, which appears
+                # while the record runs. wait for the result and for the record to finish.
+                live_data_item_reference = document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, scan_hardware_source.get_channel_id(0))
+                start_time = time.time()
+                while scan_hardware_source.is_recording or not (recorded_data_items := [data_item for data_item in document_model.data_items if data_item != live_data_item_reference.data_item]):
+                    self.assertTrue(time.time() - start_time < 30.0)
+                    time.sleep(0.01)
+                    document_controller.periodic()
+                self.assertEqual((32, 64), recorded_data_items[0].dimensional_shape)
+                self.assertEqual(active_index, profile_configuration_model.active_profile_index)
+                self.assertEqual(current_frame_parameters.size, scan_hardware_source.get_current_frame_parameters().size)
+            finally:
+                handler.close()
+
+    def test_record_once_from_scan_profile_dialog_does_not_record_profile_removed_while_menu_is_open(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            profile_configuration_model = test_context.scan_hardware_source.scan_profiles
+            scan_recorder = FrameParametersScanRecorder()
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_recorder, document_controller)
+            try:
+                handler.show_profile_actions_menu(profile_configuration_model.profiles[2], Geometry.IntPoint())
+                ui = document_controller.ui
+                assert isinstance(ui, TestUI.UserInterface) and ui.popup
+                record_callback = next(item.callback for item in ui.popup.items if item.title == "Record Once")
+                assert record_callback
+                profile_configuration_model.remove_profile(2)
+                record_callback()
+                self.assertEqual(list(), scan_recorder.recorded_frame_parameters_list)
+            finally:
+                handler.close()
+
+    def test_record_once_from_scan_profile_dialog_does_not_record_when_recording_becomes_impossible_while_menu_is_open(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            profile_configuration_model = test_context.scan_hardware_source.scan_profiles
+            scan_recorder = FrameParametersScanRecorder()
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_recorder, document_controller)
+            try:
+                handler.show_profile_actions_menu(profile_configuration_model.profiles[2], Geometry.IntPoint())
+                ui = document_controller.ui
+                assert isinstance(ui, TestUI.UserInterface) and ui.popup
+                record_callback = next(item.callback for item in ui.popup.items if item.title == "Record Once")
+                assert record_callback
+                # a recording started from the scan panel while the menu is open disables recording.
+                scan_recorder.record_button_enabled = False
+                record_callback()
+                self.assertEqual(list(), scan_recorder.recorded_frame_parameters_list)
+            finally:
+                handler.close()
+
+    def test_activate_button_in_scan_profile_configuration_dialog_makes_profile_active(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            active_index = profile_configuration_model.active_profile_index
+            inactive_index = (active_index + 1) % len(profile_configuration_model.profiles)
+            active_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[active_index], scan_control_model, lambda profile, global_point: None)
+            active_profile_widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, active_profile_handler)
+            inactive_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[inactive_index], scan_control_model, lambda profile, global_point: None)
+            inactive_profile_widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, inactive_profile_handler)
+            try:
+                self.assertFalse(active_profile_handler.can_activate)
+                self.assertTrue(inactive_profile_handler.can_activate)
+                assert inactive_profile_handler.activate_button and inactive_profile_handler.activate_button.on_clicked
+                inactive_profile_handler.activate_button.on_clicked()
+                self.assertEqual(inactive_index, profile_configuration_model.active_profile_index)
+                self.assertTrue(active_profile_handler.can_activate)
+                self.assertFalse(inactive_profile_handler.can_activate)
+            finally:
+                active_profile_widget.close()
+                inactive_profile_widget.close()
+
+    def test_renaming_scan_profile_in_configuration_dialog_trims_the_name(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[1], scan_control_model, lambda profile, global_point: None)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
+            try:
+                name_line_edit = profile_handler.name_line_edit
+                assert name_line_edit
+                name_line_edit.editing_finished("  Survey  ")
+                self.assertEqual("Survey", profile_configuration_model.profile_names[1])
+                self.assertEqual("Survey", name_line_edit.text)
+            finally:
+                widget.close()
+
+    def test_renaming_active_scan_profile_keeps_it_selected_in_scan_panel(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                active_index = profile_configuration_model.active_profile_index
+                profile_configuration_model.rename_profile(profile_configuration_model.active_profile, "Survey")
+                self.assertEqual(active_index, profile_configuration_model.active_profile_index)
+                self.assertEqual(active_index, scan_panel_controller.profile_combo_box.current_index)
+                self.assertEqual("Survey", scan_panel_controller.profile_combo_box.current_text)
+            finally:
+                widget.close()
+
+    def test_scan_profile_configuration_button_reuses_open_dialog(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                scan_panel_controller.handle_profile_config_button(widget)
+                dialog = scan_panel_controller.profile_configuration_dialog
+                self.assertIsNotNone(dialog)
+                scan_panel_controller.handle_profile_config_button(widget)
+                self.assertIs(dialog, scan_panel_controller.profile_configuration_dialog)
+                assert dialog
+                dialog.request_close()
+                self.assertIsNone(scan_panel_controller.profile_configuration_dialog)
+                scan_panel_controller.handle_profile_config_button(widget)
+                self.assertIsNotNone(scan_panel_controller.profile_configuration_dialog)
+                self.assertIsNot(dialog, scan_panel_controller.profile_configuration_dialog)
+            finally:
+                if dialog := scan_panel_controller.profile_configuration_dialog:
+                    dialog.request_close()
+                widget.close()
+
+    def test_escape_closes_scan_profile_configuration_dialog(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                scan_panel_controller.handle_profile_config_button(widget)
+                dialog = scan_panel_controller.profile_configuration_dialog
+                assert dialog
+                self.assertTrue(dialog.key_pressed(document_controller.ui.create_key_by_id("escape")))
+                self.assertIsNone(scan_panel_controller.profile_configuration_dialog)
+            finally:
+                if dialog := scan_panel_controller.profile_configuration_dialog:
+                    dialog.request_close()
+                widget.close()
+
+    def test_closing_scan_panel_closes_its_scan_profile_configuration_dialog(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            scan_panel_controller.handle_profile_config_button(widget)
+            dialog = scan_panel_controller.profile_configuration_dialog
+            assert dialog
+            closed_windows: list[Window.Window] = list()
+            window_close_event_listener = dialog.window_close_event.listen(closed_windows.append)
+            try:
+                widget.close()
+                self.assertEqual([dialog], closed_windows)
+            finally:
+                if not closed_windows:
+                    dialog.request_close()
+            window_close_event_listener = None
+
+    def test_activating_scan_profile_in_one_scan_panel_activates_it_in_another(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller1 = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget1 = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller1)
+            scan_panel_controller2 = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget2 = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller2)
+            try:
+                self.assertEqual(0, scan_panel_controller2.profile_combo_box.current_index)
+                scan_panel_controller1.profile_combo_box.current_index = 2
+                self.assertEqual(2, scan_panel_controller2.profile_combo_box.current_index)
+            finally:
+                widget1.close()
+                widget2.close()
+
+    def test_previous_scan_profile_button_is_enabled_once_a_second_profile_is_activated(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                self.assertFalse(scan_panel_controller.previous_profile_button.enabled)
+                scan_panel_controller.profile_combo_box.current_index = 1
+                self.assertTrue(scan_panel_controller.previous_profile_button.enabled)
+            finally:
+                widget.close()
+
+    def test_scan_profile_controls_in_scan_panel_are_disabled_during_sequence_acquisition(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            # activate a second profile so that the previous profile button is enabled outside the acquisition.
+            scan_hardware_source.scan_profiles.active_profile_index = 1
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            # the acquisition thread waits in sequence mode until the controls have been checked.
+            sequence_mode_started = threading.Event()
+            controls_checked = threading.Event()
+
+            def handle_property_changed(property_name: str) -> None:
+                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
+                    sequence_mode_started.set()
+                    controls_checked.wait(10.0)
+
+            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(Acquisition.MakerDataStream(data_stream),))
+            try:
+                acquisition_thread.start()
+                try:
+                    self.assertTrue(sequence_mode_started.wait(10.0))
+                    document_controller.periodic()
+                    self.assertFalse(scan_panel_controller.profile_combo_box.enabled)
+                    self.assertFalse(scan_panel_controller.previous_profile_button.enabled)
+                finally:
+                    controls_checked.set()
+                    acquisition_thread.join(60.0)
+                self.assertFalse(acquisition_thread.is_alive())
+                document_controller.periodic()
+                self.assertTrue(scan_panel_controller.profile_combo_box.enabled)
+                self.assertTrue(scan_panel_controller.previous_profile_button.enabled)
+            finally:
+                property_changed_event_listener = None
+                widget.close()
+
+    def test_activate_button_in_scan_profile_configuration_dialog_is_disabled_during_sequence_acquisition(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[1], scan_control_model, lambda profile, global_point: None)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
+            # the acquisition thread waits in sequence mode until the button has been checked.
+            sequence_mode_started = threading.Event()
+            button_checked = threading.Event()
+
+            def handle_property_changed(property_name: str) -> None:
+                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
+                    sequence_mode_started.set()
+                    button_checked.wait(10.0)
+
+            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(Acquisition.MakerDataStream(data_stream),))
+            try:
+                activate_button = profile_handler.activate_button
+                assert activate_button
+                acquisition_thread.start()
+                try:
+                    self.assertTrue(sequence_mode_started.wait(10.0))
+                    document_controller.periodic()
+                    self.assertFalse(activate_button.enabled)
+                finally:
+                    button_checked.set()
+                    acquisition_thread.join(60.0)
+                self.assertFalse(acquisition_thread.is_alive())
+                document_controller.periodic()
+                self.assertTrue(activate_button.enabled)
+            finally:
+                property_changed_event_listener = None
+                widget.close()
+
+    def test_scan_profile_combo_box_shows_active_profile_when_activation_during_sequence_acquisition_is_refused(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            active_profile_index = scan_hardware_source.scan_profiles.active_profile_index
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            combo_box_index_list: list[int | None] = list()
+
+            # another profile is chosen in the combo box once the sequence acquisition has started. a user can't do this,
+            # since the combo box is disabled during the acquisition, so this stands for a script which sets it.
+            def handle_property_changed(property_name: str) -> None:
+                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
+                    scan_panel_controller.profile_combo_box.current_index = active_profile_index + 1
+                    combo_box_index_list.append(scan_panel_controller.profile_combo_box.current_index)
+
+            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            try:
+                Acquisition.acquire(Acquisition.MakerDataStream(data_stream))
+                self.assertEqual([active_profile_index], combo_box_index_list)
+            finally:
+                property_changed_event_listener = None
+                widget.close()
+
+    def test_automatic_subscan_pixel_width_in_scan_profile_configuration_dialog_is_empty_text(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            profile = ScanProfiles.ProfileModel(str())
+            profile.subscan_pixel_width = 64
+            scan_control_model = self.__create_scan_control_model(test_context)
+            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, scan_control_model, lambda profile, global_point: None)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
+            try:
+                subscan_pixel_width_line_edit = profile_handler.subscan_pixel_width_line_edit
+                assert subscan_pixel_width_line_edit
+                subscan_pixel_width_line_edit.editing_finished(str())
+                self.assertIsNone(profile.subscan_pixel_width)
+                self.assertFalse(subscan_pixel_width_line_edit.text)
+            finally:
+                widget.close()
+
+    def test_invalid_values_in_scan_profile_configuration_dialog_leave_values_unchanged(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            profile = ScanProfiles.ProfileModel(str())
+            profile.field_width = 37.0
+            profile.size_linked = False
+            profile.width = 64
+            profile.height = 32
+            profile.subscan_field_width_nm = 10.0
+            scan_control_model = self.__create_scan_control_model(test_context)
+            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, scan_control_model, lambda profile, global_point: None)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
+            try:
+                field_width_line_edit = profile_handler.field_width_line_edit
+                assert field_width_line_edit
+                for text in ("0", "-5", str()):
+                    field_width_line_edit.editing_finished(text)
+                    self.assertEqual(37.0, profile.field_width)
+                    self.assertEqual("37.0", field_width_line_edit.text)
+                width_line_edit = profile_handler.width_line_edit
+                height_line_edit = profile_handler.height_line_edit
+                assert width_line_edit and height_line_edit
+                width_line_edit.editing_finished("0")
+                height_line_edit.editing_finished("-1")
+                self.assertEqual((64, 32, False), (profile.width, profile.height, profile.size_linked))
+                self.assertEqual(("64", "32"), (width_line_edit.text, height_line_edit.text))
+                # clearing the subscan width leaves it unchanged.
+                subscan_field_width_line_edit = profile_handler.subscan_field_width_nm_line_edit
+                assert subscan_field_width_line_edit
+                subscan_field_width_line_edit.editing_finished(str())
+                self.assertEqual(10.0, profile.subscan_field_width_nm)
+                self.assertEqual("10.0", subscan_field_width_line_edit.text)
+            finally:
+                widget.close()
+
+    def test_add_button_in_scan_profile_configuration_dialog_adds_profile_after_selected_profile(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                assert handler.add_button and handler.add_button.on_clicked
+                profiles = list(profile_configuration_model.profiles)
+                handler.current_index_model.value = 1
+                handler.add_button.on_clicked()
+                self.assertEqual(profiles[0:2], list(profile_configuration_model.profiles[0:2]))
+                self.assertEqual(profiles[2:], list(profile_configuration_model.profiles[3:]))
+                self.assertNotIn(profile_configuration_model.profiles[2], profiles)
+                self.assertEqual(2, handler.current_index_model.value)
+            finally:
+                widget.close()
+
+    def test_duplicate_button_in_scan_profile_configuration_dialog_adds_copy_after_selected_profile(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                assert handler.duplicate_button and handler.duplicate_button.on_clicked
+                profile_count = len(profile_configuration_model.profiles)
+                handler.current_index_model.value = 1
+                handler.duplicate_button.on_clicked()
+                self.assertEqual(profile_count + 1, len(profile_configuration_model.profiles))
+                self.assertEqual(profile_configuration_model.profiles[1].write_values_to_dict(), profile_configuration_model.profiles[2].write_values_to_dict())
+                self.assertEqual(2, handler.current_index_model.value)
+            finally:
+                widget.close()
+
+    def test_move_down_button_in_scan_profile_configuration_dialog_moves_selected_profile(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                assert handler.move_down_button and handler.move_down_button.on_clicked
+                profile = profile_configuration_model.profiles[1]
+                handler.current_index_model.value = 1
+                handler.move_down_button.on_clicked()
+                self.assertIs(profile, profile_configuration_model.profiles[2])
+                self.assertEqual(2, handler.current_index_model.value)
+            finally:
+                widget.close()
+
+    def test_remove_button_in_scan_profile_configuration_dialog_removes_selected_profile(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                assert handler.remove_button and handler.remove_button.on_clicked
+                profile_configuration_model.active_profile_index = 0
+                profile = profile_configuration_model.profiles[1]
+                handler.current_index_model.value = 1
+                handler.remove_button.on_clicked()
+                self.assertNotIn(profile, profile_configuration_model.profiles)
+            finally:
+                widget.close()
+
+    def test_scan_profile_configuration_dialog_can_remove_selected_profile_only_when_it_is_inactive(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                profile_configuration_model.active_profile_index = 0
+                handler.current_index_model.value = 0
+                self.assertFalse(handler.can_remove)
+                handler.current_index_model.value = 1
+                self.assertTrue(handler.can_remove)
+            finally:
+                widget.close()
+
+    def test_choosing_scan_profile_in_configuration_dialog_list_activates_it(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                profile_configuration_model.active_profile_index = 0
+                list_view = handler.profile_list_view
+                assert list_view and list_view.on_item_selected
+                # choosing is a double click or return on the item.
+                self.assertTrue(list_view.on_item_selected(2))
+                self.assertIs(profile_configuration_model.profiles[2], profile_configuration_model.active_profile)
+            finally:
+                widget.close()
+
+    def test_right_clicking_inactive_scan_profile_in_configuration_dialog_offers_to_activate_or_delete_it(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                profile_configuration_model.active_profile_index = 0
+                list_view = handler.profile_list_view
+                assert list_view and list_view.on_item_handle_context_menu
+                ui = document_controller.ui
+                assert isinstance(ui, TestUI.UserInterface)
+                # right clicking a profile also selects it.
+                list_view.on_item_handle_context_menu(0, 0, 0, 0, 2)
+                self.assertEqual(2, handler.current_index_model.value)
+                assert ui.popup
+                menu_items = {item.title: item for item in ui.popup.items}
+                assert menu_items["Activate"].action and menu_items["Delete"].action and menu_items["Activate"].callback
+                self.assertTrue(menu_items["Activate"].action.enabled)
+                self.assertTrue(menu_items["Delete"].action.enabled)
+                menu_items["Activate"].callback()
+                self.assertIs(profile_configuration_model.profiles[2], profile_configuration_model.active_profile)
+            finally:
+                widget.close()
+
+    def test_right_clicking_active_scan_profile_in_configuration_dialog_offers_neither_to_activate_nor_delete_it(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            scan_control_model = self.__create_scan_control_model(test_context)
+            handler = ScanProfilesDialog.ProfileConfigurationHandler(profile_configuration_model, scan_control_model, document_controller)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, handler)
+            try:
+                profile_configuration_model.active_profile_index = 2
+                list_view = handler.profile_list_view
+                assert list_view and list_view.on_item_handle_context_menu
+                ui = document_controller.ui
+                assert isinstance(ui, TestUI.UserInterface)
+                list_view.on_item_handle_context_menu(0, 0, 0, 0, 2)
+                assert ui.popup
+                menu_items = {item.title: item for item in ui.popup.items}
+                assert menu_items["Activate"].action and menu_items["Delete"].action
+                self.assertFalse(menu_items["Activate"].action.enabled)
+                self.assertFalse(menu_items["Delete"].action.enabled)
+            finally:
+                widget.close()
 
     def test_record_names_results_correctly(self):
         with self._test_context() as test_context:

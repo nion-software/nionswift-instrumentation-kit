@@ -16,6 +16,8 @@ The scan device scans with its current frame parameters. A change to them or to 
 
 The active profile follows edits as they happen, without a separate save step. This keeps the behavior of the scan panel before profiles, where an edit went straight into the selected hardware profile slot, and it means there is no unsaved state to show, confirm or lose: switching to another profile and back returns to the values last used. The cost is that there is no saved version to return to. An exploratory change, a mistake, or a change from a script or another scan panel replaces the active profile's value, and there is no undo. To keep a profile's values while experimenting, duplicate it first, or switch to a profile meant for experimenting.
 
+In the dialog, editing a value of a parameter the active profile includes applies it to the scan device immediately; editing any other value changes only the profile. When the active profile starts including a parameter, its value becomes the parameter's current value. An invalid value is ignored, and the profile keeps its previous value.
+
 Profile names are unique. The active profile can't be deleted, so the last profile can't be either.
 
 ## Persistence
@@ -24,4 +26,6 @@ The profiles, the active and previous profiles, and the current value of each pa
 
 ## The user interface
 
-The Record button records once with the current frame parameters.
+The scan panel's top row has a button that opens the profile dialog (the sliders icon), the label "Profile", a combo box that shows and changes the active profile, a button that switches to the previous profile, and at its right end a button for the hardware configuration (the gear icon). The Record button records once with the current frame parameters.
+
+The profile dialog lists the profiles, marking the active one. Selecting a row only shows the profile; the Activate button, a double click or return activates it. Buttons under the list add, delete, duplicate and reorder profiles; a new profile includes every parameter at its current value. For the selected profile, each parameter has a check box for whether the profile includes it and an editor for each of its values. The profile's actions menu has Record Once, which records once applying the values of the parameters the profile includes, without activating it.
