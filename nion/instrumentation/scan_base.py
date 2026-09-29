@@ -31,6 +31,7 @@ from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import camera_base
 from nion.instrumentation import DriftTracker
 from nion.instrumentation import HardwareSource
+from nion.instrumentation import ScanProfiles
 from nion.instrumentation import stem_controller as STEMController
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Utility
@@ -748,6 +749,11 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     def abort_sequence_mode(self) -> None: ...
 
+    # whether a sequence has started and not yet finished or aborted, during which the current frame parameters are
+    # those of the sequence.
+    @property
+    def is_in_sequence_mode(self) -> bool: raise NotImplementedError()
+
     def get_sequence_buffer_count(self) -> int: ...
 
     def pop_sequence_buffer_data(self, scan_id: uuid.UUID) -> typing.Mapping[Acquisition.Channel, DataAndMetadata.DataAndMetadata]: ...
@@ -767,6 +773,9 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     @property
     def scan_settings(self) -> ScanSettingsProtocol: raise NotImplementedError()
+
+    @property
+    def scan_profiles(self) -> ScanProfiles.ProfileConfigurationModel: raise NotImplementedError()
 
     @property
     def stem_controller(self) -> STEMController.STEMController: raise NotImplementedError()
@@ -1330,6 +1339,40 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         self.probe_position = self.__settings.probe_position
 
+        # the scan profiles are shared by every user of this scan device, such as the scan panel in each window. they
+        # are saved in their own file, rather than with the scan settings, so that they are saved for any scan settings.
+        self.__scan_profiles_changed_event_listener: Event.EventListener | None = None
+        scan_profiles_file = configuration_location / pathlib.Path(self.hardware_source_id + "_scan_profiles.json") if configuration_location else None
+        saved_scan_profiles: ScanProfiles.SavedScanProfiles | None = None
+        if scan_profiles_file:
+            logging.info("Scan profiles configuration: " + str(scan_profiles_file))
+        # a file which cannot be read, or whose structure cannot be fully used, such as one edited by hand with a
+        # mistake, is ignored in whole or in part so that the scan device still loads. the file is renamed so that
+        # saving the profiles does not replace it, and if it cannot be renamed, the profiles are not saved.
+        scan_profiles_file_error: str | None = None
+        if scan_profiles_file and scan_profiles_file.is_file():
+            try:
+                with scan_profiles_file.open() as f:
+                    scan_profiles_properties = json.load(f)
+            except (OSError, ValueError) as e:
+                scan_profiles_file_error = str(e)
+            else:
+                saved_scan_profiles = ScanProfiles.parse_saved_scan_profiles(scan_profiles_properties)
+                if saved_scan_profiles.has_dropped_properties:
+                    scan_profiles_file_error = "unusable structure"
+        self.__scan_profiles = ScanProfiles.ProfileConfigurationModel(self, saved_scan_profiles)
+        is_scan_profiles_file_replaceable = True
+        if scan_profiles_file and scan_profiles_file_error:
+            bad_scan_profiles_file = scan_profiles_file.with_name(scan_profiles_file.name + ".bad")
+            try:
+                os.replace(scan_profiles_file, bad_scan_profiles_file)
+                logging.warning(f"Unusable scan profiles file {scan_profiles_file} renamed to {bad_scan_profiles_file}: {scan_profiles_file_error}")
+            except OSError as rename_error:
+                is_scan_profiles_file_replaceable = False
+                logging.warning(f"Unusable scan profiles file {scan_profiles_file} kept and not saved, since renaming it failed: {scan_profiles_file_error}, {rename_error}")
+        if scan_profiles_file and is_scan_profiles_file_replaceable:
+            self.__scan_profiles_changed_event_listener = self.__scan_profiles.profiles_changed_event.listen(functools.partial(settings_changed, scan_profiles_file))
+
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
@@ -1345,6 +1388,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__subscan_rotation_changed_event_listener = typing.cast(typing.Any, None)
         self.__line_scan_state_changed_event_listener = typing.cast(typing.Any, None)
         self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
+        self.__scan_profiles_changed_event_listener = None
+        self.__scan_profiles.close()
         super().close()
         if self.__settings_changed_event_listener:
             self.__settings_changed_event_listener.close()
@@ -1396,6 +1441,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     @property
     def scan_settings(self) -> ScanSettingsProtocol:
         return self.__settings
+
+    @property
+    def scan_profiles(self) -> ScanProfiles.ProfileConfigurationModel:
+        return self.__scan_profiles
 
     @property
     def stem_controller(self) -> STEMController.STEMController:
@@ -1914,19 +1963,31 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.abort_playing(sync_timeout=5.0)
         self.set_sequence_buffer_size(count)
 
+    # the sequence mode methods are called on the acquisition thread, so the is_in_sequence_mode property change is
+    # fired on that thread.
+
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
-        self.__in_sequence_mode = True
+        self.__set_in_sequence_mode(True)
         assert not self.__device.is_scanning
         self.set_current_frame_parameters(scan_frame_parameters)
         self.start_playing()
 
     def finish_sequence_mode(self) -> None:
-        self.__in_sequence_mode = False
+        self.__set_in_sequence_mode(False)
         self.set_sequence_buffer_size(0)
 
     def abort_sequence_mode(self) -> None:
-        self.__in_sequence_mode = False
+        self.__set_in_sequence_mode(False)
         self.abort_playing(sync_timeout=5.0)
+
+    def __set_in_sequence_mode(self, in_sequence_mode: bool) -> None:
+        if in_sequence_mode != self.__in_sequence_mode:
+            self.__in_sequence_mode = in_sequence_mode
+            self.notify_property_changed("is_in_sequence_mode")
+
+    @property
+    def is_in_sequence_mode(self) -> bool:
+        return self.__in_sequence_mode
 
     def get_sequence_buffer_count(self) -> int:
         return self.__device.get_sequence_buffer_count()
