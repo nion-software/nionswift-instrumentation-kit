@@ -1893,6 +1893,7 @@ class ScanControlPanel(Panel.Panel):
         if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
             if getattr(scan_hardware_source, "periodic", None):
                 scan_hardware_source.periodic()
+        super().periodic()
 
 
 class ScanDisplayPanelControllerHandler(Declarative.Handler):
