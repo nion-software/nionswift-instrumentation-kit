@@ -24,6 +24,7 @@ from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller
 from nion.instrumentation import AcquisitionPreferences
+from nion.instrumentation import scan_profile
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
 from nion.swift import Panel
@@ -968,7 +969,7 @@ class ScanControlPanelModel(Observable.Observable):
 
         self.__profile_index = 0
         self.__name = str()
-        self.__frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__profile_index)
+        self.__frame_parameters = self.__get_profile_frame_parameters(self.__profile_index)
         self.__width = 0
         self.__height = 0
         self.__width_height_linked = self.__frame_parameters.pixel_size.width == self.__frame_parameters.pixel_size.height
@@ -1032,7 +1033,7 @@ class ScanControlPanelModel(Observable.Observable):
         if name != self.__name:
             self.__name = name
             self.notify_property_changed("name")
-        frame_parameters = self.__scan_hardware_source.get_current_frame_parameters()
+        frame_parameters = scan_profile.ScanProfile.from_scan_frame_parameters(self.__scan_hardware_source.get_current_frame_parameters())
         self.__frame_parameters = frame_parameters
         if self.__width != frame_parameters.pixel_size.width:
             self.__width = frame_parameters.pixel_size.width
@@ -1157,7 +1158,7 @@ class ScanControlPanelModel(Observable.Observable):
             self.__probe_position_enabled = probe_position_enabled
             self.notify_property_changed("probe_position_enabled")
         max_fov_nm = self.__scan_hardware_source.max_field_of_view_nm_stream.value or 100000.0
-        fov_nm = self.__scan_hardware_source.get_current_frame_parameters().fov_nm
+        fov_nm = self.__frame_parameters.fov_nm
         if fov_nm > max_fov_nm:
             fov_label_color = "red"
             fov_label_tool_tip = _("Exceeds maximum field of view:") + f" {int(max_fov_nm)}nm"
@@ -1183,10 +1184,17 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             self.__handle_state_changed_on_ui_thread()
 
+    def __get_profile_frame_parameters(self, profile_index: int | None = None) -> scan_profile.ScanProfile:
+        profile_index = self.__scan_hardware_source.selected_profile_index if profile_index is None else profile_index
+        return scan_profile.ScanProfile.from_scan_frame_parameters(self.__scan_hardware_source.get_frame_parameters(profile_index))
+
+    def __set_profile_frame_parameters(self, profile_index: int, frame_parameters: scan_profile.ScanProfile) -> None:
+        self.__scan_hardware_source.set_frame_parameters(profile_index, frame_parameters.to_scan_frame_parameters())
+
     def __update_profile_index(self, profile_index: int) -> None:
         self.__handle_state_changed()
 
-    def __update_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
+    def __update_frame_parameters(self, frame_parameters: scan_profile.ScanProfile) -> None:
         self.__handle_state_changed()
 
     def __handle_property_changed(self, property_name: str) -> None:
@@ -1219,7 +1227,7 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_hardware_source.set_selected_profile_index(value)
 
     @property
-    def _scan_frame_parameters_for_testing(self) -> scan_base.ScanFrameParameters:
+    def _scan_frame_parameters_for_testing(self) -> scan_profile.ScanProfile:
         return self.__frame_parameters
 
     @property
@@ -1239,7 +1247,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(self.__frame_parameters.pixel_size.height, value)
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def height_str(self) -> str:
@@ -1254,7 +1262,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(value, self.__frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def subscan_width_str(self) -> str | None:
@@ -1265,7 +1273,7 @@ class ScanControlPanelModel(Observable.Observable):
         value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1) if value_str else None
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.subscan_pixel_width_override = value
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def placeholder_subscan_width_str(self) -> str | None:
@@ -1285,7 +1293,7 @@ class ScanControlPanelModel(Observable.Observable):
             # notifications and internal values are updated in __handle_state_changed_on_ui_thread
             pixel_size = Geometry.IntSize(self.__width, self.__width)
             frame_parameters.pixel_size = pixel_size
-            self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+            self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
@@ -1294,7 +1302,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, frame_parameters.pixel_size.width * 2)
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
@@ -1303,7 +1311,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, max(1, frame_parameters.pixel_size.width // 2))
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_height(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
@@ -1312,7 +1320,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_height(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
@@ -1321,21 +1329,21 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_subscan_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
         subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
         frame_parameters.subscan_pixel_width_override = subscan_width * 2
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_subscan_width(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
         subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
         frame_parameters.subscan_pixel_width_override = subscan_width // 2
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def pixel_time_str(self) -> str:
@@ -1346,17 +1354,17 @@ class ScanControlPanelModel(Observable.Observable):
         value = max(0.01, Converter.FloatToStringConverter().convert_back(value_str) or 0.01)
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.pixel_time_us = value
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_pixel_time(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.pixel_time_us *= 2.0
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_pixel_time(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.pixel_time_us = max(0.01, frame_parameters.pixel_time_us / 2.0)
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def fov_str(self) -> str:
@@ -1367,17 +1375,17 @@ class ScanControlPanelModel(Observable.Observable):
         fov_nm = max(1.0, Converter.FloatToStringConverter().convert_back(value) or 1.0)
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.fov_nm = fov_nm
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def increase_fov(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.fov_nm *= 2.0
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     def decrease_fov(self) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.fov_nm = max(1.0, frame_parameters.fov_nm / 2.0)
-        self.__scan_hardware_source.set_frame_parameters(self.__profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__profile_index, frame_parameters)
 
     @property
     def rotation_deg_str(self) -> str:
@@ -1500,9 +1508,9 @@ class ScanControlPanelModel(Observable.Observable):
 
     @ac_line_sync_enabled.setter
     def ac_line_sync_enabled(self, value: bool) -> None:
-        frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+        frame_parameters = self.__get_profile_frame_parameters(self.__scan_hardware_source.selected_profile_index)
         frame_parameters.ac_line_sync = value
-        self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
+        self.__set_profile_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
 
     @property
     def fov_label_color(self) -> str:
@@ -1522,7 +1530,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             # the 'enabled channel indexes' implementation is incomplete, so, for now, explicitly add them to the
             # frame parameters so that they can be recorded when logging the start playing action.
-            frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+            frame_parameters = self.__get_profile_frame_parameters(self.__scan_hardware_source.selected_profile_index)
             frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
             action_context = self.__document_controller._get_action_context()
             action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
