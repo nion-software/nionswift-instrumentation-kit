@@ -83,6 +83,10 @@ class Camera(camera_base.CameraDevice3):
     def close(self) -> None:
         self.__cancel = True
         self.__thread_event.set()
+        # a sequence acquisition in progress waits on this separate event to simulate the remainder of its
+        # exposure; without canceling it too, closing while a sequence is in flight blocks until that
+        # exposure elapses on its own.
+        self.__cancel_sequence_event.set()
         self.__thread.join()
         self.__thread = typing.cast(typing.Any, None)
         self.__simulator.close()
