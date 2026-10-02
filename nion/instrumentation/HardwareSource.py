@@ -1576,14 +1576,19 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         def abort() -> None:
             new_data_event.set()
 
-        with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
-            with contextlib.closing(self.abort_event.listen(abort)):
-                # wait for the current frame to finish. check first if already aborted.
-                if not self.is_aborted:
-                    if not new_data_event.wait(timeout):
-                        raise Exception("Could not start data_source " + str(self.hardware_source_id))
+        # deliberately do not close() these listeners: close() swaps the listener's call to a no-op
+        # without any synchronization with a concurrent fire(), which can silently drop a delivery that
+        # is already in flight. instead, just let them become unreferenced (and so garbage collected,
+        # which Event.listen() supports via weak references) when this method returns.
+        listener = self.xdatas_available_event.listen(receive_new_xdatas)
+        abort_listener = self.abort_event.listen(abort)
 
-                return new_xdatas
+        # wait for the current frame to finish. check first if already aborted.
+        if not self.is_aborted:
+            if not new_data_event.wait(timeout):
+                raise Exception("Could not start data_source " + str(self.hardware_source_id))
+
+        return new_xdatas
 
     def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         new_data_event = threading.Event()
@@ -1596,21 +1601,26 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         def abort() -> None:
             new_data_event.set()
 
-        with contextlib.closing(self.xdatas_available_event.listen(receive_new_xdatas)):
-            with contextlib.closing(self.abort_event.listen(abort)):
-                # wait for the current frame to finish. check first if already aborted.
-                if not self.is_aborted:
-                    if not new_data_event.wait(timeout):
-                        raise Exception("Could not start data_source " + str(self.hardware_source_id))
+        # deliberately do not close() these listeners: close() swaps the listener's call to a no-op
+        # without any synchronization with a concurrent fire(), which can silently drop a delivery that
+        # is already in flight. instead, just let them become unreferenced (and so garbage collected,
+        # which Event.listen() supports via weak references) when this method returns.
+        listener = self.xdatas_available_event.listen(receive_new_xdatas)
+        abort_listener = self.abort_event.listen(abort)
 
-                new_data_event.clear()
+        # wait for the current frame to finish. check first if already aborted.
+        if not self.is_aborted:
+            if not new_data_event.wait(timeout):
+                raise Exception("Could not start data_source " + str(self.hardware_source_id))
 
-                # check again for aborted in case it was aborted before entering this method.
-                if not self.is_aborted:
-                    if len(new_xdatas) > 0:
-                        new_data_event.wait(timeout)
+        new_data_event.clear()
 
-                return new_xdatas
+        # check again for aborted in case it was aborted before entering this method.
+        if not self.is_aborted:
+            if len(new_xdatas) > 0:
+                new_data_event.wait(timeout)
+
+        return new_xdatas
 
     def __data_channel_start(self, data_channel_event_args: DataChannelEventArgs) -> None:
         self.data_channel_start_event.fire(data_channel_event_args)
