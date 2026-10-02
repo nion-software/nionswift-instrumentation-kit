@@ -138,7 +138,8 @@ def make_multi_acquisition_method() -> Acquisition.AcquisitionMethodLike:
         count: int
         include_sum: bool
 
-    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4, False), MultiSection(5.0, 0.05, 2, False)])
+    # exposures only need to be large enough to produce distinct sections; they do not need to simulate realistic timing.
+    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.005, 4, False), MultiSection(5.0, 0.01, 2, False)])
 
 
 def make_multi_acquisition_with_sum_method() -> Acquisition.AcquisitionMethodLike:
@@ -149,7 +150,8 @@ def make_multi_acquisition_with_sum_method() -> Acquisition.AcquisitionMethodLik
         count: int
         include_sum: bool
 
-    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.025, 4, True), MultiSection(5.0, 0.05, 2, False)])
+    # exposures only need to be large enough to produce distinct sections; they do not need to simulate realistic timing.
+    return Acquisition.MultipleAcquisitionMethod([MultiSection(0.0, 0.005, 4, True), MultiSection(5.0, 0.01, 2, False)])
 
 
 class InstrumentController:
