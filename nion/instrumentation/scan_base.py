@@ -2684,6 +2684,12 @@ class SynchronizedDataStream(Acquisition.ContainerDataStream):
         self.__scan_packet_time = time.perf_counter()
         super()._prepare_stream(stream_args, index_stack, **kwargs)
 
+    def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
+        super()._start_stream(stream_args)
+        # update setting camera_packet_time and scan_packet_time once stream starts in case of long prepare/start time
+        self.__camera_packet_time = time.perf_counter()
+        self.__scan_packet_time = time.perf_counter()
+
     def _handle_data_received(self, data_stream_event: Acquisition.DataStreamEventArgs) -> None:
         # observe incoming data and mark the last times that a camera or scan packet arrives.
         # this facilitates an extra check to see if scan data is arriving in a timely manner.

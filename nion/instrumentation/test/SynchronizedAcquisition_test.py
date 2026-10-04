@@ -4,6 +4,7 @@ import numpy
 import threading
 import time
 import unittest
+import unittest.mock
 import uuid
 import tempfile
 import typing
@@ -1389,6 +1390,51 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual((512,), maker.get_data(Acquisition.Channel("test_eels_camera", "sum")).data_shape)
             self.assertEqual((4, 512), maker.get_data(Acquisition.Channel("test_eels_camera")).data_shape)
             maker = None
+
+    def test_flyback_events_are_zero_copy(self):
+        # Directly exercise _get_raw_data_stream_events with a non-contiguous (flyback-cropped)
+        # data array and verify that every source_data emitted in the events shares memory
+        # with the original array - i.e., no copy was made.
+        raw = numpy.arange(4 * 6 * 8, dtype=numpy.float32).reshape(4, 6, 8)
+        # Simulate flyback crop: slice out first 2 columns to get a non-contiguous view
+        cropped = raw[:, 2:, :]  # shape (4, 4, 8), strided, non-contiguous
+        self.assertFalse(cropped.flags['C_CONTIGUOUS'], "Test setup: cropped array should be non-contiguous")
+
+        # Wrap in navigable xdata (2 collection dims, 1 datum dim)
+        xdata = DataAndMetadata.new_data_and_metadata(
+            cropped,
+            data_descriptor=DataAndMetadata.DataDescriptor(False, 2, 1))
+
+        partial = camera_base.CameraDeviceStreamPartialData(
+            valid_index=4 * 4,  # all 16 pixels valid
+            is_complete=True,
+            xdata=xdata)
+
+        delegate = unittest.mock.MagicMock()
+        delegate.get_next_data.return_value = partial
+        delegate.continue_data.return_value = None
+        delegate.prepare_stream.return_value = 16
+
+        camera_hs = unittest.mock.MagicMock()
+        camera_hs.hardware_source_id = "test_camera"
+        camera_hs.get_expected_dimensions.return_value = (4, 4)
+
+        stream = camera_base.CameraDataStream(camera_hs, unittest.mock.MagicMock(), delegate)
+        stream_args = Acquisition.DataStreamArgs((4, 4))
+        stream._prepare_stream(stream_args, [])
+        stream._start_stream(stream_args)
+
+        events = stream._get_raw_data_stream_events()
+
+        self.assertGreater(len(events), 0, "Expected at least one event to be emitted")
+        for _, event in events:
+            self.assertTrue(
+                numpy.shares_memory(event.source_data, cropped),
+                "source_data does not share memory with the original cropped array"
+            )
+        # The events together must account for all 16 valid pixels
+        total_pixels = sum(event.count for _, event in events if event.count is not None)
+        self.assertEqual(16, total_pixels)
 
     # TODO: check for counts per electron
 
