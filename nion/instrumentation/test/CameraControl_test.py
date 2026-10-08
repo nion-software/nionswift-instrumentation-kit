@@ -579,6 +579,11 @@ class TestCameraControlClass(unittest.TestCase):
                 hardware_source.abort_playing()
             self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
 
+    def test_test_context_camera_exposure_sets_camera_exposure(self):
+        with AcquisitionTestContext.test_context(camera_exposure=0.02) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            self.assertAlmostEqual(20, hardware_source.get_current_frame_parameters().exposure_ms)
+
     def test_first_view_uses_correct_exposure(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
