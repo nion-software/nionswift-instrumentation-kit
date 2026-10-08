@@ -330,15 +330,60 @@ class ScanHardwareSource(HardwareSource.ConcreteHardwareSource):
 
 
 def _test_acquiring_frames_with_generator_produces_correct_frame_numbers(testcase, hardware_source, document_controller):
+    # the acquisition thread calls the acquire hook before acquiring each frame or part of a frame. the hook holds the
+    # acquisition until a grab is listening and still needs a frame, so that frames finish only while a grab is waiting
+    # for them and the frame numbers do not depend on how the threads are scheduled.
+
+    # the lock protects frames, frames_needed, and is_acquisition_released, which are shared by the test thread and
+    # the acquisition thread.
+    lock = threading.Lock()
+    frames = list()
+    frames_needed = 0
+    is_acquisition_released = False
+
+    # record each frame as it finishes. listeners are called in the order added, so this one records a frame before a
+    # grab receives it.
+    def record_frame(data_promises) -> None:
+        with lock:
+            frames.append(data_promises[0].xdata.metadata["hardware_source"]["frame_index"])
+
+    record_frame_listener = hardware_source.xdatas_available_event.listen(record_frame)
+    test_listener_count = hardware_source.xdatas_available_event.listener_count
+
+    def is_acquisition_permitted() -> bool:
+        with lock:
+            if is_acquisition_released:
+                return True
+            is_grab_listening = hardware_source.xdatas_available_event.listener_count > test_listener_count
+            return is_grab_listening and len(frames) < frames_needed
+
+    # the event does not report new listeners, so poll for a grab. give up after a while so that a broken grab fails
+    # the test rather than hangs it.
+    def hold_acquisition() -> None:
+        deadline = time.monotonic() + 10.0
+        while not is_acquisition_permitted() and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+    # grab while permitting the acquisition of the given number of frames.
+    def grab(get_next_xdatas, frame_count: int) -> int:
+        nonlocal frames_needed
+        with lock:
+            frames_needed += frame_count
+        return get_next_xdatas()[0].metadata["hardware_source"]["frame_index"]
+
+    hardware_source._test_acquire_hook = hold_acquisition
     hardware_source.start_playing(sync_timeout=3.0)
     try:
-        frame0 = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["frame_index"]
-        frame1 = hardware_source.get_next_xdatas_to_finish()[0].metadata["hardware_source"]["frame_index"]
-        frame3 = hardware_source.get_next_xdatas_to_start()[0].metadata["hardware_source"]["frame_index"]
-        frame5 = hardware_source.get_next_xdatas_to_start()[0].metadata["hardware_source"]["frame_index"]
-        testcase.assertEqual((1, 3, 5), (frame1 - frame0, frame3 - frame0, frame5 - frame0))
+        frame0 = grab(hardware_source.get_next_xdatas_to_finish, 1)
+        frame1 = grab(hardware_source.get_next_xdatas_to_finish, 1)
+        frame3 = grab(hardware_source.get_next_xdatas_to_start, 2)
+        frame5 = grab(hardware_source.get_next_xdatas_to_start, 2)
     finally:
+        with lock:
+            is_acquisition_released = True
         hardware_source.abort_playing(sync_timeout=3.0)
+        hardware_source._test_acquire_hook = None
+    testcase.assertEqual((1, 3, 5), (frame1 - frame0, frame3 - frame0, frame5 - frame0), f"frames {frames} finished")
 
 def _test_acquire_multiple_frames_reuses_same_data_item(testcase, hardware_source, document_controller):
     hardware_source.start_playing(sync_timeout=3.0)
