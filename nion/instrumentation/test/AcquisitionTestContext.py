@@ -57,7 +57,7 @@ class AcquisitionTestContextConfigurationLike(typing.Protocol):
 
 
 class AcquisitionTestContext(TestContext.MemoryProfileContext):
-    def __init__(self, configuration: AcquisitionTestContextConfigurationLike, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False, is_app: bool = False) -> None:
+    def __init__(self, configuration: AcquisitionTestContextConfigurationLike, *, is_eels: bool = False, camera_exposure: float | None = None, is_both_cameras: bool = False, is_app: bool = False) -> None:
         super().__init__()
         assert not is_eels or not is_both_cameras
         logging.getLogger("acquisition").setLevel(logging.ERROR)
@@ -71,6 +71,16 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.scan_module.device.scan_device_id)
         self._ronchigram_camera_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.ronchigram_camera_device_id)
         self._eels_camera_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(configuration.eels_camera_device_id)
+        # if a camera exposure is given, make it the exposure of the first profile of each camera and keep the exposure
+        # of the other profiles in proportion to it. otherwise the cameras keep the exposures from the configuration.
+        if camera_exposure is not None:
+            for hardware_source in (self._ronchigram_camera_hardware_source, self._eels_camera_hardware_source):
+                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
+                exposure_scale = camera_exposure * 1000 / camera_hardware_source.get_frame_parameters(0).exposure_ms
+                for profile_index in range(len(camera_hardware_source.modes)):
+                    frame_parameters = camera_hardware_source.get_frame_parameters(profile_index)
+                    frame_parameters.exposure_ms *= exposure_scale
+                    camera_hardware_source.set_frame_parameters(profile_index, frame_parameters)
         self.configuration = configuration
         self.instrument = configuration.instrument
         self.scan_hardware_source = scan_hardware_source
@@ -100,7 +110,7 @@ class AcquisitionTestContext(TestContext.MemoryProfileContext):
         self.__exit_stack.append(ex)
 
 
-def test_context(configuration: typing.Optional[AcquisitionTestContextConfigurationLike] = None, *, is_eels: bool = False, camera_exposure: float = 0.025, is_both_cameras: bool = False, is_app: bool = False, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> AcquisitionTestContext:
+def test_context(configuration: typing.Optional[AcquisitionTestContextConfigurationLike] = None, *, is_eels: bool = False, camera_exposure: float | None = None, is_both_cameras: bool = False, is_app: bool = False, advance_pixel_filter: typing.Callable[[int], bool] | None = None) -> AcquisitionTestContext:
     configuration_ = configuration or AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration(advance_pixel_filter=advance_pixel_filter)
     return AcquisitionTestContext(configuration_, is_eels=is_eels, camera_exposure=camera_exposure, is_both_cameras=is_both_cameras, is_app=is_app)
 
