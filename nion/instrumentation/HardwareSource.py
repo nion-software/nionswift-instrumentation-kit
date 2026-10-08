@@ -107,6 +107,14 @@ class HardwareSourceBridge:
         self.__document_model = document_model
         self.__data_items_to_append_lock = threading.RLock()
         self.__data_items_to_append: typing.List[typing.Tuple[str, DataItem.DataItem]] = list()
+
+        # the data channel events arrive on acquisition threads and may still arrive after the hardware source
+        # listeners are removed, since an event that is already firing calls the listeners it had when it started. the
+        # closed lock makes close wait for a data channel event in progress, and the closed flag makes the data channel
+        # events which arrive after close do nothing.
+        self.__closed_lock = threading.RLock()
+        self.__closed = False
+
         self.__hardware_sources_list_listener = ListListener.ListListener(
             HardwareSourceManager()._hardware_source_list_model,
             ListListener.ListItemEventsHandlerFactory(
@@ -118,6 +126,8 @@ class HardwareSourceBridge:
         )
 
     def close(self) -> None:
+        with self.__closed_lock:
+            self.__closed = True
         # close hardware source related stuff
         # close data items left to append that haven't been appended
         with self.__data_items_to_append_lock:
@@ -183,20 +193,26 @@ class HardwareSourceBridge:
             assert threading.current_thread() == threading.main_thread()
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_event_args.data_channel_id)
             data_item_reference.start()
-        self.__call_soon(data_channel_start)
+        with self.__closed_lock:
+            if not self.__closed:
+                self.__call_soon(data_channel_start)
 
     def __data_channel_stop(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs) -> None:
         def data_channel_stop() -> None:
             assert threading.current_thread() == threading.main_thread()
             data_item_reference = self.__document_model.get_data_item_channel_reference(hardware_source.hardware_source_id, data_channel_event_args.data_channel_id)
             data_item_reference.stop()
-        self.__call_soon(data_channel_stop)
+        with self.__closed_lock:
+            if not self.__closed:
+                self.__call_soon(data_channel_stop)
 
     def __data_channel_updated(self, hardware_source: HardwareSource, data_channel_event_args: DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
-        data_item_reference = self.__construct_data_item_reference(hardware_source, data_channel_event_args.data_channel_id, data_channel_event_args.name)
-        data_item = data_item_reference.data_item
-        assert data_item
-        self.__document_model._queue_data_item_update(data_item, data_and_metadata)
+        with self.__closed_lock:
+            if not self.__closed:
+                data_item_reference = self.__construct_data_item_reference(hardware_source, data_channel_event_args.data_channel_id, data_channel_event_args.name)
+                data_item = data_item_reference.data_item
+                assert data_item
+                self.__document_model._queue_data_item_update(data_item, data_and_metadata)
 
 
 # Keeps track of all registered hardware sources and instruments.
