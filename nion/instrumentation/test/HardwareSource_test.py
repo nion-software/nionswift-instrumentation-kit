@@ -481,8 +481,9 @@ def _test_view_reuses_single_data_item(testcase, hardware_source, document_contr
     testcase.assertEqual(len(document_model.data_items), 1)
     data_item = document_model.data_items[0]
     testcase.assertFalse(data_item.is_live)
-    frame_index = data_item.metadata.get("hardware_source")["frame_index"]
-    # play the second time. it should make a copy of the first data item and use the original.
+    data = numpy.copy(data_item.data)
+    # play the second time. it should make a copy of the first data item and use the original. the data of each frame
+    # differs, so the original should hold new data and the copy should hold the data from the first time.
     new_data_item = copy.deepcopy(document_model.data_items[0])
     document_model.append_data_item(new_data_item)
     hardware_source.start_playing(sync_timeout=3.0)
@@ -494,10 +495,8 @@ def _test_view_reuses_single_data_item(testcase, hardware_source, document_contr
     testcase.assertEqual(len(document_model.data_items), 2)
     data_item = document_model.data_items[0]
     copied_data_item = document_model.data_items[1]
-    new_frame_index = data_item.metadata.get("hardware_source")["frame_index"]
-    copied_frame_index = copied_data_item.metadata.get("hardware_source")["frame_index"]
-    testcase.assertNotEqual(frame_index, new_frame_index)
-    testcase.assertEqual(frame_index, copied_frame_index)
+    testcase.assertFalse(numpy.array_equal(data, data_item.data))
+    testcase.assertTrue(numpy.array_equal(data, copied_data_item.data))
 
 def _test_get_next_data_elements_to_finish_returns_full_frames(testcase, hardware_source, document_controller):
     hardware_source.start_playing(sync_timeout=3.0)
