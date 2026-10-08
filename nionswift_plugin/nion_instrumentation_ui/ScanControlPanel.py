@@ -1682,7 +1682,7 @@ class ScanPanelController(Declarative.Handler):
         rotation_row = create_line_edit_row(_("Rot. (deg)"), "@binding(_model.rotation_deg_str)", text_width=68)
         width_row = create_line_edit_row(_("Width"), "@binding(_model.width_str)", KeyAndAction("L", "handle_decrease_width"), KeyAndAction("H", "handle_increase_width"), text_width=48)
         height_row = create_line_edit_row(_("Height"), "@binding(_model.height_str)", KeyAndAction("L", "handle_decrease_height"), KeyAndAction("H", "handle_increase_height"), text_width=48)
-        subscan_width_row = create_line_edit_row(_("Size"), "@binding(_model.subscan_width_str)", KeyAndAction("D", "handle_decrease_subscan_width"), KeyAndAction("R", "handle_increase_subscan_width"), text_width=48, placeholder_text_binding="@binding(_model.placeholder_subscan_width_str)")
+        subscan_width_row = create_line_edit_row(_("Width"), "@binding(_model.subscan_width_str)", KeyAndAction("L", "handle_decrease_subscan_width"), KeyAndAction("H", "handle_increase_subscan_width"), text_width=48, placeholder_text_binding="@binding(_model.placeholder_subscan_width_str)")
 
         size_row = u.create_row(
             u.create_column(width_row, height_row, spacing=2),
