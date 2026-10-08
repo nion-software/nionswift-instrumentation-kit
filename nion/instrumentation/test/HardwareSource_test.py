@@ -22,6 +22,7 @@ from nion.swift.test import TestContext
 from nion.ui import DrawingContext
 from nion.ui import TestUI
 from nion.utils import DateTime
+from nion.utils import Event
 from nion.utils import Geometry
 
 
@@ -86,6 +87,47 @@ class SimpleHardwareSource(HardwareSource.ConcreteHardwareSource):
 
     def _create_acquisition_record_task(self, **kwargs) -> SimpleAcquisitionTask:
         return SimpleAcquisitionTask(False, self.sleep, self.image)
+
+
+class GatedAcquisitionTask(SimpleAcquisitionTask):
+    """A continuous acquisition task which acquires a frame only when the test permits it and a grab is listening.
+
+    Each frame first takes a permit from frame_permits. When no permit is available, the task aborts if
+    abort_without_permit is set, and then waits for a permit. The frame then waits until a grab listens to
+    xdatas_available_event, so that the frame finishes after the grab starts listening. Setting release_event stops the
+    waiting for a grab, so that the task can be aborted at the end of a test.
+    """
+
+    def __init__(self, frame_permits: threading.Semaphore, abort_without_permit: bool, xdatas_available_event: Event.Event, release_event: threading.Event) -> None:
+        super().__init__(True, 0.0)
+        self.__frame_permits = frame_permits
+        self.__abort_without_permit = abort_without_permit
+        self.__xdatas_available_event = xdatas_available_event
+        self.__release_event = release_event
+
+    def _acquire_data_elements(self):
+        if not self.__frame_permits.acquire(blocking=False):
+            if self.__abort_without_permit:
+                self.abort()
+            self.__frame_permits.acquire()
+        # only a grab listens to xdatas_available_event, so any listener means a grab is listening. the event does not
+        # report new listeners, so poll for one.
+        while self.__xdatas_available_event.listener_count == 0 and not self.__release_event.wait(0.001):
+            pass
+        return super()._acquire_data_elements()
+
+
+class GatedHardwareSource(SimpleHardwareSource):
+    """A hardware source which plays using a GatedAcquisitionTask, so that the test controls which frames a grab sees."""
+
+    def __init__(self, abort_without_permit: bool) -> None:
+        super().__init__()
+        self.frame_permits = threading.Semaphore(0)
+        self.abort_without_permit = abort_without_permit
+        self.release_event = threading.Event()
+
+    def _create_acquisition_view_task(self) -> GatedAcquisitionTask:
+        return GatedAcquisitionTask(self.frame_permits, self.abort_without_permit, self.xdatas_available_event, self.release_event)
 
 
 class LinePlotAcquisitionTask(HardwareSource.AcquisitionTask):
@@ -636,6 +678,35 @@ class TestHardwareSourceClass(unittest.TestCase):
         self.assertEqual(hardware_source_manager.get_hardware_source_for_hardware_source_id("testalias2").hardware_source_id, simple_hardware_source.hardware_source_id)
         self.assertEqual(hardware_source_manager.get_hardware_source_for_hardware_source_id("testalias3").hardware_source_id, simple_hardware_source.hardware_source_id)
         hardware_source_manager.unregister_hardware_source(simple_hardware_source)
+
+    def test_get_next_xdatas_to_start_raises_when_next_frame_does_not_finish(self):
+        # permit only one frame. the grab sees it finish, but it may have started before the grab, so the grab must not
+        # return it.
+        hardware_source = GatedHardwareSource(abort_without_permit=False)
+        HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
+        hardware_source.frame_permits.release()
+        hardware_source.start_playing(sync_timeout=3.0)
+        try:
+            with self.assertRaises(Exception):
+                hardware_source.get_next_xdatas_to_start(timeout=0.5)
+        finally:
+            hardware_source.release_event.set()
+            hardware_source.frame_permits.release(100)
+            hardware_source.abort_playing(sync_timeout=3.0)
+
+    def test_get_next_xdatas_to_start_returns_no_data_when_aborted_before_next_frame(self):
+        # permit only one frame and abort when the next one is due. the grab sees the permitted frame finish, but it may
+        # have started before the grab, so the grab must not return it.
+        hardware_source = GatedHardwareSource(abort_without_permit=True)
+        HardwareSource.HardwareSourceManager().register_hardware_source(hardware_source)
+        hardware_source.frame_permits.release()
+        hardware_source.start_playing(sync_timeout=3.0)
+        try:
+            self.assertEqual(0, len(hardware_source.get_next_xdatas_to_start(timeout=3.0)))
+        finally:
+            hardware_source.release_event.set()
+            hardware_source.frame_permits.release(100)
+            hardware_source.abort_playing(sync_timeout=3.0)
 
     ## STANDARD ACQUISITION TESTS ##
     # Search for the tag above when adding tests to this section.

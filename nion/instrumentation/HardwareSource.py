@@ -1566,12 +1566,35 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 assert time.time() - start < float(sync_timeout)
 
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        """Return the data of the next frame to finish.
+
+        The frame may have started before this call. Acquisition must already be playing.
+
+        The acquisition thread fires xdatas_available_event once for each frame it finishes. This method listens to that
+        event and then sleeps until the first frame finishes. The acquisition thread does not wait for this thread to
+        wake, so by the time it wakes, further frames may have finished. The listener counts the frames it is given and
+        keeps only the first, so the frame returned is the one which finished first after this call, however late this
+        thread wakes.
+
+        If the hardware source aborts before the frame finishes, return an empty sequence.
+
+        Raises an exception if no frame finishes within the timeout.
+        """
         new_data_event = threading.Event()
         new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
+        # the lock protects new_xdatas and delivery_count, which are written on the acquisition thread and read on this one.
+        new_xdatas_lock = threading.Lock()
+        delivery_count = 0
+
         def receive_new_xdatas(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
-            new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
-            new_data_event.set()
+            nonlocal delivery_count
+            # keep the first frame and ignore the frames which finish before the waiting thread wakes.
+            with new_xdatas_lock:
+                delivery_count += 1
+                if delivery_count == 1:
+                    new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
+                    new_data_event.set()
 
         def abort() -> None:
             new_data_event.set()
@@ -1588,17 +1611,46 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             if not new_data_event.wait(timeout):
                 raise Exception("Could not start data_source " + str(self.hardware_source_id))
 
-        return new_xdatas
+        with new_xdatas_lock:
+            return list(new_xdatas)
 
     def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        """Return the data of the next frame to start, so that all of its data was acquired after this call.
+
+        Acquisition must already be playing.
+
+        The acquisition thread fires xdatas_available_event once for each frame it finishes. The first frame to finish
+        after this call may have started before it, so this method waits for two frames to finish and skips the first.
+        The acquisition thread does not wait for this thread to wake, so by the time it wakes, further frames may have
+        finished. The listener counts the frames it is given and keeps only the second, so the frame returned is the
+        right one however late this thread wakes.
+
+        If the hardware source aborts before the second frame finishes, return an empty sequence.
+
+        Raises an exception if either frame does not finish within the timeout, which applies to each frame separately.
+        """
+        current_frame_finished_event = threading.Event()
         new_data_event = threading.Event()
         new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
 
+        # the lock protects new_xdatas and delivery_count, which are written on the acquisition thread and read on this one.
+        new_xdatas_lock = threading.Lock()
+        delivery_count = 0
+
         def receive_new_xdatas(data_promises: typing.Sequence[DataAndMetadataPromise]) -> None:
-            new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
-            new_data_event.set()
+            nonlocal delivery_count
+            # skip the first frame, which may have started before the call, and keep the second. ignore the frames which
+            # finish before the waiting thread wakes.
+            with new_xdatas_lock:
+                delivery_count += 1
+                if delivery_count == 1:
+                    current_frame_finished_event.set()
+                elif delivery_count == 2:
+                    new_xdatas[:] = [data_promise.xdata for data_promise in data_promises]
+                    new_data_event.set()
 
         def abort() -> None:
+            current_frame_finished_event.set()
             new_data_event.set()
 
         # deliberately do not close() these listeners: close() swaps the listener's call to a no-op
@@ -1610,17 +1662,16 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
         # wait for the current frame to finish. check first if already aborted.
         if not self.is_aborted:
+            if not current_frame_finished_event.wait(timeout):
+                raise Exception("Could not start data_source " + str(self.hardware_source_id))
+
+        # wait for the next frame to finish. check again for aborted in case it was aborted while waiting.
+        if not self.is_aborted:
             if not new_data_event.wait(timeout):
                 raise Exception("Could not start data_source " + str(self.hardware_source_id))
 
-        new_data_event.clear()
-
-        # check again for aborted in case it was aborted before entering this method.
-        if not self.is_aborted:
-            if len(new_xdatas) > 0:
-                new_data_event.wait(timeout)
-
-        return new_xdatas
+        with new_xdatas_lock:
+            return list(new_xdatas)
 
     def __data_channel_start(self, data_channel_event_args: DataChannelEventArgs) -> None:
         self.data_channel_start_event.fire(data_channel_event_args)
