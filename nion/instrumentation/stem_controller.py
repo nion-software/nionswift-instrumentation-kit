@@ -14,6 +14,7 @@ import threading
 import time
 import typing
 import uuid
+import weakref
 
 # third party libraries
 # None
@@ -305,6 +306,7 @@ class ScanSpecifier:
 
 
 _TryValueType = typing.TypeVar('_TryValueType', covariant=True)
+_ReservedType = typing.TypeVar('_ReservedType')
 
 class TryValue(typing.Generic[_TryValueType]):
     """ A value and an exception.
@@ -332,6 +334,104 @@ class TryValue(typing.Generic[_TryValueType]):
     @property
     def is_valid(self) -> bool:
         return self.exception is None
+
+
+class InvalidThreadError(RuntimeError):
+    """Raised when a method is called from a thread other than the main thread."""
+    pass
+
+
+class ReservedResource(typing.Generic[_ReservedType]):
+    """A main-thread reservation token for an acquired resource.
+
+    Threading contract:
+    - ``reserve`` and ``release`` occur on the main thread.
+    - Do not pass this token to worker threads.
+    - If worker code needs access, pass only ``resource``.
+    """
+
+    def __init__(self, resource: _ReservedType, release_fn: typing.Callable[[], None]) -> None:
+        self.resource: _ReservedType | None = resource
+        self.__release_fn: typing.Callable[[], None] | None = release_fn
+
+    def __enter__(self) -> ReservedResource[_ReservedType]:
+        return self
+
+    def __exit__(self, exc_type: typing.Any, exc_val: typing.Any, exc_tb: typing.Any) -> None:
+        self.release()
+
+    def release(self) -> None:
+        """Release this reservation token.
+
+        Must be called on the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("release must be called on the main thread.")
+        if self.__release_fn is not None:
+            self.__release_fn()
+            self.__release_fn = None
+        self.resource = None
+
+
+class ResourceReservation(typing.Generic[_ReservedType]):
+    """Main-thread reservation manager for one optional resource."""
+
+    def __init__(self, resource_provider: typing.Callable[[], _ReservedType | None]) -> None:
+        self.__resource_provider = resource_provider
+        self.__reservation: weakref.ReferenceType[ReservedResource[_ReservedType]] | None = None
+        self.__is_available_stream = Stream.ValueStream[bool](False)
+        self.__update_availability_stream()
+
+    @property
+    def is_available_stream(self) -> Stream.AbstractStream[bool]:
+        """A stream of availability of the resource for UI binding."""
+        return self.__is_available_stream
+
+    @property
+    def is_reserved(self) -> bool:
+        reservation_ref = self.__reservation
+        if reservation_ref is None:
+            return False
+        reservation = reservation_ref()
+        if reservation is None:
+            self.__reservation = None
+            return False
+        return True
+
+    def reserve(self) -> ReservedResource[_ReservedType] | None:
+        """Reserve and return a token, or None if unavailable or already reserved.
+
+        Must be called on the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("reserve must be called on the main thread.")
+        if self.is_reserved:
+            return None
+        resource = self.__resource_provider()
+        if resource is None:
+            self.__update_availability_stream()
+            return None
+        reservation = ReservedResource(resource, self.release)
+        self.__reservation = weakref.ref(reservation)
+        self.__update_availability_stream()
+        return reservation
+
+    def release(self) -> None:
+        """Release the current reservation.
+
+        Must be called on the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("release must be called on the main thread.")
+        self.__reservation = None
+        self.__update_availability_stream()
+
+    def notify_resource_state_changed(self) -> None:
+        """Update availability stream when underlying resource state may have changed."""
+        self.__update_availability_stream()
+
+    def __update_availability_stream(self) -> None:
+        self.__is_available_stream.value = self.__resource_provider() is not None and not self.is_reserved
 
 
 class STEMController(Observable.Observable):
@@ -367,6 +467,7 @@ class STEMController(Observable.Observable):
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
+        self.__ronchigram_camera_reservation = ResourceReservation(self.__get_ronchigram_camera)
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -375,7 +476,9 @@ class STEMController(Observable.Observable):
 
         # keep the scan context synchronized with whichever scan controller currently owns the observable scan state.
 
-        def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
+        def handle_component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
+            if "ronchigram_camera_hardware_source" in component_types:
+                self.__ronchigram_camera_reservation.notify_resource_state_changed()
             if "scan_hardware_source" in component_types:
                 scan_controller = self.__refresh_scan_controller()
                 if scan_controller and not self.__scan_controller_is_explicit:
@@ -383,7 +486,12 @@ class STEMController(Observable.Observable):
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
                     self._update_scan_context(scan_frame_parameters.pixel_size, scan_frame_parameters.center_nm, scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
-        self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
+        def handle_component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
+            if "ronchigram_camera_hardware_source" in component_types:
+                self.__ronchigram_camera_reservation.notify_resource_state_changed()
+
+        self.__component_registered_listener = Registry.listen_component_registered_event(handle_component_registered)
+        self.__component_unregistered_listener = Registry.listen_component_unregistered_event(handle_component_unregistered)
         self.__refresh_scan_controller()
 
     def close(self) -> None:
@@ -391,6 +499,7 @@ class STEMController(Observable.Observable):
         self.__scan_controller = None
         self.__scan_controller_is_explicit = False
         self.__component_registered_listener = typing.cast(typing.Any, None)
+        self.__component_unregistered_listener = typing.cast(typing.Any, None)
 
     def __set_scan_controller(self, scan_controller: typing.Optional[scan_base.ScanHardwareSource], *, is_explicit: bool) -> None:
         if scan_controller is self.__scan_controller and is_explicit == self.__scan_controller_is_explicit:
@@ -434,7 +543,10 @@ class STEMController(Observable.Observable):
     # configuration methods
 
     @property
-    def ronchigram_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
+    def ronchigram_camera(self) -> camera_base.CameraHardwareSource | None:
+        return self.__get_ronchigram_camera()
+
+    def __get_ronchigram_camera(self) -> camera_base.CameraHardwareSource | None:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
         return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
@@ -443,6 +555,24 @@ class STEMController(Observable.Observable):
     def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
+        self.__ronchigram_camera_reservation.notify_resource_state_changed()
+
+    @property
+    def is_ronchigram_available(self) -> Stream.AbstractStream[bool]:
+        """A stream of ronchigram reservation availability for UI binding."""
+        return self.__ronchigram_camera_reservation.is_available_stream
+
+    def _try_reserve_ronchigram_camera(self) -> ReservedResource[camera_base.CameraHardwareSource] | None:
+        """Reserve and return the ronchigram camera token.
+
+        Returns None if the camera is missing or already reserved.
+
+        Threading contract:
+        - reserve/release must occur on the main thread.
+        - do not pass the reservation token to worker threads.
+        - pass only ``reservation.resource`` to worker threads.
+        """
+        return self.__ronchigram_camera_reservation.reserve()
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:
