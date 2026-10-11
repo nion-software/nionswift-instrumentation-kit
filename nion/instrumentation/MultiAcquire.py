@@ -619,7 +619,11 @@ class CameraDataChannel(camera_base.SynchronizedDataChannelInterface):
                 if data_item_xdata:
                     data = data_and_metadata.data
                     assert data is not None
-                    data_item_xdata.data[tuple(dst_slice)] += data[tuple(src_slice)]
+                    # the queued partial update writes its chunk over the item's region, so the chunk carries the sum.
+                    # the item's data holds the previous frames only once their queued updates are applied.
+                    summed_data = data_item_xdata.data[tuple(dst_slice)] + data[tuple(src_slice)]
+                    data_and_metadata = data_and_metadata.clone_with_data(summed_data)
+                    src_slice = [slice(None)] * len(src_slice)
             else:
                 dst_slice = [slice(self.current_frames_index, self.current_frames_index + 1)] + dst_slice
 

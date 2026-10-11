@@ -5,6 +5,7 @@ import numpy as np
 import unittest
 import time
 
+from nion.data import DataAndMetadata
 from nion.instrumentation import camera_base
 from nion.swift import Application
 from nion.swift import Facade
@@ -482,6 +483,64 @@ class TestMultiAcquire(unittest.TestCase):
 
                 # ensure also that some scan info is saved in the camera metadata
                 self.assertIsNotNone(data_item.metadata['scan'])
+
+    def test_acquire_multi_eels_spectrum_image_with_summed_frames_holds_sum_of_frames(self):
+        scan_size = Geometry.IntSize(5, 7)
+        settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'x_shift_delay': 0.0, 'processing': 'sum_project', 'sum_frames': True}
+        parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 3}]
+        with self.__test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.size = scan_size
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            spectrum_width = camera_hardware_source.get_expected_dimensions(camera_hardware_source.get_current_frame_parameters())[1]
+            frame_sum = np.zeros(tuple(scan_size) + (spectrum_width,), np.float32)
+
+            # the simulated frames are random, so sum the frames which the camera channel receives, as the reference for the item.
+            class FrameSummingCameraDataChannel(MultiAcquire.CameraDataChannel):
+                def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, scan_shape: Geometry.IntSize,
+                           dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id: str | None) -> None:
+                    frame_sum[dest_sub_area.slice] += data_and_metadata.data[sub_area.slice]
+                    super().update(data_and_metadata, state, scan_shape, dest_sub_area, sub_area, view_id)
+
+            handlers = list[MultiAcquire.SISequenceAcquisitionHandler]()
+            multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, test_context.instrument)
+            multi_acquire_controller.scan_controller = scan_hardware_source
+            get_acquisition_handler_fn = self._make_acquisition_handler_fn(test_context, multi_acquire_controller, camera_data_channel_class=FrameSummingCameraDataChannel,
+                                                                           handler_created_fn=handlers.append)
+            # the sum reads the item's data, so apply each queued update before the next frame, as the main thread does when it keeps up with the acquisition.
+            test_context.push(multi_acquire_controller.progress_updated_event.listen(lambda *args: test_context.document_controller.periodic()))
+            multi_acquire_controller.start_multi_acquire_spectrum_image(get_acquisition_handler_fn)
+            test_context.document_controller.periodic()
+            data_item = handlers[0].camera_data_channel.data_item
+            self.assertEqual(frame_sum.shape, data_item.data_shape)
+            np.testing.assert_allclose(data_item.data, frame_sum, err_msg="the summed spectrum image is not the sum of its frames")
+
+    def test_camera_data_channel_with_summed_frames_holds_sum_of_frames(self):
+        scan_size = Geometry.IntSize(5, 7)
+        parameters = [{'index': 0, 'offset_x': 0, 'exposure_ms': 5, 'frames': 3}]
+        with self.__test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.size = scan_size
+            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            spectrum_shape = tuple(scan_size) + (camera_hardware_source.get_expected_dimensions(camera_hardware_source.get_current_frame_parameters())[1],)
+            multi_acquire_controller = self._set_up_multi_acquire({'processing': 'sum_project', 'sum_frames': True}, parameters, test_context.instrument)
+            get_acquisition_handler_fn = self._make_acquisition_handler_fn(test_context, multi_acquire_controller)
+            handler = get_acquisition_handler_fn(multi_acquire_controller.spectrum_parameters, 0, multi_acquire_controller.settings)
+            scan_area = Geometry.IntRect(Geometry.IntPoint(), scan_size)
+            # deliver frame k, filled with k + 1, as the acquisition does, and apply its queued update before the next frame, since the sum reads the item's data.
+            for frame_index in range(3):
+                handler.camera_data_channel.current_frames_index = frame_index
+                frame = DataAndMetadata.new_data_and_metadata(np.full(spectrum_shape, frame_index + 1, np.float32), data_descriptor=DataAndMetadata.DataDescriptor(False, 2, 1))
+                handler.camera_data_channel.update(frame, 'partial', scan_size, scan_area, scan_area, None)
+                test_context.document_controller.periodic()
+            handler.finish_fn()
+            data_item = handler.camera_data_channel.data_item
+            self.assertEqual(spectrum_shape, data_item.data_shape)
+            np.testing.assert_array_equal(data_item.data, np.full(spectrum_shape, 6), err_msg="the summed spectrum image is not the sum of its frames")
 
 
 if __name__ == '__main__':
