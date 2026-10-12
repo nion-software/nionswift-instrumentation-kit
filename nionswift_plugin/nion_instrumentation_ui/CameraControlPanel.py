@@ -715,7 +715,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                         def handle_window_close(window: Window.Window) -> None:
                             self.__configuration_dialog_close_listener = None
 
-                        self.__configuration_dialog_close_listener = dialog._window_close_event.listen(handle_window_close)
+                        self.__configuration_dialog_close_listener = dialog.window_close_event.listen(handle_window_close)
                         dialog.show()
                         return
                     # fall through means there is no declarative configuration dialog
