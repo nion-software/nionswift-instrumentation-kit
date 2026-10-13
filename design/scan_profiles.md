@@ -21,3 +21,7 @@ Profile names are unique. The active profile can't be deleted, so the last profi
 ## Persistence
 
 The profiles, the active and previous profiles, and the current value of each parameter, including the subscan region and rotation while the subscan is off, are saved to `<hardware_source_id>_scan_profiles.json` in the configuration location, separate from the scan settings file, through a temporary file that replaces the old one. Without a saved file, the initial profiles come from the scan device's hardware profile slots. They are ordinary profiles, which can be renamed, edited, reordered and deleted like any other. A file that can't be read, or whose structure the model can't fully use, such as a misspelled `profiles` key or an entry that isn't a profile, is renamed with `.bad` appended, and the profiles are loaded from whatever part of it the model can use; if it can't be renamed, the profiles aren't saved in that session. An invalid individual value is ignored without renaming the file, and the profile keeps its value for it.
+
+## The user interface
+
+The Record button records once with the current frame parameters.

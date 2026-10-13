@@ -63,27 +63,25 @@ class TestScanControlClass(unittest.TestCase):
         hardware_source.stop_playing(sync_timeout=3.0)
         document_controller.periodic()
 
-    def _record_one(self, document_controller: DocumentController.DocumentController, hardware_source: scan_base.ScanHardwareSource, scan_control_model: ScanControlPanel.ScanControlPanelModel) -> None:
+    def _record_one(self, document_controller: DocumentController.DocumentController, hardware_source: scan_base.ScanHardwareSource, scan_control_model: ScanControlPanel.ScanControlPanelModel, frame_parameters: scan_base.ScanFrameParameters | None = None) -> typing.Sequence[DataItem.DataItem]:
         frame_time = hardware_source.get_current_frame_time()
 
         enabled_channel_count = sum(hardware_source.get_channel_state(channel_index).enabled for channel_index in range(hardware_source.channel_count))
 
-        event = threading.Event()
-        event_count_ref = [0]
-        def handle_record_data_item(data_item: DataItem.DataItem) -> None:  # called from thread
-            event_count_ref[0] += 1
-            if event_count_ref[0] == enabled_channel_count:
-                event.set()
+        recorded_data_items: list[DataItem.DataItem] = list()
+        # the record queues each recorded data item to the main thread, so this runs from periodic on the main thread.
+        def handle_record_data_item(data_item: DataItem.DataItem) -> None:
+            recorded_data_items.append(data_item)
 
-        scan_control_model.handle_record_button_clicked(completion_fn=handle_record_data_item)
-        time.sleep(frame_time * 0.5)
+        scan_control_model.handle_record_button_clicked(frame_parameters=frame_parameters, completion_fn=handle_record_data_item)
+        # the record starts on its own thread and its data items arrive only through periodic, so wait for both the
+        # record to finish and every enabled channel's data item to arrive, running periodic while waiting.
         start_time = time.time()
-        while hardware_source.is_recording:
-            time.sleep(frame_time * 0.5)
+        while hardware_source.is_recording or len(recorded_data_items) < enabled_channel_count:
             self.assertTrue(time.time() - start_time < 30.0)
-        document_controller.periodic()
-        self.assertTrue(event.wait(3.0))
-        document_controller.periodic()
+            time.sleep(frame_time * 0.5)
+            document_controller.periodic()
+        return recorded_data_items
 
     def __create_scan_control_model(self, acquisition_test_context: AcquisitionTestContext.AcquisitionTestContext) -> ScanControlPanel.ScanControlPanelModel:
         scan_control_model = ScanControlPanel.ScanControlPanelModel(acquisition_test_context.scan_hardware_source, acquisition_test_context.document_controller)
@@ -227,14 +225,52 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters.pixel_time_us = 1
             scan_hardware_source.set_frame_parameters(0, frame_parameters)
             frame_time = scan_hardware_source.get_current_frame_time()
+            record_frame_parameters = scan_hardware_source.get_frame_parameters(2)
             scan_hardware_source.start_playing()
             time.sleep(frame_time * 0.25)
-            self._record_one(document_controller, scan_hardware_source, scan_control_model)
+            self._record_one(document_controller, scan_hardware_source, scan_control_model, record_frame_parameters)
             self.assertEqual(len(document_model.data_items), 2)  # check assumptions
             scan_hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
-            self.assertEqual(document_model.data_items[1].dimensional_shape, scan_hardware_source.get_frame_parameters(2).size)
+            self.assertEqual(document_model.data_items[1].dimensional_shape, record_frame_parameters.size)
             self.assertNotEqual(document_model.data_items[0].dimensional_shape, document_model.data_items[1].dimensional_shape)
+
+    def test_record_uses_current_frame_parameters(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_control_model = self.__create_scan_control_model(test_context)
+            current_size = scan_hardware_source.get_current_frame_parameters().size
+            self.assertNotEqual(current_size, scan_hardware_source.get_record_frame_parameters().size)  # check assumptions
+            recorded_data_items = self._record_one(document_controller, scan_hardware_source, scan_control_model)
+            self.assertEqual(current_size, Geometry.IntSize.make(recorded_data_items[0].dimensional_shape))
+
+    def test_record_uses_current_subscan(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_hardware_source.subscan_enabled = True
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+            subscan_pixel_size = scan_hardware_source.get_current_frame_parameters().subscan_pixel_size
+            recorded_data_items = self._record_one(document_controller, scan_hardware_source, scan_control_model)
+            self.assertEqual(subscan_pixel_size, Geometry.IntSize.make(recorded_data_items[0].dimensional_shape))
+
+    def test_record_uses_current_subscan_under_one_pixel_high_with_pixel_width_override(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_control_model = self.__create_scan_control_model(test_context)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(1000, 1000)
+            frame_parameters.subscan_pixel_width_override = 1000
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_hardware_source.subscan_enabled = True
+            # a region under one context pixel high, as dragging the subscan graphic can leave it
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.6, 0.2, 0.0004, 0.3)
+            subscan_pixel_size = scan_hardware_source.get_current_frame_parameters().subscan_pixel_size
+            recorded_data_items = self._record_one(document_controller, scan_hardware_source, scan_control_model)
+            self.assertEqual(subscan_pixel_size, Geometry.IntSize.make(recorded_data_items[0].dimensional_shape))
 
     def test_record_names_results_correctly(self):
         with self._test_context() as test_context:
