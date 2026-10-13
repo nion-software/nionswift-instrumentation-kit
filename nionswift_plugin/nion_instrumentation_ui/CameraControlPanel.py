@@ -709,7 +709,7 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
                                                                               camera_device=camera_hardware_source.camera,
                                                                               camera_settings=camera_hardware_source.camera_settings)
                     if ui_handler:
-                        dialog = Dialog.ActionDialog(ui, camera_hardware_source.display_name)
+                        dialog = Dialog.ActionDialog(ui, camera_hardware_source.display_name, parent_window=document_controller)
                         dialog.content.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, ui_handler))
 
                         def handle_window_close(window: Window.Window) -> None:
