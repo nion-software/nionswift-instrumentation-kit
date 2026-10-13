@@ -1388,8 +1388,8 @@ class ScanControlPanelModel(Observable.Observable):
         self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
 
     # must be called on ui thread
-    def handle_record_button_clicked(self, *, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
-        """ Call this when the user clicks the record button. """
+    def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
+        """Record one scan with the frame parameters, if given, or otherwise with the scan device's current frame parameters."""
         def finish_record(data_promise_list: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             record_index = self.__scan_hardware_source.record_index
             for data_promise in data_promise_list:
@@ -1416,7 +1416,7 @@ class ScanControlPanelModel(Observable.Observable):
                     document_controller.queue_task(functools.partial(handle_record_data_item, data_item))
             self.__scan_hardware_source.record_index += 1
 
-        self.__scan_hardware_source.record_async(finish_record)
+        self.__scan_hardware_source.record_async(finish_record, frame_parameters=frame_parameters or self.__scan_hardware_source.get_current_frame_parameters())
 
     # must be called on ui thread
     def handle_record_abort_clicked(self) -> None:
@@ -1557,7 +1557,8 @@ class ScanPanelController(Declarative.Handler):
         play_button = u.create_push_button(text="@binding(_model.scan_button_title)", enabled="@binding(_model.scan_button_enabled)", on_clicked="handle_scan_button")
         abort_button = u.create_push_button(text=_("Abort"), enabled="@binding(_model.scan_abort_button_enabled)", on_clicked="handle_scan_abort_button")
         play_state_label = u.create_label(text="@binding(_model.play_state_text)")
-        record_button = u.create_push_button(text=_("Record"), enabled="@binding(_model.record_button_enabled)", on_clicked="handle_record_button")
+        record_button = u.create_push_button(text=_("Record"), enabled="@binding(_model.record_button_enabled)", on_clicked="handle_record_button",
+                                             tool_tip=_("Record a new scan with the current frame parameters, started when the frame in progress finishes."))
         record_abort_button = u.create_push_button(text=_("Abort"), enabled="@binding(_model.record_abort_button_enabled)", on_clicked="handle_record_abort_button")
 
         probe_state_label = u.create_label(text="@binding(_model.probe_state_text)")
