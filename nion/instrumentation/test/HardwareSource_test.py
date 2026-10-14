@@ -591,19 +591,14 @@ def _test_record_starts_and_finishes_in_reasonable_time(testcase, hardware_sourc
     time0 = time.time()
     hardware_source.start_recording(sync_timeout=3.0)
     time1 = time.time()
-    try:
-        testcase.assertTrue(hardware_source.is_recording)
-    except Exception as e:
-        hardware_source.abort_recording(sync_timeout=3.0)
-    time2 = time.time()
     hardware_source.stop_recording(sync_timeout=10.0)
-    elapsed = time.time() - time2
+    elapsed = time.time() - time1
     # print(exposure, elapsed)
     # the allowance covers thread scheduling on a loaded machine, which can delay the stop by tens of milliseconds.
     # stopping which waits for something other than the frame, such as the sync timeout, still exceeds it.
     scheduling_allowance = 0.5
     time_limit = exposure * 8.0 + scheduling_allowance
-    testcase.assertTrue(elapsed < time_limit, f"Exceeded expected time {elapsed=} {time_limit=} {hardware_source.is_recording=} {time0=} {time1=} {time2=}")
+    testcase.assertTrue(elapsed < time_limit, f"Exceeded expected time {elapsed=} {time_limit=} {hardware_source.is_recording=} {time0=} {time1=}")
     testcase.assertFalse(hardware_source.is_recording)
 
 
