@@ -1658,17 +1658,20 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             subscan_region = self.subscan_region
             # Derive low-level subscan pixel counts from user-facing inputs.
             # Priority:
-            # 1) `subscan_pixel_width_override` (explicit width in pixels, preserves region aspect ratio),
+            # 1) `subscan_pixel_width_override` (explicit width in pixels, preserves the clamped region's aspect ratio),
             # 2) default region-scaled context size (or `size` override when supplied).
             # Note: `frame_parameters` currently carries both user-input fields and low-level scan values.
             # This dual-use model is a known limitation and should be split/refactored in a future change.
+            # The fractional size is clamped to at least one context pixel. The override takes its aspect ratio from the
+            # clamped size, so that calculating these frame parameters again gives the same subscan pixel size.
+            subscan_fractional_size = Geometry.FloatSize(max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width))
             subscan_pixel_width_override = frame_parameters.subscan_pixel_width_override
-            if subscan_pixel_width_override and subscan_region.aspect_ratio > 0.0:
-                subscan_pixel_size = Geometry.IntSize(max(int(subscan_pixel_width_override / subscan_region.aspect_ratio), 1), max(subscan_pixel_width_override, 1))
+            if subscan_pixel_width_override and subscan_fractional_size.aspect_ratio > 0.0:
+                subscan_pixel_size = Geometry.IntSize(max(int(subscan_pixel_width_override / subscan_fractional_size.aspect_ratio), 1), max(subscan_pixel_width_override, 1))
             else:
                 subscan_pixel_size = size or Geometry.IntSize(max(int(context_size.height * subscan_region.height), 1), max(int(context_size.width * subscan_region.width), 1))
             frame_parameters.subscan_pixel_size = subscan_pixel_size
-            frame_parameters.subscan_fractional_size = Geometry.FloatSize(max(subscan_region.height, 1 / context_size.height), max(subscan_region.width, 1 / context_size.width))
+            frame_parameters.subscan_fractional_size = subscan_fractional_size
             frame_parameters.subscan_fractional_center = subscan_region.center
             frame_parameters.subscan_rotation = self.subscan_rotation
             frame_parameters.line_scan_vector = None

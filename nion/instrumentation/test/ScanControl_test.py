@@ -1359,6 +1359,23 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(expected_subscan_region, scan_hardware_source.subscan_region)
             self.assertEqual(expected_subscan_region, subscan_graphic.bounds)
 
+    def test_subscan_with_pixel_width_override_keeps_shape_when_frame_parameters_are_set_again(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(1000, 1000)
+            frame_parameters.subscan_pixel_width_override = 1000
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_hardware_source.subscan_enabled = True
+            # a region under one context pixel high, as dragging the subscan graphic can leave it
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_tlhw(0.6, 0.2, 0.0004, 0.3)
+            subscan_pixel_size = scan_hardware_source.get_current_frame_parameters().subscan_pixel_size
+            # an unrelated edit sets the current frame parameters again
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_time_us = frame_parameters.pixel_time_us * 2
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            self.assertEqual(subscan_pixel_size, scan_hardware_source.get_current_frame_parameters().subscan_pixel_size)
+
     def test_reenabling_subscan_after_deleting_region_restores_previous_region(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
