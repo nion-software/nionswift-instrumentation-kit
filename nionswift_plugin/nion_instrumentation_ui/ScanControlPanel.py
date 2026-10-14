@@ -1702,7 +1702,8 @@ class ScanPanelController(Declarative.Handler):
             self.__profile_configuration_dialog.activate()
             return
         dialog = ScanProfilesDialog.ProfileConfigurationDialog(self.__document_controller.ui, self.__document_controller.event_loop, self.__scan_hardware_source.display_name,
-                                                               self._profile_configuration_model, self._model, parent_window=self.__document_controller)
+                                                               self._profile_configuration_model, self._model,
+                                                               hardware_source_id=self.__scan_hardware_source.hardware_source_id, parent_window=self.__document_controller)
 
         def handle_window_close(window: Window.Window) -> None:
             self.__profile_configuration_dialog = None
