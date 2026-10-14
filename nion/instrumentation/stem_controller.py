@@ -467,7 +467,7 @@ class STEMController(Observable.Observable):
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
-        self.__ronchigram_camera_reservation = ResourceReservation(self.__get_ronchigram_camera)
+        self.__resource_reservations: dict(str, ResourceReservation[typing.Any]) = dict()
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -476,9 +476,7 @@ class STEMController(Observable.Observable):
 
         # keep the scan context synchronized with whichever scan controller currently owns the observable scan state.
 
-        def handle_component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-            if "ronchigram_camera_hardware_source" in component_types:
-                self.__ronchigram_camera_reservation.notify_resource_state_changed()
+        def component_registered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
             if "scan_hardware_source" in component_types:
                 scan_controller = self.__refresh_scan_controller()
                 if scan_controller and not self.__scan_controller_is_explicit:
@@ -486,12 +484,7 @@ class STEMController(Observable.Observable):
                     scan_frame_parameters = scan_controller.get_current_frame_parameters()
                     self._update_scan_context(scan_frame_parameters.pixel_size, scan_frame_parameters.center_nm, scan_frame_parameters.fov_nm, scan_frame_parameters.rotation_rad)
 
-        def handle_component_unregistered(component: Registry._ComponentType, component_types: typing.Set[str]) -> None:
-            if "ronchigram_camera_hardware_source" in component_types:
-                self.__ronchigram_camera_reservation.notify_resource_state_changed()
-
-        self.__component_registered_listener = Registry.listen_component_registered_event(handle_component_registered)
-        self.__component_unregistered_listener = Registry.listen_component_unregistered_event(handle_component_unregistered)
+        self.__component_registered_listener = Registry.listen_component_registered_event(component_registered)
         self.__refresh_scan_controller()
 
     def close(self) -> None:
@@ -499,7 +492,6 @@ class STEMController(Observable.Observable):
         self.__scan_controller = None
         self.__scan_controller_is_explicit = False
         self.__component_registered_listener = typing.cast(typing.Any, None)
-        self.__component_unregistered_listener = typing.cast(typing.Any, None)
 
     def __set_scan_controller(self, scan_controller: typing.Optional[scan_base.ScanHardwareSource], *, is_explicit: bool) -> None:
         if scan_controller is self.__scan_controller and is_explicit == self.__scan_controller_is_explicit:
@@ -544,9 +536,6 @@ class STEMController(Observable.Observable):
 
     @property
     def ronchigram_camera(self) -> camera_base.CameraHardwareSource | None:
-        return self.__get_ronchigram_camera()
-
-    def __get_ronchigram_camera(self) -> camera_base.CameraHardwareSource | None:
         if self.__ronchigram_camera:
             return self.__ronchigram_camera
         return typing.cast(typing.Optional["camera_base.CameraHardwareSource"],
@@ -557,22 +546,20 @@ class STEMController(Observable.Observable):
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
         self.__ronchigram_camera_reservation.notify_resource_state_changed()
 
-    @property
-    def is_ronchigram_available(self) -> Stream.AbstractStream[bool]:
-        """A stream of ronchigram reservation availability for UI binding."""
-        return self.__ronchigram_camera_reservation.is_available_stream
+    def _get_resource_availability_stream(self, resource_name: str) -> Stream.AbstractStream[bool]:
+        if resource_name not in self.__resource_reservations:
+            self.__resource_reservations[resource_name] = self.__create_resource_reservation(resource_name)
+        return self.__resource_reservations[resource_name].is_available_stream
 
-    def _try_reserve_ronchigram_camera(self) -> ReservedResource[camera_base.CameraHardwareSource] | None:
-        """Reserve and return the ronchigram camera token.
+    def _try_reserve_resource(self, resource_name: str) -> ReservedResource[typing.Any] | None:
+        if resource_name not in self.__resource_reservations:
+            self.__resource_reservations[resource_name] = self.__create_resource_reservation(resource_name)
+        return self.__resource_reservations[resource_name].reserve()
 
-        Returns None if the camera is missing or already reserved.
 
-        Threading contract:
-        - reserve/release must occur on the main thread.
-        - do not pass the reservation token to worker threads.
-        - pass only ``reservation.resource`` to worker threads.
-        """
-        return self.__ronchigram_camera_reservation.reserve()
+    def __create_resource_reservation(self, resource_name: str) -> ResourceReservation[typing.Any]:
+        resource_reservation_function = lambda: Registry.get_component(resource_name)
+        return ResourceReservation(resource_reservation_function)
 
     @property
     def eels_camera(self) -> typing.Optional[camera_base.CameraHardwareSource]:

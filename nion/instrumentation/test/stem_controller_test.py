@@ -26,46 +26,46 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_reserve_and_release_ronchigram_camera(self) -> None:
         with self._test_context() as test_context:
-            self.assertTrue(test_context.instrument.is_ronchigram_available.value)
-            reservation = test_context.instrument._try_reserve_ronchigram_camera()
+            self.assertTrue(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
+            reservation = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             self.assertIsNotNone(reservation)
             assert reservation
             self.assertIsNotNone(reservation.resource)
-            self.assertFalse(test_context.instrument.is_ronchigram_available.value)
+            self.assertFalse(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
 
             reservation.release()
-            self.assertTrue(test_context.instrument.is_ronchigram_available.value)
+            self.assertTrue(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
 
     def test_reserve_and_release_ronchigram_camera_via_context_manager(self) -> None:
         with self._test_context() as test_context:
-            with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
+            with test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source") as reservation:
                 self.assertIsNotNone(reservation)
                 assert reservation
                 self.assertIsNotNone(reservation.resource)
-                self.assertFalse(test_context.instrument.is_ronchigram_available.value)
+                self.assertFalse(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
 
-            self.assertTrue(test_context.instrument.is_ronchigram_available.value)
+            self.assertTrue(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
 
     def test_reserve_ronchigram_camera_twice(self) -> None:
         with self._test_context() as test_context:
-            reservation = test_context.instrument._try_reserve_ronchigram_camera()
+            reservation = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             self.assertIsNotNone(reservation)
             assert reservation
             self.assertIsNotNone(reservation.resource)
 
-            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             self.assertIsNone(reservation2)
 
             reservation.release()
 
     def test_leaving_with_scope_allows_new_reservation(self) -> None:
         with self._test_context() as test_context:
-            with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
+            with test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source") as reservation:
                 self.assertIsNotNone(reservation)
                 assert reservation
                 self.assertIsNotNone(reservation.resource)
 
-            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             self.assertIsNotNone(reservation2)
             assert reservation2
             self.assertIsNotNone(reservation2.resource)
@@ -74,11 +74,11 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_unreleased_out_of_scope_reservation_allows_new_reservation(self) -> None:
         with self._test_context() as test_context:
-            reservation = test_context.instrument._try_reserve_ronchigram_camera()
+            reservation = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             reservation = None
             gc.collect()
 
-            reservation2 = test_context.instrument._try_reserve_ronchigram_camera()
+            reservation2 = test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
             self.assertIsNotNone(reservation2)
             assert reservation2
             self.assertIsNotNone(reservation2.resource)
@@ -91,7 +91,7 @@ class TestSTEMControllerClass(unittest.TestCase):
             def reserve_camera():
                 nonlocal exception
                 try:
-                    test_context.instrument._try_reserve_ronchigram_camera()
+                    test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source")
                 except stem_controller.InvalidThreadError as e:
                     exception = e
 
@@ -103,7 +103,7 @@ class TestSTEMControllerClass(unittest.TestCase):
     def test_can_reserve_in_async(self) -> None:
         with self._test_context() as test_context:
             async def reserve_camera_async():
-                with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
+                with test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source") as reservation:
                     assert reservation
                     return reservation.resource is not None
 
@@ -112,9 +112,9 @@ class TestSTEMControllerClass(unittest.TestCase):
 
     def test_available_stream(self) -> None:
         with self._test_context() as test_context:
-            self.assertTrue(test_context.instrument.is_ronchigram_available.value)
-            with test_context.instrument._try_reserve_ronchigram_camera() as reservation:
+            self.assertTrue(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
+            with test_context.instrument._try_reserve_resource("ronchigram_camera_hardware_source") as reservation:
                 assert reservation
                 self.assertIsNotNone(reservation.resource)
-                self.assertFalse(test_context.instrument.is_ronchigram_available.value)
-            self.assertTrue(test_context.instrument.is_ronchigram_available.value)
+                self.assertFalse(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
+            self.assertTrue(test_context.instrument._get_resource_availability_stream("ronchigram_camera_hardware_source").value)
