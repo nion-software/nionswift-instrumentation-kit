@@ -1411,7 +1411,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def is_task_running(self, task_id: str) -> bool:
         return task_id in self.__tasks
 
-    def __wait_for_tasks_stopped(self, task_ids: typing.Sequence[str], timeout: float) -> None:
+    def _wait_for_tasks_stopped(self, task_ids: typing.Sequence[str], timeout: float) -> None:
         """Wait until none of the tasks is running.
 
         Raises AssertionError if a task is still running after the timeout.
@@ -1480,7 +1480,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self._view_task_updated(None)
         self.__view_abort_event_listener = None
         if sync_timeout is not None:
-            self.__wait_for_tasks_stopped(('view', 'record'), sync_timeout)
+            self._wait_for_tasks_stopped(('view', 'record'), sync_timeout)
 
     # call this to stop acquisition gracefully
     # not thread safe
@@ -1490,7 +1490,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self._view_task_updated(None)
         self.__view_abort_event_listener = None
         if sync_timeout is not None:
-            self.__wait_for_tasks_stopped(('view',), sync_timeout)
+            self._wait_for_tasks_stopped(('view',), sync_timeout)
 
     # return whether acquisition is running. this is an approximate state and should not be used for synchronization
     # requiring a high degree of accuracy. instead, use the task itself to watch is_started and is_finished.
@@ -1590,7 +1590,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.abort_task('record')
             self._record_task_updated(None)
         if sync_timeout is not None:
-            self.__wait_for_tasks_stopped(('record',), sync_timeout)
+            self._wait_for_tasks_stopped(('record',), sync_timeout)
 
     # call this to stop acquisition gracefully
     # not thread safe
@@ -1599,7 +1599,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.stop_task('record')
             self._record_task_updated(None)
         if sync_timeout is not None:
-            self.__wait_for_tasks_stopped(('record',), sync_timeout)
+            self._wait_for_tasks_stopped(('record',), sync_timeout)
 
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         """Return the data of the next frame to finish.
