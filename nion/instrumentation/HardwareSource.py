@@ -514,7 +514,7 @@ class AcquisitionTask:
     def is_error(self) -> bool:
         return self.__failed
 
-    def wait_started(self, *, timeout: float | None = None) -> bool:
+    def wait_started(self, *, timeout: float) -> bool:
         """Wait until the task starts or fails.
 
         Return whether the task started without an error before the timeout. Call it from any thread but the acquisition
@@ -524,7 +524,7 @@ class AcquisitionTask:
             self.__state_condition.wait_for(lambda: self.__started or self.__failed, timeout)
         return self.__started and not self.__failed
 
-    def wait_finished(self, *, timeout: float | None = None) -> bool:
+    def wait_finished(self, *, timeout: float) -> bool:
         """Wait until the task finishes, with or without an error.
 
         Return whether the task finished before the timeout. Call it from any thread but the acquisition thread, since
@@ -916,10 +916,10 @@ class RecordingTask(typing.Protocol):
     def is_error(self) -> bool:
         raise NotImplementedError()
 
-    def wait_started(self, *, timeout: typing.Optional[float] = None) -> bool:
+    def wait_started(self, *, timeout: float) -> bool:
         raise NotImplementedError()
 
-    def wait_finished(self, *, timeout: typing.Optional[float] = None) -> None:
+    def wait_finished(self, *, timeout: float) -> None:
         raise NotImplementedError()
 
     def grab_xdatas(self, *, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
@@ -1557,12 +1557,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             def is_error(self) -> bool:
                 return self.__record_task.is_error
 
-            def wait_started(self, *, timeout: typing.Optional[float] = None) -> bool:
+            def wait_started(self, *, timeout: float) -> bool:
                 self.__record_task.wait_started(timeout=timeout)
                 assert self.is_started or self.is_error
                 return self.is_started and not self.is_error
 
-            def wait_finished(self, *, timeout: typing.Optional[float] = None) -> None:
+            def wait_finished(self, *, timeout: float) -> None:
                 assert self.__record_task.wait_finished(timeout=timeout)
 
             def grab_xdatas(self, *, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
