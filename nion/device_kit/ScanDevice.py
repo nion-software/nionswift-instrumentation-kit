@@ -143,7 +143,12 @@ class Device(scan_base.ScanDevice):
         self.__channels = self.__get_channels()
         self.__frame: typing.Optional[Frame] = None
         self.__frame_number = 0
+
+        # is_scanning is written by the acquisition thread and by callers of cancel. the condition is notified when it
+        # changes, so that advance_pixel can wait for the scan to start.
         self.__is_scanning = False
+        self.__is_scanning_condition = threading.Condition()
+
         self.__flyback_pixels = 2
         self.on_device_state_changed = None
         self.__frame_parameters = ScanFrameParameters()
@@ -209,11 +214,14 @@ class Device(scan_base.ScanDevice):
         # waiting for is_scanning to be True. this should occur quickly in all sitations,
         # so the timeout is short (5s). this will typically only be True for the first pixel.
         if do_sync:
-            start = time.time()
-            while not self.__is_scanning:
-                time.sleep(0.03)
-                assert time.time() - start < 5.0
+            with self.__is_scanning_condition:
+                assert self.__is_scanning_condition.wait_for(lambda: self.__is_scanning, 5.0)
         self.__scan_simulator.advance_pixel()
+
+    def __set_is_scanning(self, is_scanning: bool) -> None:
+        with self.__is_scanning_condition:
+            self.__is_scanning = is_scanning
+            self.__is_scanning_condition.notify_all()
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> bool:
         assert 0 <= channel_index < self.channel_count
@@ -352,7 +360,7 @@ class Device(scan_base.ScanDevice):
             # the buffer elements past the buffer size can be removed during viewing
             while len(self.__buffer) > self.__sequence_buffer_size + self.__view_buffer_size:
                 del self.__buffer[self.__sequence_buffer_size]
-            self.__is_scanning = False
+            self.__set_is_scanning(False)
 
         return data_elements, complete, bad_frame, sub_area, frame_number, pixels_to_skip
 
@@ -399,12 +407,12 @@ class Device(scan_base.ScanDevice):
             self.__scan_simulator.pixel_size_nm = Geometry.FloatSize(frame_parameters.fov_size_nm.height / size.height,
                                                                      frame_parameters.fov_size_nm.width / size.width)
         self.__scan_simulator.external_clock = self.__frame_parameters.external_clock_mode != 0
-        self.__is_scanning = True
+        self.__set_is_scanning(True)
         self.__flyback_pixels = self.calculate_flyback_pixels(frame_parameters)
 
     def cancel(self) -> None:
         """Cancel acquisition (immediate)."""
-        self.__is_scanning = False
+        self.__set_is_scanning(False)
 
     def stop(self) -> None:
         """Stop acquiring."""
