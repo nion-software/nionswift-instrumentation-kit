@@ -480,8 +480,9 @@ class ProfileConfigurationDialog(Dialog.ActionDialog):
 
     def __init__(self, ui: UserInterface.UserInterface, event_loop: asyncio.AbstractEventLoop, title: str,
                  profile_configuration_model: ScanProfiles.ProfileConfigurationModel, scan_recorder: ScanRecorderLike, *,
-                 parent_window: Window.Window | None = None) -> None:
-        super().__init__(ui, title, parent_window=parent_window)
+                 hardware_source_id: str, parent_window: Window.Window | None = None) -> None:
+        # the persistent id gives each scan device its own remembered position and size.
+        super().__init__(ui, title, parent_window=parent_window, persistent_id="ScanProfilesDialog/" + hardware_source_id)
         self.content.add(Declarative.DeclarativeWidget(ui, event_loop, ProfileConfigurationHandler(profile_configuration_model, scan_recorder, self)))
 
     def key_pressed(self, key: UserInterface.Key) -> bool:
