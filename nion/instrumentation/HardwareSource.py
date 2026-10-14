@@ -408,6 +408,11 @@ class AcquisitionTask:
         self.__minimum_period = 1 / 1000.0
         self.__frame_index = 0
         self.__view_id = str(uuid.uuid4()) if not continuous else None
+
+        # notified when the task starts or finishes. the acquisition thread sets the state flags before notifying, so a
+        # waiter which checks a flag under the condition's lock does not miss the change.
+        self.__state_condition = threading.Condition()
+
         self._test_acquire_exception: typing.Optional[typing.Callable[[Exception], None]] = None
         self._test_start_hook: typing.Optional[typing.Callable[[], None]] = None
         self._test_acquire_hook: typing.Optional[typing.Callable[[], None]] = None
@@ -421,11 +426,17 @@ class AcquisitionTask:
     def __mark_as_finished(self) -> None:
         self.__finished = True
         self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, None)
+        self.__notify_state_changed()
 
     def __mark_as_error(self, e: Exception) -> None:
         self.__finished = True
         self.__failed = True
         self.data_elements_changed_event.fire(list(), self.__view_id, False, self.__is_stopping, e)
+        self.__notify_state_changed()
+
+    def __notify_state_changed(self) -> None:
+        with self.__state_condition:
+            self.__state_condition.notify_all()
 
     def __safe_stop_acquisition(self) -> None:
         try:
@@ -451,6 +462,7 @@ class AcquisitionTask:
                 self.__mark_as_error(e)
                 raise
             self.__started = True
+            self.__notify_state_changed()
             # logging.debug("%s started", self)
         if self.__is_suspended:
             try:
@@ -501,6 +513,25 @@ class AcquisitionTask:
     @property
     def is_error(self) -> bool:
         return self.__failed
+
+    def wait_started(self, *, timeout: float | None = None) -> bool:
+        """Wait until the task starts or fails.
+
+        Return whether the task started without an error before the timeout. Call it from any thread but the acquisition
+        thread, since that thread starts the task.
+        """
+        with self.__state_condition:
+            self.__state_condition.wait_for(lambda: self.__started or self.__failed, timeout)
+        return self.__started and not self.__failed
+
+    def wait_finished(self, *, timeout: float | None = None) -> bool:
+        """Wait until the task finishes, with or without an error.
+
+        Return whether the task finished before the timeout. Call it from any thread but the acquisition thread, since
+        that thread finishes the task.
+        """
+        with self.__state_condition:
+            return self.__state_condition.wait_for(lambda: self.__finished, timeout)
 
     # called from the hardware source
     # note: abort, suspend and execute are always called from the same thread, ensuring that
@@ -1161,6 +1192,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__break_for_closing = False
         self.__acquire_thread_trigger = threading.Event()
         self.__tasks: typing.Dict[str, AcquisitionTask] = dict()
+
+        # notified when the acquisition thread removes a finished task. the thread removes the task before notifying, so
+        # a waiter which checks the tasks under the condition's lock does not miss the change.
+        self.__tasks_changed_condition = threading.Condition()
+
         self.__data_elements_changed_event_listeners: typing.Dict[str, Event.EventListener] = dict()
         self.__start_event_listeners: typing.Dict[str, Event.EventListener] = dict()
         self.__stop_event_listeners: typing.Dict[str, Event.EventListener] = dict()
@@ -1268,6 +1304,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     self.__stop_event_listeners[task_id].close()
                     del self.__stop_event_listeners[task_id]
                     self.acquisition_state_changed_event.fire(False)
+                    with self.__tasks_changed_condition:
+                        self.__tasks_changed_condition.notify_all()
                 self.__acquire_thread_trigger.set()
             if break_for_closing:
                 break
@@ -1373,6 +1411,14 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def is_task_running(self, task_id: str) -> bool:
         return task_id in self.__tasks
 
+    def __wait_for_tasks_stopped(self, task_ids: typing.Sequence[str], timeout: float) -> None:
+        """Wait until none of the tasks is running.
+
+        Raises AssertionError if a task is still running after the timeout.
+        """
+        with self.__tasks_changed_condition:
+            assert self.__tasks_changed_condition.wait_for(lambda: not any(self.is_task_running(task_id) for task_id in task_ids), timeout)
+
     # call this to start the task running
     # not thread safe
     def start_task(self, task_id: str, task: AcquisitionTask) -> None:
@@ -1425,11 +1471,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
             self._view_task_updated(view_task)
             self.start_task('view', view_task)
-        if "sync_timeout" in kwargs:
-            start = time.time()
-            while not self.is_playing:
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(kwargs["sync_timeout"])
 
     # call this to stop acquisition immediately
     # not thread safe
@@ -1439,10 +1480,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self._view_task_updated(None)
         self.__view_abort_event_listener = None
         if sync_timeout is not None:
-            start = time.time()
-            while self.is_playing or self.is_task_running('view') or self.is_task_running('record'):
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(sync_timeout)
+            self.__wait_for_tasks_stopped(('view', 'record'), sync_timeout)
 
     # call this to stop acquisition gracefully
     # not thread safe
@@ -1452,10 +1490,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self._view_task_updated(None)
         self.__view_abort_event_listener = None
         if sync_timeout is not None:
-            start = time.time()
-            while self.is_playing:
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(sync_timeout)
+            self.__wait_for_tasks_stopped(('view',), sync_timeout)
 
     # return whether acquisition is running. this is an approximate state and should not be used for synchronization
     # requiring a high degree of accuracy. instead, use the task itself to watch is_started and is_finished.
@@ -1500,10 +1535,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
         self.start_task('record', record_task)
         if sync_timeout is not None:
-            start = time.time()
-            while not record_task.is_started:
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(sync_timeout)
+            record_task.wait_started(timeout=sync_timeout)
+            assert record_task.is_started
 
         class RecordingTaskImpl(RecordingTask):
             def __init__(self, hardware_source: HardwareSource, record_task: AcquisitionTask, new_data_event: threading.Event, new_xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]]) -> None:
@@ -1525,19 +1558,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                 return self.__record_task.is_error
 
             def wait_started(self, *, timeout: typing.Optional[float] = None) -> bool:
-                start = time.time()
-                while not self.is_started and not self.is_error:
-                    time.sleep(0.01)
-                    if timeout is not None:
-                        assert time.time() - start < float(timeout)
+                self.__record_task.wait_started(timeout=timeout)
+                assert self.is_started or self.is_error
                 return self.is_started and not self.is_error
 
             def wait_finished(self, *, timeout: typing.Optional[float] = None) -> None:
-                start = time.time()
-                while not self.is_finished:
-                    time.sleep(0.01)  # 10 msec
-                    if timeout is not None:
-                        assert time.time() - start < float(timeout)
+                assert self.__record_task.wait_finished(timeout=timeout)
 
             def grab_xdatas(self, *, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
                 def abort() -> None:
@@ -1564,10 +1590,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.abort_task('record')
             self._record_task_updated(None)
         if sync_timeout is not None:
-            start = time.time()
-            while self.is_recording:
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(sync_timeout)
+            self.__wait_for_tasks_stopped(('record',), sync_timeout)
 
     # call this to stop acquisition gracefully
     # not thread safe
@@ -1576,10 +1599,7 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
             self.stop_task('record')
             self._record_task_updated(None)
         if sync_timeout is not None:
-            start = time.time()
-            while self.is_recording:
-                time.sleep(0.01)  # 10 msec
-                assert time.time() - start < float(sync_timeout)
+            self.__wait_for_tasks_stopped(('record',), sync_timeout)
 
     def get_next_xdatas_to_finish(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
         """Return the data of the next frame to finish.
