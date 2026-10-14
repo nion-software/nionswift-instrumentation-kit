@@ -1862,32 +1862,34 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         channel_states = [self.get_channel_state(i) for i in range(self.__device.channel_count)]
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         record_task = ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, False, frame_parameters, None, channel_ids, self.display_name)
-        finished_event = threading.Event()
         xdatas: typing.List[typing.Optional[DataAndMetadata.DataAndMetadata]] = list()
+
+        # the task delivers its data and then finishes, or finishes with an error and no data. acquiring the frame may
+        # take any time, so the wait for either is unbounded. stopping the device afterwards is bounded by sync_timeout.
+        data_or_finished_event = threading.Event()
+
         def finished(datas_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             nonlocal xdatas
             xdatas = [data_promise.xdata for data_promise in datas_promises]
             self.set_enabled_channels(old_enabled_channels)
-            finished_event.set()
+            data_or_finished_event.set()
+
+        # the task fires data_elements_changed_event after it is marked finished, with or without an error.
+        def handle_data_elements_changed(data_elements: typing.Sequence[HardwareSource.DataElementType], view_id: str | None, is_complete: bool, is_stopping: bool, e: Exception | None) -> None:
+            if record_task.is_finished:
+                data_or_finished_event.set()
+
+        # the listener is held until this method returns, after the task finishes.
+        data_elements_changed_listener = record_task.data_elements_changed_event.listen(handle_data_elements_changed)
         record_task.finished_callback_fn = finished
         self._record_task_updated(record_task)
         self.start_task('record', record_task)
-        # loop will break on finished or error (not recording). maybe a race condition?
-        while not record_task.is_finished:
-            if finished_event.wait(0.01):  # 10 msec
-                break
-        # self.stop_task('record')
+        data_or_finished_event.wait()
         self._record_task_updated(None)
         sync_timeout = sync_timeout or 3.0
-        start = time.time()
-        while not record_task.is_finished:
-            time.sleep(0.01)  # 10 msec
-            assert time.time() - start < float(sync_timeout)
+        assert record_task.wait_finished(timeout=sync_timeout)
         # since we check for 'is_recording' at beginning, wait for that to clear also.
-        start = time.time()
-        while self.is_recording:
-            time.sleep(0.01)  # 10 msec
-            assert time.time() - start < float(sync_timeout)
+        self._wait_for_tasks_stopped(('record',), sync_timeout)
         return xdatas
 
     def prepare_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
