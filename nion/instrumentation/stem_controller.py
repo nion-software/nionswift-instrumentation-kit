@@ -467,7 +467,7 @@ class STEMController(Observable.Observable):
         self.scan_context_data_items_changed_event = Event.Event()
         self.scan_context_changed_event = Event.Event()
         self.__ronchigram_camera: typing.Optional[camera_base.CameraHardwareSource] = None
-        self.__resource_reservations: dict(str, ResourceReservation[typing.Any]) = dict()
+        self.__resource_reservations: dict[str, ResourceReservation[typing.Any]] = dict()
         self.__eels_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__slit_camera: typing.Optional[camera_base.CameraHardwareSource] = None
         self.__scan_controller: typing.Optional[scan_base.ScanHardwareSource] = None
@@ -544,7 +544,6 @@ class STEMController(Observable.Observable):
     def set_ronchigram_camera(self, camera: typing.Optional[HardwareSource.HardwareSource]) -> None:
         assert camera is None or camera.features.get("is_ronchigram_camera", False)
         self.__ronchigram_camera = typing.cast(typing.Optional["camera_base.CameraHardwareSource"], camera)
-        self.__ronchigram_camera_reservation.notify_resource_state_changed()
 
     def _get_resource_availability_stream(self, resource_name: str) -> Stream.AbstractStream[bool]:
         if resource_name not in self.__resource_reservations:
@@ -555,7 +554,6 @@ class STEMController(Observable.Observable):
         if resource_name not in self.__resource_reservations:
             self.__resource_reservations[resource_name] = self.__create_resource_reservation(resource_name)
         return self.__resource_reservations[resource_name].reserve()
-
 
     def __create_resource_reservation(self, resource_name: str) -> ResourceReservation[typing.Any]:
         resource_reservation_function = lambda: Registry.get_component(resource_name)
