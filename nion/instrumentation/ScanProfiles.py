@@ -835,7 +835,7 @@ class ProfileConfigurationModel(Observable.Observable):
                 profile.read_from_frame_parameters(frame_parameters)
                 self.__append_profile(profile)
             # the hardware's selected profile slot holds the current frame parameters, so its profile is the active one.
-            self.__active_profile = self.__profiles[min(max(0, scan_hardware_source.selected_profile_index), len(self.__profiles) - 1)]
+            self.__active_profile = self.__profiles[min(max(0, scan_hardware_source.scan_settings.selected_profile_index), len(self.__profiles) - 1)]
 
         self.__frame_parameters_changed_event_listener: Event.EventListener | None = scan_hardware_source.current_frame_parameters_changed_event.listen(ReferenceCounting.weak_partial(self.__class__.__update_frame_parameters, self))
 

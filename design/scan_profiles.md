@@ -6,6 +6,8 @@ A scan profile is a named set of values for some of the scan device's parameters
 
 Each scan device has one profile model, `scan_hardware_source.scan_profiles` in `nion/instrumentation/ScanProfiles.py`, shared by all of its scan panels. It holds an ordered list of profiles. Exactly one is active, and the model remembers the previously active one.
 
+For scripts, a profile's position in the list is its profile index: setting `profile_index` activates the profile at that position, and an index with no profile does nothing.
+
 The parameters are the field width, the scan size, the pixel time, the rotation, AC line sync, and the subscan size, position, pixel width and rotation. Most parameters have one value; the scan size has three (the width, the height and the link between them), and the subscan size and position have two each. A profile includes some of the parameters, each as a whole, and has values for them. Activating a profile applies the values of the parameters it includes to the scan device; a parameter it doesn't include keeps its current value. Values a profile keeps for a parameter it doesn't include have no effect while the parameter isn't included.
 
 While the subscan is off, activating a profile applies its included subscan size, position and rotation to the scan device's subscan region and rotation, which the subscan uses when it is turned on.

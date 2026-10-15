@@ -1289,7 +1289,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # fired when the current frame parameters change
         self.current_frame_parameters_changed_event = Event.Event()
 
-        self.__profile_changed_event_listener = self.__settings.profile_changed_event.listen(self.profile_changed_event.fire)
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
         self.__stem_controller = stem_controller_
@@ -1371,6 +1370,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if scan_profiles_file and is_scan_profiles_file_replaceable:
             self.__scan_profiles_changed_event_listener = self.__scan_profiles.profiles_changed_event.listen(functools.partial(settings_changed, scan_profiles_file))
 
+        # the selected profile index is the active scan profile's position, which changes when another profile is
+        # activated or the profiles are reordered or removed.
+        self.__selected_profile_index = self.__scan_profiles.active_profile_index
+        self.__scan_profiles_property_changed_event_listener: Event.EventListener | None = self.__scan_profiles.property_changed_event.listen(ReferenceCounting.weak_partial(ConcreteScanHardwareSource.__handle_scan_profiles_property_changed, self))
+
     def close(self) -> None:
         # thread needs to close before closing the stem controller. so use this method to
         # do it slightly out of order for this class.
@@ -1387,13 +1391,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__line_scan_state_changed_event_listener = typing.cast(typing.Any, None)
         self.__line_scan_vector_changed_event_listener = typing.cast(typing.Any, None)
         self.__scan_profiles_changed_event_listener = None
+        self.__scan_profiles_property_changed_event_listener = None
         self.__scan_profiles.close()
         super().close()
         if self.__settings_changed_event_listener:
             self.__settings_changed_event_listener.close()
             self.__settings_changed_event_listener = None
-        self.__profile_changed_event_listener.close()
-        self.__profile_changed_event_listener = typing.cast(typing.Any, None)
         self.__frame_parameters_changed_event_listener.close()
         self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
         self.__current_frame_parameters_changed_event_listener.close()
@@ -2111,11 +2114,29 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__thread.start()
 
     def set_selected_profile_index(self, profile_index: int) -> None:
-        self.__settings.set_selected_profile_index(profile_index)
+        """Activate the scan profile at the index.
+
+        This remains for scripts, which select a profile by its position. An index with no profile does nothing, as does
+        any index while the scan device is recording or in sequence mode, when no profile can be activated.
+        """
+        self.__scan_profiles.active_profile_index = profile_index
 
     @property
     def selected_profile_index(self) -> int:
-        return self.__settings.selected_profile_index
+        """Return the position of the active scan profile.
+
+        This remains for scripts. The profile changed event fires with the new position when it changes.
+        """
+        return self.__scan_profiles.active_profile_index
+
+    def __handle_scan_profiles_property_changed(self, property_name: str) -> None:
+        # fire the profile changed event when the active profile's position changes, which reordering or removing
+        # profiles can do without activating another.
+        if property_name == "active_profile_index":
+            selected_profile_index = self.__scan_profiles.active_profile_index
+            if selected_profile_index != self.__selected_profile_index:
+                self.__selected_profile_index = selected_profile_index
+                self.profile_changed_event.fire(selected_profile_index)
 
     def __channel_states_changed(self, channel_states: typing.List[ChannelState]) -> None:
         # this method will be called when the device changes channels enabled (via dialog or script).
