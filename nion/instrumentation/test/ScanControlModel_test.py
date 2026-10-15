@@ -54,105 +54,98 @@ class TestScanControlClass(unittest.TestCase):
         hardware_source.stop_playing(sync_timeout=5.0)
         document_controller.periodic()
 
-    def test_profile_index(self):
-        # test changing profile index updates frame parameters, only checking fov here
+    def test_activating_scan_profile_updates_fields(self):
+        # test that activating a scan profile updates the fields, only checking fov here
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
-            scan_settings = scan_hardware_source.scan_settings
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertNotAlmostEqual(profile_frame_parameters_list[0].fov_nm, profile_frame_parameters_list[1].fov_nm)
-            self.assertEqual(model.profile_index, 0)
-            self.assertAlmostEqual(profile_frame_parameters_list[0].fov_nm, float(model.fov_str))
-            model.profile_index = 1
-            self.assertEqual(model.profile_index, 1)
-            self.assertAlmostEqual(profile_frame_parameters_list[1].fov_nm, float(model.fov_str))
-            model.profile_index = 0
-            self.assertEqual(model.profile_index, 0)
-            self.assertAlmostEqual(profile_frame_parameters_list[0].fov_nm, float(model.fov_str))
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            profile_configuration_model.profiles[1].field_width = 123.4
             # test that property changed event is emitted
-            with PropertyChangedEventWatcher(model, "profile_index") as watcher:
-                model.profile_index = 1
+            with PropertyChangedEventWatcher(model, "fov_str") as watcher:
+                profile_configuration_model.active_profile_index = 1
                 self.assertTrue(watcher.changed)
-            # test changing settings updates model
-            with PropertyChangedEventWatcher(model, "profile_index") as watcher:
-                scan_settings.set_selected_profile_index(0)
-                self.assertTrue(watcher.changed)
+                self.assertEqual("123.4", model.fov_str)
 
     def test_changing_frame_parameters(self):
-        # test changing the frame parameters fields; ensure other profile frame parameters are not changed
+        # test changing the frame parameters fields; ensure inactive scan profiles are not changed
 
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
-            scan_settings = scan_hardware_source.scan_settings
+            inactive_profile = scan_hardware_source.scan_profiles.profiles[1]
 
             # test changing pixel time
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertAlmostEqual(scan_settings.get_frame_parameters(0).pixel_time_us, float(model.pixel_time_str))
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            inactive_profile_values = inactive_profile.write_values_to_dict()
+            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().pixel_time_us, float(model.pixel_time_str))
             model.pixel_time_str = "2.5"
-            self.assertAlmostEqual(2.5, scan_settings.get_frame_parameters(0).pixel_time_us)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            self.assertAlmostEqual(2.5, scan_hardware_source.get_current_frame_parameters().pixel_time_us)
+            self.assertNotEqual(frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(inactive_profile_values, inactive_profile.write_values_to_dict())
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "pixel_time_str") as watcher:
                 model.pixel_time_str = "2.55"
                 self.assertTrue(watcher.changed)
 
             # test changing fov
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertAlmostEqual(scan_settings.get_frame_parameters(0).fov_nm, float(model.fov_str))
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            inactive_profile_values = inactive_profile.write_values_to_dict()
+            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().fov_nm, float(model.fov_str))
             model.fov_str = "123.4"
-            self.assertAlmostEqual(123.4, scan_settings.get_frame_parameters(0).fov_nm)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            self.assertAlmostEqual(123.4, scan_hardware_source.get_current_frame_parameters().fov_nm)
+            self.assertNotEqual(frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(inactive_profile_values, inactive_profile.write_values_to_dict())
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "fov_str") as watcher:
                 model.fov_str = "123.45"
                 self.assertTrue(watcher.changed)
 
             # test changing width
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            inactive_profile_values = inactive_profile.write_values_to_dict()
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
             model.width_str = "514"
-            self.assertEqual(514, scan_settings.get_frame_parameters(0).pixel_size.width)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            self.assertEqual(514, scan_hardware_source.get_current_frame_parameters().pixel_size.width)
+            self.assertNotEqual(frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(inactive_profile_values, inactive_profile.write_values_to_dict())
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "width_str") as watcher:
                 model.width_str = "512"
                 self.assertTrue(watcher.changed)
 
             # test changing height
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            inactive_profile_values = inactive_profile.write_values_to_dict()
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
             model.height_str = "515"
-            self.assertEqual(515, scan_settings.get_frame_parameters(0).pixel_size.height)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            self.assertEqual(515, scan_hardware_source.get_current_frame_parameters().pixel_size.height)
+            self.assertNotEqual(frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(inactive_profile_values, inactive_profile.write_values_to_dict())
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "height_str") as watcher:
                 model.height_str = "516"
                 self.assertTrue(watcher.changed)
 
             # test changing subscan width
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            inactive_profile_values = inactive_profile.write_values_to_dict()
+            self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
             self.assertIsNone(model.subscan_width_str)
             model.subscan_width_str = "128"
-            self.assertEqual(128, scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertEqual(128, scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
             self.assertEqual("128", model.subscan_width_str)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), scan_settings.get_frame_parameters(1).as_dict())
+            self.assertNotEqual(frame_parameters.as_dict(), scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(inactive_profile_values, inactive_profile.write_values_to_dict())
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "subscan_width_str") as watcher:
                 model.subscan_width_str = "129"
                 self.assertTrue(watcher.changed)
             # test clearing the override
             model.subscan_width_str = None
-            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
             self.assertIsNone(model.subscan_width_str)
 
             # test changing rotation
@@ -170,50 +163,49 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
-            scan_settings = scan_hardware_source.scan_settings
 
             # initial assumptions
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
             self.assertTrue(model.width_height_linked)
 
             # change the width, height should update too
             model.width_str = "600"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 600)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 600)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, 600)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, 600)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.width_str))
 
             # change the height, width should update too
             model.height_str = "500"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 500)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 500)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, 500)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, 500)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
 
             # unlink the width and height
             model.width_height_linked = False
 
             # change the width, height should remain unchanged
             model.width_str = "400"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 500)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, 400)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, 500)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
 
             # change the height, width should remain unchanged
             model.height_str = "300"
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 300)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, 400)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, 300)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
 
             # link the width and height. ensure height updates to match width.
             model.width_height_linked = True
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, 400)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, 400)
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, int(model.width_str))
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, int(model.height_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, 400)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, 400)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, int(model.width_str))
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, int(model.height_str))
 
     def test_subscan_width_placeholder(self):
         # test that the subscan width placeholder tracks the effective subscan width (override or pixel width)
@@ -222,11 +214,10 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
-            scan_settings = scan_hardware_source.scan_settings
 
             # initial assumptions: no override, placeholder tracks pixel width
             self.assertIsNone(model.subscan_width_str)
-            self.assertEqual(str(scan_settings.get_frame_parameters(0).pixel_size.width), model.placeholder_subscan_width_str)
+            self.assertEqual(str(scan_hardware_source.get_current_frame_parameters().pixel_size.width), model.placeholder_subscan_width_str)
 
             # changing width (with no override) should update the placeholder
             with PropertyChangedEventWatcher(model, "placeholder_subscan_width_str") as watcher:
@@ -237,7 +228,7 @@ class TestScanControlClass(unittest.TestCase):
             # setting an explicit override should update subscan_width_str and be reflected on the model
             model.subscan_width_str = "200"
             self.assertEqual("200", model.subscan_width_str)
-            self.assertEqual(200, scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            self.assertEqual(200, scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
 
             # changing width further should not affect the explicit override or its str representation
             model.width_str = "700"
@@ -254,43 +245,42 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
-            scan_settings = scan_hardware_source.scan_settings
 
             # test increase/decrease pixel time
-            initial_pixel_time = scan_settings.get_frame_parameters(0).pixel_time_us
+            initial_pixel_time = scan_hardware_source.get_current_frame_parameters().pixel_time_us
             model.increase_pixel_time()
-            self.assertGreater(scan_settings.get_frame_parameters(0).pixel_time_us, initial_pixel_time)
+            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
             model.decrease_pixel_time()
-            self.assertAlmostEqual(scan_settings.get_frame_parameters(0).pixel_time_us, initial_pixel_time)
+            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
 
             # test increase/decrease fov
-            initial_fov = scan_settings.get_frame_parameters(0).fov_nm
+            initial_fov = scan_hardware_source.get_current_frame_parameters().fov_nm
             model.increase_fov()
-            self.assertGreater(scan_settings.get_frame_parameters(0).fov_nm, initial_fov)
+            self.assertGreater(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
             model.decrease_fov()
-            self.assertAlmostEqual(scan_settings.get_frame_parameters(0).fov_nm, initial_fov)
+            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
 
             # test increase/decrease width
-            initial_width = scan_settings.get_frame_parameters(0).pixel_size.width
+            initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
             model.increase_width()
-            self.assertGreater(scan_settings.get_frame_parameters(0).pixel_size.width, initial_width)
+            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
             model.decrease_width()
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.width, initial_width)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
 
             # test increase/decrease height
-            initial_height = scan_settings.get_frame_parameters(0).pixel_size.height
+            initial_height = scan_hardware_source.get_current_frame_parameters().pixel_size.height
             model.increase_height()
-            self.assertGreater(scan_settings.get_frame_parameters(0).pixel_size.height, initial_height)
+            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
             model.decrease_height()
-            self.assertEqual(scan_settings.get_frame_parameters(0).pixel_size.height, initial_height)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
 
             # test increase/decrease subscan width, starting from no override (defaults to pixel width)
-            initial_width = scan_settings.get_frame_parameters(0).pixel_size.width
-            self.assertIsNone(scan_settings.get_frame_parameters(0).subscan_pixel_width_override)
+            initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
+            self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
             model.increase_subscan_width()
-            self.assertEqual(scan_settings.get_frame_parameters(0).subscan_pixel_width_override, initial_width * 2)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width * 2)
             model.decrease_subscan_width()
-            self.assertEqual(scan_settings.get_frame_parameters(0).subscan_pixel_width_override, initial_width)
+            self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width)
 
     def test_subscan_and_line_scan_checkboxes(self):
         # test that the increase/decrease methods work for pixel time, fov, width, and height

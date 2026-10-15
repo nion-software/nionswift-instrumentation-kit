@@ -1462,6 +1462,59 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile lost its values")
             self.assertEqual(first_profile_rotation, profile_configuration_model.profiles[0].rotation, "an inactive profile took the rotation")
 
+    def test_scan_panel_field_edit_leaves_hardware_profile_slots_unchanged(self) -> None:
+        # a device such as SuperScan keeps its hardware profile slots as its own profiles, which a field edit must not mix
+        # with the values of the active scan profile.
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.scan_profiles.active_profile_index = 1
+            slot_frame_parameters_list = [scan_hardware_source.get_frame_parameters(slot_index).as_dict() for slot_index in range(3)]
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_control_model.pixel_time_str = "7.5"
+            self.assertAlmostEqual(7.5, scan_hardware_source.get_current_frame_parameters().pixel_time_us)
+            self.assertEqual(slot_frame_parameters_list, [scan_hardware_source.get_frame_parameters(slot_index).as_dict() for slot_index in range(3)])
+
+    def test_scan_panel_field_edit_during_sequence_acquisition_is_ignored(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            pixel_time_us = active_profile.pixel_time_us
+            scan_control_model = self.__create_scan_control_model(test_context)
+            # the acquisition thread waits in sequence mode until the field has been edited.
+            sequence_mode_started = threading.Event()
+            field_edited = threading.Event()
+
+            def handle_property_changed(property_name: str) -> None:
+                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
+                    sequence_mode_started.set()
+                    field_edited.wait(10.0)
+
+            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            maker = Acquisition.MakerDataStream(data_stream)
+            # the acquisition saves the device state before it starts and restores it when it ends, as the acquisition panel does.
+            device_state = maker.prepare_device_state()
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(maker,))
+            try:
+                acquisition_thread.start()
+                try:
+                    self.assertTrue(sequence_mode_started.wait(10.0))
+                    document_controller.periodic()
+                    scan_control_model.pixel_time_str = str(pixel_time_us * 2)
+                    self.assertAlmostEqual(pixel_time_us, scan_hardware_source.get_current_frame_parameters().pixel_time_us, msg="the edit changed the acquisition's frame parameters")
+                finally:
+                    field_edited.set()
+                    acquisition_thread.join(60.0)
+                self.assertFalse(acquisition_thread.is_alive())
+                device_state.restore()
+                document_controller.periodic()
+                self.assertAlmostEqual(pixel_time_us, active_profile.pixel_time_us)
+            finally:
+                property_changed_event_listener = None
+
     def test_changing_current_profiles_frame_parameters_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
