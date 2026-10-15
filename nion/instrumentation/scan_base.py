@@ -1330,8 +1330,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
-        self.__latest_values_lock = threading.RLock()
-        self.__latest_values: typing.Dict[int, ScanFrameParameters] = dict()
         self.record_index = 1  # use to give unique name to recorded images
 
         # synchronized acquisition
@@ -2030,11 +2028,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.scan_frame_parameters_changed_event.fire(frame_parameters_with_channels)
 
     def __handle_current_frame_parameters_changed(self, frame_parameters: ScanFrameParameters) -> None:
-        # this method is called when the frame parameters are changed in the settings via a profile change. if the
-        # scan is recording or doing a sequence, do nothing since parameters shouldn't change during those
-        # activities. this can happen if a scan is started from the acquisition panel but the parameters do not match
-        # the current profile; then the low level will report a change and the scan settings will try to update the
-        # current settings. prevent that here. this needs rework eventually.
+        # this method is called when a write to the selected hardware slot through set_frame_parameters changes the
+        # settings' current frame parameters. if the scan is recording or doing a sequence, do nothing since parameters
+        # shouldn't change during those activities.
         if not self.is_recording and not self.__in_sequence_mode:
             self.__set_current_frame_parameters(frame_parameters)
 
@@ -2121,18 +2117,6 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def selected_profile_index(self) -> int:
         return self.__settings.selected_profile_index
 
-    def __profile_frame_parameters_changed(self, profile_index: int, frame_parameters: ScanFrameParameters) -> None:
-        # to avoid set-notify cycles, only set the low level again if parameters have changed. this is handled
-        # in the scan acquisition task.
-        with self.__latest_values_lock:
-            self.__latest_values[profile_index] = copy.copy(frame_parameters)
-        def do_update_parameters() -> None:
-            with self.__latest_values_lock:
-                for profile_index in self.__latest_values.keys():
-                    self.__settings.set_frame_parameters(profile_index, self.__latest_values[profile_index])
-                self.__latest_values = dict()
-        self.__task_queue.put(do_update_parameters)
-
     def __channel_states_changed(self, channel_states: typing.List[ChannelState]) -> None:
         # this method will be called when the device changes channels enabled (via dialog or script).
         # it updates the channels internally but does not send out a message to set the channels to the
@@ -2162,8 +2146,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return ChannelState(self.__make_channel_id(channel_index), channel_name, channel_enabled)
 
     def __device_state_changed(self, profile_frame_parameters_list: typing.Sequence[ScanFrameParameters], device_channel_states: typing.Sequence[typing.Tuple[str, bool]]) -> None:
-        for profile_index, profile_frame_parameters in enumerate(profile_frame_parameters_list):
-            self.__profile_frame_parameters_changed(profile_index, profile_frame_parameters)
+        # the device reports its hardware profiles too, but the scan profiles decide the frame parameters, so apply only
+        # the channel states.
         channel_states = list()
         for channel_index, (channel_name, channel_enabled) in enumerate(device_channel_states):
             channel_states.append(self.__make_channel_state(channel_index, channel_name, channel_enabled))

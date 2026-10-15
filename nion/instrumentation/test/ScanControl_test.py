@@ -1474,6 +1474,29 @@ class TestScanControlClass(unittest.TestCase):
             self.assertAlmostEqual(7.5, scan_hardware_source.get_current_frame_parameters().pixel_time_us)
             self.assertEqual(slot_frame_parameters_list, [scan_hardware_source.get_frame_parameters(slot_index).as_dict() for slot_index in range(3)])
 
+    def test_scan_device_report_of_its_hardware_profiles_keeps_active_scan_profile(self) -> None:
+        # a device such as SuperScan reports its hardware profiles whenever its own settings change.
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            profile_configuration_model.active_profile_index = 1
+            active_profile = profile_configuration_model.active_profile
+            field_width, width = active_profile.field_width, active_profile.width
+            reported_frame_parameters_list: list[scan_base.ScanFrameParameters] = list()
+            for slot_index in range(3):
+                frame_parameters = scan_hardware_source.get_frame_parameters(slot_index)
+                frame_parameters.fov_nm = 7.0
+                frame_parameters.pixel_size = Geometry.IntSize(h=64, w=64)
+                reported_frame_parameters_list.append(frame_parameters)
+            channel_states = [(scan_hardware_source.get_channel_name(channel_index) or str(), scan_hardware_source.get_channel_enabled(channel_index)) for channel_index in range(scan_hardware_source.channel_count)]
+            device = test_context.configuration.scan_module.device
+            assert callable(device.on_device_state_changed)
+            device.on_device_state_changed(reported_frame_parameters_list, channel_states)
+            scan_hardware_source.periodic()
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan took the reported hardware profile")
+            self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile took the reported hardware profile")
+
     def test_scan_panel_field_edit_during_sequence_acquisition_is_ignored(self) -> None:
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
