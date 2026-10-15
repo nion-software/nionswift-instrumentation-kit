@@ -1144,12 +1144,11 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = Geometry.IntSize(300, 300)
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            frame_parameters_1 = scan_hardware_source.get_frame_parameters(1)
-            frame_parameters_1.size = Geometry.IntSize(500, 500)
-            scan_hardware_source.set_frame_parameters(1, frame_parameters_1)
+            profiles = scan_hardware_source.scan_profiles.profiles
+            profiles[0].width = 300
+            profiles[0].height = 300
+            profiles[1].width = 500
+            profiles[1].height = 500
             scan_hardware_source.set_selected_profile_index(0)
             self._acquire_one(document_controller, scan_hardware_source)
             self.assertEqual(document_model.data_items[0].data_shape, (300, 300))
@@ -1160,12 +1159,11 @@ class TestScanControlClass(unittest.TestCase):
     def test_change_profile_with_different_size_during_acquisition_should_produce_different_sized_data(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = Geometry.IntSize(300, 300)
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            frame_parameters_1 = scan_hardware_source.get_frame_parameters(1)
-            frame_parameters_1.size = Geometry.IntSize(500, 500)
-            scan_hardware_source.set_frame_parameters(1, frame_parameters_1)
+            profiles = scan_hardware_source.scan_profiles.profiles
+            profiles[0].width = 300
+            profiles[0].height = 300
+            profiles[1].width = 500
+            profiles[1].height = 500
             scan_hardware_source.set_selected_profile_index(0)
             scan_hardware_source.start_playing()
             self.assertEqual(scan_hardware_source.get_next_xdatas_to_start()[0].data.shape, (300, 300))
@@ -1386,8 +1384,11 @@ class TestScanControlClass(unittest.TestCase):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_control_model = self.__create_scan_control_model(test_context)
+            profile = scan_hardware_source.scan_profiles.profiles[1]
             scan_hardware_source.set_selected_profile_index(1)
-            self.assertIsNotNone(scan_control_model._scan_frame_parameters_for_testing)
+            frame_parameters = scan_control_model._scan_frame_parameters_for_testing
+            self.assertIsNotNone(frame_parameters)
+            self.assertEqual((profile.field_width, profile.width), (frame_parameters.fov_nm, frame_parameters.size.width))
 
     def test_scan_button_scans_with_active_scan_profile_other_than_first(self) -> None:
         with self._test_context() as test_context:
@@ -1542,11 +1543,48 @@ class TestScanControlClass(unittest.TestCase):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_control_model = self.__create_scan_control_model(test_context)
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            frame_parameters_0.size = Geometry.IntSize(200, 200)
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            active_profile.width = 200
+            active_profile.height = 200
             self.assertIsNotNone(scan_control_model._scan_frame_parameters_for_testing)
             self.assertEqual(scan_control_model._scan_frame_parameters_for_testing.size, (200, 200))
+
+    def test_selecting_scan_profile_by_index_activates_it_and_keeps_previously_active_profile(self) -> None:
+        # a script selects a profile by its position, through the scripting API's profile_index.
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            profile_configuration_model.active_profile_index = 1
+            previous_profile = profile_configuration_model.active_profile
+            field_width, width = previous_profile.field_width, previous_profile.width
+            third_profile = profile_configuration_model.profiles[2]
+            scan_hardware_source.set_selected_profile_index(2)
+            self.assertIs(third_profile, profile_configuration_model.active_profile)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((third_profile.field_width, third_profile.width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan does not use the selected profile")
+            self.assertEqual((field_width, width), (previous_profile.field_width, previous_profile.width), "the previously active profile lost its values")
+
+    def test_selecting_scan_profile_by_index_with_no_profile_leaves_active_profile(self) -> None:
+        # a script selects a profile by a position which has no profile.
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            active_profile = profile_configuration_model.active_profile
+            fov_nm = scan_hardware_source.get_current_frame_parameters().fov_nm
+            scan_hardware_source.set_selected_profile_index(99)
+            self.assertIs(active_profile, profile_configuration_model.active_profile, "selecting a missing profile changed the active profile")
+            self.assertEqual(fov_nm, scan_hardware_source.get_current_frame_parameters().fov_nm, "selecting a missing profile changed the scan")
+
+    def test_selected_scan_profile_index_follows_active_scan_profile(self) -> None:
+        # a script reads the selected profile by its position, through the scripting API's profile_index.
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            selected_profile_indexes: list[int] = list()
+            profile_changed_event_listener = scan_hardware_source.profile_changed_event.listen(selected_profile_indexes.append)
+            scan_hardware_source.scan_profiles.active_profile_index = 1
+            self.assertEqual(1, scan_hardware_source.selected_profile_index)
+            self.assertEqual([1], selected_profile_indexes)
+            profile_changed_event_listener = None
 
     def test_changing_fov_updates_only_that_profile(self):
         with self._test_context() as test_context:
