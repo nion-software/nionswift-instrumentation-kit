@@ -23,6 +23,7 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import ScanProfiles
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.instrumentation.test import HardwareSource_test
 from nion.swift import DisplayPanel
 from nion.swift import DocumentController
@@ -1387,6 +1388,79 @@ class TestScanControlClass(unittest.TestCase):
             scan_control_model = self.__create_scan_control_model(test_context)
             scan_hardware_source.set_selected_profile_index(1)
             self.assertIsNotNone(scan_control_model._scan_frame_parameters_for_testing)
+
+    def test_scan_button_scans_with_active_scan_profile_other_than_first(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            profile_configuration_model.active_profile_index = 1
+            active_profile = profile_configuration_model.active_profile
+            field_width, width = active_profile.field_width, active_profile.width
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_control_model.handle_scan_button_clicked()
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan does not use the active profile")
+            self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile lost its values")
+
+    def test_scan_button_scans_with_active_scan_profile_restored_from_saved_file(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source.scan_profiles.active_profile_index = 1
+            properties = scan_hardware_source.scan_profiles.write_to_dict()
+            # a scan device as at the next launch, which loads the saved profiles file.
+            scan_module = AcquisitionTestContextConfiguration.ScanModule(test_context.instrument, "test_restored_profiles_scan_device", AcquisitionTestContextConfiguration.ScanDataGenerator())
+            configuration_location = pathlib.Path(test_context.configuration.configuration_location)
+            (configuration_location / "test_restored_profiles_scan_device_scan_profiles.json").write_text(json.dumps(properties))
+            restored_scan_hardware_source = scan_base.ConcreteScanHardwareSource(test_context.instrument, scan_module.device, scan_module.settings, configuration_location)
+            # the scan button starts the scan through an action which finds the scan device by its id.
+            HardwareSource.HardwareSourceManager().register_hardware_source(restored_scan_hardware_source)
+            try:
+                active_profile = restored_scan_hardware_source.scan_profiles.active_profile
+                field_width, width = active_profile.field_width, active_profile.width
+                scan_control_model = ScanControlPanel.ScanControlPanelModel(restored_scan_hardware_source, test_context.document_controller)
+                try:
+                    scan_control_model.handle_scan_button_clicked()
+                    restored_scan_hardware_source.stop_playing(sync_timeout=3.0)
+                finally:
+                    scan_control_model.close()
+                frame_parameters = restored_scan_hardware_source.get_current_frame_parameters()
+                self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan does not use the restored active profile")
+                self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the restored active profile lost its values")
+            finally:
+                HardwareSource.HardwareSourceManager().unregister_hardware_source(restored_scan_hardware_source)
+                restored_scan_hardware_source.close()
+
+    def test_ac_line_sync_check_box_keeps_active_scan_profile_other_than_first(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            profile_configuration_model.active_profile_index = 1
+            active_profile = profile_configuration_model.active_profile
+            field_width, width = active_profile.field_width, active_profile.width
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_control_model.ac_line_sync_enabled = True
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertTrue(frame_parameters.ac_line_sync)
+            self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan does not use the active profile")
+            self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile lost its values")
+
+    def test_rotation_field_changes_only_active_scan_profile_other_than_first(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            profile_configuration_model = scan_hardware_source.scan_profiles
+            first_profile_rotation = profile_configuration_model.profiles[0].rotation
+            profile_configuration_model.active_profile_index = 1
+            active_profile = profile_configuration_model.active_profile
+            field_width, width = active_profile.field_width, active_profile.width
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_control_model.rotation_deg_str = "12.5"
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            self.assertAlmostEqual(12.5, math.degrees(frame_parameters.rotation_rad))
+            self.assertAlmostEqual(12.5, active_profile.rotation)
+            self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan does not use the active profile")
+            self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile lost its values")
+            self.assertEqual(first_profile_rotation, profile_configuration_model.profiles[0].rotation, "an inactive profile took the rotation")
 
     def test_changing_current_profiles_frame_parameters_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:

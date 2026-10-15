@@ -1101,6 +1101,12 @@ class ScanControlPanelModel(Observable.Observable):
     def _scan_frame_parameters_for_testing(self) -> scan_base.ScanFrameParameters:
         return self.__frame_parameters
 
+    def __set_current_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
+        # a recording or a sequence acquisition scans with its own frame parameters, so an edit made then is ignored,
+        # which leaves both the acquisition and the active profile unchanged.
+        if not self.__scan_hardware_source.is_recording and not self.__scan_hardware_source.is_in_sequence_mode:
+            self.__scan_hardware_source.set_current_frame_parameters(frame_parameters)
+
     @property
     def name(self) -> str:
         return self.__name or _("Scan")
@@ -1265,14 +1271,9 @@ class ScanControlPanelModel(Observable.Observable):
     @rotation_deg_str.setter
     def rotation_deg_str(self, value: str) -> None:
         rotation_deg = Converter.FloatToStringConverter().convert_back(value) or 0.0
-        rotation_rad = rotation_deg * math.pi / 180.0
-        # Set rotation for all profiles so that the rotation is consistent across profiles.
-        # This is needed to ensure the rotation is updated for all profiles on the UI  even when no scan is currently running
-        for profile_index in range(self.profiles_model.count):
-            frame_parameters = copy.copy(self.__scan_hardware_source.get_frame_parameters(profile_index))
-            if frame_parameters.rotation_rad != rotation_rad:
-                frame_parameters.rotation_rad = rotation_rad
-                self.__scan_hardware_source.set_frame_parameters(profile_index, frame_parameters)
+        frame_parameters = copy.copy(self.__frame_parameters)
+        frame_parameters.rotation_rad = rotation_deg * math.pi / 180.0
+        self.__set_current_frame_parameters(frame_parameters)
 
     @property
     def subscan_checkbox_checked(self) -> bool:
@@ -1388,9 +1389,9 @@ class ScanControlPanelModel(Observable.Observable):
 
     @ac_line_sync_enabled.setter
     def ac_line_sync_enabled(self, value: bool) -> None:
-        frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+        frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.ac_line_sync = value
-        self.__scan_hardware_source.set_frame_parameters(self.__scan_hardware_source.selected_profile_index, frame_parameters)
+        self.__set_current_frame_parameters(frame_parameters)
 
     @property
     def fov_label_color(self) -> str:
@@ -1410,7 +1411,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             # the 'enabled channel indexes' implementation is incomplete, so, for now, explicitly add them to the
             # frame parameters so that they can be recorded when logging the start playing action.
-            frame_parameters = self.__scan_hardware_source.get_frame_parameters(self.__scan_hardware_source.selected_profile_index)
+            frame_parameters = self.__scan_hardware_source.get_current_frame_parameters()
             frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
             action_context = self.__document_controller._get_action_context()
             action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id

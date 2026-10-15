@@ -156,18 +156,9 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIsNone(model.subscan_width_str)
 
             # test changing rotation
-            profile_frame_parameters_list = [scan_settings.get_frame_parameters(i) for i in range(2)]
-            self.assertAlmostEqual(scan_settings.get_frame_parameters(0).rotation_deg, float(model.rotation_deg_str))
+            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().rotation_deg, float(model.rotation_deg_str))
             model.rotation_deg_str = "12.3"
-
-            self.assertAlmostEqual(12.3, scan_settings.get_frame_parameters(0).rotation_deg)
-            # check rotation has changed for profile 1 to ensure it is shared amongst all profiles
-            self.assertAlmostEqual(12.3, scan_settings.get_frame_parameters(1).rotation_deg)
-            self.assertNotEqual(profile_frame_parameters_list[0].as_dict(), scan_settings.get_frame_parameters(0).as_dict())
-            frame_parameters_dict = scan_settings.get_frame_parameters(1).as_dict()
-            frame_parameters_dict.pop('rotation_rad')
-            # check that other parameters have not changed (rotation is shared accross all profiles)
-            self.assertEqual(profile_frame_parameters_list[1].as_dict(), frame_parameters_dict)
+            self.assertAlmostEqual(12.3, scan_hardware_source.get_current_frame_parameters().rotation_deg)
             # test that property changed event is emitted
             with PropertyChangedEventWatcher(model, "rotation_deg_str") as watcher:
                 model.rotation_deg_str = "12.4"
@@ -580,7 +571,7 @@ class TestScanControlClass(unittest.TestCase):
                 model.ac_line_sync_enabled = True
                 self.assertTrue(model.ac_line_sync_enabled)
                 self.assertTrue(watcher.changed)
-                self.assertTrue(scan_hardware_source.get_frame_parameters(scan_hardware_source.selected_profile_index).ac_line_sync)
+                self.assertTrue(scan_hardware_source.get_current_frame_parameters().ac_line_sync)
 
     def test_fov_out_of_range(self):
         with self._test_context() as test_context:
