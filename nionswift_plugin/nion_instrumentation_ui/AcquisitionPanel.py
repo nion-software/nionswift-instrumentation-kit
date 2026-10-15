@@ -1086,7 +1086,7 @@ class ScanSpecifierValueStream(Stream.ValueStream[STEMController.ScanSpecifier])
                 camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, maybe_camera_hardware_source)
                 exposure_time = camera_hardware_source.get_frame_parameters(0).exposure_ms / 1000
             else:
-                exposure_time = scan_hardware_source.get_frame_parameters(0).pixel_time_us / 1E6
+                exposure_time = scan_hardware_source.get_current_frame_parameters().pixel_time_us / 1E6
             scan_width = self.__scan_width_model.value or 32
             assert scan_width is not None
 

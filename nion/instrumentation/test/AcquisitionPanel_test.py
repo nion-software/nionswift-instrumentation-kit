@@ -1,11 +1,15 @@
 import typing
 import unittest
 
+from nion.instrumentation import HardwareSource
+from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift import Application
 from nion.swift.model import Schema
 from nion.swift.test import TestContext
 from nion.ui import TestUI
+from nion.utils import Model
+from nion.utils import Stream
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 
 
@@ -45,3 +49,26 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual("ronchigram", camera_settings.camera_channel)
 
             camera_settings_scope()
+
+    def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
+        with self.__test_context() as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            # a pixel time edit in the scan panel changes the current frame parameters.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_time_us = 4.0
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_hardware_source.drift_enabled = True
+            scan_hardware_source.drift_settings = stem_controller.DriftCorrectionSettings(1, stem_controller.DriftIntervalUnit.TIME)
+            # without a camera, the scan description estimates the drift interval from the scan's pixel time.
+            camera_hardware_source_stream = Stream.ValueStream[HardwareSource.HardwareSource]().add_ref()
+            scan_hardware_source_stream = Stream.ValueStream[HardwareSource.HardwareSource](scan_hardware_source).add_ref()
+            scan_specifier_value_stream = AcquisitionPanel.ScanSpecifierValueStream(camera_hardware_source_stream, scan_hardware_source_stream, Model.PropertyModel[int](32), test_context.document_controller.event_loop).add_ref()
+            try:
+                scan_specifier = scan_specifier_value_stream.value
+                assert scan_specifier
+                # a drift correction every second is one every 7813 lines of 32 pixels at 4 us per pixel.
+                self.assertEqual(7813, scan_specifier.drift_interval_lines)
+            finally:
+                scan_specifier_value_stream.remove_ref()
+                scan_hardware_source_stream.remove_ref()
+                camera_hardware_source_stream.remove_ref()
