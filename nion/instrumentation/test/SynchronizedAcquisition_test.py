@@ -137,6 +137,32 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_context_size"])
                 self.assertEqual((4, 4), metadata_source.metadata["scan"]["scan_size"])
 
+    def test_grab_synchronized_with_its_own_frame_parameters_leaves_current_frame_parameters_and_active_profile_unchanged(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            # the current frame parameters are set, as a user or a script does.
+            scan_hardware_source.set_current_frame_parameters(scan_hardware_source.get_current_frame_parameters())
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            active_profile_index = scan_hardware_source.scan_profiles.active_profile_index
+            active_profile_values = active_profile.write_values_to_dict()
+            current_frame_parameters_dict = scan_hardware_source.get_current_frame_parameters().as_dict()
+            # acquire with a size, field of view and pixel time which differ from the current frame parameters.
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.pixel_size = Geometry.IntSize(h=4, w=4)
+            scan_frame_parameters.fov_nm = 50.0
+            scan_frame_parameters.pixel_time_us = 3.0
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            document_controller.periodic()
+            self.assertEqual((4, 4), scans[0].data_shape)
+            self.assertEqual(current_frame_parameters_dict, scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(active_profile_index, scan_hardware_source.scan_profiles.active_profile_index)
+            self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
+            self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
+
     def test_grab_synchronized_abort(self):
         with self.__test_context(is_eels=True) as test_context:
             scan_hardware_source = test_context.scan_hardware_source
