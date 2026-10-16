@@ -1170,9 +1170,6 @@ class DataChannelManager:
         self.__data_channel_list_model.items[0].update(xdata, "complete", None, None, None, None)
 
 
-_ReservedType = typing.TypeVar('_ReservedType')
-
-
 class InvalidThreadError(RuntimeError):
     """Raised when a reservation method is called from a thread other than the main thread."""
 
@@ -1229,7 +1226,7 @@ class ResourceReservation[_ReservedType]:
     """Main-thread reservation manager for one optional resource."""
 
     def __init__(self, resource: _ReservedType) -> None:
-        self.__resource = resource
+        self.__resource = weakref.ReferenceType[_ReservedType](resource)
         self.__reservation: weakref.ReferenceType[ReservedResource[_ReservedType]] | None = None
         self.__is_available_stream = Stream.ValueStream[bool](False)
         self.__update_availability_stream()
@@ -1261,7 +1258,10 @@ class ResourceReservation[_ReservedType]:
             raise InvalidThreadError("reserve must be called on the main thread.")
         if self.is_reserved:
             raise ResourceReservedError("Resource is already reserved.")
-        reservation = ReservedResource(self.__resource, self.release)
+        resource = self.__resource()
+        if resource is None:
+            raise ValueError("Resource is not available.")
+        reservation = ReservedResource(resource, self.release)
         self.__reservation = weakref.ref(reservation)
         self.__update_availability_stream()
         return reservation
@@ -1274,10 +1274,6 @@ class ResourceReservation[_ReservedType]:
         if threading.current_thread() is not threading.main_thread():
             raise InvalidThreadError("release must be called on the main thread.")
         self.__reservation = None
-        self.__update_availability_stream()
-
-    def notify_resource_state_changed(self) -> None:
-        """Update availability stream when underlying resource state may have changed."""
         self.__update_availability_stream()
 
     def __update_availability_stream(self) -> None:

@@ -1501,7 +1501,7 @@ class TestResourceReservation(unittest.TestCase):
             self.assertIsNotNone(reservation.resource)
 
             with self.assertRaises(HardwareSource.ResourceReservedError):
-                reservation2 = camera._reserve()
+                camera._reserve()
 
             reservation.release()
 
