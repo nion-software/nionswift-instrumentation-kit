@@ -1595,6 +1595,15 @@ class TestResourceReservation(unittest.TestCase):
                 self.assertFalse(camera._get_available_stream().value)
             self.assertTrue(camera._get_available_stream().value)
 
+    def test_accessing_resource_from_released_reservation(self) -> None:
+        """Accessing the resource from a released reservation raises UnreservedResourceError"""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            with camera._reserve() as reservation:
+                assert reservation
+                self.assertIsNotNone(reservation.resource)
+            with self.assertRaises(HardwareSource.UnreservedResourceError):
+                _ = reservation.resource
 
 if __name__ == '__main__':
     unittest.main()
