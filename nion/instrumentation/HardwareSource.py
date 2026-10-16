@@ -46,6 +46,7 @@ from nion.utils import Geometry
 from nion.utils import ListModel
 from nion.utils import Observable
 from nion.utils import Registry
+from nion.utils import Stream
 from nion.utils.ReferenceCounting import weak_partial
 
 if typing.TYPE_CHECKING:
@@ -947,6 +948,8 @@ class HardwareSource(typing.Protocol):
     def get_next_xdatas_to_start(self, timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def get_current_frame_parameters(self) -> FrameParameters: ...
     def set_current_frame_parameters(self, frame_parameters: FrameParameters) -> None: ...
+    def _reserve(self) -> ReservedResource[typing.Self]: ...
+    def _get_available_stream(self) -> Stream.AbstractStream[bool]: ...
 
     # properties
 
@@ -1167,13 +1170,127 @@ class DataChannelManager:
         self.__data_channel_list_model.items[0].update(xdata, "complete", None, None, None, None)
 
 
+_ReservedType = typing.TypeVar('_ReservedType')
+
+
+class InvalidThreadError(RuntimeError):
+    """Raised when a reservation method is called from a thread other than the main thread."""
+
+
+class ResourceReservedError(RuntimeError):
+    """Raised when a resource is already reserved and cannot be reserved again."""
+
+
+class UnreservedResourceError(RuntimeError):
+    """Raised when trying to access a resource that is no longer reserved."""
+
+
+class ReservedResource[_ReservedType]:
+    """A main-thread reservation token for an acquired resource.
+
+    Threading contract:
+    - ``reserve`` and ``release`` occur on the main thread.
+    - Do not pass this token to worker threads.
+    - If worker code needs access, pass only ``resource``.
+    """
+
+    def __init__(self, resource: _ReservedType, release_fn: typing.Callable[[], None]) -> None:
+        self.__resource: _ReservedType | None = resource
+        self.__finalizer = weakref.finalize(self, release_fn)
+
+    def __enter__(self) -> ReservedResource[_ReservedType]:
+        return self
+
+    def __exit__(self, exc_type: typing.Any, exc_val: typing.Any, exc_tb: typing.Any) -> None:
+        self.release()
+
+    def release(self) -> None:
+        """Release this reservation token.
+
+        Must be called on the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("release must be called on the main thread.")
+        self.__finalizer()
+        self.__resource = None
+
+    @property
+    def resource(self) -> _ReservedType:
+        """The reserved resource.
+
+        This property is only valid while the reservation is active. After calling ``release``, this property will raise a UnreservedResourceError.
+        """
+        if self.__resource is None:
+            raise UnreservedResourceError("Resource is no longer reserved.")
+        return self.__resource
+
+
+class ResourceReservation[_ReservedType]:
+    """Main-thread reservation manager for one optional resource."""
+
+    def __init__(self, resource: _ReservedType) -> None:
+        self.__resource = resource
+        self.__reservation: weakref.ReferenceType[ReservedResource[_ReservedType]] | None = None
+        self.__is_available_stream = Stream.ValueStream[bool](False)
+        self.__update_availability_stream()
+
+    @property
+    def is_available_stream(self) -> Stream.AbstractStream[bool]:
+        """A stream of availability of the resource for UI binding."""
+        return self.__is_available_stream
+
+    @property
+    def is_reserved(self) -> bool:
+        reservation_ref = self.__reservation
+        if reservation_ref is None:
+            return False
+        reservation = reservation_ref()
+        if reservation is None:
+            self.__reservation = None
+            return False
+        return True
+
+    def reserve(self) -> ReservedResource[_ReservedType]:
+        """Reserve and return a token.
+
+        Must be called on the main thread.
+        InvalidThreadError is raised if called from a non-main thread.
+        ResourceReservedError is raised if the resource is already reserved.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("reserve must be called on the main thread.")
+        if self.is_reserved:
+            raise ResourceReservedError("Resource is already reserved.")
+        reservation = ReservedResource(self.__resource, self.release)
+        self.__reservation = weakref.ref(reservation)
+        self.__update_availability_stream()
+        return reservation
+
+    def release(self) -> None:
+        """Release the current reservation.
+
+        Must be called on the main thread.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            raise InvalidThreadError("release must be called on the main thread.")
+        self.__reservation = None
+        self.__update_availability_stream()
+
+    def notify_resource_state_changed(self) -> None:
+        """Update availability stream when underlying resource state may have changed."""
+        self.__update_availability_stream()
+
+    def __update_availability_stream(self) -> None:
+        self.__is_available_stream.value = not self.is_reserved
+
+
 class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     """Represents a source of data and metadata frames.
 
     The hardware source generates data on a background thread.
     """
 
-    def __init__(self, hardware_source_id: str, display_name: str) -> None:
+    def __init__(self: typing.Self, hardware_source_id: str, display_name: str) -> None:
         super().__init__()
         self.__hardware_source_id = hardware_source_id
         self.__display_name = display_name
@@ -1213,6 +1330,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         self.__data_channel_stop_event = self.__data_channel_manager.data_channel_stop_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_stop, self))
         self.__data_channel_state_changed_event = self.__data_channel_manager.data_channel_state_changed_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_state_changed, self))
         self.__data_channel_updated_event = self.__data_channel_manager.data_channel_updated_event.listen(weak_partial(ConcreteHardwareSource.__data_channel_updated, self))
+
+        self.__hardware_reservation = ResourceReservation[typing.Self](self)
 
     def close(self) -> None:
         self.close_thread()
@@ -1784,6 +1903,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
     def set_channel_enabled(self, channel_index: int, enabled: bool) -> None:
         pass
+
+    def _reserve(self) -> ReservedResource[typing.Self]:
+        return self.__hardware_reservation.reserve()
+
+    def _get_available_stream(self) -> Stream.AbstractStream[bool]:
+        return self.__hardware_reservation.is_available_stream
 
 
 class DelegateAcquisitionTaskProtocol(typing.Protocol):
