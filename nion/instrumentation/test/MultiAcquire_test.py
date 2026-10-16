@@ -1,3 +1,4 @@
+import tempfile
 import typing
 
 import numpy as np
@@ -107,6 +108,38 @@ class TestMultiAcquire(unittest.TestCase):
                 self.assertLess(elapsed, total_acquisition_time + 1.0, msg=f'Exceeded allowed acquisition time ({total_acquisition_time + 1.0} s).')
                 self.assertEqual(len(data_dict['data_element_list']), len(parameters))
                 self.assertAlmostEqual(progress, 1.0, places=1)
+
+    def test_panel_time_estimate_follows_scan_current_frame_parameters(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+
+            class FakeAPI:
+                def queue_task(self, task: typing.Callable[[], None]) -> None:
+                    document_controller.queue_task(task)
+
+            # the panel saves its settings in the configuration location, so use a temporary one.
+            with tempfile.TemporaryDirectory() as configuration_location:
+                class ConfigurationTestUI(TestUI.UserInterface):
+                    def get_configuration_location(self) -> str:
+                        return configuration_location
+
+                panel_delegate = MultiAcquirePanel.MultiAcquirePanelDelegate(FakeAPI())
+                ui = Facade.UserInterface("~1.0", ConfigurationTestUI())
+                panel_delegate.create_panel_widget(ui, Facade.DocumentWindow(document_controller))
+                try:
+                    scan_hardware_source = test_context.scan_hardware_source
+                    frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    frame_parameters.size = Geometry.IntSize(64, 64)
+                    scan_hardware_source.set_current_frame_parameters(frame_parameters)
+                    document_controller.periodic()
+                    estimate_before = panel_delegate.si_time_estimate_label.text
+                    frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    frame_parameters.size = Geometry.IntSize(128, 128)
+                    scan_hardware_source.set_current_frame_parameters(frame_parameters)
+                    document_controller.periodic()
+                    self.assertNotEqual(estimate_before, panel_delegate.si_time_estimate_label.text)
+                finally:
+                    panel_delegate.close()
 
     def test_acquire_multi_eels_spectrum_applies_shift_for_each_frame(self):
         settings = {'x_shifter': 'C10', 'blanker': 'C_Blank',
