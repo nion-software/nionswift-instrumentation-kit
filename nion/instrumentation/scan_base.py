@@ -1994,7 +1994,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__device.get_sequence_buffer_count()
 
     def pop_sequence_buffer_data(self, scan_id: uuid.UUID) -> typing.Mapping[Acquisition.Channel, DataAndMetadata.DataAndMetadata]:
-        data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), scan_id)
+        data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), self.__frame_parameters, scan_id)
         xdata_group = dict()
         for channel_index, data_element in enumerate(data_element_group):
             channel = Acquisition.Channel(self.hardware_source_id, str(self.get_enabled_channel_indexes()[channel_index]))
@@ -2194,7 +2194,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         scan_frame_parameters = typing.cast(ScanFrameParameters, frame_parameters)
         return self.calculate_frame_time(scan_frame_parameters)
 
-    def __get_data_element_group_with_metadata(self, data_element_group: typing.List[typing.Dict[str, typing.Any]], scan_id: uuid.UUID) -> typing.List[typing.Dict[str, typing.Any]]:
+    # write the calibrations and metadata of each channel's data element, using the frame parameters given.
+    def __get_data_element_group_with_metadata(self, data_element_group: typing.List[typing.Dict[str, typing.Any]], frame_parameters: ScanFrameParameters, scan_id: uuid.UUID) -> typing.List[typing.Dict[str, typing.Any]]:
         enabled_channel_states = list()
         for channel_index in range(self.channel_count):
             channel_state = self.get_channel_state(channel_index)
@@ -2223,8 +2224,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             if "spatial_calibrations" in _data_element:
                 data_element["spatial_calibrations"] = copy.deepcopy(_data_element["spatial_calibrations"])
             else:
-                update_scan_data_element_spatial_calibrations(data_element, self.__frame_parameters, _data.shape, _scan_properties)
-            update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, self.__frame_parameters, scan_id, _scan_properties)
+                update_scan_data_element_spatial_calibrations(data_element, frame_parameters, _data.shape, _scan_properties)
+            update_scan_metadata(data_element["metadata"].setdefault("scan", dict()), self.hardware_source_id, self.display_name, frame_parameters, scan_id, _scan_properties)
             update_detector_metadata(data_element["metadata"].setdefault("hardware_source", dict()), self.hardware_source_id, self.display_name, _data.shape, None, channel_name, channel_id, _scan_properties)
             data_element["data"] = _data
             new_data_element_group.append(data_element)
@@ -2244,7 +2245,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if hasattr(self.__device, "get_buffer_data"):
             buffer_data = self.__device.get_buffer_data(start, count)
             scan_id = uuid.uuid4()
-            return [self.__get_data_element_group_with_metadata(data_element_group, scan_id) for data_element_group in buffer_data]
+            return [self.__get_data_element_group_with_metadata(data_element_group, self.__frame_parameters, scan_id) for data_element_group in buffer_data]
         return list()
 
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None:
