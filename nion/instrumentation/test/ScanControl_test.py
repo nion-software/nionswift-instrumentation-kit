@@ -1380,6 +1380,77 @@ class TestScanControlClass(unittest.TestCase):
             assert subscan_pixel_size
             self.assertEqual([tuple(subscan_pixel_size)], recorded_shapes)
 
+    def test_sequence_acquisition_data_and_metadata_come_from_its_own_frame_parameters(self) -> None:
+        # a script's sequence acquisition passes its own frame parameters, and its data must be described by them
+        # whatever the current frame parameters are.
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # the current frame parameters differ from the acquisition's in size, field of view and pixel time.
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            current_frame_parameters.pixel_time_us = 2.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            frame_parameters.pixel_time_us = 3.0
+            # acquire a sequence of three frames the way a script does.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            Acquisition.acquire(maker)
+            device_state.restore()
+            # the shape, calibrations and metadata describe the acquired frames, so they match the acquisition's frame parameters.
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 24, 24), xdata.data_shape)
+            self.assertAlmostEqual(50.0 / 24, xdata.dimensional_calibrations[1].scale)
+            self.assertAlmostEqual(50.0 / 24, xdata.dimensional_calibrations[2].scale)
+            scan_metadata = xdata.metadata["scan"]
+            self.assertEqual(50.0, scan_metadata["fov_nm"])
+            self.assertEqual((24, 24), tuple(scan_metadata["scan_size"]))
+            self.assertEqual(3.0, scan_metadata["scan_device_parameters"]["pixel_time_us"])
+            self.assertEqual(3.0, xdata.metadata["hardware_source"]["pixel_time_us"])
+
+    def test_sequence_acquisition_with_its_own_subscan_has_data_and_metadata_of_that_subscan(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            # the current frame parameters have a subscan which differs from the acquisition's in size and position.
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            current_frame_parameters.pixel_time_us = 2.0
+            current_frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.5, x=0.5)
+            current_frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.25, w=0.25)
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            frame_parameters.pixel_time_us = 3.0
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.3, x=0.6)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.4, w=0.4)
+            # the scan device calculates a 9 x 9 subscan for this region, so set it here so that the data stream expects the
+            # size the device scans.
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(h=9, w=9)
+            # acquire a sequence of three frames the way a script does.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            Acquisition.acquire(maker)
+            device_state.restore()
+            # the shape, calibrations and metadata describe the acquired subscan, so they match the acquisition's frame parameters.
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 9, 9), xdata.data_shape)
+            self.assertAlmostEqual(50.0 * 0.4 / 9, xdata.dimensional_calibrations[2].scale)
+            scan_metadata = xdata.metadata["scan"]
+            self.assertEqual(50.0, scan_metadata["fov_nm"])
+            self.assertEqual((9, 9), tuple(scan_metadata["scan_size"]))
+            self.assertEqual((24, 24), tuple(scan_metadata["scan_device_parameters"]["pixel_size"]))
+            self.assertEqual(3.0, scan_metadata["scan_device_parameters"]["pixel_time_us"])
+            self.assertEqual((9, 9), tuple(scan_metadata["scan_device_parameters"]["subscan_pixel_size"]))
+            self.assertEqual(3.0, xdata.metadata["hardware_source"]["pixel_time_us"])
+
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
