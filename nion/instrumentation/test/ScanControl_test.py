@@ -1451,6 +1451,33 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((9, 9), tuple(scan_metadata["scan_device_parameters"]["subscan_pixel_size"]))
             self.assertEqual(3.0, xdata.metadata["hardware_source"]["pixel_time_us"])
 
+    def test_sequence_acquisition_with_its_own_subscan_leaves_subscan_region_and_rotation_unchanged(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            scan_hardware_source.subscan_enabled = True
+            # the user places the subscan, as the subscan graphic does.
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=0.25, w=0.25))
+            scan_hardware_source.subscan_rotation = 0.1
+            subscan_region = scan_hardware_source.subscan_region
+            subscan_rotation = scan_hardware_source.subscan_rotation
+            # acquire with a subscan which differs from the user's in position, size and rotation.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.3, x=0.6)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.4, w=0.4)
+            frame_parameters.subscan_rotation = 0.3
+            # the scan device calculates a 9 x 9 subscan for this region, so set it here so that the data stream expects the
+            # size the device scans.
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(h=9, w=9)
+            # acquire a sequence of three frames the way a script does.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            Acquisition.acquire(maker)
+            device_state.restore()
+            self.assertEqual(subscan_region, scan_hardware_source.subscan_region, "the acquisition moved the user's subscan")
+            self.assertAlmostEqual(subscan_rotation, scan_hardware_source.subscan_rotation, msg="the acquisition rotated the user's subscan")
+
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
