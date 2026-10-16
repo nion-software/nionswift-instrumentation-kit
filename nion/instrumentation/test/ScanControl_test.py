@@ -1478,6 +1478,36 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(subscan_region, scan_hardware_source.subscan_region, "the acquisition moved the user's subscan")
             self.assertAlmostEqual(subscan_rotation, scan_hardware_source.subscan_rotation, msg="the acquisition rotated the user's subscan")
 
+    def test_record_async_with_its_own_frame_parameters_leaves_current_frame_parameters_and_active_profile_unchanged(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            active_profile_index = scan_hardware_source.scan_profiles.active_profile_index
+            active_profile_values = active_profile.write_values_to_dict()
+            current_frame_parameters_dict = scan_hardware_source.get_current_frame_parameters().as_dict()
+            # record with a size, field of view and pixel time which differ from the current frame parameters.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            frame_parameters.pixel_time_us = 3.0
+            recorded_event = threading.Event()
+
+            def handle_record(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:  # called from thread
+                recorded_event.set()
+
+            scan_hardware_source.record_async(handle_record, frame_parameters=frame_parameters)
+            self.assertTrue(recorded_event.wait(10.0))
+            start_time = time.time()
+            while scan_hardware_source.is_recording:
+                self.assertTrue(time.time() - start_time < 30.0)
+                time.sleep(0.01)
+            document_controller.periodic()
+            self.assertEqual(current_frame_parameters_dict, scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertEqual(active_profile_index, scan_hardware_source.scan_profiles.active_profile_index)
+            self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
+            self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
+
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
