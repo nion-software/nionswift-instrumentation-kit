@@ -1454,15 +1454,16 @@ class TestResourceReservation(unittest.TestCase):
         """Reserving the camera makes it unavailable until explicitly released."""
         with self._test_context() as test_context:
             camera = test_context.camera_hardware_source
-            self.assertTrue(camera._get_available_stream().value)
+            available_stream = camera._get_available_stream()
+            self.assertTrue(available_stream.value)
             reservation = camera._reserve()
             self.assertIsNotNone(reservation)
             assert reservation
             self.assertIsNotNone(reservation.resource)
-            self.assertFalse(camera._get_available_stream().value)
+            self.assertFalse(available_stream.value)
 
             reservation.release()
-            self.assertTrue(camera._get_available_stream().value)
+            self.assertTrue(available_stream.value)
 
     def test_reserve_and_release_ronchigram_camera_via_context_manager(self) -> None:
         """The reservation context manager releases the camera on exit."""
@@ -1636,6 +1637,23 @@ class TestResourceReservation(unittest.TestCase):
             reservation.release()
             with self.assertRaises(HardwareSource.UnreservedResourceError):
                 _ = reservation.resource
+
+    def test_double_release_does_not_affect_second_reservation(self) -> None:
+        """Releasing a reservation twice does not affect a second reservation."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            is_available_stream = camera._get_available_stream()
+            reservation1 = camera._reserve()
+            self.assertFalse(is_available_stream.value)
+            reservation1.release()
+            self.assertTrue(is_available_stream.value)
+            reservation1.release() # Should not throw any errors
+            reservation2 = camera._reserve()
+            self.assertFalse(is_available_stream.value)
+            reservation1.release() # should not release the second reservation
+            self.assertFalse(is_available_stream.value)
+            reservation2.release()
+            self.assertTrue(is_available_stream.value)
 
 if __name__ == '__main__':
     unittest.main()
