@@ -598,9 +598,11 @@ class MultiAcquirePanelDelegate:
         self.multi_acquire_controller.stem_controller = self.stem_controller
         self.multi_acquire_controller.scan_controller = self.scan_controller
         def frame_parameters_changed(frame_parameters: scan_base.ScanFrameParameters) -> None:
-            self.update_time_estimate()
+            # the scan's current frame parameters can change on any thread, such as a script thread. the label widgets
+            # are only safe to change on the main thread, so queue the update there.
+            self.__api.queue_task(self.update_time_estimate)
         if self.scan_controller:
-            self.__scan_frame_parameters_changed_event_listener = self.scan_controller.scan_settings.current_frame_parameters_changed_event.listen(frame_parameters_changed)
+            self.__scan_frame_parameters_changed_event_listener = self.scan_controller.current_frame_parameters_changed_event.listen(frame_parameters_changed)
         self.update_camera_list()
 
         self.start_button = ui.create_push_button_widget('Start MultiAcquire')
