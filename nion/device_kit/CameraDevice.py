@@ -150,15 +150,17 @@ class Camera(camera_base.CameraDevice3):
     def calibration_controls(self) -> typing.Mapping[str, typing.Union[str, int, float]]:
         """Define the STEM calibration controls for this camera.
 
-        The controls should be unique for each camera if there are more than one.
+        The controls should be unique for each camera if there are more than one. The units are those of the
+        simulator's dimensional calibrations.
         """
+        y_calibration, x_calibration = self.__simulator.get_dimensional_calibrations(None, None)
         return {
             "x_scale_control": self.camera_type + "_x_scale",
             "x_offset_control": self.camera_type + "_x_offset",
-            "x_units_value": "eV" if self.camera_type == "eels" else "rad",
+            "x_units_value": x_calibration.units,
             "y_scale_control": self.camera_type + "_y_scale",
             "y_offset_control": self.camera_type + "_y_offset",
-            "y_units_value": "" if self.camera_type == "eels" else "rad",
+            "y_units_value": y_calibration.units,
             "intensity_units_value": "counts",
             "counts_per_electron_value": self.__instrument.counts_per_electron
         }

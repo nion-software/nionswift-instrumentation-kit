@@ -110,20 +110,18 @@ class ScanModule(scan_base.ScanModule):
         self.settings = scan_base.ScanSettings(device_id, scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
 
 
+# a camera simulator whose calibrations have the given y and x units.
 class CameraSimulator:
-    def __init__(self, sensor_dimensions: typing.Optional[Geometry.IntSize]) -> None:
+    def __init__(self, sensor_dimensions: typing.Optional[Geometry.IntSize], dimensional_units: typing.Sequence[str] = ("rad", "rad")) -> None:
         self.__data_value = 0
         self.__sensor_dimensions = sensor_dimensions
+        self.__dimensional_units = tuple(dimensional_units)
 
     def close(self) -> None:
         pass
 
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
-        dimensional_calibrations = [
-            Calibration.Calibration(),
-            Calibration.Calibration()
-        ]
-        return dimensional_calibrations
+        return [Calibration.Calibration(units=units) for units in self.__dimensional_units]
 
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
         self.__data_value += 1
@@ -242,7 +240,7 @@ class AcquisitionTestContextConfiguration:
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id, 0.005)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id, 0.005)
         self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(None), self.instrument)
-        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(Geometry.IntSize(256, 1024)), self.instrument)
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(Geometry.IntSize(256, 1024), ("", "eV")), self.instrument)
 
     def run(self) -> None:
         logging.disable(logging.CRITICAL)
