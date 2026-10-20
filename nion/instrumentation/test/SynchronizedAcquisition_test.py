@@ -530,13 +530,13 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             camera_frame_parameters.processing = "sum_project"
             camera_hardware_source.start_playing(camera_frame_parameters, sync_timeout=3.0)
             try:
-                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+                camera_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
                 section_height = 5
                 scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters,
                                                        camera=camera_hardware_source,
                                                        camera_frame_parameters=camera_frame_parameters,
                                                        section_height=section_height)
-                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+                camera_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
             finally:
                 camera_hardware_source.stop_playing(sync_timeout=3.0)
 
@@ -656,7 +656,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             # start the camera playing; ensure we have a data item
             camera_hardware_source.start_playing(sync_timeout=3.0)
             try:
-                camera_hardware_source.get_next_xdatas_to_finish(camera_frame_parameters.exposure * 10)
+                camera_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
                 test_context.document_controller.periodic()
                 data_item = test_context.document_model.data_items[0]
                 self.assertEqual("eV", data_item.dimensional_calibrations[-1].units)
@@ -672,7 +672,7 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
                                                        camera_frame_parameters=camera_frame_parameters,
                                                        section_height=section_height)
 
-                camera_hardware_source.get_next_xdatas_to_start(camera_frame_parameters.exposure * 10)
+                camera_hardware_source.get_next_xdatas_to_start(timeout=10.0)
                 self.assertEqual("eV", data_item.dimensional_calibrations[-1].units)
             finally:
                 camera_hardware_source.stop_playing(sync_timeout=3.0)
