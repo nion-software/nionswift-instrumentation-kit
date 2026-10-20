@@ -1431,7 +1431,6 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
         task.activity = Activity.Activity(self.hardware_source_id + "_" + task_id, f"{self.display_name} ({task_id})")
         Activity.append_activity(task.activity)
         self.__tasks[task_id] = task
-        # TODO: sync the thread start by waiting for an event on the task which gets set when the acquire thread starts executing the task
         self.__acquire_thread_trigger.set()
         self.acquisition_state_changed_event.fire(True)
 
@@ -1454,7 +1453,9 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     def is_playing(self) -> bool:
         return self.is_task_running('view')
 
-    # call this to start acquisition
+    # call this to start acquisition. with a sync_timeout, wait until the acquisition thread has started the view task or
+    # failed to start it. a failure is reported through the acquisition state rather than raised here. a view task does
+    # not start while a record is running, so do not wait then.
     # not thread safe
     def start_playing(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         if not self.is_playing:
@@ -1471,6 +1472,12 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
 
             self._view_task_updated(view_task)
             self.start_task('view', view_task)
+        sync_timeout = kwargs.get("sync_timeout")
+        if sync_timeout is not None and not self.is_recording:
+            # the view task may already have finished and been removed, in which case there is nothing to wait for.
+            if running_view_task := self.__tasks.get('view'):
+                running_view_task.wait_started(timeout=sync_timeout)
+                assert running_view_task.is_started or running_view_task.is_error
 
     # call this to stop acquisition immediately
     # not thread safe

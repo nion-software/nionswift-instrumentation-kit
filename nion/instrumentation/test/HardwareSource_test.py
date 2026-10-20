@@ -790,6 +790,41 @@ class TestHardwareSourceClass(unittest.TestCase):
             document_controller = simple_test_context.document_controller
             _test_simple_hardware_start_and_abort_works_as_expected(self, hardware_source, document_controller)
 
+    def test_start_playing_with_sync_timeout_returns_after_acquisition_starts(self) -> None:
+        with self.__simple_test_context() as simple_test_context:
+            hardware_source = simple_test_context.hardware_source
+            # the acquisition thread calls the start hook as it starts the view task. the hook takes long enough that
+            # start_playing would return before it finishes if start_playing did not wait.
+            start_hook_called_event = threading.Event()
+
+            def handle_start() -> None:  # called from the acquisition thread
+                time.sleep(0.1)
+                start_hook_called_event.set()
+
+            hardware_source._test_start_hook = handle_start
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                self.assertTrue(start_hook_called_event.is_set())
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+
+    def test_start_playing_with_sync_timeout_during_record_returns_without_waiting_for_the_view(self) -> None:
+        with self.__simple_test_context() as simple_test_context:
+            hardware_source = simple_test_context.hardware_source
+            # hold the record in its first acquire, so that the view cannot start until the record is released.
+            record_released_event = threading.Event()
+            hardware_source._test_acquire_hook = lambda: record_released_event.wait(10.0)  # called from the acquisition thread
+            hardware_source.start_recording(sync_timeout=3.0)
+            try:
+                start_time = time.perf_counter()
+                hardware_source.start_playing(sync_timeout=3.0)
+                self.assertLess(time.perf_counter() - start_time, 3.0)
+                self.assertTrue(hardware_source.is_playing)
+            finally:
+                record_released_event.set()
+                hardware_source.abort_recording(sync_timeout=3.0)
+                hardware_source.abort_playing(sync_timeout=3.0)
+
     def test_record_only_acquires_one_item(self):
         with self.__simple_test_context() as simple_test_context:
             hardware_source = simple_test_context.hardware_source
