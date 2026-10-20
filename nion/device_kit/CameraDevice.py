@@ -133,7 +133,14 @@ class Camera(camera_base.CameraDevice3):
     def get_expected_dimensions(self, binning: int) -> typing.Tuple[int, int]:
         """Return expected dimensions for the given binning value."""
         readout_area = self.__readout_area
-        return (readout_area[2] - readout_area[0]) // binning, (readout_area[3] - readout_area[1]) // binning
+        binning_shape = self.__get_binning_shape(readout_area, binning)
+        return (readout_area[2] - readout_area[0]) // binning_shape.height, (readout_area[3] - readout_area[1]) // binning_shape.width
+
+    # a readout area of a single row, such as a spectrometer's, has no rows to bin, so it is binned along its width only.
+    def __get_binning_shape(self, readout_area_TLBR: typing.Tuple[int, int, int, int], binning: int) -> Geometry.IntSize:
+        if readout_area_TLBR[2] - readout_area_TLBR[0] == 1:
+            return Geometry.IntSize(height=1, width=binning)
+        return Geometry.IntSize(height=binning, width=binning if self.__symmetric_binning else 1)
 
     def set_frame_parameters(self, frame_parameters: camera_base.CameraFrameParameters) -> None:
         self.__set_frame_parameters(frame_parameters)
@@ -313,7 +320,7 @@ class Camera(camera_base.CameraDevice3):
         # this will be set only for the first frame in a sequence.
         start = time.perf_counter()
         readout_area = self.readout_area
-        binning_shape = Geometry.IntSize(self.__binning, self.__binning if self.__symmetric_binning else 1)
+        binning_shape = self.__get_binning_shape(readout_area, self.__binning)
         # scan device is only set during synchronized acquisition
         if self.__scan_device:
             self.__scan_device.advance_pixel(do_sync=do_sync)
