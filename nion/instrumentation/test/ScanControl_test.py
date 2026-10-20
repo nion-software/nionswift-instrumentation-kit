@@ -16,6 +16,7 @@ import uuid
 import numpy
 
 from nion.data import Calibration
+from nion.data import DataAndMetadata
 from nion.instrumentation import Acquisition
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
@@ -1276,30 +1277,56 @@ class TestScanControlClass(unittest.TestCase):
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters.pixel_time_us = 4.0
             scan_hardware_source.start_playing(frame_parameters=scan_frame_parameters, sync_timeout=3.0)
-            scan_hardware_source.get_next_xdatas_to_finish()
+            scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
             document_controller.periodic()
 
-            # ensure capture occurs during acquisition
-            time.sleep(scan_hardware_source.get_current_frame_time() / 4)
+            # hold the acquisition thread in the first partial frame update it gives this listener, so that the frame
+            # cannot finish until the capture has been clicked and the fov changed. a partial update leaves the rest of
+            # the frame to be acquired after the fov change. the acquisition thread alone writes held_frame_indexes, and
+            # frame_held_event orders the write before this thread reads it.
+            frame_held_event = threading.Event()
+            frame_released_event = threading.Event()
+            held_frame_indexes: list[int] = list()
 
-            # trigger capture
-            scan_control_model.handle_capture_button_clicked()
+            # called from the acquisition thread
+            def handle_data_channel_updated(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+                if data_channel_event_args.state == "partial" and not frame_held_event.is_set():
+                    held_frame_indexes.append(data_and_metadata.metadata["hardware_source"]["frame_index"])
+                    frame_held_event.set()
+                    frame_released_event.wait(10.0)
 
-            # change the fov during the capture
-            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            self.assertAlmostEqual(100.0, scan_frame_parameters.fov_nm)
-            scan_frame_parameters.fov_nm = 10.0
-            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            data_channel_updated_listener = scan_hardware_source.data_channel_updated_event.listen(handle_data_channel_updated)
+            try:
+                self.assertTrue(frame_held_event.wait(10.0), "no partial frame update after the first frame finished")
 
-            # wait for the capture to finish
-            scan_hardware_source.get_next_xdatas_to_finish()
+                # trigger capture. the capture takes the first frame to finish after the click, which is the held frame.
+                scan_control_model.handle_capture_button_clicked()
+
+                # change the fov during the capture
+                scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                self.assertAlmostEqual(100.0, scan_frame_parameters.fov_nm)
+                scan_frame_parameters.fov_nm = 10.0
+                scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+            finally:
+                frame_released_event.set()
+
+            # wait for a frame which starts after the fov change. the capture finishes first.
+            next_xdatas = scan_hardware_source.get_next_xdatas_to_start(timeout=10.0)
 
             # stop playing
             scan_hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
 
-            # safety check
-            self.assertEqual(1, document_model.data_items[1].metadata["hardware_source"]["frame_index"])
+            # keep the listener until acquisition stops
+            data_channel_updated_listener = None
+
+            # check that the fov change reached the acquisition
+            next_xdata = next_xdatas[0]
+            assert next_xdata
+            self.assertEqual(10.0, next_xdata.metadata["scan"]["fov_nm"])
+
+            # safety check that the capture is the frame which was in progress when the fov changed
+            self.assertEqual(held_frame_indexes[0], document_model.data_items[1].metadata["hardware_source"]["frame_index"])
 
             # check fov
             self.assertAlmostEqual(100.0, document_model.data_items[1].dimensional_calibrations[0].convert_to_calibrated_size(document_model.data_items[1].data_shape[0]))
