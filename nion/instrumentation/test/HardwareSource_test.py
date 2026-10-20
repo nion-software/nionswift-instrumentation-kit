@@ -987,10 +987,27 @@ class TestHardwareSourceClass(unittest.TestCase):
             document_model.append_data_item(data_item)
             document_model.setup_channel(document_model.make_data_item_reference_key(hardware_source.hardware_source_id, "a"), data_item)
             hardware_source._data_channel_manager._test_update_data_channel(DataAndMetadata.new_data_and_metadata(data))
-            hardware_source.sleep = 0.20
+
+            # hold the acquisition thread in the update of the top half, so that the abort takes effect before the
+            # bottom half is acquired. release it before waiting for the acquisition to stop.
+            top_half_held_event = threading.Event()
+            top_half_released_event = threading.Event()
+
+            # called from the acquisition thread
+            def handle_data_channel_updated(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+                if not top_half_held_event.is_set():
+                    top_half_held_event.set()
+                    top_half_released_event.wait(10.0)
+
+            data_channel_updated_listener = hardware_source.data_channel_updated_event.listen(handle_data_channel_updated)
             hardware_source.start_playing()
-            time.sleep(0.02)
-            hardware_source.abort_playing(sync_timeout=3.0)
+            try:
+                self.assertTrue(top_half_held_event.wait(10.0), "no update of the top half")
+                hardware_source.abort_playing()
+            finally:
+                top_half_released_event.set()
+            hardware_source._wait_for_tasks_stopped(("view",), 3.0)
+            data_channel_updated_listener = None
             self.assertEqual(len(document_model.data_items), 1)
             document_controller.periodic()
             data = document_model.data_items[0].data
