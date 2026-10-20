@@ -234,7 +234,7 @@ class Camera(camera_base.CameraDevice3):
         data_element["properties"]["integration_count"] = integration_count
         # data that has been binned vertically to a single row will be converted to 1D
         if xdata_buffer.dimensional_shape[0] == 1:
-            data_element["data"] = numpy.squeeze(xdata_buffer._data_ex)
+            data_element["data"] = numpy.squeeze(xdata_buffer._data_ex, axis=0)
             data_element["collection_dimension_count"] = 0
             data_element["datum_dimension_count"] = 1
         return data_element
