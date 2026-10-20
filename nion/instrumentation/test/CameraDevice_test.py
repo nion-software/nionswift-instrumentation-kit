@@ -56,12 +56,15 @@ class TestCameraDeviceClass(unittest.TestCase):
         camera = CameraDevice.Camera("test_one_row_camera", "edxs", "EDXS", simulator, instrument)
         with contextlib.closing(camera):
             camera.set_frame_parameters(camera_base.CameraFrameParameters({"exposure_ms": 5, "binning": 2}))
-            camera.start_live()
-            try:
-                data_element = camera.acquire_image()
-            finally:
-                camera.stop_live()
-            self.assertEqual((512,), data_element["data"].shape)
+            # a readout area one bin wide still gives 1D data, of one channel.
+            for readout_area, expected_shape in (((0, 0, 1, 1024), (512,)), ((0, 0, 1, 2), (1,))):
+                camera.readout_area = readout_area
+                camera.start_live()
+                try:
+                    data_element = camera.acquire_image()
+                finally:
+                    camera.stop_live()
+                self.assertEqual(expected_shape, data_element["data"].shape)
 
     def test_binning_a_one_row_readout_area_of_a_two_dimensional_sensor_bins_its_width_only(self) -> None:
         instrument = InstrumentDevice.Instrument("test_stem_controller", AcquisitionTestContextConfiguration.ValueManager(), AcquisitionTestContextConfiguration.AxisManager())
