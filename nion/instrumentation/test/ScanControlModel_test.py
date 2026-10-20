@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 import time
 import types
 import typing
 import unittest
 
+from nion.data import DataAndMetadata
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base as ScanBase
 from nion.instrumentation import stem_controller as STEMController
@@ -462,7 +464,6 @@ class TestScanControlClass(unittest.TestCase):
                 scan_hardware_source.abort_playing(sync_timeout=5.0)
 
     def test_record_and_abort_button(self):
-        # this test may be unreliable on due to timing issues
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
@@ -484,23 +485,43 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertTrue(scan_hardware_source.is_playing)
                 self.assertTrue(model.record_button_enabled)
                 self.assertFalse(model.record_abort_button_enabled)
+                # hold the acquisition thread in the first frame update it gives this listener once the record is
+                # queued, so that the record cannot finish while the buttons are checked. the held update is usually
+                # the view's last one before the record starts. the record is queued on its own thread, which queues
+                # the button update for this thread, so run periodic until the update arrives.
+                record_held_event = threading.Event()
+                record_released_event = threading.Event()
+
+                # called from the acquisition thread
+                def handle_data_channel_updated(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+                    if scan_hardware_source.is_recording and not record_held_event.is_set():
+                        record_held_event.set()
+                        record_released_event.wait(10.0)
+
+                data_channel_updated_listener = scan_hardware_source.data_channel_updated_event.listen(handle_data_channel_updated)
+                try:
+                    with PropertyChangedEventWatcher(model, "record_button_enabled") as watcher:
+                        with PropertyChangedEventWatcher(model, "record_abort_button_enabled") as watcher2:
+                            model.handle_record_button_clicked()
+                            self.assertTrue(record_held_event.wait(10.0), "no frame update after the record was queued")
+                            start_time = time.time()
+                            while not model.record_abort_button_enabled and (time.time() - start_time) < 10.0:
+                                time.sleep(0.01)
+                                document_controller.periodic()
+                            self.assertTrue(scan_hardware_source.is_recording)
+                            self.assertFalse(model.record_button_enabled)
+                            self.assertTrue(model.record_abort_button_enabled)
+                finally:
+                    record_released_event.set()
+                    data_channel_updated_listener = None
+
+                # wait for the record to finish and the buttons to be updated
                 with PropertyChangedEventWatcher(model, "record_button_enabled") as watcher:
                     with PropertyChangedEventWatcher(model, "record_abort_button_enabled") as watcher2:
-                        model.handle_record_button_clicked()
-                        while not scan_hardware_source.is_recording and (time.time() - start_time) < 5.0:
+                        start_time = time.time()
+                        while not model.record_button_enabled and (time.time() - start_time) < 10.0:
                             time.sleep(0.1)
                             document_controller.periodic()
-                        time.sleep(0.1)
-                        document_controller.periodic()
-                        self.assertTrue(scan_hardware_source.is_recording)
-                        self.assertFalse(model.record_button_enabled)
-                        self.assertTrue(model.record_abort_button_enabled)
-                with PropertyChangedEventWatcher(model, "record_button_enabled") as watcher:
-                    with PropertyChangedEventWatcher(model, "record_abort_button_enabled") as watcher2:
-                        while scan_hardware_source.is_recording and (time.time() - start_time) < 5.0:
-                            time.sleep(0.1)
-                            document_controller.periodic()
-                        time.sleep(0.1)
                         self.assertFalse(scan_hardware_source.is_recording)
                         self.assertTrue(model.record_button_enabled)
                         self.assertFalse(model.record_abort_button_enabled)
