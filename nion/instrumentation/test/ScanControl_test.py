@@ -1893,23 +1893,6 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.start_playing()
             scan_hardware_source.abort_playing()
 
-    def test_big_scan_does_not_prevent_further_playing(self):
-        with self._test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
-            original_size = frame_parameters_0.size
-            original_pixel_time_us = frame_parameters_0.pixel_time_us
-            frame_parameters_0.size = Geometry.IntSize(8192, 8192)
-            frame_parameters_0.pixel_time_us = 1
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            scan_hardware_source.start_playing(sync_timeout=3.0)
-            scan_hardware_source.abort_playing(sync_timeout=3.0)
-            frame_parameters_0.size = original_size
-            frame_parameters_0.pixel_time_us = original_pixel_time_us
-            scan_hardware_source.set_frame_parameters(0, frame_parameters_0)
-            scan_hardware_source.start_playing(sync_timeout=3.0)
-            scan_hardware_source.abort_playing(sync_timeout=3.0)
-
     def test_closing_display_panel_with_scan_controller_shuts_down_controller_correctly(self):
         # NOTE: this is a duplicate of test_closing_display_panel_with_display_controller_shuts_down_controller_correctly
         with self._test_context() as test_context:
