@@ -41,12 +41,18 @@ class CameraSimulatorLike(typing.Protocol):
 
 
 class Camera(camera_base.CameraDevice3):
-    """Implement a camera device."""
+    """Implement a camera device.
 
-    def __init__(self, camera_id: str, camera_type: str, camera_name: str, simulator: CameraSimulatorLike, instrument: InstrumentDevice.Instrument):
+    The signal_type is the signal type of the camera's data. When it is not given, an "eels" or "ronchigram" camera
+    has its camera type as its signal type, and any other camera has none.
+    """
+
+    def __init__(self, camera_id: str, camera_type: str, camera_name: str, simulator: CameraSimulatorLike, instrument: InstrumentDevice.Instrument, *,
+                 signal_type: str | None = None) -> None:
         self.camera_id = camera_id
         self.camera_type = camera_type
         self.camera_name = camera_name
+        self.signal_type = signal_type if signal_type is not None else (camera_type if camera_type in ("eels", "ronchigram") else None)
         self.__camera_task: typing.Optional[CameraTask] = None
         self.__instrument = instrument
         self.__scan_device: typing.Optional[ScanDevice.Device] = None
