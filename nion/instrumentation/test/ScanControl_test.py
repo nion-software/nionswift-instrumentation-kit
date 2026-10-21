@@ -1782,7 +1782,6 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
 
     def test_record_during_view_uses_record_mode(self):
-        # NOTE: requires stages_per_frame == 2
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             frame_parameters_0 = scan_hardware_source.get_frame_parameters(0)
@@ -1792,18 +1791,13 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters_2 = scan_hardware_source.get_frame_parameters(2)
             frame_parameters_2.fov_nm = 100
             scan_hardware_source.set_frame_parameters(2, frame_parameters_2)
-            frame_time = scan_hardware_source.get_current_frame_time()
-            scan_hardware_source.start_playing()
-            self.assertEqual(Metadata.get_metadata_value(scan_hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 10)
-            # give view a chance to start before recording. this must finished _before_ the final segment of partial
-            # acquisition for this test to work; otherwise the final segment finishes and notifies and gets picked up
-            # in the first wait call after start_recording below.
-            # Also, time of partial acquisition  must be less than 50% of the frame time
-            time.sleep(frame_time * 0.1)
-            scan_hardware_source.start_recording()
-            time.sleep(frame_time * 0.1)  # give record a chance to start; starting record will abort view immediately
-            self.assertEqual(Metadata.get_metadata_value(scan_hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 100)
-            self.assertEqual(Metadata.get_metadata_value(scan_hardware_source.get_next_xdatas_to_finish()[0], "stem.scan.fov_nm"), 10)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            self.assertEqual(Metadata.get_metadata_value(scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)[0], "stem.scan.fov_nm"), 10)
+            # the recording task gives the record data however late it is grabbed. the record is delivered before its
+            # finished callback, so the next frame to finish after the grab comes from the view.
+            recording_task = scan_hardware_source.start_recording()
+            self.assertEqual(Metadata.get_metadata_value(recording_task.grab_xdatas(timeout=10.0)[0], "stem.scan.fov_nm"), 100)
+            self.assertEqual(Metadata.get_metadata_value(scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)[0], "stem.scan.fov_nm"), 10)
 
     def test_consecutive_frames_have_unique_data(self):
         # this test will fail if the scan is saturated (or otherwise produces identical values naturally)
