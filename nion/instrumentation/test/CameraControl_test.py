@@ -620,9 +620,9 @@ class TestCameraControlClass(unittest.TestCase):
             finally:
                 hardware_source.stop_playing(sync_timeout=3.0)
             state_controller.handle_change_profile("Snap")
+            start = time.perf_counter()
             hardware_source.start_playing(sync_timeout=3.0)
             try:
-                start = time.perf_counter()
                 data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # frame now
                 elapsed = time.perf_counter() - start
             finally:
