@@ -633,8 +633,24 @@ class CameraDevice3(typing.Protocol):
 
         Cameras are allowed to bin in one dimension and not the other.
         Default implementation utilises get_expected_dimensions. Cameras should override where appropriate.
+
+        The shape of the data the camera delivers may differ; see get_frame_data_shape.
         """
         return self.get_expected_dimensions(frame_parameters.binning)
+
+    def get_frame_data_shape(self, frame_parameters: CameraFrameParameters) -> typing.Tuple[int, ...]:
+        """Return the shape of the data of a frame given parameters, before any processing.
+
+        The expected dimensions describe the frame on the sensor, always (height, width). The frame data shape describes
+        the data the camera delivers for that frame, and differs from the expected dimensions only when a camera delivers
+        a frame of one row as 1D data, in which case it is (width,). The camera hardware source uses the frame data shape
+        to shape and calibrate the data of view, sequence and synchronized acquisition.
+
+        The default is the expected dimensions. A camera which delivers a frame of one row as 1D data must override this
+        to return (width,) for that frame. This method is optional; a camera device which does not provide it is treated
+        as returning the expected dimensions.
+        """
+        return self.get_expected_dimensions_for_frame_parameters(frame_parameters)
 
     def validate_frame_parameters(self, frame_parameters: CameraFrameParameters) -> CameraFrameParameters:
         """Validate the frame parameters.
@@ -1413,6 +1429,7 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     # protected methods
 
     def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]: ...
+    def get_frame_data_shape(self, frame_parameters: CameraFrameParameters) -> tuple[int, ...]: ...
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str: ...
     def grab_next_to_start(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
@@ -1700,6 +1717,9 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
     def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]:
         return self.__camera.get_expected_dimensions(frame_parameters.binning)
+
+    def get_frame_data_shape(self, frame_parameters: CameraFrameParameters) -> tuple[int, ...]:
+        return self.get_expected_dimensions(frame_parameters)
 
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
         if self.__signal_type == "eels":
@@ -2357,6 +2377,13 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_expected_dimensions(self, frame_parameters: CameraFrameParameters) -> tuple[int, int]:
         return self.__camera.get_expected_dimensions_for_frame_parameters(frame_parameters)
 
+    def get_frame_data_shape(self, frame_parameters: CameraFrameParameters) -> tuple[int, ...]:
+        # camera devices may optionally provide the frame data shape. the default is the expected dimensions.
+        get_frame_data_shape = getattr(self.__camera, "get_frame_data_shape", None)
+        if callable(get_frame_data_shape):
+            return tuple(get_frame_data_shape(frame_parameters))
+        return self.get_expected_dimensions(frame_parameters)
+
     def get_signal_name(self, camera_frame_parameters: CameraFrameParameters) -> str:
         if self.__signal_type == "eels":
             if camera_frame_parameters.processing == "sum_project":
@@ -2458,7 +2485,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_camera_calibrations(self, camera_frame_parameters: CameraFrameParameters) -> typing.Tuple[Calibration.Calibration, ...]:
         calibrator = self.__get_camera_calibrator()
         processing = camera_frame_parameters.processing
-        data_shape = self.get_expected_dimensions(camera_frame_parameters)
+        data_shape = self.get_frame_data_shape(camera_frame_parameters)
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
@@ -2936,7 +2963,7 @@ class CameraDataStream(Acquisition.DataStream):
         return (self.__channel,)
 
     def _get_info(self, channel: Acquisition.Channel) -> Acquisition.DataStreamInfo:
-        data_shape = tuple(self.__camera_hardware_source.get_expected_dimensions(self.__camera_frame_parameters))
+        data_shape = self.__camera_hardware_source.get_frame_data_shape(self.__camera_frame_parameters)
         data_metadata = DataAndMetadata.DataMetadata(data_shape=data_shape, data_dtype=numpy.float32)
         return Acquisition.DataStreamInfo(data_metadata, self.__camera_frame_parameters.exposure_ms / 1000)
 
@@ -3460,6 +3487,16 @@ class SynchronizedDataChannelInterface:
     def update(self, data_and_metadata: DataAndMetadata.DataAndMetadata, state: str, data_shape: Geometry.IntSize, dest_sub_area: Geometry.IntRect, sub_area: Geometry.IntRect, view_id: typing.Optional[str]) -> None: ...
 
 
+def make_sum_project_data_stream(camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, camera_data_stream: Acquisition.DataStream) -> Acquisition.DataStream:
+    """Return a data stream which sums the rows of each frame of the camera data stream into a spectrum.
+
+    A frame whose data is 1D has no rows to sum, so the camera data stream is returned unchanged.
+    """
+    if len(camera_hardware_source.get_frame_data_shape(camera_frame_parameters)) > 1:
+        return Acquisition.FramedDataStream(camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+    return camera_data_stream
+
+
 def make_sequence_data_stream(
         camera_hardware_source: CameraHardwareSource,
         camera_frame_parameters: CameraFrameParameters,
@@ -3480,7 +3517,7 @@ def make_sequence_data_stream(
                                                       additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
-        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+        processed_camera_data_stream = make_sum_project_data_stream(camera_hardware_source, camera_frame_parameters, processed_camera_data_stream)
     elif camera_frame_parameters.processing == "sum_masked":
         active_masks = camera_frame_parameters.active_masks
         if active_masks:
@@ -3553,8 +3590,7 @@ def build_camera_device_data_stream(camera_hardware_source: CameraHardwareSource
     camera_data_stream = CameraDataStream(camera_hardware_source, camera_frame_parameters, CameraDeviceFrameStreamDelegate(camera_hardware_source, camera_frame_parameters))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
-        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream,
-                                                                    operator=Acquisition.SumOperator(axis=0))
+        processed_camera_data_stream = make_sum_project_data_stream(camera_hardware_source, camera_frame_parameters, processed_camera_data_stream)
     elif camera_frame_parameters.processing == "sum_masked":
         active_masks = camera_frame_parameters.active_masks
         if active_masks:

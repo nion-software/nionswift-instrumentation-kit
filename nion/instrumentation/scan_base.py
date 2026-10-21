@@ -1518,8 +1518,8 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             camera_readout_size_squeezed = (max(len(camera_frame_parameters.active_masks), 1),)
             axes_descriptor = AxesDescriptor(None, [2], [0, 1])
         else:
-            camera_readout_size_squeezed = tuple(camera_readout_size)
-            axes_descriptor = AxesDescriptor(None, [0, 1], [2, 3])
+            camera_readout_size_squeezed = tuple(camera.get_frame_data_shape(camera_frame_parameters))
+            axes_descriptor = AxesDescriptor(None, [0, 1], list(range(2, 2 + len(camera_readout_size_squeezed))))
 
         scan_calibrations = get_scan_calibrations(scan_frame_parameters)
 
@@ -2854,7 +2854,7 @@ def make_synchronized_scan_data_stream(
                                                                   additional_camera_metadata))
     processed_camera_data_stream: Acquisition.DataStream = camera_data_stream
     if camera_frame_parameters.processing == "sum_project":
-        processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=Acquisition.SumOperator(axis=0))
+        processed_camera_data_stream = camera_base.make_sum_project_data_stream(camera_hardware_source, camera_frame_parameters, processed_camera_data_stream)
     elif camera_frame_parameters.processing == "sum_masked":
         active_masks = camera_frame_parameters.active_masks
         if active_masks:
