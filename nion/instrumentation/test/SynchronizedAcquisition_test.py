@@ -311,17 +311,14 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
         with self.__test_context(is_eels=True) as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
-            scan_frame_parameters2 = scan_hardware_source.get_frame_parameters(2)
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters.scan_id = uuid.uuid4()
             scan_frame_parameters.size = Geometry.IntSize(4, 4)
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
-            frame_time = scan_frame_parameters2.pixel_time_us * scan_frame_parameters2.size[0] * scan_frame_parameters2.size[1] / 1000000.0
-            scan_hardware_source.start_recording()
-            time.sleep(frame_time * 0.6)
-            self.assertEqual(scan_hardware_source.get_next_xdatas_to_finish(10.0)[0].data.shape, (1024, 1024))
+            recording_task = scan_hardware_source.start_recording()
+            self.assertEqual(recording_task.grab_xdatas(timeout=10.0)[0].data.shape, (1024, 1024))
             # check the acquisition state
             self.assertFalse(camera_hardware_source.camera._is_acquire_synchronized_running)
 
