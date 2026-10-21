@@ -390,6 +390,76 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIsNotNone(si_data_item)
             self.assertEqual((3, 4, 5), si_data_item.data_shape)
 
+    def test_grab_synchronized_eels_with_a_one_row_readout_area_produces_a_calibrated_spectrum_image(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_hardware_source.readout_area = (0, 0, 1, 1024)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.binning = 1
+            camera_frame_parameters.processing = None
+            data_item_data_channel = DataChannel.DataItemDataChannel(document_model, "Spectrum Image", {
+                Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
+            scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters)
+            data_item_data_channel = None
+            test_context.document_controller.periodic()
+            si_data_item = next(data_item for data_item in document_model.data_items if "test" in data_item.title)
+            self.assertEqual((4, 4, 1024), si_data_item.data_shape)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), si_data_item.data_and_metadata.data_descriptor)
+            self.assertEqual("eV", si_data_item.dimensional_calibrations[-1].units)
+
+    def test_grab_synchronized_sum_project_eels_with_a_one_row_readout_area_produces_a_calibrated_spectrum_image(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_hardware_source.readout_area = (0, 0, 1, 1024)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.binning = 1
+            camera_frame_parameters.processing = "sum_project"
+            data_item_data_channel = DataChannel.DataItemDataChannel(document_model, "Spectrum Image", {
+                Acquisition.Channel(scan_hardware_source.hardware_source_id, "0"): "HAADF",
+                Acquisition.Channel(camera_hardware_source.hardware_source_id): "test"})
+            scan_hardware_source.grab_synchronized(data_channel=data_item_data_channel,
+                                                   scan_frame_parameters=scan_frame_parameters,
+                                                   camera=camera_hardware_source,
+                                                   camera_frame_parameters=camera_frame_parameters)
+            data_item_data_channel = None
+            test_context.document_controller.periodic()
+            si_data_item = next(data_item for data_item in document_model.data_items if "test" in data_item.title)
+            self.assertEqual((4, 4, 1024), si_data_item.data_shape)
+            self.assertEqual(DataAndMetadata.DataDescriptor(False, 2, 1), si_data_item.data_and_metadata.data_descriptor)
+            self.assertEqual("eV", si_data_item.dimensional_calibrations[-1].units)
+
+    def test_grab_synchronized_info_of_eels_with_a_one_row_readout_area_describes_a_spectrum_image(self) -> None:
+        # multi-acquire builds its spectrum images from this info.
+        with self.__test_context(is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_hardware_source.readout_area = (0, 0, 1, 1024)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.size = Geometry.IntSize(4, 4)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.binning = 1
+            camera_frame_parameters.processing = None
+            grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                                                     camera=camera_hardware_source,
+                                                                                     camera_frame_parameters=camera_frame_parameters)
+            self.assertEqual((1024,), tuple(grab_synchronized_info.camera_readout_size_squeezed))
+            self.assertEqual([2], list(grab_synchronized_info.axes_descriptor.data_axes))
+            self.assertEqual(["eV"], [calibration.units for calibration in grab_synchronized_info.data_calibrations])
+
     def test_grab_rotated_synchronized_eels(self):
         # tests whether rotation was applied, as judged by the resulting metadata
         with self.__test_context(is_eels=True) as test_context:

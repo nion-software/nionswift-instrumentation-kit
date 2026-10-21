@@ -172,6 +172,11 @@ class Camera(camera_base.CameraDevice3):
             "counts_per_electron_value": self.__instrument.counts_per_electron
         }
 
+    def get_frame_data_shape(self, frame_parameters: camera_base.CameraFrameParameters) -> typing.Tuple[int, ...]:
+        """Return the shape of the data of a frame given parameters, which is 1D for a frame of one row."""
+        expected_dimensions = self.get_expected_dimensions_for_frame_parameters(frame_parameters)
+        return expected_dimensions[1:] if expected_dimensions[0] == 1 else expected_dimensions
+
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
         return self.__simulator.get_dimensional_calibrations(readout_area, binning_shape)
 
@@ -405,9 +410,9 @@ class CameraTask:
 
     def start(self) -> typing.Optional[DataAndMetadata.DataAndMetadata]:
         # returns the full readout, including flyback pixels
-        camera_readout_shape: typing.Tuple[int, ...] = self.__camera_device.get_expected_dimensions_for_frame_parameters(self.__camera_frame_parameters)
+        camera_readout_shape = self.__camera_device.get_frame_data_shape(self.__camera_frame_parameters)
         if self.__camera_frame_parameters.processing == "sum_project":
-            camera_readout_shape = camera_readout_shape[1:]
+            camera_readout_shape = camera_readout_shape[-1:]
         elif self.__camera_frame_parameters.processing == "sum_masked":
             camera_readout_shape = (len(self.__camera_device.mask_array) if self.__camera_device.mask_array is not None else 1,)
         self.__data = numpy.zeros(self.__collection_shape + camera_readout_shape, numpy.float32)
