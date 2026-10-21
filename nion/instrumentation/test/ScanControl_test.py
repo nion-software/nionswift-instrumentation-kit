@@ -1074,10 +1074,10 @@ class TestScanControlClass(unittest.TestCase):
         with self._test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
             scan_hardware_source.set_channel_enabled(0, True)
-            frame_time = scan_hardware_source.get_current_frame_time()
             scan_hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(frame_time * 1.2)
+                # the frame's data channel update, which creates the data item, comes before the frame finishes.
+                scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
                 test_context.document_controller.periodic()
                 self.assertEqual(1, len(test_context.document_model.data_items))
                 self.assertTrue(test_context.document_model.data_items[0].is_write_delayed)
