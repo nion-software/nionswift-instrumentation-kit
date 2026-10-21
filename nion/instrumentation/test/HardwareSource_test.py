@@ -937,7 +937,8 @@ class TestHardwareSourceClass(unittest.TestCase):
                     while hardware_source.is_recording:
                         time.sleep(0.01)
                         self.assertTrue(time.time() - start_time < 3.0)
-                    time.sleep(0.01)
+                    # the next frame to finish comes from the view, which resumes before it acquires the frame.
+                    hardware_source.get_next_xdatas_to_finish(timeout=3.0)
                     self.assertFalse(hardware_source.suspended)
                 finally:
                     hardware_source.abort_recording(sync_timeout=3.0)
