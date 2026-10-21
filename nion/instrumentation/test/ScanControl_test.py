@@ -1230,13 +1230,14 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             scan_control_model = self.__create_scan_control_model(test_context)
             scan_hardware_source.set_channel_enabled(1, True)
-            scan_hardware_source.start_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
             scan_control_model.handle_capture_button_clicked()
-            scan_hardware_source.stop_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()
+            # the capture listens before this wait does, so the frame this wait returns has also been given to the capture.
+            scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 4)
             # check that the new data item titles are different
@@ -1253,13 +1254,14 @@ class TestScanControlClass(unittest.TestCase):
             scan_control_model = self.__create_scan_control_model(test_context)
             ApplicationData.get_session_metadata_model().microscopist = "Ned Flanders"
             scan_hardware_source.set_channel_enabled(1, True)
-            scan_hardware_source.start_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
             document_controller.periodic()
             self.assertEqual(len(document_model.data_items), 2)
             scan_control_model.handle_capture_button_clicked()
-            scan_hardware_source.stop_playing()
-            scan_hardware_source.get_next_xdatas_to_finish()
+            # the capture listens before this wait does, so the frame this wait returns has also been given to the capture.
+            scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+            scan_hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual("Ned Flanders", document_model.data_items[3].session_metadata["microscopist"])
 
