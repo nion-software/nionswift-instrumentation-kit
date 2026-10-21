@@ -247,10 +247,8 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters = scan_hardware_source.get_frame_parameters(0)
             frame_parameters.pixel_time_us = 1
             scan_hardware_source.set_frame_parameters(0, frame_parameters)
-            frame_time = scan_hardware_source.get_current_frame_time()
             record_frame_parameters = scan_hardware_source.get_frame_parameters(2)
-            scan_hardware_source.start_playing()
-            time.sleep(frame_time * 0.25)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
             self._record_one(document_controller, scan_hardware_source, scan_control_model, record_frame_parameters)
             self.assertEqual(len(document_model.data_items), 2)  # check assumptions
             scan_hardware_source.stop_playing(sync_timeout=3.0)
@@ -1101,8 +1099,7 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source = test_context.scan_hardware_source
             self._acquire_one(document_controller, scan_hardware_source)  # throw out first scan, which can take longer due to initial conditions
             frame_time = scan_hardware_source.get_current_frame_time()
-            scan_hardware_source.start_playing()
-            time.sleep(frame_time * 0.25)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
             was_playing = scan_hardware_source.is_playing
             scan_hardware_source.set_channel_enabled(0, False)
             time.sleep(frame_time * 0.25)  # this sleep is not really necessary but leave it here for extra robustness
@@ -1906,10 +1903,9 @@ class TestScanControlClass(unittest.TestCase):
             document_controller.workspace_controller.change_workspace(workspace_2x1)
             root_canvas_item = document_controller.workspace_controller.image_row.children[0]._root_canvas_item()
             root_canvas_item.update_layout(Geometry.IntPoint(), Geometry.IntSize(width=640, height=480))
-            scan_hardware_source.start_playing()
+            scan_hardware_source.start_playing(sync_timeout=3.0)
             try:
                 frame_time = scan_hardware_source.get_current_frame_time()
-                time.sleep(frame_time * 2)  # let view start
                 d = {"type": "image", "controller_type": "scan-live", "hardware_source_id": scan_hardware_source.hardware_source_id, "channel_id": "a"}
                 display_panel = document_controller.selected_display_panel
                 display_panel.change_display_panel_content(d)

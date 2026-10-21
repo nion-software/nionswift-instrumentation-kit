@@ -569,7 +569,6 @@ class TestCameraControlClass(unittest.TestCase):
             state_controller.handle_binning_changed("4")
             hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(self.exposure * 0.5)
                 hardware_source.get_next_xdatas_to_finish()  # view again
                 document_controller.periodic()
                 self.assertEqual(document_model.data_items[0].data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
@@ -616,7 +615,6 @@ class TestCameraControlClass(unittest.TestCase):
             state_controller.handle_change_profile("Run")
             hardware_source.start_playing(sync_timeout=3.0)
             try:
-                time.sleep(self.exposure * 0.5)
                 data_and_metadata = hardware_source.get_next_xdatas_to_finish()[0]  # view again
                 self.assertEqual(data_and_metadata.data_shape, hardware_source.get_expected_dimensions(hardware_source.get_current_frame_parameters()))
             finally:
