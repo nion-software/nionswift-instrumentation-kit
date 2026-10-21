@@ -8,7 +8,6 @@ from nion.instrumentation import camera_base
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.swift.test import TestContext
-from nion.utils import Geometry
 
 
 # a test configuration whose spectrometer is an EDXS detector, a camera type with no units of its own.
@@ -17,7 +16,7 @@ class EDXSAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguratio
     def __init__(self) -> None:
         super().__init__()
         self.eels_camera_device.close()
-        simulator = AcquisitionTestContextConfiguration.CameraSimulator(Geometry.IntSize(256, 1024), ("", "eV"))
+        simulator = AcquisitionTestContextConfiguration.CameraSimulator(("", "eV"))
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "edxs", "EDXS", simulator, self.instrument)
 
 
@@ -53,7 +52,7 @@ class TestCameraDeviceClass(unittest.TestCase):
 
     def test_binning_a_one_row_camera_bins_its_width_only(self) -> None:
         instrument = OneRowInstrument("test_stem_controller", AcquisitionTestContextConfiguration.ValueManager(), AcquisitionTestContextConfiguration.AxisManager())
-        simulator = AcquisitionTestContextConfiguration.CameraSimulator(Geometry.IntSize(1, 1024))
+        simulator = AcquisitionTestContextConfiguration.CameraSimulator()
         camera = CameraDevice.Camera("test_one_row_camera", "edxs", "EDXS", simulator, instrument)
         with contextlib.closing(camera):
             camera.set_frame_parameters(camera_base.CameraFrameParameters({"exposure_ms": 5, "binning": 2}))
@@ -66,7 +65,7 @@ class TestCameraDeviceClass(unittest.TestCase):
 
     def test_binning_a_one_row_readout_area_of_a_two_dimensional_sensor_bins_its_width_only(self) -> None:
         instrument = InstrumentDevice.Instrument("test_stem_controller", AcquisitionTestContextConfiguration.ValueManager(), AcquisitionTestContextConfiguration.AxisManager())
-        simulator = AcquisitionTestContextConfiguration.CameraSimulator(Geometry.IntSize(1, 1024))
+        simulator = AcquisitionTestContextConfiguration.CameraSimulator()
         camera = CameraDevice.Camera("test_eels_camera", "eels", "EELS", simulator, instrument)
         with contextlib.closing(camera):
             camera.readout_area = (0, 0, 1, 1024)
