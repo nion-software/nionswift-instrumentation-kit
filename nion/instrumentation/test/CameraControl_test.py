@@ -945,6 +945,21 @@ class TestCameraControlClass(unittest.TestCase):
             # note: it is an error to run view mode with "sum_project" enabled.
             # "sum_project" is for sequence/SI only.
 
+    def test_eels_with_a_one_row_readout_area_produces_a_calibrated_spectrum(self) -> None:
+        with self._test_context(is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.readout_area = (0, 0, 1, 1024)
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.binning = 1
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                xdata = hardware_source.get_next_xdatas_to_finish()[0]
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+            self.assertEqual((1024,), xdata.data_shape)
+            self.assertEqual("eV", xdata.dimensional_calibrations[0].units)
+
     def test_acquire_with_probe_position(self):
         # used to test out the code path, but no specific asserts
         with self._test_context() as test_context:
@@ -1508,6 +1523,34 @@ class TestCameraControlClass(unittest.TestCase):
             with self.subTest(acquisition_device_fn=acquisition_device_fn, acquisition_method_fn=acquisition_method_fn, expected_count=expected_count):
                 with self._test_context(is_eels=is_eels) as test_context:
                     self.__test_acq(test_context.document_controller, acquisition_device_fn(test_context, camera_channeL), acquisition_method_fn(), expected_count)
+
+    def test_acquisition_panel_sequence_of_eels_with_a_one_row_readout_area_produces_calibrated_spectra(self) -> None:
+        def has_energy_calibration(data_metadata: DataAndMetadata.DataMetadata) -> bool:
+            return data_metadata.dimensional_calibrations[-1].units == "eV"
+
+        for camera_channel in (None, "eels_spectrum"):
+            with self.subTest(camera_channel=camera_channel):
+                with self._test_context(is_eels=True) as test_context:
+                    camera_hardware_source = test_context.camera_hardware_source
+                    camera_hardware_source.readout_area = (0, 0, 1, 1024)
+                    camera_frame_parameters = camera_hardware_source.get_frame_parameters(0)
+                    camera_frame_parameters.binning = 1
+                    acquisition_device = camera_base.CameraAcquisitionDevice(camera_hardware_source, camera_frame_parameters, camera_channel)
+                    self.__test_acq(test_context.document_controller, acquisition_device, make_sequence_acquisition_method(),
+                                    [((4, 1024), DataAndMetadata.DataDescriptor(True, 0, 1), has_energy_calibration)])
+
+    def test_acquisition_panel_spectrum_image_of_eels_with_a_one_row_readout_area_produces_calibrated_spectra(self) -> None:
+        def has_energy_calibration(data_metadata: DataAndMetadata.DataMetadata) -> bool:
+            return data_metadata.dimensional_calibrations[-1].units == "eV"
+
+        for camera_channel in (None, "eels_spectrum"):
+            with self.subTest(camera_channel=camera_channel):
+                with self._test_context(is_eels=True) as test_context:
+                    test_context.camera_hardware_source.readout_area = (0, 0, 1, 1024)
+                    self.__test_acq(test_context.document_controller, make_synchronized_device(test_context, camera_channel), make_basic_acquisition_method(),
+                                    [((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None),
+                                     ((6, 4, 512), DataAndMetadata.DataDescriptor(False, 2, 1), has_energy_calibration),
+                                     ((6, 4), DataAndMetadata.DataDescriptor(False, 0, 2), None)])
 
     def test_acquisition_panel_acquisition_restarts_view(self):
         with self._test_context() as test_context:
