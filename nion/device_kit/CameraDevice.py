@@ -59,6 +59,7 @@ class Camera(camera_base.CameraDevice3):
         self.__simulator = simulator
         self.__sensor_dimensions = instrument.camera_sensor_dimensions(camera_type)
         self.__readout_area = instrument.camera_readout_area(camera_type)
+        self.__check_readout_area(self.__readout_area)
         self.__symmetric_binning = True
         self.__integration_count = 1
         self.__xdata_buffer: typing.Optional[DataAndMetadata.DataAndMetadata] = None
@@ -110,8 +111,19 @@ class Camera(camera_base.CameraDevice3):
 
     @readout_area.setter
     def readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
-        """Set the readout area, specified in sensor coordinates (unbinned). Affects all modes."""
+        """Set the readout area, specified in sensor coordinates (unbinned). Affects all modes.
+
+        Raises ValueError, leaving the readout area unchanged, if the readout area is empty or not within the sensor.
+        """
+        self.__check_readout_area(readout_area_TLBR)
         self.__readout_area = readout_area_TLBR
+
+    # a camera reads out a part of its sensor, so a readout area must be within the sensor and not empty.
+    def __check_readout_area(self, readout_area_TLBR: typing.Tuple[int, int, int, int]) -> None:
+        sensor_height, sensor_width = self.__sensor_dimensions
+        top, left, bottom, right = readout_area_TLBR
+        if not (0 <= top < bottom <= sensor_height and 0 <= left < right <= sensor_width):
+            raise ValueError(f"Readout area {readout_area_TLBR} is empty or not within the sensor of size {self.__sensor_dimensions}.")
 
     @property
     def flip(self) -> bool:
