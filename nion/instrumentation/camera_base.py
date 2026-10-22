@@ -103,7 +103,8 @@ class CameraDevice(typing.Protocol):
         Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
 
         There are restrictions on the valid values, depending on camera. This property should use the closest
-        appropriate values, rounding up when necessary.
+        appropriate values, rounding up when necessary. An implementation may instead raise ValueError for an area
+        it cannot read out, such as one outside the sensor.
 
         This is a global property, meaning it affects all profiles.
         """
@@ -514,7 +515,8 @@ class CameraDevice3(typing.Protocol):
         Accepts tuple of (top, left, bottom, right) readout rectangle, specified in sensor coordinates.
 
         There are restrictions on the valid values, depending on camera. This property should use the closest
-        appropriate values, rounding up when necessary.
+        appropriate values, rounding up when necessary. An implementation may instead raise ValueError for an area
+        it cannot read out, such as one outside the sensor.
 
         This is a global property, meaning it affects all profiles.
         """

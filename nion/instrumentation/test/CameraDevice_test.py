@@ -90,6 +90,16 @@ class TestCameraDeviceClass(unittest.TestCase):
                 camera.stop_live()
             self.assertEqual((512,), data_element["data"].shape)
 
+    def test_setting_a_readout_area_which_is_empty_or_not_within_the_sensor_raises_and_keeps_the_readout_area(self) -> None:
+        with AcquisitionTestContext.test_context(is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.readout_area = (0, 0, 1, 1024)
+            for readout_area in ((0, -100, 1, 412), (0, 512, 1, 1536), (256, 0, 257, 1024), (0, 0, 0, 1024), (0, 100, 1, 100)):
+                with self.subTest(readout_area=readout_area):
+                    with self.assertRaises(ValueError):
+                        hardware_source.readout_area = readout_area
+                    self.assertEqual((0, 0, 1, 1024), hardware_source.readout_area)
+
 
 if __name__ == '__main__':
     unittest.main()
