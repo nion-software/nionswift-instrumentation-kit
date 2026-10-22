@@ -2491,7 +2491,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
-            return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape[0:1]))
+            return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape[-1:]))
         else:
             return tuple(calibrator.get_signal_calibrations(camera_frame_parameters, data_shape))
 
