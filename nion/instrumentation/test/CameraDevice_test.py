@@ -30,6 +30,24 @@ class OneRowInstrument(InstrumentDevice.Instrument):
         return 0, 0, 1, 1024
 
 
+# a camera whose x calibration has its origin at the center of the frame.
+class CenteredOriginCamera(CameraDevice.Camera):
+
+    @property
+    def calibration_controls(self) -> typing.Mapping[str, str | int | float]:
+        return dict(super().calibration_controls) | {"x_origin_override": "center"}
+
+
+# a test configuration whose ronchigram camera has its x origin at the center of the frame.
+class CenteredOriginAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ronchigram_camera_device.close()
+        simulator = AcquisitionTestContextConfiguration.CameraSimulator()
+        self.ronchigram_camera_device = CenteredOriginCamera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", simulator, self.instrument)
+
+
 class TestCameraDeviceClass(unittest.TestCase):
 
     def setUp(self) -> None:
@@ -99,6 +117,19 @@ class TestCameraDeviceClass(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         hardware_source.readout_area = readout_area
                     self.assertEqual((0, 0, 1, 1024), hardware_source.readout_area)
+
+    def test_sum_project_sequence_of_a_camera_with_a_centered_origin_is_centered_on_the_frame_width(self) -> None:
+        with AcquisitionTestContext.test_context(CenteredOriginAcquisitionTestContextConfiguration()) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.readout_area = (0, 0, 256, 1024)
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.binning = 1
+            frame_parameters.processing = "sum_project"
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.acquire_sequence_prepare(3)
+            data_element = hardware_source.acquire_sequence(3)[0]
+            self.assertEqual((3, 1024), data_element["data"].shape)
+            self.assertEqual(-512.0, data_element["spatial_calibrations"][-1]["offset"])
 
 
 if __name__ == '__main__':
