@@ -19,12 +19,14 @@ from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import PreferencesDialog
 from nion.ui import Widgets
+from nion.ui import Window
 from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
 
 from nion.instrumentation import video_base
+from nionswift_plugin.nion_instrumentation_ui import HardwareSourceActions
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DataItem
@@ -147,22 +149,27 @@ class VideoSourceStateController:
             self.on_display_name_changed(self.display_name)
         self.__update_buttons()
 
-    def handle_play_clicked(self) -> None:
-        """ Call this when the user clicks the play/pause button. """
+    def handle_play_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the play/pause button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
         if self.__hardware_source:
             if self.is_playing:
-                action_context = self.__document_controller._get_action_context()
-                action_context.parameters["hardware_source_id"] = self.__hardware_source.hardware_source_id
-                self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
+                self.__document_controller.perform_action("acquisition.stop_playing", parameters={"hardware_source_id": self.__hardware_source.hardware_source_id},
+                                                          invoked_from=invoked_from, invoked_from_id=invoked_from_id)
             else:
-                action_context = self.__document_controller._get_action_context()
-                action_context.parameters["hardware_source_id"] = self.__hardware_source.hardware_source_id
-                self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+                self.__document_controller.perform_action("acquisition.start_playing", parameters={"hardware_source_id": self.__hardware_source.hardware_source_id},
+                                                          invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
-    def handle_abort_clicked(self) -> None:
-        """ Call this when the user clicks the abort button. """
+    def handle_abort_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the abort button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
         if self.__hardware_source:
-            self.__document_controller.perform_action("acquisition.abort_playing", parameters={"hardware_source_id": self.__hardware_source.hardware_source_id})
+            self.__document_controller.perform_action("acquisition.abort_playing", parameters={"hardware_source_id": self.__hardware_source.hardware_source_id},
+                                                      invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
     @property
     def is_playing(self) -> bool:
@@ -284,8 +291,11 @@ class VideoDisplayPanelController:
 
         display_panel.set_data_item_reference(self.__state_controller.data_item_reference)
 
-        play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_clicked
-        abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
+        # the footer buttons run their actions from the display panel, in the window's own content.
+        play_button_canvas_item.on_button_clicked = functools.partial(self.__state_controller.handle_play_clicked,
+                                                                      invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
+        abort_button_canvas_item.on_button_clicked = functools.partial(self.__state_controller.handle_abort_clicked,
+                                                                       invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
         self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
 
@@ -307,10 +317,10 @@ class VideoDisplayPanelController:
 
     def key_pressed(self, key: UserInterface.Key) -> bool:
         if key.text == " ":
-            self.__state_controller.handle_play_clicked()
+            self.__state_controller.handle_play_clicked(invoked_from=Window.ActionOrigin.KEY, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
             return True
         elif key.is_escape:
-            self.__state_controller.handle_abort_clicked()
+            self.__state_controller.handle_abort_clicked(invoked_from=Window.ActionOrigin.KEY, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
             return True
         return False
 
@@ -324,7 +334,7 @@ class VideoDisplayPanelController:
 
 class VideoSourceWidget(Widgets.CompositeWidgetBase):
 
-    def __init__(self, document_controller: DocumentController.DocumentController, hardware_source: video_base.VideoHardwareSource) -> None:
+    def __init__(self, document_controller: DocumentController.DocumentController, hardware_source: video_base.VideoHardwareSource, *, panel_id: str | None = None) -> None:
         content_widget = document_controller.ui.create_column_widget(properties={"margin": 0, "spacing": 2})
         super().__init__(content_widget)
 
@@ -368,7 +378,8 @@ class VideoSourceWidget(Widgets.CompositeWidgetBase):
         thumbnail_widget.on_drag = thumbnail_widget_drag
 
         # connections
-        play_pause_button.on_clicked = self.__state_controller.handle_play_clicked
+        # the button runs its action from the panel, named by its id.
+        play_pause_button.on_clicked = functools.partial(self.__state_controller.handle_play_clicked, invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=panel_id)
 
         self.__state_controller.on_display_name_changed = display_name_changed
         self.__state_controller.on_play_button_state_changed = play_button_state_changed
@@ -397,7 +408,7 @@ class VideoSourcePanel(Panel.Panel):
 
         def hardware_source_added(hardware_source: HardwareSource.HardwareSource) -> None:
             if hasattr(hardware_source, "video_device") and isinstance(hardware_source, video_base.VideoHardwareSource):
-                hardware_source_widget = VideoSourceWidget(document_controller, hardware_source)
+                hardware_source_widget = VideoSourceWidget(document_controller, hardware_source, panel_id=panel_id)
                 hardware_column.add(hardware_source_widget)
                 self.__hardware_source_widgets[hardware_source.hardware_source_id] = hardware_source_widget
 

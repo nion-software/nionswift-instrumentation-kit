@@ -30,10 +30,12 @@ from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import Dialog
 from nion.ui import Widgets
+from nion.ui import Window
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import Stream
+from nionswift_plugin.nion_instrumentation_ui import HardwareSourceActions
 
 if typing.TYPE_CHECKING:
     from nion.swift.model import DisplayItem
@@ -42,7 +44,6 @@ if typing.TYPE_CHECKING:
     from nion.swift import DocumentController
     from nion.ui import DrawingContext
     from nion.ui import UserInterface
-    from nion.ui import Window
     from nion.utils import Event
 
 _ = gettext.gettext
@@ -243,24 +244,27 @@ class CameraControlStateController:
         if profile_label in self.__camera_hardware_source.modes:
             self.__camera_hardware_source.set_selected_profile_index(self.__camera_hardware_source.modes.index(profile_label))
 
-    def handle_play_pause_clicked(self) -> None:
-        """ Call this when the user clicks the play/pause button. """
+    def handle_play_pause_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the play/pause button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
         if self.__camera_hardware_source:
             if self.is_playing:
-                action_context = self.__document_controller._get_action_context()
-                action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
-                self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
+                self.__document_controller.perform_action("acquisition.stop_playing", parameters={"hardware_source_id": self.__camera_hardware_source.hardware_source_id},
+                                                          invoked_from=invoked_from, invoked_from_id=invoked_from_id)
             else:
-                action_context = self.__document_controller._get_action_context()
-                action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
-                self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+                self.__document_controller.perform_action("acquisition.start_playing", parameters={"hardware_source_id": self.__camera_hardware_source.hardware_source_id},
+                                                          invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
-    def handle_abort_clicked(self) -> None:
-        """ Call this when the user clicks the abort button. """
+    def handle_abort_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the abort button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
         if self.__camera_hardware_source:
-            action_context = self.__document_controller._get_action_context()
-            action_context.parameters["hardware_source_id"] = self.__camera_hardware_source.hardware_source_id
-            self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
+            self.__document_controller.perform_action("acquisition.abort_playing", parameters={"hardware_source_id": self.__camera_hardware_source.hardware_source_id},
+                                                      invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
     # must be called on ui thread
     def handle_settings_button_clicked(self, api_broker: typing.Any) -> None:
@@ -646,7 +650,7 @@ class ThreadHelper:
 
 class CameraControlWidget(Widgets.CompositeWidgetBase):
 
-    def __init__(self, document_controller: DocumentController.DocumentController, camera_hardware_source: camera_base.CameraHardwareSource) -> None:
+    def __init__(self, document_controller: DocumentController.DocumentController, camera_hardware_source: camera_base.CameraHardwareSource, *, panel_id: str | None = None) -> None:
         column_widget = document_controller.ui.create_column_widget(properties={"margin": 6, "spacing": 2})
         super().__init__(column_widget)
 
@@ -739,9 +743,10 @@ class CameraControlWidget(Widgets.CompositeWidgetBase):
         profile_combo = ui.create_combo_box_widget(properties={"min-width": 72})
         play_state_label = ui.create_label_widget()
         play_button = ui.create_push_button_widget(_("Play"))
-        play_button.on_clicked = self.__state_controller.handle_play_pause_clicked
+        # the buttons run their actions from the panel, named by its id.
+        play_button.on_clicked = functools.partial(self.__state_controller.handle_play_pause_clicked, invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=panel_id)
         abort_button = ui.create_push_button_widget(_("Abort"))
-        abort_button.on_clicked = self.__state_controller.handle_abort_clicked
+        abort_button.on_clicked = functools.partial(self.__state_controller.handle_abort_clicked, invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=panel_id)
 
         document_model = self.document_controller.document_model
         data_item_reference = document_model.get_data_item_reference(camera_hardware_source.hardware_source_id)
@@ -1046,7 +1051,7 @@ class CameraControlPanel(Panel.Panel):
         hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.hardware_source_id)
         if hardware_source:
             camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-            camera_control_widget = CameraControlWidget(self.document_controller, camera_hardware_source)
+            camera_control_widget = CameraControlWidget(self.document_controller, camera_hardware_source, panel_id=panel_id)
             self.__camera_control_widget = camera_control_widget
             self.widget.add(camera_control_widget)
             self.widget.add_spacing(12)
@@ -1223,8 +1228,11 @@ class CameraDisplayPanelController:
 
         self.__acquisition_state_changed_listener = self.__state_controller.acquisition_state_model.property_changed_event.listen(acquisition_state_changed)
 
-        play_button_canvas_item.on_button_clicked = self.__state_controller.handle_play_pause_clicked
-        abort_button_canvas_item.on_button_clicked = self.__state_controller.handle_abort_clicked
+        # the footer buttons run their actions from the display panel, in the window's own content.
+        play_button_canvas_item.on_button_clicked = functools.partial(self.__state_controller.handle_play_pause_clicked,
+                                                                      invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
+        abort_button_canvas_item.on_button_clicked = functools.partial(self.__state_controller.handle_abort_clicked,
+                                                                       invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
         capture_button.on_button_clicked = self.__state_controller.handle_capture_clicked
 
         self.__state_controller.initialize_state()
@@ -1256,10 +1264,10 @@ class CameraDisplayPanelController:
 
     def key_pressed(self, key: UserInterface.Key) -> bool:
         if key.text == " ":
-            self.__state_controller.handle_play_pause_clicked()
+            self.__state_controller.handle_play_pause_clicked(invoked_from=Window.ActionOrigin.KEY, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
             return True
         elif key.is_escape:
-            self.__state_controller.handle_abort_clicked()
+            self.__state_controller.handle_abort_clicked(invoked_from=Window.ActionOrigin.KEY, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
             return True
         return False
 

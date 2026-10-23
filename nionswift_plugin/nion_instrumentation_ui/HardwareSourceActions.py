@@ -17,6 +17,9 @@ if typing.TYPE_CHECKING:
 
 _ = gettext.gettext
 
+# the origin id of an action run from a button or key in a display panel, which names every display panel alike.
+DISPLAY_PANEL_ORIGIN_ID = "display-panel"
+
 
 class StartPlayingAction(Window.Action):
     action_id = "acquisition.start_playing"
