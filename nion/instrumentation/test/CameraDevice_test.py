@@ -1,13 +1,19 @@
 import contextlib
+import threading
+import time
 import typing
 import unittest
+import uuid
 
+from nion.data import DataAndMetadata
 from nion.device_kit import CameraDevice
 from nion.device_kit import InstrumentDevice
 from nion.instrumentation import camera_base
+from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.swift.test import TestContext
+from nion.utils import Geometry
 
 
 # a test configuration whose spectrometer is an EDXS detector, a camera type with no units or signal type of its own,
@@ -47,6 +53,38 @@ class CenteredOriginAcquisitionTestContextConfiguration(AcquisitionTestContextCo
         self.ronchigram_camera_device.close()
         simulator = AcquisitionTestContextConfiguration.CameraSimulator()
         self.ronchigram_camera_device = CenteredOriginCamera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", simulator, self.instrument)
+
+
+# a camera simulator which records the largest number of its get_frame_data calls in progress at once. each call takes
+# 20 ms so that calls from two threads overlap.
+class ConcurrencyRecordingCameraSimulator(AcquisitionTestContextConfiguration.CameraSimulator):
+
+    def __init__(self) -> None:
+        super().__init__(("", "eV"))
+        self.__lock = threading.Lock()
+        self.__active_call_count = 0
+        self.max_active_call_count = 0
+
+    def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: Geometry.FloatPoint | None) -> DataAndMetadata.DataAndMetadata:
+        with self.__lock:
+            self.__active_call_count += 1
+            self.max_active_call_count = max(self.max_active_call_count, self.__active_call_count)
+        try:
+            time.sleep(0.02)
+            return super().get_frame_data(readout_area, binning_shape, exposure_s, scan_context, probe_position)
+        finally:
+            with self.__lock:
+                self.__active_call_count -= 1
+
+
+# a test configuration whose spectrometer has a simulator which records overlapping calls.
+class ConcurrencyRecordingAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.eels_camera_device.close()
+        self.simulator = ConcurrencyRecordingCameraSimulator()
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", self.simulator, self.instrument)
 
 
 class TestCameraDeviceClass(unittest.TestCase):
@@ -157,6 +195,88 @@ class TestCameraDeviceClass(unittest.TestCase):
             self.assertEqual((256, 1024), xdata.data_shape)
             self.assertEqual(-128.0, xdata.dimensional_calibrations[0].offset)
             self.assertEqual(-512.0, xdata.dimensional_calibrations[1].offset)
+
+    def test_sequence_acquired_while_the_view_plays_does_not_overlap_the_view_frames(self) -> None:
+        configuration = ConcurrencyRecordingAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()
+                hardware_source.acquire_sequence_prepare(10)
+                hardware_source.acquire_sequence(10)
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+            self.assertEqual(1, configuration.simulator.max_active_call_count, "the simulator was asked for frames by two threads at once")
+
+    def test_sequence_acquired_just_after_stopping_the_view_does_not_overlap_the_view_frames(self) -> None:
+        configuration = ConcurrencyRecordingAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.start_playing(sync_timeout=3.0)
+            hardware_source.get_next_xdatas_to_finish()
+            hardware_source.abort_playing(sync_timeout=3.0)
+            hardware_source.acquire_sequence_prepare(10)
+            hardware_source.acquire_sequence(10)
+            self.assertEqual(1, configuration.simulator.max_active_call_count, "the simulator was asked for frames by two threads at once")
+
+    def test_synchronized_acquisition_delivered_as_partial_data_succeeds_when_the_view_starts_during_it(self) -> None:
+        with AcquisitionTestContext.test_context(is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            # acquire the spectrum image in parts of ten pixels, so that the view has a chance to acquire between parts.
+            setattr(camera_hardware_source, "_update_period_for_testing", 0.05)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(16, 16)
+            # starting the view applies its frame parameters to the camera, so use frame parameters which the view
+            # can share; a view has no processing.
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.binning = 4
+            camera_frame_parameters.processing = None
+            results: list[typing.Any] = list()
+
+            def grab_synchronized() -> None:
+                results.append(scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters))
+
+            synchronized_thread = threading.Thread(target=grab_synchronized)
+            synchronized_thread.start()
+            try:
+                while synchronized_thread.is_alive() and not camera_hardware_source.camera._is_acquire_synchronized_running:
+                    time.sleep(0.005)
+                camera_hardware_source.start_playing()
+            finally:
+                synchronized_thread.join()
+                camera_hardware_source.abort_playing(sync_timeout=3.0)
+            self.assertEqual(1, len(results), "the synchronized acquisition failed")
+            scans, spectrum_images = results[0]
+            self.assertEqual((16, 16), spectrum_images[0].data_shape[:2])
+
+    def test_view_playing_during_a_sequence_receives_the_sequence_frames(self) -> None:
+        with AcquisitionTestContext.test_context(is_eels=True) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            # a view frame which waits for new data gives up after 200 exposures, here 4 s, longer than the 2 s sequence.
+            frame_parameters = hardware_source.get_current_frame_parameters()
+            frame_parameters.exposure_ms = 20
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                hardware_source.get_next_xdatas_to_finish()
+                hardware_source.acquire_sequence_prepare(100)
+                sequence_thread = threading.Thread(target=hardware_source.acquire_sequence, args=(100,))
+                start = time.perf_counter()
+                sequence_thread.start()
+                try:
+                    time.sleep(0.2)
+                    hardware_source.get_next_xdatas_to_finish()
+                    hardware_source.get_next_xdatas_to_finish()
+                    elapsed = time.perf_counter() - start
+                finally:
+                    sequence_thread.join()
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+            self.assertLess(elapsed, 1.0, "the view stalled until the sequence finished")
 
 
 if __name__ == '__main__':
