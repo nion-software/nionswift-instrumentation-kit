@@ -2155,46 +2155,46 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((field_width, width), (frame_parameters.fov_nm, frame_parameters.pixel_size.width), "the scan took the reported hardware profile")
             self.assertEqual((field_width, width), (active_profile.field_width, active_profile.width), "the active profile took the reported hardware profile")
 
-    def test_scan_panel_field_edit_during_sequence_acquisition_is_ignored(self) -> None:
+    def test_scan_panel_field_edit_during_sequence_acquisition_is_kept_without_changing_the_acquisition(self) -> None:
         with self._test_context() as test_context:
-            document_controller = test_context.document_controller
-            scan_hardware_source = test_context.scan_hardware_source
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
             active_profile = scan_hardware_source.scan_profiles.active_profile
-            pixel_time_us = active_profile.pixel_time_us
             scan_control_model = self.__create_scan_control_model(test_context)
-            # the acquisition thread waits in sequence mode until the field has been edited.
-            sequence_mode_started = threading.Event()
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            # the scan device waits at the first frame of the sequence until the field has been edited.
+            first_frame_arrived = threading.Event()
             field_edited = threading.Event()
 
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
-                    sequence_mode_started.set()
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
                     field_edited.wait(10.0)
 
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
-            frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
-            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            # a script acquires a sequence of three frames on its own thread.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
             maker = Acquisition.MakerDataStream(data_stream)
-            # the acquisition saves the device state before it starts and restores it when it ends, as the acquisition panel does.
             device_state = maker.prepare_device_state()
             acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(maker,))
+            acquisition_thread.start()
             try:
-                acquisition_thread.start()
-                try:
-                    self.assertTrue(sequence_mode_started.wait(10.0))
-                    document_controller.periodic()
-                    scan_control_model.pixel_time_str = str(pixel_time_us * 2)
-                    self.assertAlmostEqual(pixel_time_us, scan_hardware_source.get_current_frame_parameters().pixel_time_us, msg="the edit changed the acquisition's frame parameters")
-                finally:
-                    field_edited.set()
-                    acquisition_thread.join(60.0)
-                self.assertFalse(acquisition_thread.is_alive())
-                device_state.restore()
-                document_controller.periodic()
-                self.assertAlmostEqual(pixel_time_us, active_profile.pixel_time_us)
+                self.assertTrue(first_frame_arrived.wait(10.0))
+                # the user edits the width in the scan panel during the acquisition.
+                scan_control_model.width_str = "40"
             finally:
-                property_changed_event_listener = None
+                field_edited.set()
+                acquisition_thread.join(60.0)
+            self.assertFalse(acquisition_thread.is_alive())
+            device_state.restore()
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertFalse(maker.is_error, "the edit during the acquisition made it fail")
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 24, 24), xdata.data_shape, "the edit during the acquisition changed what it acquired")
+            self.assertEqual(40, scan_hardware_source.get_current_frame_parameters().pixel_size.width, "the scan panel's edit during the acquisition was ignored")
+            self.assertEqual(40, active_profile.width, "the active profile lost the scan panel's edit during the acquisition")
 
     def test_changing_current_profiles_frame_parameters_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
