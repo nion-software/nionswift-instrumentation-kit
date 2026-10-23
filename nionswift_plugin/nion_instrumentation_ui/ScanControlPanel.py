@@ -1587,7 +1587,7 @@ class ScanPanelController(Declarative.Handler):
         return None
 
     def handle_config_button(self, widget: UserInterface.Widget) -> None:
-        self.__scan_hardware_source.scan_settings.open_configuration_interface(PlugInManager.APIBroker())
+        self.__perform_action("scan.open_configuration")
 
     @property
     def profile_configuration_dialog(self) -> ScanProfilesDialog.ProfileConfigurationDialog | None:
@@ -1611,7 +1611,7 @@ class ScanPanelController(Declarative.Handler):
         dialog.show()
 
     def handle_previous_profile_button(self, widget: UserInterface.Widget) -> None:
-        self._profile_configuration_model.activate_previous_profile()
+        self.__perform_action("scan.activate_previous_profile")
 
     def __perform_action(self, action_id: str, parameters: typing.Mapping[str, bool | int | str] | None = None) -> None:
         # run the action on this panel's scan device, with this panel as its origin.
