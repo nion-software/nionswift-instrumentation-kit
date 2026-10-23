@@ -162,7 +162,7 @@ class VideoSourceStateController:
     def handle_abort_clicked(self) -> None:
         """ Call this when the user clicks the abort button. """
         if self.__hardware_source:
-            self.__hardware_source.abort_playing()
+            self.__document_controller.perform_action("acquisition.abort_playing", parameters={"hardware_source_id": self.__hardware_source.hardware_source_id})
 
     @property
     def is_playing(self) -> bool:
