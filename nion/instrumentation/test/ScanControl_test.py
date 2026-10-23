@@ -1593,6 +1593,90 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(subscan_region, scan_hardware_source.subscan_region, "the acquisition moved the user's subscan")
             self.assertAlmostEqual(subscan_rotation, scan_hardware_source.subscan_rotation, msg="the acquisition rotated the user's subscan")
 
+    def test_sequence_acquisition_leaves_scan_panel_on_users_values(self) -> None:
+        # while a script's sequence scans with its own size, field of view and pixel time, the scan panel and the rest
+        # of what the user sees keep showing the user's values.
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            scan_control_model = self.__create_scan_control_model(test_context)
+            scan_hardware_source.subscan_enabled = True
+            # the user chooses a size, field of view, pixel time and subscan which differ from the acquisition's.
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            current_frame_parameters.pixel_time_us = 2.0
+            current_frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.5, x=0.5)
+            current_frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.25, w=0.25)
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            current_frame_parameters_dict = scan_hardware_source.get_current_frame_parameters().as_dict()
+            subscan_region = scan_hardware_source.subscan_region
+            scan_context_size = scan_hardware_source.scan_context.size
+            scan_panel_fields = (scan_control_model.width_str, scan_control_model.height_str, scan_control_model.pixel_time_str, scan_control_model.fov_str)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            frame_parameters.pixel_time_us = 3.0
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.3, x=0.6)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.4, w=0.4)
+            # the scan device calculates a 9 x 9 subscan for this region, so set it here so that the data stream expects the
+            # size the device scans.
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(h=9, w=9)
+            # what the user sees when the first frame of the sequence arrives, on the scan device's acquisition thread.
+            while_acquiring: list[tuple[typing.Any, ...]] = list()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not while_acquiring:
+                    while_acquiring.append((scan_hardware_source.get_current_frame_parameters().as_dict(),
+                                            scan_hardware_source.subscan_region,
+                                            scan_hardware_source.scan_context.size,
+                                            (scan_control_model.width_str, scan_control_model.height_str, scan_control_model.pixel_time_str, scan_control_model.fov_str),
+                                            data_promises[0].xdata.data_shape if data_promises[0].xdata else None))
+
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            # acquire a sequence of three frames the way a script does.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            Acquisition.acquire(maker)
+            device_state.restore()
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertEqual(1, len(while_acquiring), "no frame of the sequence arrived")
+            current_frame_parameters_dict_while_acquiring, subscan_region_while_acquiring, scan_context_size_while_acquiring, scan_panel_fields_while_acquiring, frame_shape = while_acquiring[0]
+            self.assertEqual(current_frame_parameters_dict, current_frame_parameters_dict_while_acquiring, "the current frame parameters showed the acquisition's")
+            self.assertEqual(subscan_region, subscan_region_while_acquiring, "the subscan graphic showed the acquisition's subscan")
+            self.assertEqual(scan_context_size, scan_context_size_while_acquiring, "the scan context showed the acquisition's size")
+            self.assertEqual(scan_panel_fields, scan_panel_fields_while_acquiring, "the scan panel showed the acquisition's frame parameters")
+            # the scan device scans the acquisition's subscan, and the data describes it.
+            self.assertEqual((9, 9), frame_shape)
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 9, 9), xdata.data_shape)
+            self.assertAlmostEqual(50.0 * 0.4 / 9, xdata.dimensional_calibrations[2].scale)
+
+    def test_sequence_acquisition_with_its_own_frame_parameters_does_not_announce_a_change_to_the_current_frame_parameters(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            frame_parameters.pixel_time_us = 3.0
+            changes_while_acquiring: list[scan_base.ScanFrameParameters] = list()
+
+            def handle_current_frame_parameters_changed(changed_frame_parameters: scan_base.ScanFrameParameters) -> None:
+                if scan_hardware_source.is_in_sequence_mode:
+                    changes_while_acquiring.append(changed_frame_parameters)
+
+            # the listener is held until the acquisition ends.
+            current_frame_parameters_changed_listener = scan_hardware_source.current_frame_parameters_changed_event.listen(handle_current_frame_parameters_changed)
+            # acquire a sequence of three frames the way a script does.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            Acquisition.acquire(maker)
+            device_state.restore()
+            current_frame_parameters_changed_listener = typing.cast(typing.Any, None)
+            self.assertEqual(list(), changes_while_acquiring, "listeners to the current frame parameters were told of the acquisition's")
+
     def test_record_async_with_its_own_frame_parameters_leaves_current_frame_parameters_and_active_profile_unchanged(self) -> None:
         with self._test_context() as test_context:
             document_controller = test_context.document_controller

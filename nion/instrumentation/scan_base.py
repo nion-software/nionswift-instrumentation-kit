@@ -749,8 +749,7 @@ class ScanHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
     def abort_sequence_mode(self) -> None: ...
 
-    # whether a sequence has started and not yet finished or aborted, during which the current frame parameters are
-    # those of the sequence.
+    # whether a sequence has started and not yet finished or aborted.
     @property
     def is_in_sequence_mode(self) -> bool: raise NotImplementedError()
 
@@ -1324,6 +1323,12 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
 
         # used for avoiding parameter changes during acquisition procedures. not perfect yet.
         self.__in_sequence_mode = False
+
+        # the latest sequence's frame parameters. they are kept after the sequence finishes, so that its data can still
+        # be popped. start_sequence_mode replaces them before it enters sequence mode, on the thread running the
+        # sequence. that thread reads them, and so does a view started in sequence mode from any thread. replacing the
+        # reference is atomic, so a reader sees either the previous or the new frame parameters.
+        self.__sequence_frame_parameters: ScanFrameParameters | None = None
 
         self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
@@ -1919,9 +1924,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         assert self.__frame_parameters is not None
         channel_count = self.__device.channel_count
         channel_states = [self.get_channel_state(i) for i in range(channel_count)]
-        if not self.subscan_enabled:
-            self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
-        frame_parameters = copy.deepcopy(self.__frame_parameters)
+        # in sequence mode, the view uses the sequence's frame parameters and doesn't update the scan context.
+        if self.__in_sequence_mode and self.__sequence_frame_parameters is not None:
+            frame_parameters = copy.deepcopy(self.__sequence_frame_parameters)
+        else:
+            if not self.subscan_enabled:
+                self.__stem_controller._update_scan_context(self.__frame_parameters.pixel_size, self.__frame_parameters.center_nm, self.__frame_parameters.fov_nm, self.__frame_parameters.rotation_rad)
+            frame_parameters = copy.deepcopy(self.__frame_parameters)
         channel_ids = [channel_state.channel_id for channel_state in channel_states]
         return ScanAcquisitionTask(self.__stem_controller, self, self.__device, self.hardware_source_id, True, frame_parameters, None, channel_ids, self.display_name)
 
@@ -2007,9 +2016,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     # fired on that thread.
 
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
+        # calculate the sequence's subscan as a recording does.
+        self.__sequence_frame_parameters = self.__calculate_subscan_parameters(scan_frame_parameters)
         self.__set_in_sequence_mode(True)
         assert not self.__device.is_scanning
-        self.set_current_frame_parameters(scan_frame_parameters)
         self.start_playing()
 
     def finish_sequence_mode(self) -> None:
@@ -2033,7 +2043,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return self.__device.get_sequence_buffer_count()
 
     def pop_sequence_buffer_data(self, scan_id: uuid.UUID) -> typing.Mapping[Acquisition.Channel, DataAndMetadata.DataAndMetadata]:
-        data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), self.__frame_parameters, scan_id)
+        # the data is that of the latest sequence. before any sequence has started the buffer is empty, so the current
+        # frame parameters are used.
+        frame_parameters = self.__sequence_frame_parameters if self.__sequence_frame_parameters is not None else self.__frame_parameters
+        data_element_group = self.__get_data_element_group_with_metadata(self.__device.pop_sequence_buffer_data(), frame_parameters, scan_id)
         xdata_group = dict()
         for channel_index, data_element in enumerate(data_element_group):
             channel = Acquisition.Channel(self.hardware_source_id, str(self.get_enabled_channel_indexes()[channel_index]))
@@ -2077,6 +2090,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__set_current_frame_parameters(frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
+        """Return a copy of the current frame parameters."""
         return copy.copy(self.__frame_parameters)
 
     def set_record_frame_parameters(self, frame_parameters: HardwareSource.FrameParameters) -> None:
