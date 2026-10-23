@@ -24,11 +24,8 @@ _ = gettext.gettext
 
 
 def set_current_frame_parameters(scan_hardware_source: scan_base.ScanHardwareSource, frame_parameters: scan_base.ScanFrameParameters) -> None:
-    """Set the scan device's current frame parameters, unless it is recording or in sequence mode."""
-    # a recording or a sequence acquisition scans with its own frame parameters, so an edit made then is ignored,
-    # which leaves both the acquisition and the active profile unchanged.
-    if not scan_hardware_source.is_recording and not scan_hardware_source.is_in_sequence_mode:
-        scan_hardware_source.set_current_frame_parameters(frame_parameters)
+    """Set the scan device's current frame parameters."""
+    scan_hardware_source.set_current_frame_parameters(frame_parameters)
 
 
 def record(document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, *,
