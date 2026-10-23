@@ -781,9 +781,9 @@ class ScanControlPanelModel(Observable.Observable):
     - increase_fov()
     - decrease_fov()
     - handle_scan_button_clicked()
-    - handle_abort_button_clicked()
+    - handle_scan_abort_button_clicked()
     - handle_record_button_clicked()
-    - handle_record_abort_button_clicked()
+    - handle_record_abort_clicked()
     """
 
     def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, document_controller: DocumentController.DocumentController) -> None:

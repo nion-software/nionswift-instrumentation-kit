@@ -67,7 +67,7 @@ class VideoSourceStateController:
             (method) abort_recording()
 
     Clients should call:
-        handle_play_clicked(workspace_controller)
+        handle_play_clicked()
         handle_abort_clicked()
 
     Clients can respond to:

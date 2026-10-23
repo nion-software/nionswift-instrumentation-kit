@@ -64,10 +64,10 @@ class CameraControlStateController:
 
     Clients should call:
         handle_change_profile(profile_label)
-        handle_play_pause_clicked(workspace_controller)
+        handle_play_pause_clicked()
         handle_abort_clicked()
-        handle_shift_click(hardware_source_id, mouse_position, image_dimensions)
-        handle_tilt_click(hardware_source_id, mouse_position, image_dimensions)
+        handle_shift_click(hardware_source_id, mouse_position, camera_shape, logger)
+        handle_tilt_click(hardware_source_id, mouse_position, camera_shape, logger)
         handle_binning_changed(binning_str)
         handle_exposure_changed(exposure)
         handle_increase_exposure()
