@@ -1508,6 +1508,14 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     log_messages_event: Event.Event
 
 
+def get_default_signal_type(camera_type: str) -> str | None:
+    """Return the signal type of a camera which does not define one: its camera type for "eels" or "ronchigram", else None.
+
+    This is for backward compatibility. New cameras should define signal_type directly.
+    """
+    return camera_type if camera_type in ("eels", "ronchigram") else None
+
+
 class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwareSource):
 
     def __init__(self, instrument_controller_id: typing.Optional[str], camera: CameraDevice, camera_settings: CameraSettings, configuration_location: typing.Optional[pathlib.Path], camera_panel_type: typing.Optional[str], camera_panel_delegate_type: typing.Optional[str] = None):
@@ -1538,9 +1546,7 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
         self.__camera = camera
         self.__camera_category = typing.cast(typing.Any, camera).camera_type
-        # signal type falls back to camera category if camera category is "eels" or "ronchigram". this is only for
-        # backward compatibility. new camera instances should define signal_type directly.
-        self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
+        self.__signal_type = getattr(camera, "signal_type", get_default_signal_type(self.__camera_category))
         self.processor = None
 
         # configure the features. putting the features into this object is for convenience of access. the features
@@ -2154,9 +2160,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
         self.__camera = camera
         self.__camera_category = typing.cast(typing.Any, camera).camera_type
-        # signal type falls back to camera category if camera category is "eels" or "ronchigram". this is only for
-        # backward compatibility. new camera instances should define signal_type directly.
-        self.__signal_type = getattr(camera, "signal_type", self.__camera_category if self.__camera_category in ("eels", "ronchigram") else None)
+        self.__signal_type = getattr(camera, "signal_type", get_default_signal_type(self.__camera_category))
         self.processor = None
 
         self.__camera_calibrator: typing.Optional[CameraCalibrator] = None

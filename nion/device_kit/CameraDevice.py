@@ -52,7 +52,7 @@ class Camera(camera_base.CameraDevice3):
         self.camera_id = camera_id
         self.camera_type = camera_type
         self.camera_name = camera_name
-        self.signal_type = signal_type if signal_type is not None else (camera_type if camera_type in ("eels", "ronchigram") else None)
+        self.signal_type = signal_type if signal_type is not None else camera_base.get_default_signal_type(camera_type)
         self.__camera_task: typing.Optional[CameraTask] = None
         self.__instrument = instrument
         self.__scan_device: typing.Optional[ScanDevice.Device] = None
