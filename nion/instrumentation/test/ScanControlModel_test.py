@@ -13,6 +13,7 @@ from nion.instrumentation import stem_controller as STEMController
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.swift import DocumentController
 from nion.swift.test import TestContext
+from nion.ui import Declarative
 from nion.utils import Geometry
 from nion.utils import Observable
 from nion.utils import ReferenceCounting
@@ -242,47 +243,50 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual("700", model.placeholder_subscan_width_str)
 
     def test_increase_decrease_fields(self):
-        # test that the increase/decrease methods work for pixel time, fov, width, and height
+        # test that the scan panel's step buttons work for pixel time, fov, width, height, and subscan width
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
-            model = ScanControlPanel.ScanControlPanelModel(scan_hardware_source, document_controller)
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                # test increase/decrease pixel time
+                initial_pixel_time = scan_hardware_source.get_current_frame_parameters().pixel_time_us
+                scan_panel_controller.handle_increase_time(widget)
+                self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
+                scan_panel_controller.handle_decrease_time(widget)
+                self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
 
-            # test increase/decrease pixel time
-            initial_pixel_time = scan_hardware_source.get_current_frame_parameters().pixel_time_us
-            model.increase_pixel_time()
-            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
-            model.decrease_pixel_time()
-            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().pixel_time_us, initial_pixel_time)
+                # test increase/decrease fov
+                initial_fov = scan_hardware_source.get_current_frame_parameters().fov_nm
+                scan_panel_controller.handle_increase_fov(widget)
+                self.assertGreater(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
+                scan_panel_controller.handle_decrease_fov(widget)
+                self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
 
-            # test increase/decrease fov
-            initial_fov = scan_hardware_source.get_current_frame_parameters().fov_nm
-            model.increase_fov()
-            self.assertGreater(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
-            model.decrease_fov()
-            self.assertAlmostEqual(scan_hardware_source.get_current_frame_parameters().fov_nm, initial_fov)
+                # test increase/decrease width
+                initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
+                scan_panel_controller.handle_increase_width(widget)
+                self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
+                scan_panel_controller.handle_decrease_width(widget)
+                self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
 
-            # test increase/decrease width
-            initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
-            model.increase_width()
-            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
-            model.decrease_width()
-            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.width, initial_width)
+                # test increase/decrease height
+                initial_height = scan_hardware_source.get_current_frame_parameters().pixel_size.height
+                scan_panel_controller.handle_increase_height(widget)
+                self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
+                scan_panel_controller.handle_decrease_height(widget)
+                self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
 
-            # test increase/decrease height
-            initial_height = scan_hardware_source.get_current_frame_parameters().pixel_size.height
-            model.increase_height()
-            self.assertGreater(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
-            model.decrease_height()
-            self.assertEqual(scan_hardware_source.get_current_frame_parameters().pixel_size.height, initial_height)
-
-            # test increase/decrease subscan width, starting from no override (defaults to pixel width)
-            initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
-            self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
-            model.increase_subscan_width()
-            self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width * 2)
-            model.decrease_subscan_width()
-            self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width)
+                # test increase/decrease subscan width, starting from no override (defaults to pixel width)
+                initial_width = scan_hardware_source.get_current_frame_parameters().pixel_size.width
+                self.assertIsNone(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override)
+                scan_panel_controller.handle_increase_subscan_width(widget)
+                self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width * 2)
+                scan_panel_controller.handle_decrease_subscan_width(widget)
+                self.assertEqual(scan_hardware_source.get_current_frame_parameters().subscan_pixel_width_override, initial_width)
+            finally:
+                widget.close()
 
     def test_subscan_and_line_scan_checkboxes(self):
         # test that the increase/decrease methods work for pixel time, fov, width, and height

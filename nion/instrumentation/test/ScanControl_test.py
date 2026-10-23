@@ -1860,14 +1860,19 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
-            scan_control_model = self.__create_scan_control_model(test_context)
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
-            scan_control_model.width_height_linked = False
-            scan_control_model.decrease_width()
-            scan_control_model.decrease_height()
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
+                # the panel's link check box is bound to its model's width_height_linked.
+                scan_panel_controller._model.width_height_linked = False
+                scan_panel_controller.handle_decrease_width(widget)
+                scan_panel_controller.handle_decrease_height(widget)
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
+            finally:
+                widget.close()
 
     def test_record_during_view_uses_record_mode(self):
         with self._test_context() as test_context:
@@ -1944,25 +1949,34 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
-            scan_control_model = self.__create_scan_control_model(test_context)
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
-            scan_control_model.decrease_width()
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
+                scan_panel_controller.handle_decrease_width(widget)
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (128, 128))
+            finally:
+                widget.close()
 
     def test_changing_width_when_unlinked_does_not_change_height(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             document_model = test_context.document_model
             scan_hardware_source = test_context.scan_hardware_source
-            scan_control_model = self.__create_scan_control_model(test_context)
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
-            scan_control_model.width_height_linked = False
-            scan_control_model.decrease_width()
-            self._acquire_one(document_controller, scan_hardware_source)
-            self.assertEqual(document_model.data_items[0].data_shape, (256, 128))
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (256, 256))
+                # the panel's link check box is bound to its model's width_height_linked.
+                scan_panel_controller._model.width_height_linked = False
+                scan_panel_controller.handle_decrease_width(widget)
+                self._acquire_one(document_controller, scan_hardware_source)
+                self.assertEqual(document_model.data_items[0].data_shape, (256, 128))
+            finally:
+                widget.close()
 
     def test_obscenely_large_scan_does_not_crash(self):
         with self._test_context() as test_context:
