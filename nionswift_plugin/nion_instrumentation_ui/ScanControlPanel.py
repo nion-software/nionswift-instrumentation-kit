@@ -47,6 +47,7 @@ from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Observable
 from nion.utils import Registry
+from nionswift_plugin.nion_instrumentation_ui import HardwareSourceActions
 from nionswift_plugin.nion_instrumentation_ui import InstrumentationWidgets
 from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
@@ -1373,28 +1374,31 @@ class ScanControlPanelModel(Observable.Observable):
         return self.__fov_label_tool_tip
 
     # must be called on ui thread
-    def handle_scan_button_clicked(self) -> None:
-        """ Call this when the user clicks the play/pause button. """
+    def handle_scan_button_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the play/pause button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
         if self.__scan_hardware_source.is_playing:
-            action_context = self.__document_controller._get_action_context()
-            action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
-            self.__document_controller.perform_action_in_context("acquisition.stop_playing", action_context)
+            self.__document_controller.perform_action("acquisition.stop_playing", parameters={"hardware_source_id": self.__scan_hardware_source.hardware_source_id},
+                                                      invoked_from=invoked_from, invoked_from_id=invoked_from_id)
         else:
             # the 'enabled channel indexes' implementation is incomplete, so, for now, explicitly add them to the
             # frame parameters so that they can be recorded when logging the start playing action.
             frame_parameters = self.__scan_hardware_source.get_current_frame_parameters()
             frame_parameters.enabled_channel_indexes = self.__scan_hardware_source.get_enabled_channel_indexes()
-            action_context = self.__document_controller._get_action_context()
-            action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
-            action_context.parameters["frame_parameters"] = frame_parameters.as_dict()
-            self.__document_controller.perform_action_in_context("acquisition.start_playing", action_context)
+            self.__document_controller.perform_action("acquisition.start_playing",
+                                                      parameters={"hardware_source_id": self.__scan_hardware_source.hardware_source_id, "frame_parameters": frame_parameters.as_dict()},
+                                                      invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
     # must be called on ui thread
-    def handle_scan_abort_button_clicked(self) -> None:
-        """ Call this when the user clicks the abort button. """
-        action_context = self.__document_controller._get_action_context()
-        action_context.parameters["hardware_source_id"] = self.__scan_hardware_source.hardware_source_id
-        self.__document_controller.perform_action_in_context("acquisition.abort_playing", action_context)
+    def handle_scan_abort_button_clicked(self, *, invoked_from: Window.ActionOrigin | None = None, invoked_from_id: str | None = None) -> None:
+        """Call this when the user clicks the abort button.
+
+        invoked_from and invoked_from_id give the action the origin of the click or key, such as a panel and its id. Code passes neither.
+        """
+        self.__document_controller.perform_action("acquisition.abort_playing", parameters={"hardware_source_id": self.__scan_hardware_source.hardware_source_id},
+                                                  invoked_from=invoked_from, invoked_from_id=invoked_from_id)
 
     # must be called on ui thread
     def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
@@ -1490,11 +1494,14 @@ class ScanControlPanelModel(Observable.Observable):
 
 class ScanPanelController(Declarative.Handler):
 
-    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource) -> None:
+    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, *, panel_id: str | None = None) -> None:
         super().__init__()
 
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
+
+        # the id of the panel showing these controls, which the play and abort buttons give as the origin of their actions.
+        self.__panel_id = panel_id
 
         self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
         self._profile_configuration_model = scan_hardware_source.scan_profiles
@@ -1719,10 +1726,10 @@ class ScanPanelController(Declarative.Handler):
         self._model.decrease_subscan_width()
 
     def handle_scan_button(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_scan_button_clicked()
+        self._model.handle_scan_button_clicked(invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=self.__panel_id)
 
     def handle_scan_abort_button(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_scan_abort_button_clicked()
+        self._model.handle_scan_abort_button_clicked(invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=self.__panel_id)
 
     def handle_record_button(self, widget: UserInterface.Widget) -> None:
         self._model.handle_record_button_clicked()
@@ -1786,7 +1793,7 @@ class ScanControlPanel(Panel.Panel):
         scan_hardware_source = HardwareSource.HardwareSourceManager().get_hardware_source_for_hardware_source_id(self.__hardware_source_id)
         if isinstance(scan_hardware_source, scan_base.ScanHardwareSource):
             document_controller = self.document_controller
-            scan_panel_controller = ScanPanelController(document_controller, scan_hardware_source)
+            scan_panel_controller = ScanPanelController(document_controller, scan_hardware_source, panel_id=self.panel_id)
             self.__column_widget.add(Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller))
             self.__column_widget.add_stretch()
 
@@ -1842,10 +1849,10 @@ class ScanDisplayPanelControllerHandler(Declarative.Handler):
         self._channel.close()
 
     def handle_scan_clicked(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_scan_button_clicked()
+        self._model.handle_scan_button_clicked(invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
     def handle_scan_abort_clicked(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_scan_abort_button_clicked()
+        self._model.handle_scan_abort_button_clicked(invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
     def handle_capture_clicked(self, widget: UserInterface.Widget) -> None:
         self._model.handle_capture_button_clicked()
