@@ -61,7 +61,6 @@ class FrameParametersScanRecorder(Observable.Observable):
     def __init__(self) -> None:
         super().__init__()
         self.record_button_enabled = True
-        self.profile_activation_enabled = True
         self.recorded_frame_parameters_list: list[scan_base.ScanFrameParameters | None] = list()
 
     def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None) -> None:
@@ -395,12 +394,11 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             profile_configuration_model = scan_hardware_source.scan_profiles
-            scan_control_model = self.__create_scan_control_model(test_context)
             active_index = profile_configuration_model.active_profile_index
             inactive_index = (active_index + 1) % len(profile_configuration_model.profiles)
-            active_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[active_index], scan_control_model, lambda profile, global_point: None)
+            active_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[active_index], lambda profile, global_point: None)
             active_profile_widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, active_profile_handler)
-            inactive_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[inactive_index], scan_control_model, lambda profile, global_point: None)
+            inactive_profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[inactive_index], lambda profile, global_point: None)
             inactive_profile_widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, inactive_profile_handler)
             try:
                 self.assertFalse(active_profile_handler.can_activate)
@@ -419,8 +417,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             profile_configuration_model = scan_hardware_source.scan_profiles
-            scan_control_model = self.__create_scan_control_model(test_context)
-            profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[1], scan_control_model, lambda profile, global_point: None)
+            profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[1], lambda profile, global_point: None)
             widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
             try:
                 name_line_edit = profile_handler.name_line_edit
@@ -535,62 +532,22 @@ class TestScanControlClass(unittest.TestCase):
             finally:
                 widget.close()
 
-    def test_scan_profile_controls_in_scan_panel_are_disabled_during_sequence_acquisition(self) -> None:
-        with self._test_context() as test_context:
-            document_controller = test_context.document_controller
-            scan_hardware_source = test_context.scan_hardware_source
-            # activate a second profile so that the previous profile button is enabled outside the acquisition.
-            scan_hardware_source.scan_profiles.active_profile_index = 1
-            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
-            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
-            # the acquisition thread waits in sequence mode until the controls have been checked.
-            sequence_mode_started = threading.Event()
-            controls_checked = threading.Event()
-
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
-                    sequence_mode_started.set()
-                    controls_checked.wait(10.0)
-
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
-            frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
-            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
-            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(Acquisition.MakerDataStream(data_stream),))
-            try:
-                acquisition_thread.start()
-                try:
-                    self.assertTrue(sequence_mode_started.wait(10.0))
-                    document_controller.periodic()
-                    self.assertFalse(scan_panel_controller.profile_combo_box.enabled)
-                    self.assertFalse(scan_panel_controller.previous_profile_button.enabled)
-                finally:
-                    controls_checked.set()
-                    acquisition_thread.join(60.0)
-                self.assertFalse(acquisition_thread.is_alive())
-                document_controller.periodic()
-                self.assertTrue(scan_panel_controller.profile_combo_box.enabled)
-                self.assertTrue(scan_panel_controller.previous_profile_button.enabled)
-            finally:
-                property_changed_event_listener = None
-                widget.close()
-
-    def test_activate_button_in_scan_profile_configuration_dialog_is_disabled_during_sequence_acquisition(self) -> None:
+    def test_scan_profile_combo_box_activates_profile_during_sequence_acquisition(self) -> None:
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             profile_configuration_model = scan_hardware_source.scan_profiles
-            scan_control_model = self.__create_scan_control_model(test_context)
-            profile_handler = ScanProfilesDialog.ProfileHandler(profile_configuration_model, profile_configuration_model.profiles[1], scan_control_model, lambda profile, global_point: None)
-            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
-            # the acquisition thread waits in sequence mode until the button has been checked.
+            other_profile_index = profile_configuration_model.active_profile_index + 1
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            # the acquisition thread waits in sequence mode until the profile has been chosen.
             sequence_mode_started = threading.Event()
-            button_checked = threading.Event()
+            profile_chosen = threading.Event()
 
             def handle_property_changed(property_name: str) -> None:
                 if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
                     sequence_mode_started.set()
-                    button_checked.wait(10.0)
+                    profile_chosen.wait(10.0)
 
             property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
             frame_parameters = scan_hardware_source.get_current_frame_parameters()
@@ -598,46 +555,17 @@ class TestScanControlClass(unittest.TestCase):
             data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
             acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(Acquisition.MakerDataStream(data_stream),))
             try:
-                activate_button = profile_handler.activate_button
-                assert activate_button
                 acquisition_thread.start()
                 try:
                     self.assertTrue(sequence_mode_started.wait(10.0))
                     document_controller.periodic()
-                    self.assertFalse(activate_button.enabled)
+                    scan_panel_controller.profile_combo_box.current_index = other_profile_index
                 finally:
-                    button_checked.set()
+                    profile_chosen.set()
                     acquisition_thread.join(60.0)
                 self.assertFalse(acquisition_thread.is_alive())
-                document_controller.periodic()
-                self.assertTrue(activate_button.enabled)
-            finally:
-                property_changed_event_listener = None
-                widget.close()
-
-    def test_scan_profile_combo_box_shows_active_profile_when_activation_during_sequence_acquisition_is_refused(self) -> None:
-        with self._test_context() as test_context:
-            document_controller = test_context.document_controller
-            scan_hardware_source = test_context.scan_hardware_source
-            active_profile_index = scan_hardware_source.scan_profiles.active_profile_index
-            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
-            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
-            combo_box_index_list: list[int | None] = list()
-
-            # another profile is chosen in the combo box once the sequence acquisition has started. a user can't do this,
-            # since the combo box is disabled during the acquisition, so this stands for a script which sets it.
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
-                    scan_panel_controller.profile_combo_box.current_index = active_profile_index + 1
-                    combo_box_index_list.append(scan_panel_controller.profile_combo_box.current_index)
-
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
-            frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
-            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
-            try:
-                Acquisition.acquire(Acquisition.MakerDataStream(data_stream))
-                self.assertEqual([active_profile_index], combo_box_index_list)
+                self.assertEqual(other_profile_index, profile_configuration_model.active_profile_index)
+                self.assertEqual(other_profile_index, scan_panel_controller.profile_combo_box.current_index)
             finally:
                 property_changed_event_listener = None
                 widget.close()
@@ -647,8 +575,7 @@ class TestScanControlClass(unittest.TestCase):
             document_controller = test_context.document_controller
             profile = ScanProfiles.ProfileModel(str())
             profile.subscan_pixel_width = 64
-            scan_control_model = self.__create_scan_control_model(test_context)
-            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, scan_control_model, lambda profile, global_point: None)
+            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, lambda profile, global_point: None)
             widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
             try:
                 subscan_pixel_width_line_edit = profile_handler.subscan_pixel_width_line_edit
@@ -668,8 +595,7 @@ class TestScanControlClass(unittest.TestCase):
             profile.width = 64
             profile.height = 32
             profile.subscan_field_width_nm = 10.0
-            scan_control_model = self.__create_scan_control_model(test_context)
-            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, scan_control_model, lambda profile, global_point: None)
+            profile_handler = ScanProfilesDialog.ProfileHandler(test_context.scan_hardware_source.scan_profiles, profile, lambda profile, global_point: None)
             widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, profile_handler)
             try:
                 field_width_line_edit = profile_handler.field_width_line_edit

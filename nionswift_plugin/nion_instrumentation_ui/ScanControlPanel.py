@@ -763,7 +763,6 @@ class ScanControlPanelModel(Observable.Observable):
     - scan_abort_button_enabled (read only)
     - record_button_enabled (read only)
     - record_abort_button_enabled (read only)
-    - profile_activation_enabled (read only)
     - previous_profile_button_enabled (read only)
     - play_state_text (read only)
     - probe_state_text (read only)
@@ -792,7 +791,6 @@ class ScanControlPanelModel(Observable.Observable):
         self.__frame_parameters_changed_event_listener = self.__scan_hardware_source.scan_settings.current_frame_parameters_changed_event.listen(self.__update_frame_parameters)
         self.__data_channel_state_changed_event_listener = self.__scan_hardware_source.data_channel_state_changed_event.listen(self.__data_channel_state_changed)
         self.__acquisition_state_changed_event_listener = self.__scan_hardware_source.acquisition_state_changed_event.listen(self.__acquisition_state_changed)
-        self.__scan_hardware_source_property_changed_event_listener = self.__scan_hardware_source.property_changed_event.listen(self.__handle_scan_hardware_source_property_changed)
         self.__scan_profiles_property_changed_event_listener = self.__scan_hardware_source.scan_profiles.property_changed_event.listen(self.__handle_scan_profiles_property_changed)
         self.__probe_state_changed_event_listener = stem_controller_.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__channel_state_changed_event_listener = self.__scan_hardware_source.channel_state_changed_event.listen(self.__channel_state_changed)
@@ -827,7 +825,6 @@ class ScanControlPanelModel(Observable.Observable):
         self.__scan_abort_button_enabled = False
         self.__record_button_enabled = False
         self.__record_abort_button_enabled = False
-        self.__profile_activation_enabled = False
         self.__previous_profile_button_enabled = False
         self.__capture_button_visible = False
         self.__capture_button_enabled = False
@@ -852,7 +849,6 @@ class ScanControlPanelModel(Observable.Observable):
             self.__frame_parameters_changed_event_listener = typing.cast(typing.Any, None)
             self.__data_channel_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__acquisition_state_changed_event_listener = typing.cast(typing.Any, None)
-            self.__scan_hardware_source_property_changed_event_listener = typing.cast(typing.Any, None)
             self.__scan_profiles_property_changed_event_listener = typing.cast(typing.Any, None)
             self.__probe_state_changed_event_listener = typing.cast(typing.Any, None)
             self.__channel_state_changed_event_listener = typing.cast(typing.Any, None)
@@ -955,12 +951,7 @@ class ScanControlPanelModel(Observable.Observable):
         if record_abort_button_enabled != self.__record_abort_button_enabled:
             self.__record_abort_button_enabled = record_abort_button_enabled
             self.notify_property_changed("record_abort_button_enabled")
-        profile_configuration_model = self.__scan_hardware_source.scan_profiles
-        profile_activation_enabled = profile_configuration_model.can_activate_profile
-        if profile_activation_enabled != self.__profile_activation_enabled:
-            self.__profile_activation_enabled = profile_activation_enabled
-            self.notify_property_changed("profile_activation_enabled")
-        previous_profile_button_enabled = profile_activation_enabled and profile_configuration_model.has_previous_profile
+        previous_profile_button_enabled = self.__scan_hardware_source.scan_profiles.has_previous_profile
         if previous_profile_button_enabled != self.__previous_profile_button_enabled:
             self.__previous_profile_button_enabled = previous_profile_button_enabled
             self.notify_property_changed("previous_profile_button_enabled")
@@ -1041,10 +1032,6 @@ class ScanControlPanelModel(Observable.Observable):
 
     def __acquisition_state_changed(self, acquisition_state: str) -> None:
         self.__handle_state_changed()
-
-    def __handle_scan_hardware_source_property_changed(self, property_name: str) -> None:
-        if property_name == "is_in_sequence_mode":
-            self.__handle_state_changed()
 
     def __handle_scan_profiles_property_changed(self, property_name: str) -> None:
         if property_name == "has_previous_profile":
@@ -1235,11 +1222,6 @@ class ScanControlPanelModel(Observable.Observable):
     @property
     def record_abort_button_enabled(self) -> bool:
         return self.__record_abort_button_enabled
-
-    @property
-    def profile_activation_enabled(self) -> bool:
-        """Return whether the controls which activate a scan profile are enabled, which they are not while recording or in sequence mode."""
-        return self.__profile_activation_enabled
 
     @property
     def previous_profile_button_enabled(self) -> bool:
@@ -1442,7 +1424,7 @@ class ScanPanelController(Declarative.Handler):
         scan_profile_row = u.create_row(
             u.create_image(image="@binding(_profile_config_icon)", width=24, height=24, tool_tip=_("Configure scan profiles."), on_clicked="handle_profile_config_button"),
             u.create_label(text=_("Profile")),
-            u.create_combo_box(name="profile_combo_box", items_ref="@binding(_profile_configuration_model.profile_names)", current_index="@binding(_profile_configuration_model.active_profile_index)", enabled="@binding(_model.profile_activation_enabled)"),
+            u.create_combo_box(name="profile_combo_box", items_ref="@binding(_profile_configuration_model.profile_names)", current_index="@binding(_profile_configuration_model.active_profile_index)"),
             u.create_image(name="previous_profile_button", image="@binding(_previous_profile_icon)", enabled="@binding(_model.previous_profile_button_enabled)", width=24, height=24, tool_tip=_("Activate the previously active scan profile."), on_clicked="handle_previous_profile_button"),
             u.create_stretch(),
             u.create_image(image="@binding(_hardware_config_icon)", width=24, height=24, tool_tip=_("Configure scan hardware settings."), on_clicked="handle_config_button"),

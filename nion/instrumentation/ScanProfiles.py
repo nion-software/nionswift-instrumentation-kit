@@ -970,25 +970,12 @@ class ProfileConfigurationModel(Observable.Observable):
         """Activate the profile at the index, applying it to the scan and remembering the profile it replaces.
 
         An index of None, which a combo box reports when it has no selection, leaves the active profile unchanged,
-        since there is always an active profile. The active profile is also unchanged when a profile cannot be activated now.
+        since there is always an active profile.
         """
         if value is not None and 0 <= value < len(self.__profiles):
             self.__activate_profile(self.__profiles[value])
 
-    @property
-    def can_activate_profile(self) -> bool:
-        """Return whether a profile can be activated now, which it cannot while the scan device is recording or in sequence mode.
-
-        This property is not observable; the scan device's acquisition_state_changed_event and its is_in_sequence_mode
-        property change tell when it may change.
-        """
-        return not self.__scan_hardware_source.is_recording and not self.__scan_hardware_source.is_in_sequence_mode
-
     def __activate_profile(self, profile: ProfileModel) -> None:
-        if not self.can_activate_profile:
-            # a combo box which chose the profile shows the active profile again.
-            self.notify_property_changed("active_profile_index")
-            return
         if profile is not self.__active_profile:
             self.__previous_profile = self.__active_profile
             self.__active_profile = profile
@@ -1018,10 +1005,7 @@ class ProfileConfigurationModel(Observable.Observable):
         return self.__previous_profile is not None
 
     def activate_previous_profile(self) -> None:
-        """Activate the previously active profile, so that repeating this toggles between the last two profiles.
-
-        The active profile is unchanged when a profile cannot be activated now.
-        """
+        """Activate the previously active profile, so that repeating this toggles between the last two profiles."""
         if self.__previous_profile is not None:
             self.__activate_profile(self.__previous_profile)
 
