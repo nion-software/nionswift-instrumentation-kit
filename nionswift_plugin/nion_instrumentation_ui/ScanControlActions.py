@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # standard libraries
 import copy
+import functools
 import gettext
 import typing
 
@@ -11,6 +12,8 @@ import typing
 # local libraries
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import scan_base
+from nion.swift import DocumentController
+from nion.swift.model import DataItem
 from nion.swift.model import Notification
 from nion.ui import Window
 from nion.utils import Geometry
@@ -131,6 +134,42 @@ def decrease_pmt(scan_hardware_source: scan_base.ScanHardwareSource, channel_ind
 def _notify_pmt_change_failed(exception: Exception) -> None:
     notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller", "Unable to change PMT", f"Exception: {exception}.")
     Notification.notify(notification)
+
+
+def record(document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, *,
+           frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
+    """Record one scan into a new data item for each channel, and show each in the window's next result display panel.
+
+    The scan uses the frame parameters, if given, or otherwise the scan device's current frame parameters. The record runs on its own
+    thread, so this returns before it finishes. completion_fn, if given, is called on the main thread with each new data item.
+    """
+    # called on the record's thread when it finishes. the data items are added on the main thread.
+    def finish_record(data_promise_list: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+        record_index = scan_hardware_source.record_index
+        for data_promise in data_promise_list:
+            data_and_metadata = data_promise.xdata
+            if data_and_metadata:
+                data_item = DataItem.DataItem()
+                display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
+                display_name = display_name if display_name else _("Record")
+                channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
+                title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
+                data_item.title = "{} {}".format(title_base, record_index)
+                data_item.set_xdata(data_and_metadata)
+
+                def handle_record_data_item(data_item: DataItem.DataItem) -> None:
+                    document_controller.document_model.append_data_item(data_item)
+                    result_display_panel = document_controller.next_result_display_panel()
+                    if result_display_panel:
+                        result_display_panel.set_display_panel_data_item(data_item)
+                        result_display_panel.request_focus()
+                    if callable(completion_fn):
+                        completion_fn(data_item)
+
+                document_controller.queue_task(functools.partial(handle_record_data_item, data_item))
+        scan_hardware_source.record_index += 1
+
+    scan_hardware_source.record_async(finish_record, frame_parameters=frame_parameters or scan_hardware_source.get_current_frame_parameters())
 
 
 def _get_scan_hardware_source(context: Window.ActionContext) -> scan_base.ScanHardwareSource | None:
@@ -293,6 +332,27 @@ class IncreasePMTAction(PMTAction):
         return Window.ActionResult(Window.ActionStatus.FINISHED)
 
 
+class RecordAction(ScanAction):
+    action_id = "scan.record"
+    action_name = _("Record")
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        # the new data items go into the window the action runs in, so the action does nothing without a document window.
+        if (scan_hardware_source := _get_scan_hardware_source(context)) and isinstance(context.window, DocumentController.DocumentController):
+            record(context.window, scan_hardware_source)
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
+
+
+class AbortRecordAction(ScanAction):
+    action_id = "scan.abort_record"
+    action_name = _("Abort Record")
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        if scan_hardware_source := _get_scan_hardware_source(context):
+            scan_hardware_source.abort_recording()
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
+
+
 Window.register_action(DecreasePixelTimeAction())
 Window.register_action(IncreasePixelTimeAction())
 Window.register_action(DecreaseFieldOfViewAction())
@@ -305,3 +365,5 @@ Window.register_action(DecreaseSubscanWidthAction())
 Window.register_action(IncreaseSubscanWidthAction())
 Window.register_action(DecreasePMTAction())
 Window.register_action(IncreasePMTAction())
+Window.register_action(RecordAction())
+Window.register_action(AbortRecordAction())

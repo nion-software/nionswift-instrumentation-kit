@@ -1357,34 +1357,11 @@ class ScanControlPanelModel(Observable.Observable):
 
     # must be called on ui thread
     def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
-        """Record one scan with the frame parameters, if given, or otherwise with the scan device's current frame parameters."""
-        def finish_record(data_promise_list: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
-            record_index = self.__scan_hardware_source.record_index
-            for data_promise in data_promise_list:
-                data_and_metadata = data_promise.xdata
-                if data_and_metadata:
-                    document_controller = self.__document_controller
-                    data_item = DataItem.DataItem()
-                    display_name = data_and_metadata.metadata.get("hardware_source", dict()).get("hardware_source_name")
-                    display_name = display_name if display_name else _("Record")
-                    channel_name = data_and_metadata.metadata.get("hardware_source", dict()).get("channel_name")
-                    title_base = "{} ({})".format(display_name, channel_name) if channel_name else display_name
-                    data_item.title = "{} {}".format(title_base, record_index)
-                    data_item.set_xdata(data_and_metadata)
+        """Record one scan with the frame parameters, if given, or otherwise with the scan device's current frame parameters.
 
-                    def handle_record_data_item(data_item: DataItem.DataItem) -> None:
-                        document_controller.document_model.append_data_item(data_item)
-                        result_display_panel = document_controller.next_result_display_panel()
-                        if result_display_panel:
-                            result_display_panel.set_display_panel_data_item(data_item)
-                            result_display_panel.request_focus()
-                        if callable(completion_fn):
-                            completion_fn(data_item)
-
-                    document_controller.queue_task(functools.partial(handle_record_data_item, data_item))
-            self.__scan_hardware_source.record_index += 1
-
-        self.__scan_hardware_source.record_async(finish_record, frame_parameters=frame_parameters or self.__scan_hardware_source.get_current_frame_parameters())
+        completion_fn, if given, is called on the main thread with each new data item.
+        """
+        ScanControlActions.record(self.__document_controller, self.__scan_hardware_source, frame_parameters=frame_parameters, completion_fn=completion_fn)
 
     # must be called on ui thread
     def handle_record_abort_clicked(self) -> None:
@@ -1679,10 +1656,10 @@ class ScanPanelController(Declarative.Handler):
         self._model.handle_scan_abort_button_clicked(invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=self.__panel_id)
 
     def handle_record_button(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_record_button_clicked()
+        self.__perform_action("scan.record")
 
     def handle_record_abort_button(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_record_abort_clicked()
+        self.__perform_action("scan.abort_record")
 
     # this gets called from the DisplayPanelManager. pass on the message to the state controller.
     # must be called on ui thread
