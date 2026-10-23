@@ -15,6 +15,7 @@ from nion.instrumentation import scan_base
 from nion.swift import DocumentController
 from nion.swift.model import DataItem
 from nion.swift.model import Notification
+from nion.swift.model import PlugInManager
 from nion.ui import Window
 from nion.utils import Geometry
 
@@ -353,6 +354,26 @@ class AbortRecordAction(ScanAction):
         return Window.ActionResult(Window.ActionStatus.FINISHED)
 
 
+class ActivatePreviousProfileAction(ScanAction):
+    action_id = "scan.activate_previous_profile"
+    action_name = _("Activate Previous Scan Profile")
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        if scan_hardware_source := _get_scan_hardware_source(context):
+            scan_hardware_source.scan_profiles.activate_previous_profile()
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
+
+
+class OpenConfigurationAction(ScanAction):
+    action_id = "scan.open_configuration"
+    action_name = _("Open Scan Configuration")
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        if scan_hardware_source := _get_scan_hardware_source(context):
+            scan_hardware_source.scan_settings.open_configuration_interface(PlugInManager.APIBroker())
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
+
+
 Window.register_action(DecreasePixelTimeAction())
 Window.register_action(IncreasePixelTimeAction())
 Window.register_action(DecreaseFieldOfViewAction())
@@ -367,3 +388,5 @@ Window.register_action(DecreasePMTAction())
 Window.register_action(IncreasePMTAction())
 Window.register_action(RecordAction())
 Window.register_action(AbortRecordAction())
+Window.register_action(ActivatePreviousProfileAction())
+Window.register_action(OpenConfigurationAction())
