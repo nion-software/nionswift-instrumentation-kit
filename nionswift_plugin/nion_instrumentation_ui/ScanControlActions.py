@@ -114,29 +114,6 @@ def with_decreased_subscan_width(frame_parameters: scan_base.ScanFrameParameters
     return frame_parameters
 
 
-def increase_pmt(scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int) -> None:
-    """Increase the PMT of the scan channel, showing a notification if the device fails to."""
-    # a failure to change the PMT is shown to the person who asked for it, and the window carries on.
-    try:
-        scan_hardware_source.increase_pmt(channel_index)
-    except Exception as e:
-        _notify_pmt_change_failed(e)
-
-
-def decrease_pmt(scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int) -> None:
-    """Decrease the PMT of the scan channel, showing a notification if the device fails to."""
-    # a failure to change the PMT is shown to the person who asked for it, and the window carries on.
-    try:
-        scan_hardware_source.decrease_pmt(channel_index)
-    except Exception as e:
-        _notify_pmt_change_failed(e)
-
-
-def _notify_pmt_change_failed(exception: Exception) -> None:
-    notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller", "Unable to change PMT", f"Exception: {exception}.")
-    Notification.notify(notification)
-
-
 def record(document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, *,
            frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
     """Record one scan into a new data item for each channel, and show each in the window's next result display panel.
@@ -302,35 +279,45 @@ class IncreaseSubscanWidthAction(FrameParametersStepAction):
 class PMTAction(ScanAction):
     """An action on the PMT of the scan channel given by the channel_index parameter.
 
-    The action does nothing without a channel index. Its summary also names the channel index.
+    The action does nothing without a channel index. Its summary also includes the channel index. If the scan device fails to
+    change the PMT, the action shows a notification.
     """
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        channel_index = context.parameters.get("channel_index")
+        if (scan_hardware_source := _get_scan_hardware_source(context)) and isinstance(channel_index, int):
+            # a failure to change the PMT is shown to the person who asked for it, and the window carries on.
+            try:
+                self._change_pmt(scan_hardware_source, channel_index)
+            except Exception as e:
+                notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller", "Unable to change PMT", f"Exception: {e}.")
+                Notification.notify(notification)
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
 
     def get_action_summary(self, context: Window.ActionContext) -> str:
         scan_hardware_source = _get_scan_hardware_source(context)
         hardware_source_name = scan_hardware_source.display_name if scan_hardware_source else "N/A"
         return f"{self.action_id}: {self.action_name} ({hardware_source_name}, channel {context.parameters.get('channel_index')})"
 
+    # change the PMT of the scan channel by one step. execute shows an exception raised here in a notification.
+    def _change_pmt(self, scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int) -> None:
+        raise NotImplementedError()
+
 
 class DecreasePMTAction(PMTAction):
     action_id = "scan.decrease_pmt"
     action_name = _("Decrease PMT")
 
-    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
-        channel_index = context.parameters.get("channel_index")
-        if (scan_hardware_source := _get_scan_hardware_source(context)) and isinstance(channel_index, int):
-            decrease_pmt(scan_hardware_source, channel_index)
-        return Window.ActionResult(Window.ActionStatus.FINISHED)
+    def _change_pmt(self, scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int) -> None:
+        scan_hardware_source.decrease_pmt(channel_index)
 
 
 class IncreasePMTAction(PMTAction):
     action_id = "scan.increase_pmt"
     action_name = _("Increase PMT")
 
-    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
-        channel_index = context.parameters.get("channel_index")
-        if (scan_hardware_source := _get_scan_hardware_source(context)) and isinstance(channel_index, int):
-            increase_pmt(scan_hardware_source, channel_index)
-        return Window.ActionResult(Window.ActionStatus.FINISHED)
+    def _change_pmt(self, scan_hardware_source: scan_base.ScanHardwareSource, channel_index: int) -> None:
+        scan_hardware_source.increase_pmt(channel_index)
 
 
 class RecordAction(ScanAction):
