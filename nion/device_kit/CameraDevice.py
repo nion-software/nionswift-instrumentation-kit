@@ -71,7 +71,16 @@ class Camera(camera_base.CameraDevice3):
         self.__has_data_event = threading.Event()
         self.__cancel = False
         self.__is_playing = False
+
+        # the view acquisition thread and the thread running a sequence or synchronized acquisition both acquire frames
+        # from the simulator into the frame buffer. this condition guards is_acquiring, which is set from the beginning
+        # to the end of a sequence, and is_view_frame_active, so that the view thread pauses during a sequence and the
+        # sequence begins after a view frame in progress finishes. this confines simulator calls and frame buffer writes
+        # to one thread at a time, assuming one sequence at a time. acquire_image reads the frame buffer on another thread.
+        self.__acquire_condition = threading.Condition()
         self.__is_acquiring = False
+        self.__is_view_frame_active = False
+
         self.__cancel_sequence_event = threading.Event()
         self.__exposure = 1.0
         self.__binning = 1
@@ -236,11 +245,13 @@ class Camera(camera_base.CameraDevice3):
         integration_count = self.__integration_count or 1
         for frame_number in range(integration_count):
             if direct:
-                self.__direct_acquire(self.__cancel_sequence_event, do_sync)
+                # the view thread is paused during a sequence, so a playing view receives the sequence frames.
+                if self.__direct_acquire(self.__cancel_sequence_event, do_sync):
+                    self.__has_data_event.set()
             else:
                 if not self.__has_data_event.wait(self.__exposure * 200) and not self.__thread.is_alive():
                     raise Exception("No simulator thread.")
-            self.__has_data_event.clear()
+                self.__has_data_event.clear()
             if xdata_buffer is None:
                 xdata_buffer = copy.deepcopy(self.__xdata_buffer)
             elif self.__xdata_buffer:
@@ -266,86 +277,112 @@ class Camera(camera_base.CameraDevice3):
             data_element["datum_dimension_count"] = 1
         return data_element
 
+    # pause the view thread for a sequence or synchronized acquisition. interrupt the exposure of a view frame in
+    # progress, and wait for that frame to finish.
+    def __begin_acquiring(self) -> None:
+        with self.__acquire_condition:
+            self.__is_acquiring = True
+            self.__thread_event.set()
+            self.__acquire_condition.wait_for(lambda: not self.__is_view_frame_active)
+
+    # resume the view thread, which acquires again if the view is playing.
+    def __end_acquiring(self) -> None:
+        with self.__acquire_condition:
+            self.__is_acquiring = False
+        self.__thread_event.set()
+
+    # runs on the thread of the sequence or synchronized acquisition, which calls the continue method.
     def _acquire_sequence(self, n: int) -> typing.Optional[ImportExportManager.DataElementType]:
         # if the device does not implement acquire_sequence, fall back to looping acquisition.
-        self.__is_acquiring = True
         self.__has_data_event.clear()  # ensure any has_data_event is new data
-        try:
-            properties = None
-            data = None
-            if self._external_trigger:
-                scan_hardware_source = self.__instrument.scan_controller
-                scan_device = scan_hardware_source.scan_device if scan_hardware_source else None
-                if scan_device and hasattr(scan_device, "blanker_signal_condition"):
-                    with scan_device.blanker_signal_condition:
-                        scan_device.blanker_signal_condition.wait(timeout=max(self.__exposure * 2, 5))
-            for index in range(n):
-                if self.__cancel_sequence_event.is_set():
-                    return None
-                do_sync = index == 0 and n > 1  # n > 1 avoids race where scan is disabled on last frame but still asking for only 1 frame
-                frame_data_element = self.__acquire_image(direct=True, do_sync=do_sync)
-                frame_data = frame_data_element["data"]
-                if self.__processing == "sum_project" and len(frame_data.shape) > 1:
-                    data_shape = (n,) + frame_data.shape[1:]
-                    data_dtype = frame_data.dtype
-                elif self.__processing == "sum_masked":
-                    data_shape = (n, len(self.__mask_array) if self.__mask_array is not None else 1)
-                    data_dtype = frame_data.dtype
-                else:
-                    data_shape = (n,) + frame_data.shape
-                    data_dtype = frame_data.dtype
-                if data is None:
-                    data = numpy.zeros(data_shape, data_dtype)
-                assert data.shape == data_shape
-                assert data.dtype == data_dtype
-                if self.__processing == "sum_project" and len(frame_data.shape) > 1:
-                    summed_xdata = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0)
+        properties = None
+        data = None
+        if self._external_trigger:
+            scan_hardware_source = self.__instrument.scan_controller
+            scan_device = scan_hardware_source.scan_device if scan_hardware_source else None
+            if scan_device and hasattr(scan_device, "blanker_signal_condition"):
+                with scan_device.blanker_signal_condition:
+                    scan_device.blanker_signal_condition.wait(timeout=max(self.__exposure * 2, 5))
+        for index in range(n):
+            if self.__cancel_sequence_event.is_set():
+                return None
+            do_sync = index == 0 and n > 1  # n > 1 avoids race where scan is disabled on last frame but still asking for only 1 frame
+            frame_data_element = self.__acquire_image(direct=True, do_sync=do_sync)
+            frame_data = frame_data_element["data"]
+            if self.__processing == "sum_project" and len(frame_data.shape) > 1:
+                data_shape = (n,) + frame_data.shape[1:]
+                data_dtype = frame_data.dtype
+            elif self.__processing == "sum_masked":
+                data_shape = (n, len(self.__mask_array) if self.__mask_array is not None else 1)
+                data_dtype = frame_data.dtype
+            else:
+                data_shape = (n,) + frame_data.shape
+                data_dtype = frame_data.dtype
+            if data is None:
+                data = numpy.zeros(data_shape, data_dtype)
+            assert data.shape == data_shape
+            assert data.dtype == data_dtype
+            if self.__processing == "sum_project" and len(frame_data.shape) > 1:
+                summed_xdata = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data), 0)
+                assert summed_xdata
+                summed_data = summed_xdata.data
+                assert summed_data is not None
+                data[index] = summed_data
+            elif self.__processing == "sum_masked":
+                if self.__mask_array is not None:
+                    summed_xdata = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data * self.__mask_array), (1, 2))
                     assert summed_xdata
                     summed_data = summed_xdata.data
                     assert summed_data is not None
                     data[index] = summed_data
-                elif self.__processing == "sum_masked":
-                    if self.__mask_array is not None:
-                        summed_xdata = Core.function_sum(DataAndMetadata.new_data_and_metadata(frame_data * self.__mask_array), (1, 2))
-                        assert summed_xdata
-                        summed_data = summed_xdata.data
-                        assert summed_data is not None
-                        data[index] = summed_data
-                    else:
-                        data[index] = numpy.sum(frame_data)
                 else:
-                    data[index] = frame_data
-                properties = copy.deepcopy(frame_data_element["properties"])
-                if self.__processing == "sum_project":
-                    properties["valid_rows"] = 1
-                    spatial_properties = properties.get("spatial_calibrations")
-                    if spatial_properties is not None:
-                        properties["spatial_calibrations"] = spatial_properties[1:]
-        finally:
-            self.__is_acquiring = False
+                    data[index] = numpy.sum(frame_data)
+            else:
+                data[index] = frame_data
+            properties = copy.deepcopy(frame_data_element["properties"])
+            if self.__processing == "sum_project":
+                properties["valid_rows"] = 1
+                spatial_properties = properties.get("spatial_calibrations")
+                if spatial_properties is not None:
+                    properties["spatial_calibrations"] = spatial_properties[1:]
         data_element = dict()
         data_element["data"] = data
         data_element["properties"] = properties
         return data_element
 
+    # the view stays paused until the sequence ends, since a canceled sequence may still be acquiring a frame on its
+    # own thread.
     def acquire_sequence_cancel(self) -> None:
         self.__cancel_sequence_event.set()
 
     def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
         self.__cancel_sequence_event.clear()
-        self.__set_frame_parameters(camera_frame_parameters)
-        self.__camera_task = CameraTask(self, camera_frame_parameters, (count,))
-        self.__camera_task.start()
+        self.__begin_acquiring()
+        try:
+            self.__set_frame_parameters(camera_frame_parameters)
+            self.__camera_task = CameraTask(self, camera_frame_parameters, (count,))
+            self.__camera_task.start()
+        except BaseException:
+            # a caller does not end a sequence which fails to begin.
+            self.__end_acquiring()
+            raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, False, False, None, 0)
 
     def acquire_sequence_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> camera_base.PartialData:
         assert self.__camera_task
-        is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
+        try:
+            is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
+        except BaseException:
+            # some callers do not end a sequence which fails.
+            self.__end_acquiring()
+            raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, is_complete, is_canceled, None, valid_count)
 
     def acquire_sequence_end(self, **kwargs: typing.Any) -> None:
         self.__camera_task = None
+        self.__end_acquiring()
 
+    # runs on the view thread or on the thread of a sequence, never on both at once; see acquire_condition.
     def __direct_acquire(self, cancel_event: threading.Event, do_sync: bool = False) -> bool:
         # if do_sync is True, the scan device will sync with its acquisition thread before
         # advancing the pixel. this avoids race conditions of when the pixel count gets reset.
@@ -371,6 +408,7 @@ class Camera(camera_base.CameraDevice3):
         self.__xdata_buffer = xdata
         return False
 
+    # runs on the view thread. it acquires frames while the view plays, and pauses while a sequence runs.
     def __acquisition_thread(self) -> None:
         while True:
             if self.__cancel:  # case where exposure was canceled.
@@ -379,34 +417,59 @@ class Camera(camera_base.CameraDevice3):
             self.__thread_event.clear()
             if self.__cancel:
                 break
-            while (self.__is_playing or self.__is_acquiring) and not self.__cancel:
-                if self.__direct_acquire(self.__thread_event):
-                    self.__has_data_event.set()
-                else:
-                    # thread event was triggered during wait; continue loop
-                    self.__has_data_event.clear()
-                    self.__thread_event.clear()
+            while not self.__cancel:
+                with self.__acquire_condition:
+                    if not self.__is_playing or self.__is_acquiring:
+                        break
+                    self.__is_view_frame_active = True
+                try:
+                    if self.__direct_acquire(self.__thread_event):
+                        self.__has_data_event.set()
+                    else:
+                        # thread event was triggered during wait; continue loop
+                        self.__has_data_event.clear()
+                        self.__thread_event.clear()
+                finally:
+                    with self.__acquire_condition:
+                        self.__is_view_frame_active = False
+                        self.__acquire_condition.notify_all()
 
     def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
         self.__cancel_sequence_event.clear()
-        self.__set_frame_parameters(camera_frame_parameters)
-        scan_controller = self.__instrument.scan_controller
-        assert scan_controller
-        scan_device = scan_controller.scan_device
-        self.__scan_device = typing.cast("ScanDevice.Device", scan_device)
-        self.__camera_task = CameraTask(self, camera_frame_parameters, collection_shape)
-        self.__camera_task.start()
+        self.__begin_acquiring()
+        try:
+            self.__set_frame_parameters(camera_frame_parameters)
+            scan_controller = self.__instrument.scan_controller
+            assert scan_controller
+            scan_device = scan_controller.scan_device
+            self.__scan_device = typing.cast("ScanDevice.Device", scan_device)
+            self.__camera_task = CameraTask(self, camera_frame_parameters, collection_shape)
+            self.__camera_task.start()
+        except BaseException:
+            # a caller does not end a synchronized acquisition which fails to begin.
+            self.__scan_device = None
+            self.__end_acquiring()
+            raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, False, False, None, 0)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> camera_base.PartialData:
         assert self.__camera_task
-        is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
+        try:
+            is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
+        except BaseException:
+            # some callers do not end a synchronized acquisition which fails.
+            self.__scan_device = None
+            self.__end_acquiring()
+            raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, is_complete, is_canceled, None, valid_count)
 
     def acquire_synchronized_end(self, **kwargs: typing.Any) -> None:
         self.__camera_task = None
+        # clear the scan device before the view resumes, so that view frames do not advance the scan.
         self.__scan_device = None
+        self.__end_acquiring()
 
+    # the view stays paused until the synchronized acquisition ends; see acquire_sequence_cancel.
     def acquire_synchronized_cancel(self) -> None:
         self.__cancel_sequence_event.set()
 
