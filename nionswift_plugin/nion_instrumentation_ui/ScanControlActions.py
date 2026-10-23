@@ -374,6 +374,7 @@ class OpenConfigurationAction(ScanAction):
         return Window.ActionResult(Window.ActionStatus.FINISHED)
 
 
+# scan.capture is registered in ScanControlPanel.py, beside the ScanDisplayPanelController it uses.
 Window.register_action(DecreasePixelTimeAction())
 Window.register_action(IncreasePixelTimeAction())
 Window.register_action(DecreaseFieldOfViewAction())
