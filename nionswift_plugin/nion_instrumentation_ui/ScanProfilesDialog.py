@@ -17,7 +17,6 @@ from nion.ui import UserInterface
 from nion.ui import Widgets
 from nion.ui import Window
 from nion.utils import Converter
-from nion.utils import Event
 from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import ReferenceCounting
@@ -28,19 +27,10 @@ _ = gettext.gettext
 
 
 class ScanRecorderLike(typing.Protocol):
-    """The scan recording which the dialog uses to record once with a profile, such as that of the scan control panel.
-
-    It also says whether a profile can be activated now, and notifies changes to that through property_changed_event on the
-    main thread, so that the dialog can disable its Activate button.
-    """
-
-    property_changed_event: Event.Event
+    """The scan recording which the dialog uses to record once with a profile, such as that of the scan control panel."""
 
     @property
     def record_button_enabled(self) -> bool: ...
-
-    @property
-    def profile_activation_enabled(self) -> bool: ...
 
     def handle_record_button_clicked(self, *, frame_parameters: scan_base.ScanFrameParameters | None = None) -> None: ...
 
@@ -69,11 +59,10 @@ class ProfileHandler(Declarative.Handler):
     LINE_EDIT_WIDTH: typing.Final[int] = 60
 
     def __init__(self, profile_configuration_model: ScanProfiles.ProfileConfigurationModel, profile_model: ScanProfiles.ProfileModel,
-                 scan_recorder: ScanRecorderLike, show_actions_menu: typing.Callable[[ScanProfiles.ProfileModel, Geometry.IntPoint], None]) -> None:
+                 show_actions_menu: typing.Callable[[ScanProfiles.ProfileModel, Geometry.IntPoint], None]) -> None:
         super().__init__()
         self._profile_model = profile_model
         self.__profile_configuration_model = profile_configuration_model
-        self.__scan_recorder = scan_recorder
         self.__show_actions_menu = show_actions_menu
         self.activate_button: UserInterface.PushButtonWidget | None = None
         self.name_line_edit: UserInterface.LineEditWidget | None = None
@@ -90,9 +79,6 @@ class ProfileHandler(Declarative.Handler):
         self.subscan_rotation_line_edit: UserInterface.LineEditWidget | None = None
         self.__profile_configuration_model_listener = profile_configuration_model.property_changed_event.listen(
             ReferenceCounting.weak_partial(ProfileHandler.__handle_profile_configuration_model_property_changed, self)
-        )
-        self.__scan_recorder_listener = scan_recorder.property_changed_event.listen(
-            ReferenceCounting.weak_partial(ProfileHandler.__handle_scan_recorder_property_changed, self)
         )
 
         # the converters used by the bindings of the editors and the labels below.
@@ -250,13 +236,9 @@ class ProfileHandler(Declarative.Handler):
         if property_name == "active_profile_index":
             self.notify_property_changed("can_activate")
 
-    def __handle_scan_recorder_property_changed(self, property_name: str) -> None:
-        if property_name == "profile_activation_enabled":
-            self.notify_property_changed("can_activate")
-
     @property
     def can_activate(self) -> bool:
-        return self.__scan_recorder.profile_activation_enabled and not self.__profile_configuration_model.is_active_profile(self._profile_model)
+        return not self.__profile_configuration_model.is_active_profile(self._profile_model)
 
     @property
     def profile_name(self) -> str:
@@ -368,7 +350,7 @@ class ProfileConfigurationHandler(Declarative.Handler):
         if component_id == "row":
             return ProfileRowHandler(self._profile_configuration_model, typing.cast(ScanProfiles.ProfileModel, item))
         if component_id == "detail":
-            return ProfileHandler(self._profile_configuration_model, typing.cast(ScanProfiles.ProfileModel, item), self.__scan_recorder, self.show_profile_actions_menu)
+            return ProfileHandler(self._profile_configuration_model, typing.cast(ScanProfiles.ProfileModel, item), self.show_profile_actions_menu)
         return None
 
     def __handle_list_state_changed(self, property_name: str) -> None:
@@ -417,7 +399,7 @@ class ProfileConfigurationHandler(Declarative.Handler):
         profiles = self._profile_configuration_model.profiles
         menu = self.__window.create_context_menu()
         activate_action = menu.add_menu_item(_("Activate"), functools.partial(self.__activate_profile, profile))
-        activate_action.enabled = self.__scan_recorder.profile_activation_enabled and not self._profile_configuration_model.is_active_profile(profile)
+        activate_action.enabled = not self._profile_configuration_model.is_active_profile(profile)
         record_action = menu.add_menu_item(_("Record Once"), functools.partial(self.__record_profile, profile))
         record_action.enabled = self.__scan_recorder.record_button_enabled
         menu.add_separator()

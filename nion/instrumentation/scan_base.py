@@ -2248,8 +2248,7 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def set_selected_profile_index(self, profile_index: int) -> None:
         """Activate the scan profile at the index.
 
-        This remains for scripts, which select a profile by its position. An index with no profile does nothing, as does
-        any index while the scan device is recording or in sequence mode, when no profile can be activated.
+        This remains for scripts, which select a profile by its position. An index with no profile does nothing.
         """
         self.__scan_profiles.active_profile_index = profile_index
 

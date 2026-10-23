@@ -167,32 +167,54 @@ class TestScanProfilesClass(unittest.TestCase):
             self.assertEqual(list(), saved_properties_list)
             profiles_changed_event_listener = None
 
-    def test_activating_scan_profile_during_sequence_acquisition_leaves_profiles_unchanged(self) -> None:
+    def test_activating_scan_profile_during_sequence_acquisition_makes_its_values_current_without_changing_the_acquisition(self) -> None:
         with self._test_context() as test_context:
             scan_hardware_source = typing.cast(ScanBase.ScanHardwareSource, test_context.scan_hardware_source)
             profile_configuration_model = scan_hardware_source.scan_profiles
             active_profile = profile_configuration_model.active_profile
+            active_profile_values = active_profile.write_values_to_dict()
             other_profile = profile_configuration_model.profiles[1]
-            other_profile_values = other_profile.write_values_to_dict()
-            self.assertNotEqual(active_profile.write_values_to_dict(), other_profile_values)
-
-            # the user chooses the other profile once the sequence acquisition has started.
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
-                    profile_configuration_model.active_profile_index = 1
-
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
-            # the acquisition saves the device state before it starts and restores it when it ends, as the acquisition panel does.
+            other_profile.width = 40
+            other_profile.height = 40
+            other_profile.field_width = 70.0
             frame_parameters = scan_hardware_source.get_current_frame_parameters()
             frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
-            data_stream = ScanBase.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
+            frame_parameters.fov_nm = 50.0
+            # the scan device waits at the first frame of the sequence until the profile has been activated.
+            first_frame_arrived = threading.Event()
+            profile_activated = threading.Event()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
+                    profile_activated.wait(10.0)
+
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            # a script acquires a sequence of three frames on its own thread.
+            data_stream = ScanBase.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
             maker = Acquisition.MakerDataStream(data_stream)
             device_state = maker.prepare_device_state()
-            Acquisition.acquire(maker)
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(maker,))
+            acquisition_thread.start()
+            try:
+                self.assertTrue(first_frame_arrived.wait(10.0))
+                # the user activates the other profile during the acquisition.
+                profile_configuration_model.active_profile_index = 1
+            finally:
+                profile_activated.set()
+                acquisition_thread.join(60.0)
+            self.assertFalse(acquisition_thread.is_alive())
             device_state.restore()
-            property_changed_event_listener = None
-            self.assertIs(active_profile, profile_configuration_model.active_profile)
-            self.assertEqual(other_profile_values, other_profile.write_values_to_dict())
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertFalse(maker.is_error, "activating a profile during the acquisition made it fail")
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 24, 24), xdata.data_shape, "activating a profile during the acquisition changed what it acquired")
+            self.assertAlmostEqual(50.0 / 24, xdata.dimensional_calibrations[2].scale)
+            self.assertIs(other_profile, profile_configuration_model.active_profile)
+            frame_parameters_after = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (frame_parameters_after.pixel_size, frame_parameters_after.fov_nm), "the activated profile's values are not current")
+            self.assertEqual(active_profile_values, active_profile.write_values_to_dict(), "the previously active profile changed")
 
     def test_active_scan_profile_keeps_fractional_and_small_field_width(self) -> None:
         with self._test_context() as test_context:
