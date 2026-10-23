@@ -118,12 +118,21 @@ class Controller:
             print(f"AR: start playing {datetime.datetime.now()}")
             hardware_source.prepare_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
             hardware_source.start_sequence_mode(hardware_source.get_current_frame_parameters(), frame_count)
-            print("AR: wait for acquire")
-            success, actual_count = await event_loop.run_in_executor(None, exec_acquire)
-            if not was_playing:
-                print("AR: restopping")
-                hardware_source.stop_playing()
-            print(f"AR: acquire finished {datetime.datetime.now()}")
+            grab_leaves_sequence_mode = False
+            try:
+                print("AR: wait for acquire")
+                success, actual_count = await event_loop.run_in_executor(None, exec_acquire)
+                if not was_playing:
+                    print("AR: restopping")
+                    hardware_source.stop_playing()
+                print(f"AR: acquire finished {datetime.datetime.now()}")
+                grab_leaves_sequence_mode = actual_count > 0
+            finally:
+                # exec_grab leaves sequence mode once it has frames to grab. with none, after a cancel, a view which
+                # did not start or an error, leave it here. finishing clears the sequence buffer and keeps a playing
+                # view, as a grab does; was_playing decides the view afterwards.
+                if not grab_leaves_sequence_mode:
+                    hardware_source.finish_sequence_mode()
         else:
             success = True
             actual_count = frame_count
