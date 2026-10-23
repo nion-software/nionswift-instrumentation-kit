@@ -110,14 +110,19 @@ class ScanModule(scan_base.ScanModule):
         self.settings = scan_base.ScanSettings(device_id, scan_modes, lambda d: ScanDevice.ScanFrameParameters(d), 0, 2)
 
 
-# a camera simulator whose frames are random data of the readout area, and whose calibrations have the given y and x units.
+# a camera simulator whose frames are random data of the readout area, whose calibrations have the given y and x units,
+# and which has the given counts per electron.
 class CameraSimulator:
-    def __init__(self, dimensional_units: typing.Sequence[str] = ("rad", "rad")) -> None:
+    def __init__(self, dimensional_units: typing.Sequence[str] = ("rad", "rad"), *, counts_per_electron: float | None = None) -> None:
         self.__data_value = 0
         self.__dimensional_units = tuple(dimensional_units)
+        self.__counts_per_electron = counts_per_electron
 
     def close(self) -> None:
         pass
+
+    def get_counts_per_electron(self) -> float | None:
+        return self.__counts_per_electron
 
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
         return [Calibration.Calibration(units=units) for units in self.__dimensional_units]
@@ -238,8 +243,8 @@ class AcquisitionTestContextConfiguration:
         self.scan_module = ScanModule(self.instrument, "test_scan_device", ScanDataGenerator(), advance_pixel_filter=advance_pixel_filter)
         self.ronchigram_camera_settings = CameraDevice.CameraSettings(self.ronchigram_camera_device_id, 0.005)
         self.eels_camera_settings = CameraDevice.CameraSettings(self.eels_camera_device_id, 0.005)
-        self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(), self.instrument)
-        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(("", "eV")), self.instrument)
+        self.ronchigram_camera_device = CameraDevice.Camera(self.ronchigram_camera_device_id, "ronchigram", "Ronchigram", CameraSimulator(counts_per_electron=self.instrument.counts_per_electron), self.instrument)
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", CameraSimulator(("", "eV"), counts_per_electron=self.instrument.counts_per_electron), self.instrument)
 
     def run(self) -> None:
         logging.disable(logging.CRITICAL)
