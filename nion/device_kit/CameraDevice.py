@@ -36,6 +36,7 @@ _ = gettext.gettext
 
 class CameraSimulatorLike(typing.Protocol):
     def close(self) -> None: ...
+    def get_counts_per_electron(self) -> float | None: ...
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]: ...
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata: ...
 
@@ -176,10 +177,11 @@ class Camera(camera_base.CameraDevice3):
         """Define the STEM calibration controls for this camera.
 
         The controls should be unique for each camera if there are more than one. The units are those of the
-        simulator's dimensional calibrations.
+        simulator's dimensional calibrations, and the counts per electron are those of the simulator. A simulator with
+        no counts per electron leaves them out.
         """
         y_calibration, x_calibration = self.__simulator.get_dimensional_calibrations(None, None)
-        return {
+        calibration_controls: dict[str, str | int | float] = {
             "x_scale_control": self.camera_type + "_x_scale",
             "x_offset_control": self.camera_type + "_x_offset",
             "x_units_value": x_calibration.units,
@@ -187,8 +189,10 @@ class Camera(camera_base.CameraDevice3):
             "y_offset_control": self.camera_type + "_y_offset",
             "y_units_value": y_calibration.units,
             "intensity_units_value": "counts",
-            "counts_per_electron_value": self.__instrument.counts_per_electron
         }
+        if (counts_per_electron := self.__simulator.get_counts_per_electron()) is not None:
+            calibration_controls["counts_per_electron_value"] = counts_per_electron
+        return calibration_controls
 
     def get_frame_data_shape(self, frame_parameters: camera_base.CameraFrameParameters) -> typing.Tuple[int, ...]:
         """Return the shape of the data of a frame given parameters, which is 1D for a frame of one row."""
