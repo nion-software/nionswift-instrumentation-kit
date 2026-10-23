@@ -26,6 +26,7 @@ from nion.instrumentation import stem_controller
 from nion.instrumentation import AcquisitionPreferences
 from nion.swift import DataItemThumbnailWidget
 from nion.swift import DisplayPanel
+from nion.swift import DocumentController
 from nion.swift import Panel
 from nion.swift import Workspace
 from nion.swift.model import ApplicationData
@@ -53,7 +54,6 @@ from nionswift_plugin.nion_instrumentation_ui import ScanControlActions
 from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
 if typing.TYPE_CHECKING:
-    from nion.swift import DocumentController
     from nion.swift.model import DisplayItem
     from nion.swift.model import Persistence
     from nion.utils import Event
@@ -1734,9 +1734,16 @@ class ScanControlPanel(Panel.Panel):
 
 
 class ScanDisplayPanelControllerHandler(Declarative.Handler):
-    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
+    """The handler for the control bar of a scan display panel.
+
+    The display panel is the one the control bar is in. Capture runs the scan.capture action in that display panel's context.
+    """
+
+    def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, channel_id: str,
+                 *, display_panel: DisplayPanel.DisplayPanel) -> None:
         super().__init__()
         self.__document_controller = document_controller
+        self.__display_panel = display_panel
         self.__hardware_source_id = scan_hardware_source.hardware_source_id
         self.__channel_id = channel_id
         self.__channel_index = scan_hardware_source.get_channel_index(channel_id) or 0
@@ -1773,6 +1780,7 @@ class ScanDisplayPanelControllerHandler(Declarative.Handler):
         super().close()
         self._model.close()
         self._channel.close()
+        self.__display_panel = typing.cast(typing.Any, None)
 
     def handle_scan_clicked(self, widget: UserInterface.Widget) -> None:
         self._model.handle_scan_button_clicked(invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
@@ -1781,6 +1789,18 @@ class ScanDisplayPanelControllerHandler(Declarative.Handler):
         self._model.handle_scan_abort_button_clicked(invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
     def handle_capture_clicked(self, widget: UserInterface.Widget) -> None:
+        # the context has the display panel this control bar is in, even when other display panels are selected, since the
+        # capture is started on this control bar's model, which disables only this control bar's Capture button until the frames arrive.
+        display_panel = self.__display_panel
+        display_item = display_panel.display_item
+        action_context = self.__document_controller.get_action_context_for_display_items([display_item] if display_item else [], None)
+        action_context.display_panel = display_panel
+        action_context.parameters["hardware_source_id"] = self.__hardware_source_id
+        self.__document_controller.perform_action_in_context("scan.capture", action_context, invoked_from=Window.ActionOrigin.WINDOW,
+                                                             invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
+
+    def capture(self) -> None:
+        """Capture the scan device's next frames into new data items, and disable this control bar's Capture button until they arrive."""
         self._model.handle_capture_button_clicked()
 
     def handle_decrease_pmt_clicked(self, widget: UserInterface.Widget) -> None:
@@ -1815,7 +1835,7 @@ class ScanDisplayPanelController:
 
         canvas_ui = CanvasUserInterface.CanvasUserInterface(document_controller.ui)
 
-        self.__ui_handler = ScanDisplayPanelControllerHandler(document_controller, scan_hardware_source, data_channel_id)
+        self.__ui_handler = ScanDisplayPanelControllerHandler(document_controller, scan_hardware_source, data_channel_id, display_panel=display_panel)
         self.__widget = Declarative.construct_widget(canvas_ui, document_controller.event_loop, self.__ui_handler)
 
         self.__canvas_item_composition = CanvasItem.CanvasItemComposition()
@@ -1854,6 +1874,31 @@ class ScanDisplayPanelController:
     @property
     def hardware_source_id(self) -> str:
         return self.__hardware_source_id
+
+    def capture(self) -> None:
+        """Capture the scan device's next frames into new data items, and disable this display panel's Capture button until they arrive."""
+        self.__ui_handler.capture()
+
+
+class ScanCaptureAction(ScanControlActions.ScanAction):
+    """Capture the next frames of the scan device given by the hardware_source_id parameter, from the context's display panel.
+
+    The action does nothing unless the context's display panel shows that scan device's live data, since the capture is started on that
+    display panel's control bar, whose Capture button it disables until the frames arrive.
+    """
+    action_id = "scan.capture"
+    action_name = _("Capture")
+
+    def execute(self, context: Window.ActionContext) -> Window.ActionResult:
+        # only a document window's context has a display panel.
+        display_panel = context.display_panel if isinstance(context, DocumentController.DocumentController.ActionContext) else None
+        display_panel_controller = display_panel.display_panel_controller if display_panel else None
+        if isinstance(display_panel_controller, ScanDisplayPanelController) and display_panel_controller.hardware_source_id == context.parameters.get("hardware_source_id"):
+            display_panel_controller.capture()
+        return Window.ActionResult(Window.ActionStatus.FINISHED)
+
+
+Window.register_action(ScanCaptureAction())
 
 
 class DriftScanPreferencesPanel:
