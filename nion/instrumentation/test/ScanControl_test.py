@@ -540,16 +540,17 @@ class TestScanControlClass(unittest.TestCase):
             other_profile_index = profile_configuration_model.active_profile_index + 1
             scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
             widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
-            # the acquisition thread waits in sequence mode until the profile has been chosen.
-            sequence_mode_started = threading.Event()
+            # the scan device waits at the first frame of the sequence until the profile has been chosen.
+            first_frame_arrived = threading.Event()
             profile_chosen = threading.Event()
 
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode" and scan_hardware_source.is_in_sequence_mode:
-                    sequence_mode_started.set()
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
                     profile_chosen.wait(10.0)
 
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
             frame_parameters = scan_hardware_source.get_current_frame_parameters()
             frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
             data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
@@ -557,7 +558,7 @@ class TestScanControlClass(unittest.TestCase):
             try:
                 acquisition_thread.start()
                 try:
-                    self.assertTrue(sequence_mode_started.wait(10.0))
+                    self.assertTrue(first_frame_arrived.wait(10.0))
                     document_controller.periodic()
                     scan_panel_controller.profile_combo_box.current_index = other_profile_index
                 finally:
@@ -567,7 +568,7 @@ class TestScanControlClass(unittest.TestCase):
                 self.assertEqual(other_profile_index, profile_configuration_model.active_profile_index)
                 self.assertEqual(other_profile_index, scan_panel_controller.profile_combo_box.current_index)
             finally:
-                property_changed_event_listener = None
+                xdatas_available_listener = typing.cast(typing.Any, None)
                 widget.close()
 
     def test_automatic_subscan_pixel_width_in_scan_profile_configuration_dialog_is_empty_text(self) -> None:
@@ -2674,24 +2675,6 @@ class TestScanControlClass(unittest.TestCase):
             finally:
                 scan_listener.close()
                 instrument_listener.close()
-
-    def test_sequence_mode_is_observable_on_scan_hardware_source(self) -> None:
-        with self._test_context() as test_context:
-            scan_hardware_source = test_context.scan_hardware_source
-            # record the sequence mode at each notification, which arrives on the thread running the acquisition.
-            in_sequence_mode_list: list[bool] = list()
-
-            def handle_property_changed(property_name: str) -> None:
-                if property_name == "is_in_sequence_mode":
-                    in_sequence_mode_list.append(scan_hardware_source.is_in_sequence_mode)
-
-            property_changed_event_listener = scan_hardware_source.property_changed_event.listen(handle_property_changed)
-            frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
-            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(2)
-            Acquisition.acquire(Acquisition.MakerDataStream(data_stream))
-            self.assertEqual([True, False], in_sequence_mode_list)
-            property_changed_event_listener = None
 
     def test_enabling_subscan_during_initial_acquisition_puts_graphic_on_context(self):
         with self._test_context() as test_context:

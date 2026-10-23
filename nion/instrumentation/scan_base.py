@@ -2058,20 +2058,16 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.abort_playing(sync_timeout=5.0)
         self.set_sequence_buffer_size(count)
 
-    # the sequence mode methods are called on the acquisition thread, so the is_in_sequence_mode property change is
-    # fired on that thread.
+    # the sequence mode methods are called on the thread running the sequence: the acquisition's thread for a sequence
+    # data stream, and the main thread or the Acquisition Recorder's grab thread for the Acquisition Recorder.
 
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
         # calculate the sequence's subscan as a recording does.
         self.__sequence_frame_parameters = self.__calculate_subscan_parameters(scan_frame_parameters)
         # enter sequence mode under the lock, so an edit either reaches the idle scan device before the sequence's view
-        # starts with its own frame parameters, or is held back until the sequence ends. the listeners run after the
-        # lock is released.
+        # starts with its own frame parameters, or is held back until the sequence ends.
         with self.__device_frame_parameters_lock:
-            was_in_sequence_mode = self.__in_sequence_mode
             self.__in_sequence_mode = True
-        if not was_in_sequence_mode:
-            self.notify_property_changed("is_in_sequence_mode")
         assert not self.__device.is_scanning
         self.start_playing()
 
@@ -2091,12 +2087,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def __leave_sequence_mode(self) -> None:
         # an aborted sequence is also finished, and the second call does nothing.
         with self.__device_frame_parameters_lock:
-            was_in_sequence_mode = self.__in_sequence_mode
-            if was_in_sequence_mode:
+            if self.__in_sequence_mode:
                 self.__in_sequence_mode = False
                 self.__send_current_frame_parameters_to_device()
-        if was_in_sequence_mode:
-            self.notify_property_changed("is_in_sequence_mode")
 
     @property
     def is_in_sequence_mode(self) -> bool:
