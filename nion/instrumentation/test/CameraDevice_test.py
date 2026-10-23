@@ -30,15 +30,15 @@ class OneRowInstrument(InstrumentDevice.Instrument):
         return 0, 0, 1, 1024
 
 
-# a camera whose x calibration has its origin at the center of the frame.
+# a camera whose x and y calibrations have their origin at the center of the frame.
 class CenteredOriginCamera(CameraDevice.Camera):
 
     @property
     def calibration_controls(self) -> typing.Mapping[str, str | int | float]:
-        return dict(super().calibration_controls) | {"x_origin_override": "center"}
+        return dict(super().calibration_controls) | {"x_origin_override": "center", "y_origin_override": "center"}
 
 
-# a test configuration whose ronchigram camera has its x origin at the center of the frame.
+# a test configuration whose ronchigram camera has its x and y origin at the center of the frame.
 class CenteredOriginAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
 
     def __init__(self) -> None:
@@ -130,6 +130,22 @@ class TestCameraDeviceClass(unittest.TestCase):
             data_element = hardware_source.acquire_sequence(3)[0]
             self.assertEqual((3, 1024), data_element["data"].shape)
             self.assertEqual(-512.0, data_element["spatial_calibrations"][-1]["offset"])
+
+    def test_view_of_a_camera_with_a_centered_origin_is_centered_on_the_frame(self) -> None:
+        with AcquisitionTestContext.test_context(CenteredOriginAcquisitionTestContextConfiguration()) as test_context:
+            hardware_source = test_context.camera_hardware_source
+            hardware_source.readout_area = (0, 0, 256, 1024)
+            frame_parameters = hardware_source.get_frame_parameters(0)
+            frame_parameters.binning = 1
+            hardware_source.set_current_frame_parameters(frame_parameters)
+            hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                xdata = hardware_source.get_next_xdatas_to_finish()[0]
+            finally:
+                hardware_source.abort_playing(sync_timeout=3.0)
+            self.assertEqual((256, 1024), xdata.data_shape)
+            self.assertEqual(-128.0, xdata.dimensional_calibrations[0].offset)
+            self.assertEqual(-512.0, xdata.dimensional_calibrations[1].offset)
 
 
 if __name__ == '__main__':

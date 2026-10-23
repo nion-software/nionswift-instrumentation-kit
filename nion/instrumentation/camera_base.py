@@ -3188,8 +3188,8 @@ class CalibrationControlsCalibrator(CameraCalibrator):
         binning = frame_parameters.binning
         calibration_controls = self.__camera_device.calibration_controls
         if len(data_shape) == 2:
-            y_calibration = build_calibration(self.__instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
-            x_calibration = build_calibration(self.__instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            y_calibration = build_calibration(self.__instrument_controller, calibration_controls, "y", binning, data_shape[0])
+            x_calibration = build_calibration(self.__instrument_controller, calibration_controls, "x", binning, data_shape[1])
             return (y_calibration, x_calibration)
         else:
             x_calibration = build_calibration(self.__instrument_controller, calibration_controls, "x", binning, data_shape[0])
