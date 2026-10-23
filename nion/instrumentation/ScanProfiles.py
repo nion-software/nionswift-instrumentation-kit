@@ -781,13 +781,12 @@ class ProfileConfigurationModel(Observable.Observable):
     The profiles_changed_event fires with the properties to save whenever the profiles or the active profile change.
 
     Changes to the current frame parameters and subscan of the scan device are edits to the current values, except
-    while the scan device is recording or in sequence mode, when they are the temporary frame parameters of the
-    acquisition and are ignored.
+    while the scan device is recording or in sequence mode, when they are ignored.
 
     The model is confined to the main thread and does not protect its state against concurrent access. This includes
     the scan device's changes to its current frame parameters and subscan, which the model follows as they happen, so
-    the scan device is expected to make those changes on the main thread, other than the ignored changes of an
-    acquisition, which may come from the acquisition thread.
+    the scan device is expected to make those changes on the main thread, other than the ignored ones, which may come
+    from another thread.
     """
 
     def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, saved_scan_profiles: SavedScanProfiles | None = None) -> None:
@@ -936,8 +935,6 @@ class ProfileConfigurationModel(Observable.Observable):
         }
 
     def __update_frame_parameters(self, scan_frame_parameters: scan_base.ScanFrameParameters) -> None:
-        # a recording or a sequence acquisition sets the frame parameters it acquires with, which are not an edit by
-        # the user, so they neither change the profiles nor are saved.
         if self.__scan_hardware_source.is_recording or self.__scan_hardware_source.is_in_sequence_mode:
             return
         self.__current_values.read_from_frame_parameters(self.__get_frame_parameters_with_subscan(scan_frame_parameters))
