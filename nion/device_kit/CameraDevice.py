@@ -180,8 +180,12 @@ class Camera(camera_base.CameraDevice3):
 
     def get_frame_data_shape(self, frame_parameters: camera_base.CameraFrameParameters) -> typing.Tuple[int, ...]:
         """Return the shape of the data of a frame given parameters, which is 1D for a frame of one row."""
-        expected_dimensions = self.get_expected_dimensions_for_frame_parameters(frame_parameters)
-        return expected_dimensions[1:] if expected_dimensions[0] == 1 else expected_dimensions
+        return self.__get_frame_data_shape(self.get_expected_dimensions_for_frame_parameters(frame_parameters))
+
+    # the shape of the data of a frame of the given shape. a frame of one row is delivered as 1D data.
+    @staticmethod
+    def __get_frame_data_shape(frame_shape: typing.Tuple[int, ...]) -> typing.Tuple[int, ...]:
+        return frame_shape[1:] if frame_shape[0] == 1 else frame_shape
 
     def get_dimensional_calibrations(self, readout_area: typing.Optional[Geometry.IntRect], binning_shape: typing.Optional[Geometry.IntSize]) -> typing.Sequence[Calibration.Calibration]:
         return self.__simulator.get_dimensional_calibrations(readout_area, binning_shape)
@@ -238,9 +242,10 @@ class Camera(camera_base.CameraDevice3):
         data_element["properties"] = dict()
         data_element["properties"]["frame_number"] = self.__frame_number
         data_element["properties"]["integration_count"] = integration_count
-        # data that has been binned vertically to a single row will be converted to 1D
-        if xdata_buffer.dimensional_shape[0] == 1:
-            data_element["data"] = numpy.squeeze(xdata_buffer._data_ex, axis=0)
+        # the data of a frame of one row is converted to 1D.
+        frame_data_shape = self.__get_frame_data_shape(tuple(xdata_buffer.dimensional_shape))
+        if len(frame_data_shape) == 1:
+            data_element["data"] = numpy.reshape(xdata_buffer._data_ex, frame_data_shape)
             data_element["collection_dimension_count"] = 0
             data_element["datum_dimension_count"] = 1
         return data_element
