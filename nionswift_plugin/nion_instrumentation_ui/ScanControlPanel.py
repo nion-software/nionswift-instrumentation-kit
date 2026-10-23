@@ -785,7 +785,7 @@ class ScanControlPanelModel(Observable.Observable):
     - handle_scan_button_clicked()
     - handle_scan_abort_button_clicked()
     - handle_record_button_clicked()
-    - handle_record_abort_clicked()
+    - handle_capture_button_clicked()
     """
 
     def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, document_controller: DocumentController.DocumentController) -> None:
@@ -1363,12 +1363,6 @@ class ScanControlPanelModel(Observable.Observable):
         """
         ScanControlActions.record(self.__document_controller, self.__scan_hardware_source, frame_parameters=frame_parameters, completion_fn=completion_fn)
 
-    # must be called on ui thread
-    def handle_record_abort_clicked(self) -> None:
-        """ Call this when the user clicks the abort button. """
-        if self.__scan_hardware_source:
-            self.__scan_hardware_source.abort_recording()
-
     def handle_capture_button_clicked(self) -> None:
         def receive_new_xdatas(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
             self.__captured_xdatas_available_listener = None
@@ -1402,12 +1396,6 @@ class ScanControlPanelModel(Observable.Observable):
 
         self.__captured_xdatas_available_listener = self.__scan_hardware_source.xdatas_available_event.listen(receive_new_xdatas)
         self.__handle_state_changed()
-
-    def handle_increase_pmt_clicked(self, channel_index: int) -> None:
-        ScanControlActions.increase_pmt(self.__scan_hardware_source, channel_index)
-
-    def handle_decrease_pmt_clicked(self, channel_index: int) -> None:
-        ScanControlActions.decrease_pmt(self.__scan_hardware_source, channel_index)
 
 
 class ScanPanelController(Declarative.Handler):
