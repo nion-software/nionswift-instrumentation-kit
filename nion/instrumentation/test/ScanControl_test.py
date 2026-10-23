@@ -41,6 +41,7 @@ from nion.ui import UserInterface
 from nion.ui import Window
 from nion.utils import Geometry
 from nion.utils import Observable
+from nionswift_plugin.nion_instrumentation_ui import AcquisitionRecorder
 from nionswift_plugin.nion_instrumentation_ui import ScanControlPanel
 from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
@@ -1621,6 +1622,53 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(active_profile_index, scan_hardware_source.scan_profiles.active_profile_index)
             self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
             self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
+
+    def test_acquisition_recorder_cancelled_before_second_frame_leaves_sequence_mode(self) -> None:
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.pixel_time_us = 2.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            # the scan device waits at the sequence's first frame until the grab has finished, so no second frame arrives.
+            first_frame_arrived = threading.Event()
+            grab_finished = threading.Event()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
+                    grab_finished.wait(10.0)
+
+            # the listener is held until the grab ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            controller = AcquisitionRecorder.Controller()
+            controller.frame_count_model.value = 3
+            # the acquisition recorder records a sequence with the current frame parameters, with no view playing.
+            grab_task = document_controller.event_loop.create_task(controller.grab(document_controller, scan_hardware_source, True))
+            try:
+                changed = False
+                start_time = time.time()
+                while not grab_task.done():
+                    self.assertTrue(time.time() - start_time < 30.0)
+                    if not changed and first_frame_arrived.is_set():
+                        # the user changes the size and field of view and cancels the recorder before its second frame.
+                        changed_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                        changed_frame_parameters.pixel_size = Geometry.IntSize(h=40, w=40)
+                        changed_frame_parameters.fov_nm = 70.0
+                        scan_hardware_source.set_current_frame_parameters(changed_frame_parameters)
+                        controller.cancel()
+                        changed = True
+                    document_controller.periodic()
+                    time.sleep(0.01)
+            finally:
+                grab_finished.set()
+            grab_task.result()
+            controller.close()
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertFalse(scan_hardware_source.is_in_sequence_mode, "the cancelled recorder left the scan in sequence mode")
+            device_frame_parameters = scan_hardware_source.scan_device.current_frame_parameters
+            self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (device_frame_parameters.pixel_size, device_frame_parameters.fov_nm), "the scan device was left on the sequence's frame parameters")
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
