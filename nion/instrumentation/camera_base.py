@@ -1862,9 +1862,9 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 else:
                     calibration_controls = None
                 if calibration_controls is not None:
-                    x_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "x", scaling_x, data_shape[0])
-                    y_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "y", scaling_y, data_shape[1] if len(data_shape) > 1 else 0)
-                    z_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "z", 1, data_shape[2] if len(data_shape) > 2 else 0)
+                    x_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "x", scaling_x, data_shape[-1])
+                    y_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "y", scaling_y, data_shape[-2] if len(data_shape) > 1 else 0)
+                    z_calibration_dict = self.__build_calibration_dict(instrument_controller, calibration_controls, "z", 1, data_shape[-3] if len(data_shape) > 2 else 0)
                     # leave this here for backwards compatibility until origin override is specified in NionCameraManager.py
                     if camera_category.lower() == "ronchigram" and len(data_shape) == 2:
                         y_calibration_dict["offset"] = -y_calibration_dict.get("scale", 1) * data_shape[0] * 0.5
@@ -1943,11 +1943,11 @@ class CameraHardwareSource2(HardwareSource.ConcreteHardwareSource, CameraHardwar
         if processing in {"sum_masked"}:
             return (Calibration.Calibration(),)  # a dummy calibration; the masked dimension is 1 so this is needed
         elif processing in {"sum_project"}:
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[-1])
             return (x_calibration,)
         else:
-            y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[1] if len(data_shape) > 1 else 0)
-            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[0])
+            y_calibration = build_calibration(instrument_controller, calibration_controls, "y", binning, data_shape[0])
+            x_calibration = build_calibration(instrument_controller, calibration_controls, "x", binning, data_shape[1])
             return (y_calibration, x_calibration)
 
     def get_camera_intensity_calibration(self, camera_frame_parameters: CameraFrameParameters) -> Calibration.Calibration:
