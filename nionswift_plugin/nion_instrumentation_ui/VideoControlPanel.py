@@ -309,7 +309,7 @@ class VideoDisplayPanelController:
         if key.text == " ":
             self.__state_controller.handle_play_clicked()
             return True
-        elif key.key == 0x1000000:  # escape
+        elif key.is_escape:
             self.__state_controller.handle_abort_clicked()
             return True
         return False
