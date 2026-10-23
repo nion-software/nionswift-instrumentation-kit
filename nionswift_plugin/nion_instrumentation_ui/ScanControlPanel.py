@@ -49,6 +49,7 @@ from nion.utils import Observable
 from nion.utils import Registry
 from nionswift_plugin.nion_instrumentation_ui import HardwareSourceActions
 from nionswift_plugin.nion_instrumentation_ui import InstrumentationWidgets
+from nionswift_plugin.nion_instrumentation_ui import ScanControlActions
 from nionswift_plugin.nion_instrumentation_ui import ScanProfilesDialog
 
 if typing.TYPE_CHECKING:
@@ -1073,12 +1074,6 @@ class ScanControlPanelModel(Observable.Observable):
     def _scan_frame_parameters_for_testing(self) -> scan_base.ScanFrameParameters:
         return self.__frame_parameters
 
-    def __set_current_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
-        # a recording or a sequence acquisition scans with its own frame parameters, so an edit made then is ignored,
-        # which leaves both the acquisition and the active profile unchanged.
-        if not self.__scan_hardware_source.is_recording and not self.__scan_hardware_source.is_in_sequence_mode:
-            self.__scan_hardware_source.set_current_frame_parameters(frame_parameters)
-
     @property
     def name(self) -> str:
         return self.__name or _("Scan")
@@ -1096,7 +1091,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(self.__frame_parameters.pixel_size.height, value)
         frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     @property
     def height_str(self) -> str:
@@ -1111,7 +1106,7 @@ class ScanControlPanelModel(Observable.Observable):
         else:
             pixel_size = Geometry.IntSize(value, self.__frame_parameters.pixel_size.width)
         frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     @property
     def subscan_width_str(self) -> str | None:
@@ -1122,7 +1117,7 @@ class ScanControlPanelModel(Observable.Observable):
         value = max(1, Converter.IntegerToStringConverter().convert_back(value_str) or 1) if value_str else None
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.subscan_pixel_width_override = value
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     @property
     def placeholder_subscan_width_str(self) -> str | None:
@@ -1142,57 +1137,25 @@ class ScanControlPanelModel(Observable.Observable):
             # notifications and internal values are updated in __handle_state_changed_on_ui_thread
             pixel_size = Geometry.IntSize(self.__width, self.__width)
             frame_parameters.pixel_size = pixel_size
-            self.__set_current_frame_parameters(frame_parameters)
+            ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     def increase_width(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__width_height_linked:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
-        else:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, frame_parameters.pixel_size.width * 2)
-        frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_width(self.__frame_parameters, self.__width_height_linked))
 
     def decrease_width(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__width_height_linked:
-            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
-        else:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height, max(1, frame_parameters.pixel_size.width // 2))
-        frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_width(self.__frame_parameters, self.__width_height_linked))
 
     def increase_height(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__width_height_linked:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width * 2)
-        else:
-            pixel_size = Geometry.IntSize(frame_parameters.pixel_size.height * 2, frame_parameters.pixel_size.width)
-        frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_height(self.__frame_parameters, self.__width_height_linked))
 
     def decrease_height(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        if self.__width_height_linked:
-            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), max(1, frame_parameters.pixel_size.width // 2))
-        else:
-            pixel_size = Geometry.IntSize(max(1, frame_parameters.pixel_size.height // 2), frame_parameters.pixel_size.width)
-        frame_parameters.pixel_size = pixel_size
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_height(self.__frame_parameters, self.__width_height_linked))
 
     def increase_subscan_width(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
-        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
-        frame_parameters.subscan_pixel_width_override = subscan_width * 2
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_subscan_width(self.__frame_parameters))
 
     def decrease_subscan_width(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
-        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
-        frame_parameters.subscan_pixel_width_override = subscan_width // 2
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_subscan_width(self.__frame_parameters))
 
     @property
     def pixel_time_str(self) -> str:
@@ -1203,17 +1166,13 @@ class ScanControlPanelModel(Observable.Observable):
         value = max(0.01, Converter.FloatToStringConverter().convert_back(value_str) or 0.01)
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.pixel_time_us = value
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     def increase_pixel_time(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        frame_parameters.pixel_time_us *= 2.0
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_pixel_time(self.__frame_parameters))
 
     def decrease_pixel_time(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        frame_parameters.pixel_time_us = max(0.01, frame_parameters.pixel_time_us / 2.0)
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_pixel_time(self.__frame_parameters))
 
     @property
     def fov_str(self) -> str:
@@ -1224,17 +1183,13 @@ class ScanControlPanelModel(Observable.Observable):
         fov_nm = max(1.0, Converter.FloatToStringConverter().convert_back(value) or 1.0)
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.fov_nm = fov_nm
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     def increase_fov(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        frame_parameters.fov_nm *= 2.0
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_fov(self.__frame_parameters))
 
     def decrease_fov(self) -> None:
-        frame_parameters = copy.copy(self.__frame_parameters)
-        frame_parameters.fov_nm = max(1.0, frame_parameters.fov_nm / 2.0)
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_fov(self.__frame_parameters))
 
     @property
     def rotation_deg_str(self) -> str:
@@ -1245,7 +1200,7 @@ class ScanControlPanelModel(Observable.Observable):
         rotation_deg = Converter.FloatToStringConverter().convert_back(value) or 0.0
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.rotation_rad = rotation_deg * math.pi / 180.0
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     @property
     def subscan_checkbox_checked(self) -> bool:
@@ -1363,7 +1318,7 @@ class ScanControlPanelModel(Observable.Observable):
     def ac_line_sync_enabled(self, value: bool) -> None:
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.ac_line_sync = value
-        self.__set_current_frame_parameters(frame_parameters)
+        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
     @property
     def fov_label_color(self) -> str:
@@ -1472,24 +1427,10 @@ class ScanControlPanelModel(Observable.Observable):
         self.__handle_state_changed()
 
     def handle_increase_pmt_clicked(self, channel_index: int) -> None:
-        try:
-            self.__scan_hardware_source.increase_pmt(channel_index)
-        except Exception as e:
-            from nion.swift.model import Notification
-            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
-                                                     "Unable to change PMT",
-                                                     f"Exception: {e}.")
-            Notification.notify(notification)
+        ScanControlActions.increase_pmt(self.__scan_hardware_source, channel_index)
 
     def handle_decrease_pmt_clicked(self, channel_index: int) -> None:
-        try:
-            self.__scan_hardware_source.decrease_pmt(channel_index)
-        except Exception as e:
-            from nion.swift.model import Notification
-            notification = Notification.Notification("notification", "\N{MICROSCOPE} STEM Controller",
-                                                     "Unable to change PMT",
-                                                     f"Exception: {e}.")
-            Notification.notify(notification)
+        ScanControlActions.decrease_pmt(self.__scan_hardware_source, channel_index)
 
 
 class ScanPanelController(Declarative.Handler):
@@ -1500,7 +1441,7 @@ class ScanPanelController(Declarative.Handler):
         self.__document_controller = document_controller
         self.__scan_hardware_source = scan_hardware_source
 
-        # the id of the panel showing these controls, which the play and abort buttons give as the origin of their actions.
+        # the id of the panel showing these controls, which its buttons give as the origin of their actions.
         self.__panel_id = panel_id
 
         self._model = ScanControlPanelModel(scan_hardware_source, document_controller)
@@ -1695,35 +1636,41 @@ class ScanPanelController(Declarative.Handler):
     def handle_previous_profile_button(self, widget: UserInterface.Widget) -> None:
         self._profile_configuration_model.activate_previous_profile()
 
+    def __perform_action(self, action_id: str, parameters: typing.Mapping[str, bool | int | str] | None = None) -> None:
+        # run the action on this panel's scan device, with this panel as its origin.
+        action_parameters: dict[str, bool | int | str] = {"hardware_source_id": self.__scan_hardware_source.hardware_source_id}
+        action_parameters.update(parameters or dict())
+        self.__document_controller.perform_action(action_id, parameters=action_parameters, invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=self.__panel_id)
+
     def handle_increase_time(self, widget: UserInterface.Widget) -> None:
-        self._model.increase_pixel_time()
+        self.__perform_action("scan.increase_pixel_time")
 
     def handle_decrease_time(self, widget: UserInterface.Widget) -> None:
-        self._model.decrease_pixel_time()
+        self.__perform_action("scan.decrease_pixel_time")
 
     def handle_increase_fov(self, widget: UserInterface.Widget) -> None:
-        self._model.increase_fov()
+        self.__perform_action("scan.increase_fov")
 
     def handle_decrease_fov(self, widget: UserInterface.Widget) -> None:
-        self._model.decrease_fov()
+        self.__perform_action("scan.decrease_fov")
 
     def handle_increase_width(self, widget: UserInterface.Widget) -> None:
-        self._model.increase_width()
+        self.__perform_action("scan.increase_width", {"width_height_linked": self._model.width_height_linked})
 
     def handle_decrease_width(self, widget: UserInterface.Widget) -> None:
-        self._model.decrease_width()
+        self.__perform_action("scan.decrease_width", {"width_height_linked": self._model.width_height_linked})
 
     def handle_increase_height(self, widget: UserInterface.Widget) -> None:
-        self._model.increase_height()
+        self.__perform_action("scan.increase_height", {"width_height_linked": self._model.width_height_linked})
 
     def handle_decrease_height(self, widget: UserInterface.Widget) -> None:
-        self._model.decrease_height()
+        self.__perform_action("scan.decrease_height", {"width_height_linked": self._model.width_height_linked})
 
     def handle_increase_subscan_width(self, widget: UserInterface.Widget) -> None:
-        self._model.increase_subscan_width()
+        self.__perform_action("scan.increase_subscan_width")
 
     def handle_decrease_subscan_width(self, widget: UserInterface.Widget) -> None:
-        self._model.decrease_subscan_width()
+        self.__perform_action("scan.decrease_subscan_width")
 
     def handle_scan_button(self, widget: UserInterface.Widget) -> None:
         self._model.handle_scan_button_clicked(invoked_from=Window.ActionOrigin.PANEL, invoked_from_id=self.__panel_id)
@@ -1812,6 +1759,8 @@ class ScanControlPanel(Panel.Panel):
 class ScanDisplayPanelControllerHandler(Declarative.Handler):
     def __init__(self, document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, channel_id: str) -> None:
         super().__init__()
+        self.__document_controller = document_controller
+        self.__hardware_source_id = scan_hardware_source.hardware_source_id
         self.__channel_id = channel_id
         self.__channel_index = scan_hardware_source.get_channel_index(channel_id) or 0
         u = Declarative.DeclarativeUI()
@@ -1858,10 +1807,12 @@ class ScanDisplayPanelControllerHandler(Declarative.Handler):
         self._model.handle_capture_button_clicked()
 
     def handle_decrease_pmt_clicked(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_decrease_pmt_clicked(self.__channel_index)
+        self.__document_controller.perform_action("scan.decrease_pmt", parameters={"hardware_source_id": self.__hardware_source_id, "channel_index": self.__channel_index},
+                                                  invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
     def handle_increase_pmt_clicked(self, widget: UserInterface.Widget) -> None:
-        self._model.handle_increase_pmt_clicked(self.__channel_index)
+        self.__document_controller.perform_action("scan.increase_pmt", parameters={"hardware_source_id": self.__hardware_source_id, "channel_index": self.__channel_index},
+                                                  invoked_from=Window.ActionOrigin.WINDOW, invoked_from_id=HardwareSourceActions.DISPLAY_PANEL_ORIGIN_ID)
 
 
 class ScanDisplayPanelController:
