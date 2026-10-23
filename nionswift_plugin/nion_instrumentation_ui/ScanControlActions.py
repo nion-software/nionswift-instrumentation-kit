@@ -31,89 +31,6 @@ def set_current_frame_parameters(scan_hardware_source: scan_base.ScanHardwareSou
         scan_hardware_source.set_current_frame_parameters(frame_parameters)
 
 
-# the functions below each return a copy of the frame parameters with one step of a scan control panel's step buttons applied.
-# width_height_linked is whether the panel links the width and height, so that a step to one is also made to the other.
-
-def with_increased_pixel_time(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    frame_parameters.pixel_time_us *= 2.0
-    return frame_parameters
-
-
-def with_decreased_pixel_time(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    frame_parameters.pixel_time_us = max(0.01, frame_parameters.pixel_time_us / 2.0)
-    return frame_parameters
-
-
-def with_increased_fov(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    frame_parameters.fov_nm *= 2.0
-    return frame_parameters
-
-
-def with_decreased_fov(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    frame_parameters.fov_nm = max(1.0, frame_parameters.fov_nm / 2.0)
-    return frame_parameters
-
-
-def with_increased_width(frame_parameters: scan_base.ScanFrameParameters, width_height_linked: bool) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    pixel_size = frame_parameters.pixel_size
-    if width_height_linked:
-        frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width * 2)
-    else:
-        frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height, pixel_size.width * 2)
-    return frame_parameters
-
-
-def with_decreased_width(frame_parameters: scan_base.ScanFrameParameters, width_height_linked: bool) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    pixel_size = frame_parameters.pixel_size
-    if width_height_linked:
-        frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), max(1, pixel_size.width // 2))
-    else:
-        frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height, max(1, pixel_size.width // 2))
-    return frame_parameters
-
-
-def with_increased_height(frame_parameters: scan_base.ScanFrameParameters, width_height_linked: bool) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    pixel_size = frame_parameters.pixel_size
-    if width_height_linked:
-        frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width * 2)
-    else:
-        frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width)
-    return frame_parameters
-
-
-def with_decreased_height(frame_parameters: scan_base.ScanFrameParameters, width_height_linked: bool) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    pixel_size = frame_parameters.pixel_size
-    if width_height_linked:
-        frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), max(1, pixel_size.width // 2))
-    else:
-        frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), pixel_size.width)
-    return frame_parameters
-
-
-def with_increased_subscan_width(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
-    subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
-    frame_parameters.subscan_pixel_width_override = subscan_width * 2
-    return frame_parameters
-
-
-def with_decreased_subscan_width(frame_parameters: scan_base.ScanFrameParameters) -> scan_base.ScanFrameParameters:
-    frame_parameters = copy.copy(frame_parameters)
-    subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
-    subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
-    frame_parameters.subscan_pixel_width_override = subscan_width // 2
-    return frame_parameters
-
-
 def record(document_controller: DocumentController.DocumentController, scan_hardware_source: scan_base.ScanHardwareSource, *,
            frame_parameters: scan_base.ScanFrameParameters | None = None, completion_fn: typing.Callable[[DataItem.DataItem], None] | None = None) -> None:
     """Record one scan into a new data item for each channel, and show each in the window's next result display panel.
@@ -160,6 +77,12 @@ def _get_scan_hardware_source(context: Window.ActionContext) -> scan_base.ScanHa
     return None
 
 
+def _get_width_height_linked(context: Window.ActionContext) -> bool:
+    # whether a scan width or height step is also made to the other dimension, from the width_height_linked parameter. without the
+    # parameter, the step changes only its own dimension. the scan control panel passes its own link state.
+    return bool(context.parameters.get("width_height_linked", False))
+
+
 class ScanAction(Window.Action):
     """An action on the scan device given by the hardware_source_id parameter.
 
@@ -177,103 +100,118 @@ class FrameParametersStepAction(ScanAction):
 
     def execute(self, context: Window.ActionContext) -> Window.ActionResult:
         if scan_hardware_source := _get_scan_hardware_source(context):
-            frame_parameters = self._get_stepped_frame_parameters(scan_hardware_source.get_current_frame_parameters(), context)
+            frame_parameters = copy.copy(scan_hardware_source.get_current_frame_parameters())
+            self._step_frame_parameters(frame_parameters, context)
             set_current_frame_parameters(scan_hardware_source, frame_parameters)
         return Window.ActionResult(Window.ActionStatus.FINISHED)
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
+    # change the frame parameters, a copy of the scan device's current frame parameters, by one step.
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
         raise NotImplementedError()
-
-
-class SizeStepAction(FrameParametersStepAction):
-    """A step of the scan width or height, which also takes the width_height_linked parameter.
-
-    With width_height_linked true, the step is also made to the other dimension. Without the parameter, the step changes only the
-    dimension the action names. The scan control panel passes its own link state.
-    """
-
-    def _get_width_height_linked(self, context: Window.ActionContext) -> bool:
-        return bool(context.parameters.get("width_height_linked", False))
 
 
 class DecreasePixelTimeAction(FrameParametersStepAction):
     action_id = "scan.decrease_pixel_time"
     action_name = _("Decrease Pixel Time")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_decreased_pixel_time(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        frame_parameters.pixel_time_us = max(0.01, frame_parameters.pixel_time_us / 2.0)
 
 
 class IncreasePixelTimeAction(FrameParametersStepAction):
     action_id = "scan.increase_pixel_time"
     action_name = _("Increase Pixel Time")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_increased_pixel_time(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        frame_parameters.pixel_time_us *= 2.0
 
 
 class DecreaseFieldOfViewAction(FrameParametersStepAction):
     action_id = "scan.decrease_fov"
     action_name = _("Decrease Field of View")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_decreased_fov(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        frame_parameters.fov_nm = max(1.0, frame_parameters.fov_nm / 2.0)
 
 
 class IncreaseFieldOfViewAction(FrameParametersStepAction):
     action_id = "scan.increase_fov"
     action_name = _("Increase Field of View")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_increased_fov(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        frame_parameters.fov_nm *= 2.0
 
 
-class DecreaseWidthAction(SizeStepAction):
+class DecreaseWidthAction(FrameParametersStepAction):
     action_id = "scan.decrease_width"
     action_name = _("Decrease Scan Width")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_decreased_width(frame_parameters, self._get_width_height_linked(context))
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        width_height_linked = _get_width_height_linked(context)
+        pixel_size = frame_parameters.pixel_size
+        if width_height_linked:
+            frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), max(1, pixel_size.width // 2))
+        else:
+            frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height, max(1, pixel_size.width // 2))
 
 
-class IncreaseWidthAction(SizeStepAction):
+class IncreaseWidthAction(FrameParametersStepAction):
     action_id = "scan.increase_width"
     action_name = _("Increase Scan Width")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_increased_width(frame_parameters, self._get_width_height_linked(context))
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        width_height_linked = _get_width_height_linked(context)
+        pixel_size = frame_parameters.pixel_size
+        if width_height_linked:
+            frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width * 2)
+        else:
+            frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height, pixel_size.width * 2)
 
 
-class DecreaseHeightAction(SizeStepAction):
+class DecreaseHeightAction(FrameParametersStepAction):
     action_id = "scan.decrease_height"
     action_name = _("Decrease Scan Height")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_decreased_height(frame_parameters, self._get_width_height_linked(context))
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        width_height_linked = _get_width_height_linked(context)
+        pixel_size = frame_parameters.pixel_size
+        if width_height_linked:
+            frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), max(1, pixel_size.width // 2))
+        else:
+            frame_parameters.pixel_size = Geometry.IntSize(max(1, pixel_size.height // 2), pixel_size.width)
 
 
-class IncreaseHeightAction(SizeStepAction):
+class IncreaseHeightAction(FrameParametersStepAction):
     action_id = "scan.increase_height"
     action_name = _("Increase Scan Height")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_increased_height(frame_parameters, self._get_width_height_linked(context))
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        width_height_linked = _get_width_height_linked(context)
+        pixel_size = frame_parameters.pixel_size
+        if width_height_linked:
+            frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width * 2)
+        else:
+            frame_parameters.pixel_size = Geometry.IntSize(pixel_size.height * 2, pixel_size.width)
 
 
 class DecreaseSubscanWidthAction(FrameParametersStepAction):
     action_id = "scan.decrease_subscan_width"
     action_name = _("Decrease Subscan Width")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_decreased_subscan_width(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
+        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
+        frame_parameters.subscan_pixel_width_override = subscan_width // 2
 
 
 class IncreaseSubscanWidthAction(FrameParametersStepAction):
     action_id = "scan.increase_subscan_width"
     action_name = _("Increase Subscan Width")
 
-    def _get_stepped_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> scan_base.ScanFrameParameters:
-        return with_increased_subscan_width(frame_parameters)
+    def _step_frame_parameters(self, frame_parameters: scan_base.ScanFrameParameters, context: Window.ActionContext) -> None:
+        subscan_pixel_size = frame_parameters.subscan_pixel_size or frame_parameters.scan_size
+        subscan_width = frame_parameters.subscan_pixel_width_override or subscan_pixel_size.width
+        frame_parameters.subscan_pixel_width_override = subscan_width * 2
 
 
 class PMTAction(ScanAction):

@@ -774,14 +774,6 @@ class ScanControlPanelModel(Observable.Observable):
     - channels (read only)
 
     The following methods are provided for modifying the model:
-    - increase_width()
-    - decrease_width()
-    - increase_height()
-    - decrease_height()
-    - increase_pixel_time()
-    - decrease_pixel_time()
-    - increase_fov()
-    - decrease_fov()
     - handle_scan_button_clicked()
     - handle_scan_abort_button_clicked()
     - handle_record_button_clicked()
@@ -1139,24 +1131,6 @@ class ScanControlPanelModel(Observable.Observable):
             frame_parameters.pixel_size = pixel_size
             ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
-    def increase_width(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_width(self.__frame_parameters, self.__width_height_linked))
-
-    def decrease_width(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_width(self.__frame_parameters, self.__width_height_linked))
-
-    def increase_height(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_height(self.__frame_parameters, self.__width_height_linked))
-
-    def decrease_height(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_height(self.__frame_parameters, self.__width_height_linked))
-
-    def increase_subscan_width(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_subscan_width(self.__frame_parameters))
-
-    def decrease_subscan_width(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_subscan_width(self.__frame_parameters))
-
     @property
     def pixel_time_str(self) -> str:
         return self.__pixel_time_str
@@ -1168,12 +1142,6 @@ class ScanControlPanelModel(Observable.Observable):
         frame_parameters.pixel_time_us = value
         ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
 
-    def increase_pixel_time(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_pixel_time(self.__frame_parameters))
-
-    def decrease_pixel_time(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_pixel_time(self.__frame_parameters))
-
     @property
     def fov_str(self) -> str:
         return self.__fov_str
@@ -1184,12 +1152,6 @@ class ScanControlPanelModel(Observable.Observable):
         frame_parameters = copy.copy(self.__frame_parameters)
         frame_parameters.fov_nm = fov_nm
         ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, frame_parameters)
-
-    def increase_fov(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_increased_fov(self.__frame_parameters))
-
-    def decrease_fov(self) -> None:
-        ScanControlActions.set_current_frame_parameters(self.__scan_hardware_source, ScanControlActions.with_decreased_fov(self.__frame_parameters))
 
     @property
     def rotation_deg_str(self) -> str:
