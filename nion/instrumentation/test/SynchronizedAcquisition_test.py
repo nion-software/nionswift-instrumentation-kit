@@ -142,23 +142,28 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             document_controller = test_context.document_controller
             scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
-            # the current frame parameters are set, as a user or a script does.
-            scan_hardware_source.set_current_frame_parameters(scan_hardware_source.get_current_frame_parameters())
+            # the current frame parameters, with a rotation, are set, as a user or a script does.
+            user_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            user_frame_parameters.rotation_rad = math.radians(10)
+            scan_hardware_source.set_current_frame_parameters(user_frame_parameters)
             active_profile = scan_hardware_source.scan_profiles.active_profile
             active_profile_index = scan_hardware_source.scan_profiles.active_profile_index
             active_profile_values = active_profile.write_values_to_dict()
             current_frame_parameters_dict = scan_hardware_source.get_current_frame_parameters().as_dict()
-            # acquire with a size, field of view and pixel time which differ from the current frame parameters.
+            # acquire with a size, field of view, pixel time and rotation which differ from the current frame parameters,
+            # the rotation turned a quarter as a tuning routine does.
             scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
             scan_frame_parameters.pixel_size = Geometry.IntSize(h=4, w=4)
             scan_frame_parameters.fov_nm = 50.0
             scan_frame_parameters.pixel_time_us = 3.0
+            scan_frame_parameters.rotation_rad = math.radians(10) + math.pi / 2
             camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
             camera_frame_parameters.processing = "sum_project"
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             document_controller.periodic()
             self.assertEqual((4, 4), scans[0].data_shape)
-            self.assertEqual(current_frame_parameters_dict, scan_hardware_source.get_current_frame_parameters().as_dict())
+            self.assertAlmostEqual(math.radians(10), scan_hardware_source.get_current_frame_parameters().rotation_rad, msg="the acquisition changed the user's scan rotation")
+            self.assertEqual(current_frame_parameters_dict, scan_hardware_source.get_current_frame_parameters().as_dict(), "the acquisition changed the user's frame parameters")
             self.assertEqual(active_profile_index, scan_hardware_source.scan_profiles.active_profile_index)
             self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
             self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
@@ -474,6 +479,9 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             scans, spectrum_images = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
             for metadata_source in spectrum_images:
                 self.assertAlmostEqual(math.radians(30), Metadata.get_metadata_value(metadata_source, "stem.scan.rotation"))
+            # the scan device reports the rotation it scanned with in the properties of each frame it delivers.
+            for scan in scans:
+                self.assertAlmostEqual(math.radians(30), scan.metadata["scan"]["scan_device_properties"]["rotation_rad"], msg="the scan device did not scan with the acquisition's rotation")
 
     def test_grab_sync_info_has_proper_calibrations(self):
         with self.__test_context(is_eels=True) as test_context:
