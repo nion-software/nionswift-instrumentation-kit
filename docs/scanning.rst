@@ -277,37 +277,65 @@ stopped. ::
     scan.stop_playing()
     scan.abort_playing()
 
-How do I configure the scan for acquire a subscan of an existing scan?
------------------------------------------------------------------------
-A subscan can be specified within the context of an individual scan by specifying additional parameters. ::
+How do I configure the scan to acquire a subscan of an existing scan?
+---------------------------------------------------------------------
+A subscan covers a region of the field of view. To record one frame of a subscan, give ``record_immediate`` frame
+parameters with subscan fields of their own. The recording scans them as given, whether the user's subscan is on or off,
+so the subscan's size in pixels is given along with its region. The user's subscan is unchanged afterwards. ::
 
     import math
-    import time
+    from nion.utils import Geometry
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
 
     scan = stem_controller.scan_controller
 
     frame_parameters = scan.get_current_frame_parameters()
-    frame_parameters["subscan_pixel_size"] = (100, 100)
-    frame_parameters["subscan_fractional_size"] = (0.4, 0.3)
-    frame_parameters["subscan_fractional_center"] = (0.5, 0.5)
-    frame_parameters["subscan_rotation"] = math.radians(15)
-    # adjust frame_parameters further here if desired
+    frame_parameters.subscan_pixel_size = Geometry.IntSize(h=100, w=75)
+    frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.4, w=0.3)
+    frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.5, x=0.5)
+    frame_parameters.subscan_rotation = math.radians(15)
 
-    scan.start_playing(frame_parameters)
+    scan.abort_playing(sync_timeout=5.0)
+    frame = scan.record_immediate(frame_parameters)[0]
 
-============================    =========   ===========
-Name                            Immediate   Description
-============================    =========   ===========
-subscan_pixel_size              yes         the subscan desired size tuple (h, w), in pixels
-subscan_fractional_size         yes         the subscan fractional size, relative to field of view
-subscan_fractional_center       yes         the subscan fractional center, relative to field of view
-subscan_rotation                yes         the subscan rotation around subscan fractional center, in radians
-============================    =========   ===========
+While the user's subscan is on, the current frame parameters carry it in these fields, so a recording made from them
+scans the user's subscan unless the fields are replaced, or set to ``None`` to record the whole field of view.
 
-The fractional size and center are relative to the field of view and have the same rotation. The (0, 0) tuple is at the
-top left and the (1, 1) tuple is at the bottom right. Coordinates are specified in y-axis, x-axis order.
+The user's own subscan is set with the scan's ``subscan_region``, ``subscan_rotation`` and ``subscan_enabled``
+properties. Setting them changes the subscan graphic, the scan control panel and the active scan profile, as the user's
+own change would, and a view scans the subscan while it is on. ::
+
+    import math
+    from nion.utils import Geometry
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    scan = stem_controller.scan_controller
+
+    scan.subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=0.4, w=0.3))
+    scan.subscan_rotation = math.radians(15)
+    scan.subscan_enabled = True
+
+    scan.start_playing()
+
+============================    ===========
+Name                            Description
+============================    ===========
+subscan_region                  the subscan's fractional rectangle, a ``Geometry.FloatRect`` relative to the field of view
+subscan_rotation                the subscan's rotation around the center of its region, in radians
+subscan_enabled                 whether the scan scans the subscan instead of the whole field of view
+============================    ===========
+
+The region and rotation are kept while the subscan is off, and are used again when it is turned on.
+
+The scan decides the size in pixels of the user's subscan. Its height and width are the region's fractional height and
+width times the height and width of the current frame parameters' ``pixel_size``. When the current frame parameters'
+``subscan_pixel_width_override`` is set, the subscan is that many pixels wide and as many pixels high as the region's
+aspect ratio gives.
+
+A subscan's region is relative to the field of view and has the same rotation. The (0, 0) point is at the top left and
+the (1, 1) point is at the bottom right. Coordinates are specified in y-axis, x-axis order.
 
 Changing the rotation will rotate the scan around the microscope axis and the subscan will generally be off axis; so a
 rotation will effectively shift a subscan in addition to rotating it. Positive rotation is counterclockwise.
