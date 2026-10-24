@@ -3024,6 +3024,99 @@ class TestScanControlClass(unittest.TestCase):
             self.assertAlmostEqual(document_model.data_items[0].dimensional_calibrations[0].scale, xdata.dimensional_calibrations[1].scale * 2)
             self.assertEqual(document_model.data_items[0].dimensional_calibrations[0].units, xdata.dimensional_calibrations[1].units)
 
+    def test_record_immediate_with_its_own_frame_parameters_leaves_current_frame_parameters_unchanged(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # the current frame parameters are set, and a channel is enabled, as a user or a script does. enabling the
+            # channel adds enabled_channel_indexes to the current frame parameters, which the recording also adds when it
+            # enables the channels again, so the comparison below sees only what the recording changes.
+            scan_hardware_source.set_current_frame_parameters(scan_hardware_source.get_current_frame_parameters())
+            scan_hardware_source.set_channel_enabled(0, True)
+            current_frame_parameters_dict = scan_hardware_source.get_current_frame_parameters().as_dict()
+            # record with a size, field of view and rotation which differ from the current frame parameters.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=20, w=30)
+            frame_parameters.fov_nm = 7.0
+            frame_parameters.rotation_rad = math.radians(20)
+            scan_hardware_source.record_immediate(frame_parameters)
+            self.assertEqual(current_frame_parameters_dict, scan_hardware_source.get_current_frame_parameters().as_dict(), "the recording changed the user's frame parameters")
+
+    def test_record_immediate_with_its_own_channels_leaves_enabled_channels_as_they_were(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            enabled_channel_indexes = list(scan_hardware_source.get_enabled_channel_indexes())
+            # record from a channel which is not enabled.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=20, w=30)
+            frame_parameters.enabled_channel_indexes = [1]
+            scan_hardware_source.record_immediate(frame_parameters)
+            self.assertEqual(enabled_channel_indexes, list(scan_hardware_source.get_enabled_channel_indexes()), "the recording left the user's channels changed")
+
+    def test_record_immediate_after_aborting_the_view_leaves_no_view_playing(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # stop the view and then record, as a tuning routine does.
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            scan_hardware_source.abort_playing(sync_timeout=3.0)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=20, w=30)
+            scan_hardware_source.record_immediate(frame_parameters)
+            self.assertFalse(scan_hardware_source.is_playing, "a view is scanning after the recording")
+            self.assertFalse(scan_hardware_source.is_recording, "the scan is still recording after the recording returned")
+
+    def test_record_immediate_leaves_the_scan_device_on_the_recording_frame_parameters(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # the current frame parameters are set, as a user or a script does, which puts the scan device on them.
+            scan_hardware_source.set_current_frame_parameters(scan_hardware_source.get_current_frame_parameters())
+            # record with a size, field of view and rotation which differ from the current frame parameters.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=20, w=30)
+            frame_parameters.fov_nm = 7.0
+            frame_parameters.rotation_rad = math.radians(20)
+            scan_hardware_source.record_immediate(frame_parameters)
+            # a probe position set after the recording refers to the frame the scan device is on, which the size, field of
+            # view, center, rotation and subscan fields describe.
+            device_frame_parameters = scan_hardware_source.scan_device.current_frame_parameters
+            for field_name in ("pixel_size", "fov_nm", "center_nm", "rotation_rad", "subscan_pixel_size", "subscan_fractional_size", "subscan_fractional_center", "subscan_rotation"):
+                self.assertEqual(getattr(frame_parameters, field_name), getattr(device_frame_parameters, field_name),
+                                 f"the scan device left the recording's {field_name}, so a probe position set afterwards refers to a different frame")
+
+    def test_record_immediate_with_its_own_subscan_keeps_its_pixel_size_while_the_user_subscan_is_on(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # the user turns on a subscan.
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=0.5, w=0.5))
+            scan_hardware_source.subscan_enabled = True
+            # record a subscan with a region and size in pixels of its own, as a script does.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.subscan_pixel_size = Geometry.IntSize(h=33, w=41)
+            frame_parameters.subscan_fractional_size = Geometry.FloatSize(h=0.3, w=0.4)
+            frame_parameters.subscan_fractional_center = Geometry.FloatPoint(y=0.4, x=0.6)
+            frame_parameters.enabled_channel_indexes = [0]
+            xdata_list = scan_hardware_source.record_immediate(frame_parameters)
+            self.assertEqual(1, len(xdata_list), "the recording did not return the data of its one channel")
+            self.assertEqual((33, 41), xdata_list[0].data_shape, "the recording scanned a size in pixels other than the one it was given")
+
+    def test_record_immediate_with_subscan_fields_cleared_records_the_whole_frame_while_the_user_subscan_is_on(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            # the user turns on a subscan.
+            scan_hardware_source.subscan_region = Geometry.FloatRect.from_center_and_size(Geometry.FloatPoint(y=0.5, x=0.5), Geometry.FloatSize(h=0.5, w=0.5))
+            scan_hardware_source.subscan_enabled = True
+            # record the whole frame by clearing the subscan fields the current frame parameters carry, as a tuning routine
+            # which measures across the whole frame does.
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=20, w=30)
+            frame_parameters.subscan_pixel_size = None
+            frame_parameters.subscan_fractional_size = None
+            frame_parameters.subscan_fractional_center = None
+            frame_parameters.enabled_channel_indexes = [0]
+            xdata_list = scan_hardware_source.record_immediate(frame_parameters)
+            self.assertEqual(1, len(xdata_list), "the recording did not return the data of its one channel")
+            self.assertEqual((20, 30), xdata_list[0].data_shape, "the recording scanned the user's subscan instead of the whole frame")
+            self.assertIsNone(scan_hardware_source.scan_device.current_frame_parameters.subscan_pixel_size, "the scan device was left on a subscan after recording the whole frame")
+
     def test_get_buffer_data_basic_functionality(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
@@ -3253,7 +3346,15 @@ class TestScanControlClass(unittest.TestCase):
             frame_parameters.set_parameter("ac_frame_sync", True)
             frame_parameters.set_parameter("external_clock_mode", 0)
             frame_parameters.set_parameter("external_scan_mode", 0)
+            # the current frame parameters are set, as a user or a script does, which puts the scan device on them.
+            hardware_source.set_current_frame_parameters(hardware_source.get_current_frame_parameters())
+            current_frame_parameters_dict = hardware_source.get_current_frame_parameters().as_dict()
+            device_frame_parameters_dict = hardware_source.scan_device.current_frame_parameters.as_dict()
             hardware_source.scan_immediate(frame_parameters)
+            self.assertFalse(hardware_source.is_playing, "a view is scanning after the scan")
+            self.assertFalse(hardware_source.is_recording, "a recording is scanning after the scan")
+            self.assertEqual(current_frame_parameters_dict, hardware_source.get_current_frame_parameters().as_dict(), "the scan changed the user's frame parameters")
+            self.assertEqual(device_frame_parameters_dict, hardware_source.scan_device.current_frame_parameters.as_dict(), "the scan device was left on the scan's frame parameters")
 
     def test_scan_action_with_frame_parameters(self) -> None:
         with self._test_context() as test_context:
