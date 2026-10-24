@@ -486,14 +486,18 @@ How do I find data items associated with viewing and recording?
 ---------------------------------------------------------------
 The scan device pushes its data through data channels which are connected to data items via data item references in Nion
 Swift. To find the associated data item, you must find the associated data item reference key (there will be one for
-each individual scan detector and application) and then ask Nion Swift for the associated data item. ::
+each individual scan detector and application) and then ask Nion Swift for the associated data item. The default
+channel mapping forms the key from the scan's hardware source id and the detector's channel id joined with underscores,
+with ``subscan`` added for the subscan. A scan device's data channel delegate can change the mapping, for example to put
+the subscan's data into the context data item, and then the key differs. ::
 
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
 
     scan = stem_controller.scan_controller
 
-    reference_key = scan.make_reference_key(channel_index=0, subscan=True)
+    channel_id = scan.get_channel_state(0).channel_id
+    reference_key = "_".join([scan.hardware_source_id, channel_id, "subscan"])
 
     data_item = api.library.get_data_item_for_reference_key(reference_key)
 
@@ -529,17 +533,17 @@ How do I control the probe when not scanning?
 You can determine the probe state and probe position. The probe state will be either "scanning" or "parked". If "parked"
 the position will be either None or a fractional position relative to the most recently acquired data. ::
 
+    from nion.utils import Geometry
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
 
     print(stem_controller.probe_state)
     print(stem_controller.probe_position)
 
-    stem_controller.probe_position = (0.6, 0.4)
+    stem_controller.probe_position = Geometry.FloatPoint(y=0.6, x=0.4)
     stem_controller.probe_position = None  # move to default parked position
 
 .. TODO: observing probe_position, probe_state changes
 .. TODO: partial data acquisitions
 .. TODO: monitoring changes to current values
 .. TODO: get/set named/saved settings
-
