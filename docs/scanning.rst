@@ -60,7 +60,8 @@ ac_line_sync                    no          whether to sync each line to power l
 ac_frame_sync                   no          whether to sync each frame to power line frequency
 ============================    =========   ===========
 
-The scan controller tracks its current frame parameters during acquisition.
+The scan controller tracks its current frame parameters during acquisition. ``get_current_frame_parameters`` returns a
+copy of them, so changing the copy changes nothing until it is passed to the scan.
 
 Some parameters (fov_nm, rotation_rad, pixel_time_us, and flyback_time_us) take effect immediately, while others
 are marked as pending and take effect on the next frame.
@@ -183,6 +184,36 @@ following code::
 
 The ``grab_next_to_start`` and ``grab_next_to_finish`` calls return a list of ``xdata`` objects with an entry for each
 enabled channel. These values are unpacked in the last two lines.
+
+How do I record one frame with its own frame parameters?
+--------------------------------------------------------
+You can record one frame with frame parameters which differ from the current ones, without changing the current ones,
+using the following code::
+
+    from nion.utils import Geometry
+    from nion.utils import Registry
+    stem_controller = Registry.get_component("stem_controller")
+
+    scan = stem_controller.scan_controller
+
+    frame_parameters = scan.get_current_frame_parameters()
+    frame_parameters.pixel_size = Geometry.IntSize(h=100, w=100)
+    frame_parameters.rotation_rad = 0.0
+    frame_parameters.enabled_channel_indexes = [0]
+    # adjust frame_parameters further here if desired
+
+    scan.abort_playing(sync_timeout=5.0)
+    frame = scan.record_immediate(frame_parameters)[0]
+
+The ``record_immediate`` call returns once the frame is acquired, with an ``xdata`` object for each recorded channel. The
+recording uses the frame parameters as given, and the scan's current frame parameters are unchanged afterwards, except
+that they record which channels are enabled, as the scan control panel's channel check boxes do. The channels in
+``enabled_channel_indexes`` are enabled for the recording, and the channels enabled before are enabled again when the
+recording delivers its data. A recording which fails returns an empty list and leaves the channels as it set them.
+
+A running view is suspended during the recording and resumes afterwards, so the example stops the view first. With no
+view running, the scan device stays on the recording's frame parameters afterwards, so a probe position set next refers
+to the recorded frame.
 
 How do I determine if the scan is running?
 ------------------------------------------
@@ -317,6 +348,11 @@ The following code will perform a scan synchronized with a camera::
     frames, camera_data_list = combined_data
     frame = frames[0]
     camera_data = camera_data_list[0]
+
+The scan uses the scan frame parameters it is given, including their rotation. A running view is stopped during the
+acquisition. When the acquisition ends, the scan's current frame parameters are set back to what they were before, which
+also puts the scan device back on them, and the view is started again if it was running. So the current frame parameters
+are unchanged afterwards.
 
 You can use a camera frame parameter to control processing from 2d to 1d data.
 

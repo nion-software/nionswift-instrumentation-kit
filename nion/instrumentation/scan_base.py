@@ -1549,6 +1549,25 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                           scan_data_stream_functor: typing.Optional[Acquisition.DataStreamFunctor] = None,
                           scan_count: int = 1,
                           error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> GrabSynchronizedResult:
+        """Acquire a scan synchronized with a camera, using the given scan and camera frame parameters.
+
+        The scan uses a copy of the given scan frame parameters, including their rotation. A running view is stopped first.
+        When the acquisition ends, whether it finishes, is aborted or fails, the current frame parameters are set back to
+        what they were before, which also puts the scan device back on them, and the view is started again if it was
+        running. The current frame parameters are unchanged afterwards.
+
+        The data channel, if given, receives the camera data as it is acquired. The section height and the scan data stream
+        functor, if given, divide the scan into sections and modify the scan data stream, as a drift corrector does. The
+        error handler, if given, is called with any exception raised during the acquisition. The scan count is the number of
+        scans acquired; when it is more than one, the data of each channel is a sequence with an entry for each scan.
+
+        Returns a tuple of two lists, the scan data with an entry for each enabled scan channel and the camera data with an
+        entry for each camera channel, or None if the acquisition is aborted.
+
+        Raises RuntimeError if the acquisition fails. Raises the scan device's own exception if preparing the synchronized
+        scan fails; that happens before the acquisition starts, so the error handler is not called, a running view is not
+        stopped, and the current frame parameters are unchanged.
+        """
         synchronized_scan_data_stream = make_synchronized_scan_data_stream(scan_hardware_source=self,
                                                                            scan_frame_parameters=copy.copy(scan_frame_parameters),
                                                                            camera_hardware_source=camera,
@@ -1924,6 +1943,26 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def record_immediate(self,
                          frame_parameters: ScanFrameParameters,
                          sync_timeout: typing.Optional[float] = None) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]:
+        """Record one frame with the given frame parameters and return its data once it is acquired.
+
+        The recording uses a copy of the given frame parameters, including their subscan fields, and the current frame
+        parameters are unchanged afterwards, except that they record which channels are enabled, as the scan control
+        panel's channel check boxes do. Frame parameters taken from the current ones carry the user's subscan while it
+        is on, so a recording made from them scans that subscan unless their subscan fields are replaced. If the frame
+        parameters have enabled channel indexes, those channels are enabled for the recording, and the channels which were
+        enabled before are enabled again when the recording delivers its data. A recording which fails leaves the channels
+        as it set them.
+
+        A running view is suspended during the recording and resumes afterwards, which puts the scan device back on the
+        view's frame parameters. Otherwise, the scan device stays on the recording's frame parameters afterwards, so that
+        a probe position set next refers to the recorded frame. The recording does not start a view.
+
+        The sync timeout bounds the wait for the scan device to stop after the frame, and defaults to three seconds. The
+        wait for the frame itself is unbounded.
+
+        Returns the data for each recorded channel, or an empty list if the recording fails. Raises AssertionError if the
+        scan is already recording or does not stop within the sync timeout.
+        """
         assert not self.is_recording
         frame_parameters = copy.deepcopy(frame_parameters)
         old_enabled_channels = self.get_enabled_channel_indexes()
@@ -2249,6 +2288,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         return list()
 
     def scan_immediate(self, frame_parameters: ScanFrameParameters) -> None:
+        """Scan one frame on the scan device with the given frame parameters, discarding its data.
+
+        The frame parameters are given to the scan device as they are, without going through the current frame parameters,
+        which are unchanged afterwards. The method returns once the frame is scanned, after putting the scan device back on
+        the frame parameters it had before. It neither starts a view or a recording nor stops one, so the caller stops any
+        view or recording first. No data is read from the scan, so no data item is made.
+        """
         old_frame_parameters = self.__device.current_frame_parameters
         self.__device.set_frame_parameters(frame_parameters)
         frame_number = self.__device.start_frame(False)
