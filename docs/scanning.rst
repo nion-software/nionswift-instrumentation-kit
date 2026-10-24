@@ -40,18 +40,20 @@ Subscans can also be specified within a full scan context. Subscans take the rot
 
 What parameters can be controlled on the scan?
 ----------------------------------------------
-An individual scan is configured with frame parameters, which is just a Python ``dict`` structure.
+An individual scan is configured with frame parameters, a ``ScanFrameParameters`` object. A parameter with an
+attribute, such as ``fov_nm``, is read and set through the attribute. Other parameters, such as those particular to a
+scan device, are read with ``get_parameter`` and set with ``set_parameter``.
 
 The following parameters are supported:
 
 ============================    =========   ===========
 Name                            Immediate   Description
 ============================    =========   ===========
-fov_size_nm                     yes         the physical field of view, in nm
+fov_nm                          yes         the physical field of view, in nm
 rotation_rad                    yes         the rotation, in radians
 pixel_time_us                   yes         the time to spend at each pixel, in microseconds
 flyback_time_us                 yes         the flyback time, in microseconds
-size                            no          the size, in pixels, of the scan
+pixel_size                      no          the size, in pixels, of the scan
 external_clock_wait_time_ms     no          the maximum time to wait for external trigger
 external_clock_mode             no          the external trigger mode
 ac_line_sync                    no          whether to sync each line to power line frequency
@@ -60,7 +62,7 @@ ac_frame_sync                   no          whether to sync each frame to power 
 
 The scan controller tracks its current frame parameters during acquisition.
 
-Some parameters (fov_size_nm, rotation_rad, pixel_time_us, and flyback_time_us) take effect immediately, while others
+Some parameters (fov_nm, rotation_rad, pixel_time_us, and flyback_time_us) take effect immediately, while others
 are marked as pending and take effect on the next frame.
 
 More complex scans can also be comprised of more than one individual scan. If parameters are changed during a complex
@@ -129,7 +131,7 @@ You can configure an individual scan and start viewing using the following code:
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
 
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
 As the scan starts, output data will be associated with data items in Nion Swift which will be updated in near real
 time.
@@ -143,11 +145,11 @@ You can configure an individual scan, start viewing, and grab data from the acqu
 
     scan = stem_controller.scan_controller
 
+    scan.set_enabled_channels([0])
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
 
-    scan.set_enabled_channels([0])
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
     # grab two consecutive frames, with a guaranteed start time after the first call
     frame1 = scan.grab_next_to_start()[0]
@@ -167,11 +169,11 @@ following code::
 
     scan = stem_controller.scan_controller
 
+    scan.set_enabled_channels([1, 2])
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
 
-    scan.set_enabled_channels([1, 2])
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
     # grab two consecutive frames, with a guaranteed start time after the first call
     frames1 = scan.grab_next_to_start()
@@ -237,7 +239,7 @@ stopped. ::
     frame_time = scan.calculate_frame_time(frame_parameters)
     # adjust frame_parameters here if desired
 
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
     time.sleep(frame_time * 0.75)
 
@@ -292,6 +294,7 @@ multiple cameras/devices.
 
 The following code will perform a scan synchronized with a camera::
 
+    from nion.utils import Geometry
     from nion.utils import Registry
     stem_controller = Registry.get_component("stem_controller")
 
@@ -300,10 +303,10 @@ The following code will perform a scan synchronized with a camera::
     eels = stem_controller.eels_camera
 
     scan_frame_parameters = scan.get_current_frame_parameters()
-    scan_frame_parameters["size"] = (16, 12)
+    scan_frame_parameters.pixel_size = Geometry.IntSize(h=16, w=12)
 
     eels_frame_parameters = eels.get_current_frame_parameters()
-    eels_frame_parameters["processing"] = "sum_project"  # produce 1D spectrum at each scan location
+    eels_frame_parameters.processing = "sum_project"  # produce 1D spectrum at each scan location
     # further adjust scan_frame_parameters and eels_frame_parameters here if desired
 
     combined_data = scan.grab_synchronized(
@@ -406,7 +409,7 @@ You can grab recently acquired scans (as long as they each have the same pixel s
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
 
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
     # grab buffered frames
     frames_list = scan.grab_buffer(10)
@@ -448,12 +451,12 @@ metadata using the following technique::
     frame_parameters = scan.get_current_frame_parameters()
     # adjust frame_parameters here if desired
 
-    scan.start_playing(frame_parameters)
+    scan.start_playing(frame_parameters=frame_parameters)
 
     # grab a frame as an example
     frame = scan.grab_next_to_finish()[0]
 
-    new_frame_parameters = scan.create_frame_parameters(frame.metadata["hardware_source"])
+    new_frame_parameters = scan.get_frame_parameters_from_metadata(frame.metadata)
 
 .. _probe-position:
 
