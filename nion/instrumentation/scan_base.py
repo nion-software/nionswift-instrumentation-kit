@@ -497,8 +497,16 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__is_continuous = is_continuous
         self.__display_name = display_name
         self.__hardware_source_id = hardware_source_id
-        self.__frame_parameters = copy.copy(frame_parameters)
         self.__frame_parameters_at_start_of_frame = copy.copy(frame_parameters)
+
+        # the task's frame parameters, and whether it is scanning. set_frame_parameters may be called from any thread,
+        # and resume, suspend and stop are called on the hardware source's acquisition thread. the lock makes storing
+        # the frame parameters and deciding whether to send them one step, so new frame parameters either reach a
+        # scanning task at once or are stored before a resume sends them.
+        self.__frame_parameters_lock = threading.Lock()
+        self.__frame_parameters = copy.copy(frame_parameters)
+        self.__is_scanning = False
+
         self.__acquisition_task_parameters = acquisition_task_parameters or ScanAcquisitionTaskParameters()
         self.__frame_number: typing.Optional[int] = None
         self.__scan_id: typing.Optional[uuid.UUID] = None
@@ -510,9 +518,18 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
         self.__subscan_enabled = False
 
     def set_frame_parameters(self, frame_parameters: ScanFrameParameters) -> None:
-        if self.__frame_parameters.as_dict() != frame_parameters.as_dict():
-            self.__frame_parameters = copy.copy(frame_parameters)
-            self.__activate_frame_parameters()
+        """Set the task's frame parameters.
+
+        A scanning task sends them to the scan device at once. A suspended task, or one which has not started, sends
+        them when it resumes or starts. It may be called from any thread.
+        """
+        with self.__frame_parameters_lock:
+            # the stored frame parameters are on the scan device while the task scans, and go to it when the task
+            # resumes, so equal ones need nothing.
+            if self.__frame_parameters.as_dict() != frame_parameters.as_dict():
+                self.__frame_parameters = copy.copy(frame_parameters)
+                if self.__is_scanning:
+                    self.__activate_frame_parameters()
 
     @property
     def frame_parameters(self) -> typing.Optional[ScanFrameParameters]:
@@ -534,6 +551,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _suspend_acquisition(self) -> None:
         super()._suspend_acquisition()
+        with self.__frame_parameters_lock:
+            self.__is_scanning = False
         self.__device.cancel()
         self.__device.stop()
         start_time = time.time()
@@ -543,7 +562,9 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _resume_acquisition(self) -> None:
         super()._resume_acquisition()
-        self.__activate_frame_parameters()
+        with self.__frame_parameters_lock:
+            self.__activate_frame_parameters()
+            self.__is_scanning = True
         self.__frame_number = self.__device.start_frame(self.__is_continuous)
         self.__scan_id = self.__last_scan_id
         self.__pixels_to_skip = 0
@@ -562,6 +583,8 @@ class ScanAcquisitionTask(HardwareSource.AcquisitionTask):
 
     def _stop_acquisition(self) -> None:
         super()._stop_acquisition()
+        with self.__frame_parameters_lock:
+            self.__is_scanning = False
         self.__device.stop()
         start_time = time.time()
         while self.__device.is_scanning and time.time() - start_time < 1.0:
@@ -1321,8 +1344,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__frame_parameters = self.__settings.get_current_frame_parameters()
         self.__record_parameters = self.__settings.get_record_frame_parameters()
 
-        # used for avoiding parameter changes during acquisition procedures. not perfect yet.
+        # whether a sequence has started and not yet finished or aborted.
         self.__in_sequence_mode = False
+
+        # orders a change to the current frame parameters with the end of a sequence, which runs on another thread, so
+        # the scan device ends on the latest current frame parameters. it is held while the current frame parameters are
+        # sent and stored, and while sequence mode is left.
+        self.__device_frame_parameters_lock = threading.RLock()
 
         # the latest sequence's frame parameters. they are kept after the sequence finishes, so that its data can still
         # be popped. start_sequence_mode replaces them before it enters sequence mode, on the thread running the
@@ -1330,7 +1358,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # reference is atomic, so a reader sees either the previous or the new frame parameters.
         self.__sequence_frame_parameters: ScanFrameParameters | None = None
 
+        # the view task. a change to the current frame parameters goes to it. start_playing sets it, and stop_playing,
+        # abort_playing and the acquisition thread, when the view task finishes, clear it. replacing the reference is
+        # atomic, so a reader gets either the previous or the new task. a change sent to a view task just as it
+        # finishes doesn't reach the scan device, but the next view starts with it, since a view starts with the
+        # current frame parameters.
         self.__acquisition_task: typing.Optional[HardwareSource.AcquisitionTask] = None
+
         # the task queue is a list of tasks that must be executed on the UI thread. items are added to the queue
         # and executed at a later time in the __handle_executing_task_queue method.
         self.__task_queue: queue.Queue[typing.Callable[[], None]] = queue.Queue()
@@ -1556,10 +1590,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
                           error_handler: typing.Optional[typing.Callable[[Exception], None]] = None) -> GrabSynchronizedResult:
         """Acquire a scan synchronized with a camera, using the given scan and camera frame parameters.
 
-        The scan uses a copy of the given scan frame parameters, including their rotation. A running view is stopped first.
-        When the acquisition ends, whether it finishes, is aborted or fails, the current frame parameters are set back to
-        what they were before, which also puts the scan device back on them, and the view is started again if it was
-        running. The current frame parameters are unchanged afterwards.
+        The scan uses a copy of the given scan frame parameters, including their rotation. A running view is stopped
+        first. When the acquisition ends, whether it finishes, is aborted or fails, the view is started again if it was
+        running.
 
         The data channel, if given, receives the camera data as it is acquired. The section height and the scan data stream
         functor, if given, divide the scan into sections and modify the scan data stream, as a drift corrector does. The
@@ -2018,21 +2051,33 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
         # calculate the sequence's subscan as a recording does.
         self.__sequence_frame_parameters = self.__calculate_subscan_parameters(scan_frame_parameters)
-        self.__set_in_sequence_mode(True)
+        if not self.__in_sequence_mode:
+            self.__in_sequence_mode = True
+            self.notify_property_changed("is_in_sequence_mode")
         assert not self.__device.is_scanning
         self.start_playing()
 
     def finish_sequence_mode(self) -> None:
-        self.__set_in_sequence_mode(False)
+        # release the sequence buffer before leaving sequence mode. leaving sends the current frame parameters to a view
+        # which may still be playing, and a scan device which applies them at once, as SuperScan does, must not get them
+        # while the buffer is still sized for the sequence.
         self.set_sequence_buffer_size(0)
+        self.__leave_sequence_mode()
 
     def abort_sequence_mode(self) -> None:
-        self.__set_in_sequence_mode(False)
-        self.abort_playing(sync_timeout=5.0)
+        try:
+            self.abort_playing(sync_timeout=5.0)
+        finally:
+            self.__leave_sequence_mode()
 
-    def __set_in_sequence_mode(self, in_sequence_mode: bool) -> None:
-        if in_sequence_mode != self.__in_sequence_mode:
-            self.__in_sequence_mode = in_sequence_mode
+    def __leave_sequence_mode(self) -> None:
+        # an aborted sequence is also finished, and the second call does nothing.
+        with self.__device_frame_parameters_lock:
+            was_in_sequence_mode = self.__in_sequence_mode
+            if was_in_sequence_mode:
+                self.__in_sequence_mode = False
+                self.__send_current_frame_parameters_to_device()
+        if was_in_sequence_mode:
             self.notify_property_changed("is_in_sequence_mode")
 
     @property
@@ -2067,20 +2112,38 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         if sync_scan_properties:
             self.__sync_scan_properties_from_frame_parameters(frame_parameters)
         frame_parameters = self.__apply_subscan_parameters(frame_parameters)
-        acquisition_task = self.__acquisition_task
-        if isinstance(acquisition_task, ScanAcquisitionTask):
-            acquisition_task.set_frame_parameters(frame_parameters)
-        else:
-            # handle case where current profile has been changed but scan is not running.
-            device_frame_parameters = copy.copy(frame_parameters)
-            self.__device.set_frame_parameters(device_frame_parameters)
-        self.max_field_of_view_nm_stream.value = self.__device.calculate_max_field_of_view(frame_parameters)
-        self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
-        self.__frame_parameters = copy.copy(frame_parameters)
+        with self.__device_frame_parameters_lock:
+            self.__send_frame_parameters_to_device(frame_parameters)
+            self.max_field_of_view_nm_stream.value = self.__device.calculate_max_field_of_view(frame_parameters)
+            self.__stem_controller._update_scan_context(frame_parameters.pixel_size, frame_parameters.center_nm, frame_parameters.fov_nm, frame_parameters.rotation_rad)
+            self.__frame_parameters = copy.copy(frame_parameters)
         self.current_frame_parameters_changed_event.fire(self.__frame_parameters)
         frame_parameters_with_channels = copy.copy(frame_parameters)
         frame_parameters_with_channels.enabled_channel_indexes = self.get_enabled_channel_indexes()
         self.scan_frame_parameters_changed_event.fire(frame_parameters_with_channels)
+
+    def __send_current_frame_parameters_to_device(self) -> None:
+        """Send the current frame parameters to the scan device, through the view if it is playing.
+
+        It doesn't fire an event. It may be called from any thread and doesn't wait for the main thread.
+        """
+        with self.__device_frame_parameters_lock:
+            self.__send_frame_parameters_to_device(self.__frame_parameters)
+
+    def __send_frame_parameters_to_device(self, frame_parameters: ScanFrameParameters) -> None:
+        # in sequence mode, leaving sequence mode sends the change. a view task sends it at once while it scans, or when
+        # it resumes after a recording. during a recording with no view, the next view starts with it.
+        acquisition_task = self.__acquisition_task
+        if self.__in_sequence_mode:
+            pass
+        elif isinstance(acquisition_task, ScanAcquisitionTask):
+            acquisition_task.set_frame_parameters(frame_parameters)
+        elif self.is_recording:
+            pass
+        else:
+            # handle case where current profile has been changed but scan is not running.
+            device_frame_parameters = copy.copy(frame_parameters)
+            self.__device.set_frame_parameters(device_frame_parameters)
 
     def __handle_current_frame_parameters_changed(self, frame_parameters: ScanFrameParameters) -> None:
         # this method is called when a write to the selected hardware slot through set_frame_parameters changes the
@@ -2500,15 +2563,14 @@ class ScanFrameSequenceDataStream(Acquisition.DataStream):
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
         was_playing = self.__scan_hardware_source.is_playing
-        def unprepare(scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
-            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+        def unprepare(scan_hardware_source: ScanHardwareSource) -> None:
             if was_playing:
                 scan_hardware_source.start_playing()
             else:
                 scan_hardware_source.stop_playing()
 
         self.__scan_hardware_source.abort_playing(sync_timeout=60.0)
-        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source, self.__scan_hardware_source.get_current_frame_parameters()))
+        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source))
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:
@@ -2662,15 +2724,14 @@ class ScanDataStream(Acquisition.DataStream):
 
     def _prepare_device_state(self, device_state: Acquisition.DeviceState) -> None:
         was_playing = self.__scan_hardware_source.is_playing
-        def unprepare(scan_hardware_source: ScanHardwareSource, scan_frame_parameters: ScanFrameParameters) -> None:
-            scan_hardware_source.set_current_frame_parameters(scan_frame_parameters)
+        def unprepare(scan_hardware_source: ScanHardwareSource) -> None:
             if was_playing:
                 scan_hardware_source.start_playing()
             else:
                 scan_hardware_source.stop_playing()
 
         self.__scan_hardware_source.abort_playing(sync_timeout=60.0)
-        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source, self.__scan_hardware_source.get_current_frame_parameters()))
+        device_state.add_state("restart_scan", functools.partial(unprepare, self.__scan_hardware_source))
 
     @property
     def channels(self) -> typing.Tuple[Acquisition.Channel, ...]:

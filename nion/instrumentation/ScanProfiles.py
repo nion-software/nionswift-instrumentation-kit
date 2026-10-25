@@ -780,13 +780,11 @@ class ProfileConfigurationModel(Observable.Observable):
 
     The profiles_changed_event fires with the properties to save whenever the profiles or the active profile change.
 
-    Changes to the current frame parameters and subscan of the scan device are edits to the current values, except
-    while the scan device is recording or in sequence mode, when they are ignored.
+    Changes to the current frame parameters and subscan of the scan device are edits to the current values.
 
     The model is confined to the main thread and does not protect its state against concurrent access. This includes
     the scan device's changes to its current frame parameters and subscan, which the model follows as they happen, so
-    the scan device is expected to make those changes on the main thread, other than the ignored ones, which may come
-    from another thread.
+    the scan device is expected to make those changes on the main thread.
     """
 
     def __init__(self, scan_hardware_source: scan_base.ScanHardwareSource, saved_scan_profiles: SavedScanProfiles | None = None) -> None:
@@ -935,8 +933,6 @@ class ProfileConfigurationModel(Observable.Observable):
         }
 
     def __update_frame_parameters(self, scan_frame_parameters: scan_base.ScanFrameParameters) -> None:
-        if self.__scan_hardware_source.is_recording or self.__scan_hardware_source.is_in_sequence_mode:
-            return
         self.__current_values.read_from_frame_parameters(self.__get_frame_parameters_with_subscan(scan_frame_parameters))
         # a change made while synchronizing is saved once the synchronizing is done.
         if not self.__is_synchronizing:
@@ -983,9 +979,8 @@ class ProfileConfigurationModel(Observable.Observable):
     def can_activate_profile(self) -> bool:
         """Return whether a profile can be activated now, which it cannot while the scan device is recording or in sequence mode.
 
-        An acquisition restores the frame parameters it started from when it ends, which would write them to a profile
-        activated during it. This property is not observable; the scan device's acquisition_state_changed_event and its
-        is_in_sequence_mode property change tell when it may change.
+        This property is not observable; the scan device's acquisition_state_changed_event and its is_in_sequence_mode
+        property change tell when it may change.
         """
         return not self.__scan_hardware_source.is_recording and not self.__scan_hardware_source.is_in_sequence_mode
 

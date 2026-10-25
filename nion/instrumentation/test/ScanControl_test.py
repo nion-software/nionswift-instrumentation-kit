@@ -1707,6 +1707,55 @@ class TestScanControlClass(unittest.TestCase):
             self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
             self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
 
+    def test_frame_parameters_changed_during_sequence_acquisition_are_kept_without_changing_the_acquisition(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            # the scan device waits at the first frame of the sequence until the frame parameters have been changed.
+            first_frame_arrived = threading.Event()
+            frame_parameters_changed = threading.Event()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
+                    frame_parameters_changed.wait(10.0)
+
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            # a script acquires a sequence of three frames on its own thread.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(maker,))
+            acquisition_thread.start()
+            try:
+                self.assertTrue(first_frame_arrived.wait(10.0))
+                # the user changes the size and field of view during the acquisition.
+                changed_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                changed_frame_parameters.pixel_size = Geometry.IntSize(h=40, w=40)
+                changed_frame_parameters.fov_nm = 70.0
+                scan_hardware_source.set_current_frame_parameters(changed_frame_parameters)
+            finally:
+                frame_parameters_changed.set()
+                acquisition_thread.join(60.0)
+            self.assertFalse(acquisition_thread.is_alive())
+            device_state.restore()
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertFalse(maker.is_error, "the change during the acquisition made it fail")
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 24, 24), xdata.data_shape, "the change during the acquisition changed what it acquired")
+            self.assertAlmostEqual(50.0 / 24, xdata.dimensional_calibrations[2].scale)
+            frame_parameters_after = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (frame_parameters_after.pixel_size, frame_parameters_after.fov_nm), "the change during the acquisition was lost when it ended")
+            self.assertEqual((40, 40, 70.0), (active_profile.width, active_profile.height, active_profile.field_width), "the active profile lost the change made during the acquisition")
+
     def test_view_playing_through_sequence_continues_with_frame_parameters_changed_during_it(self) -> None:
         with self._test_context() as test_context:
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
@@ -1879,6 +1928,64 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.set_current_frame_parameters(changed_frame_parameters)
             device_frame_parameters = scan_hardware_source.scan_device.current_frame_parameters
             self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (device_frame_parameters.pixel_size, device_frame_parameters.fov_nm), "the change made after the view ended did not reach the scan device")
+
+    def test_frame_parameters_changed_during_record_are_kept_for_the_view_without_changing_the_record(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            current_frame_parameters.pixel_time_us = 2.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            record_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            record_frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            record_frame_parameters.fov_nm = 50.0
+            # the scan device waits at the end of the record's frame, the frame with the record's size, until the frame
+            # parameters have been changed. the view is suspended while the record scans.
+            frame_during_record_arrived = threading.Event()
+            frame_parameters_changed = threading.Event()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                xdata = data_promises[0].xdata if data_promises else None
+                if scan_hardware_source.is_recording and xdata is not None and xdata.data_shape == (24, 24) and not frame_during_record_arrived.is_set():
+                    frame_during_record_arrived.set()
+                    frame_parameters_changed.wait(10.0)
+
+            # the listener is held until the record ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                recording_task = scan_hardware_source.start_recording(frame_parameters=record_frame_parameters)
+                try:
+                    self.assertTrue(frame_during_record_arrived.wait(10.0))
+                    # the user changes the size and field of view during the record.
+                    changed_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    changed_frame_parameters.pixel_size = Geometry.IntSize(h=40, w=40)
+                    changed_frame_parameters.fov_nm = 70.0
+                    scan_hardware_source.set_current_frame_parameters(changed_frame_parameters)
+                    device_frame_parameters = scan_hardware_source.scan_device.current_frame_parameters
+                    self.assertEqual((Geometry.IntSize(h=24, w=24), 50.0), (device_frame_parameters.pixel_size, device_frame_parameters.fov_nm),
+                                     "the change during the record reached the scan device while it recorded")
+                finally:
+                    frame_parameters_changed.set()
+                recorded_xdata = recording_task.grab_xdatas(timeout=10.0)[0]
+                assert recorded_xdata
+                self.assertEqual((24, 24), recorded_xdata.data_shape, "the change during the record changed what it recorded")
+                self.assertAlmostEqual(50.0 / 24, recorded_xdata.dimensional_calibrations[0].scale)
+                start_time = time.time()
+                while scan_hardware_source.is_recording:
+                    self.assertTrue(time.time() - start_time < 30.0)
+                    time.sleep(0.01)
+                viewed_xdata = scan_hardware_source.get_next_xdatas_to_start(timeout=10.0)[0]
+                assert viewed_xdata
+                self.assertEqual((40, 40), viewed_xdata.data_shape, "the view did not resume with the change made during the record")
+            finally:
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+                xdatas_available_listener = typing.cast(typing.Any, None)
+            frame_parameters_after = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (frame_parameters_after.pixel_size, frame_parameters_after.fov_nm), "the change during the record was lost when it ended")
+            self.assertEqual((40, 40, 70.0), (active_profile.width, active_profile.height, active_profile.field_width), "the active profile lost the change made during the record")
 
     def test_changing_profile_updates_frame_parameters_in_ui(self):
         with self._test_context() as test_context:
