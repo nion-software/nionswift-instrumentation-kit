@@ -34,6 +34,7 @@ from nion.swift.model import DataItem
 from nion.swift.model import ImportExportManager
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
+from nion.ui import CanvasItem
 from nion.ui import Declarative
 from nion.ui import TestUI
 from nion.ui import UserInterface
@@ -1287,6 +1288,70 @@ class TestScanControlClass(unittest.TestCase):
             scan_hardware_source.stop_playing(sync_timeout=3.0)
             document_controller.periodic()
             self.assertEqual("Ned Flanders", document_model.data_items[3].session_metadata["microscopist"])
+
+    def test_capture_button_in_scan_display_panel_control_bar_captures_new_data_items(self):
+        with self._test_context() as test_context:
+            ScanControlPanel.run()
+            try:
+                document_controller = test_context.document_controller
+                document_model = test_context.document_model
+                scan_hardware_source = test_context.scan_hardware_source
+                scan_hardware_source.set_channel_enabled(1, True)
+                display_panel = document_controller.selected_display_panel
+                display_panel.change_display_panel_content({"controller_type": "scan-live", "hardware_source_id": scan_hardware_source.hardware_source_id, "channel_id": scan_hardware_source.get_channel_state(0).channel_id})
+                frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                frame_parameters.pixel_time_us = 4.0
+                scan_hardware_source.start_playing(frame_parameters=frame_parameters, sync_timeout=3.0)
+                scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+                document_controller.periodic()
+                data_item_count = len(document_model.data_items)
+
+                # find the Capture button in the display panel's control bar.
+                def find_capture_button(canvas_item: CanvasItem.AbstractCanvasItem) -> CanvasItem.TextButtonCanvasItem | None:
+                    if isinstance(canvas_item, CanvasItem.TextButtonCanvasItem) and canvas_item.text == "Capture":
+                        return canvas_item
+                    if isinstance(canvas_item, CanvasItem.CanvasItemComposition):
+                        for child_canvas_item in canvas_item.canvas_items:
+                            if capture_button := find_capture_button(child_canvas_item):
+                                return capture_button
+                    return None
+
+                capture_button = find_capture_button(display_panel.footer_canvas_item)
+                assert capture_button
+
+                # hold the acquisition thread in a partial update of the next frame, so that the capture cannot finish
+                # until the Capture button's state has been checked.
+                frame_held_event = threading.Event()
+                frame_released_event = threading.Event()
+
+                # called from the acquisition thread
+                def handle_data_channel_updated(data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
+                    if data_channel_event_args.state == "partial" and not frame_held_event.is_set():
+                        frame_held_event.set()
+                        frame_released_event.wait(10.0)
+
+                data_channel_updated_listener = scan_hardware_source.data_channel_updated_event.listen(handle_data_channel_updated)
+                try:
+                    self.assertTrue(frame_held_event.wait(10.0), "no partial frame update after the first frame finished")
+                    # a click on the button reaches it as mouse_clicked.
+                    capture_button.mouse_clicked(0, 0, CanvasItem.KeyboardModifiers())
+                    document_controller.periodic()
+                    self.assertFalse(capture_button.enabled)
+                finally:
+                    frame_released_event.set()
+
+                # the capture listens before this wait does, so the capture has its frames when this wait returns.
+                scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+                document_controller.periodic()
+                self.assertEqual(data_item_count + 2, len(document_model.data_items))
+                self.assertTrue(capture_button.enabled)
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+                document_controller.periodic()
+
+                # keep the listener until acquisition stops
+                data_channel_updated_listener = None
+            finally:
+                ScanControlPanel.stop()
 
     def test_changing_fov_during_capture_results_in_correct_calibration(self):
         with self._test_context() as test_context:
