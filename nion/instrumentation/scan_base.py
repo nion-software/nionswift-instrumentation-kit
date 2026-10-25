@@ -2164,11 +2164,9 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
             self.__device.set_frame_parameters(device_frame_parameters)
 
     def __handle_current_frame_parameters_changed(self, frame_parameters: ScanFrameParameters) -> None:
-        # this method is called when a write to the selected hardware slot through set_frame_parameters changes the
-        # settings' current frame parameters. if the scan is recording or doing a sequence, do nothing since parameters
-        # shouldn't change during those activities.
-        if not self.is_recording and not self.__in_sequence_mode:
-            self.__set_current_frame_parameters(frame_parameters)
+        # this method is called when a write through set_frame_parameters to the selected profile index changes the
+        # settings' current frame parameters.
+        self.__set_current_frame_parameters(frame_parameters)
 
     def get_current_frame_parameters(self) -> ScanFrameParameters:
         """Return a copy of the current frame parameters."""
