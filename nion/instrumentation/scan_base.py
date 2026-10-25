@@ -1347,9 +1347,10 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         # whether a sequence has started and not yet finished or aborted.
         self.__in_sequence_mode = False
 
-        # orders a change to the current frame parameters with the end of a sequence, which runs on another thread, so
-        # the scan device ends on the latest current frame parameters. it is held while the current frame parameters are
-        # sent and stored, and while sequence mode is left.
+        # orders a change to the current frame parameters with the start of a recording or a sequence and the end of a
+        # sequence, which run on other threads. so an edit never reaches the acquisition, and a sequence which ends
+        # leaves the scan device on the latest current frame parameters. it is held while the current frame parameters
+        # are sent and stored, while sequence mode is entered or left, and while a record task is added.
         self.__device_frame_parameters_lock = threading.RLock()
 
         # the latest sequence's frame parameters. they are kept after the sequence finishes, so that its data can still
@@ -1970,6 +1971,18 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def _view_task_updated(self, view_task: typing.Optional[HardwareSource.AcquisitionTask]) -> None:
         self.__acquisition_task = view_task
 
+    def start_task(self, task_id: str, task: HardwareSource.AcquisitionTask) -> None:
+        # add the record task under the lock. with no view playing, an edit then either reaches the idle scan device
+        # before the record starts, and the record replaces it with its own frame parameters, or finds the scan
+        # recording and is held back. with a view playing, the view task orders the edit with its suspension. the
+        # acquisition state and activity listeners run under the lock, which is safe since they don't wait for
+        # another thread.
+        if task_id == 'record':
+            with self.__device_frame_parameters_lock:
+                super().start_task(task_id, task)
+        else:
+            super().start_task(task_id, task)
+
     def _create_acquisition_record_task(self, *, frame_parameters: typing.Optional[HardwareSource.FrameParameters] = None, **kwargs: typing.Any) -> HardwareSource.AcquisitionTask:
         # frame_parameters is typed as HardwareSource.FrameParameters. construct a ScanFrameParameters from
         # their dict via the settings to allow it to customize the frame parameters.
@@ -2051,8 +2064,13 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
     def start_sequence_mode(self, scan_frame_parameters: ScanFrameParameters, count: int) -> None:
         # calculate the sequence's subscan as a recording does.
         self.__sequence_frame_parameters = self.__calculate_subscan_parameters(scan_frame_parameters)
-        if not self.__in_sequence_mode:
+        # enter sequence mode under the lock, so an edit either reaches the idle scan device before the sequence's view
+        # starts with its own frame parameters, or is held back until the sequence ends. the listeners run after the
+        # lock is released.
+        with self.__device_frame_parameters_lock:
+            was_in_sequence_mode = self.__in_sequence_mode
             self.__in_sequence_mode = True
+        if not was_in_sequence_mode:
             self.notify_property_changed("is_in_sequence_mode")
         assert not self.__device.is_scanning
         self.start_playing()
