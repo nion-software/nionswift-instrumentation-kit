@@ -1296,6 +1296,11 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
                     if activity:
                         Activity.activity_finished(activity)
                     self.__tasks[task_id].activity = None
+                    # a view which ends on its own, such as after an error, is no longer running, so clear the
+                    # subclass's reference to it, as stop_playing and abort_playing do. an edit then goes to the device
+                    # instead of to the ended view.
+                    if task_id == 'view':
+                        self._view_task_updated(None)
                     del self.__tasks[task_id]
                     self.__data_elements_changed_event_listeners[task_id].close()
                     del self.__data_elements_changed_event_listeners[task_id]
@@ -1338,7 +1343,8 @@ class ConcreteHardwareSource(Observable.Observable, HardwareSource):
     # subclasses can implement this method to get notification that the view task has been changed.
     # subclasses may have a need to access the view task and this method can help keep track of the
     # current view task.
-    # will be called from the UI thread and should return quickly.
+    # will be called from the thread calling start_playing, stop_playing or abort_playing, or with None from the
+    # acquisition thread when a view task finishes, and should return quickly.
     def _view_task_updated(self, view_task: typing.Optional[AcquisitionTask]) -> None:
         pass
 
