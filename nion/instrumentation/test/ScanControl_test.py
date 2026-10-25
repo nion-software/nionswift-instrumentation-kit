@@ -1756,6 +1756,56 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (frame_parameters_after.pixel_size, frame_parameters_after.fov_nm), "the change during the acquisition was lost when it ended")
             self.assertEqual((40, 40, 70.0), (active_profile.width, active_profile.height, active_profile.field_width), "the active profile lost the change made during the acquisition")
 
+    def test_set_frame_parameters_for_selected_profile_index_during_sequence_acquisition_is_kept_without_changing_the_acquisition(self) -> None:
+        with self._test_context() as test_context:
+            scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
+            active_profile = scan_hardware_source.scan_profiles.active_profile
+            selected_profile_index = scan_hardware_source.scan_settings.selected_profile_index
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=24, w=24)
+            frame_parameters.fov_nm = 50.0
+            # the scan device waits at the first frame of the sequence until the frame parameters have been set.
+            first_frame_arrived = threading.Event()
+            frame_parameters_set = threading.Event()
+
+            def handle_xdatas_available(data_promises: typing.Sequence[HardwareSource.DataAndMetadataPromise]) -> None:
+                if scan_hardware_source.is_in_sequence_mode and not first_frame_arrived.is_set():
+                    first_frame_arrived.set()
+                    frame_parameters_set.wait(10.0)
+
+            # the listener is held until the acquisition ends.
+            xdatas_available_listener = scan_hardware_source.xdatas_available_event.listen(handle_xdatas_available)
+            # a script acquires a sequence of three frames on its own thread.
+            data_stream = scan_base.ScanFrameDataStream(scan_hardware_source, frame_parameters).wrap_in_sequence(3)
+            maker = Acquisition.MakerDataStream(data_stream)
+            device_state = maker.prepare_device_state()
+            acquisition_thread = threading.Thread(target=Acquisition.acquire, args=(maker,))
+            acquisition_thread.start()
+            try:
+                self.assertTrue(first_frame_arrived.wait(10.0))
+                # a script sets the size and field of view for the selected profile index during the acquisition.
+                changed_frame_parameters = scan_hardware_source.get_frame_parameters(selected_profile_index)
+                changed_frame_parameters.pixel_size = Geometry.IntSize(h=40, w=40)
+                changed_frame_parameters.fov_nm = 70.0
+                scan_hardware_source.set_frame_parameters(selected_profile_index, changed_frame_parameters)
+            finally:
+                frame_parameters_set.set()
+                acquisition_thread.join(60.0)
+            self.assertFalse(acquisition_thread.is_alive())
+            device_state.restore()
+            xdatas_available_listener = typing.cast(typing.Any, None)
+            self.assertFalse(maker.is_error, "setting the frame parameters during the acquisition made it fail")
+            xdata, = [maker.get_data(channel) for channel in maker.channels]
+            self.assertEqual((3, 24, 24), xdata.data_shape, "setting the frame parameters during the acquisition changed what it acquired")
+            frame_parameters_after = scan_hardware_source.get_current_frame_parameters()
+            self.assertEqual((Geometry.IntSize(h=40, w=40), 70.0), (frame_parameters_after.pixel_size, frame_parameters_after.fov_nm),
+                             "setting the frame parameters during the acquisition did not change the current frame parameters")
+            self.assertEqual((40, 40, 70.0), (active_profile.width, active_profile.height, active_profile.field_width), "the active profile did not follow the frame parameters set during the acquisition")
+
     def test_view_playing_through_sequence_continues_with_frame_parameters_changed_during_it(self) -> None:
         with self._test_context() as test_context:
             scan_hardware_source = typing.cast(scan_base.ScanHardwareSource, test_context.scan_hardware_source)
