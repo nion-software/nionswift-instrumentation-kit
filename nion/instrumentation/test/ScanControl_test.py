@@ -256,6 +256,29 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(document_model.data_items[1].dimensional_shape, record_frame_parameters.size)
             self.assertNotEqual(document_model.data_items[0].dimensional_shape, document_model.data_items[1].dimensional_shape)
 
+    def test_record_button_in_scan_control_panel_records_new_data_item(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            scan_panel_controller = ScanControlPanel.ScanPanelController(document_controller, scan_hardware_source)
+            widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, scan_panel_controller)
+            try:
+                # acquire first, so that the live data item already exists and the record adds only its own data item.
+                self._acquire_one(document_controller, scan_hardware_source)
+                data_item_count = len(document_model.data_items)
+                frame_time = scan_hardware_source.get_current_frame_time()
+                scan_panel_controller.handle_record_button(widget)
+                # the record runs on its own thread and adds its data item through periodic, so run periodic until the
+                # record finishes and its data item arrives.
+                start_time = time.time()
+                while (scan_hardware_source.is_recording or len(document_model.data_items) == data_item_count) and time.time() - start_time < 30.0:
+                    time.sleep(frame_time * 0.5)
+                    document_controller.periodic()
+                self.assertEqual(data_item_count + 1, len(document_model.data_items))
+            finally:
+                widget.close()
+
     def test_record_uses_current_frame_parameters(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
