@@ -168,6 +168,39 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertIs(active_profile, scan_hardware_source.scan_profiles.active_profile)
             self.assertEqual(active_profile_values, active_profile.write_values_to_dict())
 
+    def test_grab_synchronized_with_its_own_frame_parameters_and_no_view_starts_next_view_on_current_frame_parameters(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            current_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            current_frame_parameters.pixel_size = Geometry.IntSize(h=32, w=32)
+            current_frame_parameters.fov_nm = 80.0
+            scan_hardware_source.set_current_frame_parameters(current_frame_parameters)
+            # a script acquires with a size and field of view which differ from the current frame parameters.
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.pixel_size = Geometry.IntSize(h=4, w=4)
+            scan_frame_parameters.fov_nm = 50.0
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.processing = "sum_project"
+            current_frame_parameters_changed_count = 0
+
+            def handle_current_frame_parameters_changed(frame_parameters: scan_base.ScanFrameParameters) -> None:
+                nonlocal current_frame_parameters_changed_count
+                current_frame_parameters_changed_count += 1
+
+            current_frame_parameters_changed_listener = scan_hardware_source.current_frame_parameters_changed_event.listen(handle_current_frame_parameters_changed)
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            document_controller.periodic()
+            current_frame_parameters_changed_listener = typing.cast(typing.Any, None)
+            self.assertEqual(0, current_frame_parameters_changed_count, "the acquisition announced a change to the current frame parameters")
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                view_xdatas = scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+            finally:
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+            self.assertEqual((32, 32), view_xdatas[0].data_shape, "the next view scanned the acquisition's frame parameters")
+
     def test_grab_synchronized_abort(self):
         with self.__test_context(is_eels=True) as test_context:
             scan_hardware_source = test_context.scan_hardware_source
