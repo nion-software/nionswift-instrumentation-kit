@@ -40,6 +40,66 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire.spectrum_parameters.add_parameters(MultiAcquire.MultiEELSParameters.from_dict(parameters))
         return multi_acquire
 
+    def _make_acquisition_handler_fn(self, test_context: AcquisitionTestContext.AcquisitionTestContext, multi_acquire_controller: MultiAcquire.MultiAcquireController, *,
+                                     masks: typing.Sequence[camera_base.Mask] | None = None,
+                                     stack_metadata_keys: typing.Sequence[typing.Sequence[str]] | None = None,
+                                     camera_data_channel_class: type[MultiAcquire.CameraDataChannel] = MultiAcquire.CameraDataChannel,
+                                     handler_created_fn: typing.Callable[[MultiAcquire.SISequenceAcquisitionHandler], None] | None = None
+                                     ) -> typing.Callable[[MultiAcquire.MultiEELSParametersList, int, MultiAcquire.MultiEELSSettings], MultiAcquire.SISequenceAcquisitionHandler]:
+        """Return a function which builds the acquisition handler for each parameters index of a spectrum image.
+
+        The camera data channel is an instance of camera_data_channel_class. The masks, if given, become the camera's active masks.
+        The function passes each handler to handler_created_fn, if given, once the handler's channels are started.
+        """
+        document_model = test_context.document_model
+        camera_hardware_source = test_context.camera_hardware_source
+        scan_hardware_source = test_context.scan_hardware_source
+
+        def get_acquisition_handler_fn(multi_acquire_parameters_list: MultiAcquire.MultiEELSParametersList, current_parameters_index: int,
+                                       multi_acquire_settings: MultiAcquire.MultiEELSSettings) -> MultiAcquire.SISequenceAcquisitionHandler:
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = multi_acquire_parameters_list[current_parameters_index].exposure_ms
+            camera_frame_parameters.processing = multi_acquire_settings.processing
+            if masks is not None:
+                camera_frame_parameters.active_masks = masks
+            grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
+                                                                                     camera=camera_hardware_source,
+                                                                                     camera_frame_parameters=camera_frame_parameters)
+            scan_size = tuple(grab_synchronized_info.scan_size)
+            cumulative_elapsed_time = 0.0
+            for parameters in multi_acquire_parameters_list.parameters:
+                if parameters.index >= current_parameters_index:
+                    break
+                cumulative_elapsed_time += scan_size[0] * scan_size[1] * parameters.exposure_ms * parameters.frames
+            multi_acquire_parameters = multi_acquire_parameters_list[current_parameters_index]
+            camera_data_channel = camera_data_channel_class(document_model, camera_hardware_source.display_name, grab_synchronized_info,
+                                                            multi_acquire_parameters, multi_acquire_settings, current_parameters_index,
+                                                            cumulative_elapsed_time, stack_metadata_keys=stack_metadata_keys)
+            enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in scan_hardware_source.get_enabled_channel_indexes()]
+            scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names, grab_synchronized_info,
+                                                             multi_acquire_parameters, multi_acquire_settings)
+            camera_data_channel.start()
+            scan_data_channel.start()
+            si_sequence_behavior: MultiAcquire.SISequenceBehavior | None = None
+            if multi_acquire_settings.shift_each_sequence_slice:
+                si_sequence_behavior = MultiAcquire.SISequenceBehavior(multi_acquire_controller, current_parameters_index)
+            handler = MultiAcquire.SISequenceAcquisitionHandler(camera_hardware_source, camera_data_channel, camera_frame_parameters,
+                                                                scan_hardware_source, scan_data_channel, scan_frame_parameters,
+                                                                si_sequence_behavior)
+            test_context.push(camera_data_channel.progress_updated_event.listen(multi_acquire_controller.set_progress_counter))
+
+            def finish_fn() -> None:
+                camera_data_channel.stop()
+                scan_data_channel.stop()
+
+            handler.finish_fn = finish_fn
+            if handler_created_fn:
+                handler_created_fn(handler)
+            return handler
+
+        return get_acquisition_handler_fn
+
     def test_acquire_multi_eels_spectrum_works_and_finishes_in_time(self):
         for use_multi_eels_calibration in [True, False]:
             settings = {'x_shifter': 'EELS_MagneticShift_Offset', 'blanker': 'C_Blank',
@@ -261,51 +321,8 @@ class TestMultiAcquire(unittest.TestCase):
                             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
                             multi_acquire_controller.scan_controller = scan_hardware_source
 
-                            def get_acquisition_handler_fn(multi_acquire_parameters_list: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
-                                camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-                                scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                                camera_frame_parameters.exposure_ms = multi_acquire_parameters_list[current_parameters_index].exposure_ms
-                                camera_frame_parameters.processing = multi_acquire_settings.processing
-                                camera_frame_parameters.active_masks = masks
-                                grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                                                                    camera=camera_hardware_source,
-                                                                                                    camera_frame_parameters=camera_frame_parameters)
-                                scan_size = tuple(grab_synchronized_info.scan_size)
-                                cumulative_elapsed_time = 0.0
-                                for parameters in multi_acquire_parameters_list.parameters:
-                                    if parameters.index >= current_parameters_index:
-                                        break
-                                    cumulative_elapsed_time += scan_size[0] * scan_size[1] * parameters.exposure_ms * parameters.frames
-                                multi_acquire_parameters = multi_acquire_parameters_list[current_parameters_index]
-                                camera_data_channel = MultiAcquire.CameraDataChannel(document_model,
-                                                                                     camera_hardware_source.display_name,
-                                                                                     grab_synchronized_info,
-                                                                                     multi_acquire_parameters,
-                                                                                     multi_acquire_settings,
-                                                                                     current_parameters_index,
-                                                                                     cumulative_elapsed_time,
-                                                                                     stack_metadata_keys=[['hardware_source', 'binning']])
-                                enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
-                                enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
-                                scan_data_channel = MultiAcquire.ScanDataChannel(document_model, enabled_channel_names,
-                                                                                 grab_synchronized_info,
-                                                                                 multi_acquire_parameters,
-                                                                                 multi_acquire_settings)
-                                camera_data_channel.start()
-                                scan_data_channel.start()
-                                handler =  MultiAcquire.SISequenceAcquisitionHandler(camera_hardware_source, camera_data_channel, camera_frame_parameters,
-                                                                                     scan_hardware_source, scan_data_channel, scan_frame_parameters)
-
-                                listener = handler.camera_data_channel.progress_updated_event.listen(multi_acquire_controller.set_progress_counter)
-
-                                def finish_fn() -> None:
-                                    listener.close()
-                                    handler.camera_data_channel.stop()
-                                    handler.scan_data_channel.stop()
-
-                                handler.finish_fn = finish_fn
-
-                                return handler
+                            get_acquisition_handler_fn = self._make_acquisition_handler_fn(test_context, multi_acquire_controller, masks=masks,
+                                                                                             stack_metadata_keys=[['hardware_source', 'binning']])
 
                             progress = 0
                             def update_progress(minimum, maximum, value):
@@ -405,53 +422,7 @@ class TestMultiAcquire(unittest.TestCase):
             multi_acquire_controller = self._set_up_multi_acquire(settings, parameters, stem_controller)
             multi_acquire_controller.scan_controller = scan_hardware_source
 
-            def get_acquisition_handler_fn(multi_acquire_parameters_list: MultiAcquire.MultiEELSParametersList, current_parameters_index, multi_acquire_settings: MultiAcquire.MultiEELSSettings):
-                camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-                scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-                camera_frame_parameters.exposure_ms = multi_acquire_parameters_list[current_parameters_index].exposure_ms
-                camera_frame_parameters.processing = multi_acquire_settings.processing
-                grab_synchronized_info = scan_hardware_source.grab_synchronized_get_info(scan_frame_parameters=scan_frame_parameters,
-                                                                                    camera=camera_hardware_source,
-                                                                                    camera_frame_parameters=camera_frame_parameters)
-                scan_size = tuple(grab_synchronized_info.scan_size)
-                cumulative_elapsed_time = 0.0
-                for parameters in multi_acquire_parameters_list.parameters:
-                    if parameters.index >= current_parameters_index:
-                        break
-                    cumulative_elapsed_time += scan_size[0] * scan_size[1] * parameters.exposure_ms * parameters.frames
-                multi_acquire_parameters = multi_acquire_parameters_list[current_parameters_index]
-                camera_data_channel = MultiAcquire.CameraDataChannel(document_model,
-                                                                     camera_hardware_source.display_name,
-                                                                     grab_synchronized_info,
-                                                                     multi_acquire_parameters, multi_acquire_settings,
-                                                                     current_parameters_index,
-                                                                     cumulative_elapsed_time,
-                                                                     stack_metadata_keys=[['instrument', 'defocus']])
-                enabled_channels = scan_hardware_source.get_enabled_channel_indexes()
-                enabled_channel_names = [scan_hardware_source.get_channel_name(i) for i in enabled_channels]
-                scan_data_channel = MultiAcquire.ScanDataChannel(document_model,
-                                                                 enabled_channel_names,
-                                                                 grab_synchronized_info,
-                                                                 multi_acquire_parameters, multi_acquire_settings)
-                camera_data_channel.start()
-                scan_data_channel.start()
-                si_sequence_behavior: typing.Optional[MultiAcquire.SISequenceBehavior] = None
-                if multi_acquire_controller.active_settings.shift_each_sequence_slice:
-                    si_sequence_behavior = MultiAcquire.SISequenceBehavior(multi_acquire_controller, current_parameters_index)
-                handler =  MultiAcquire.SISequenceAcquisitionHandler(camera_hardware_source, camera_data_channel, camera_frame_parameters,
-                                                                     scan_hardware_source, scan_data_channel, scan_frame_parameters,
-                                                                     si_sequence_behavior)
-
-                listener = handler.camera_data_channel.progress_updated_event.listen(multi_acquire_controller.set_progress_counter)
-
-                def finish_fn():
-                    listener.close()
-                    handler.camera_data_channel.stop()
-                    handler.scan_data_channel.stop()
-
-                handler.finish_fn = finish_fn
-
-                return handler
+            get_acquisition_handler_fn = self._make_acquisition_handler_fn(test_context, multi_acquire_controller, stack_metadata_keys=[['instrument', 'defocus']])
 
             progress = 0
             def update_progress(minimum, maximum, value):
