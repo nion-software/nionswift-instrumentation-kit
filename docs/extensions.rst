@@ -55,6 +55,8 @@ The standard camera control bar provides play/pause button and a checkbox to dis
 
 A custom camera is defined by implementing a camera module and registering it with the registry. A camera module provides a camera device, optional camera settings, an optional camera panel delegate, or an optional camera panel. If the camera panel is not defined, the standard camera panel is used. The standard camera panel can utilize a delegate to provide configuration and monitor dialogs.
 
+The camera device must implement ``camera_base.CameraDevice3``, including a ``camera_version`` property which returns 3. A camera device of an earlier version is not loaded.
+
 A camera device uses several methods and properties to define its behavior. As part of this behavior, the camera device acquires images and returns data in a data element. Some properties can be specified by the camera object, while others can be or need to be specified in the data element returned from the acquisition methods. When both options are available, the data element version takes precedence.
 
 The camera device should define a `camera_category` property. Although not limited to these, `eels` and `ronchigram` are two possible values.
@@ -63,9 +65,7 @@ The camera device may also define a `signal_type` property. Although not limited
 
 If the camera device may also define a `has_processed_channel` property. If this property is true or if the camera type is 'eels' and this property is not defined, then the camera control bar displays a checkbox to decide whether it is showing the original raw data or the processed data. If the camera type is 'eels' and this checkbox is not desired, then set `has_processed_channel` to false.
 
-The data element can directly specify calibrations (using the `intensity_calibration` and `spatial_calibrations` keys in the data element), or it can directly specify how to read the calibrations from the instrument (using the `calibration_controls` key in the data element), or it can indirectly specify how to read the calibrations from the instrument (using the `calibration_controls` camera device property).
-
-The `calibration_controls` data element key or camera device propery returns a `dict` describing how to read the calibrations from the instrument controller. If the calibrations are dependent on the camera device state, the `calibration_controls` should be provided as a key in the data element; otherwise the `calibration_controls` can be specified as a property of the camera device.
+The calibrations come from the camera calibrator which the camera device returns from `get_camera_calibrator`. The default calibrator reads the calibrations from the instrument controller as described by the `calibration_controls` camera device property, a `dict` described under Calibration Controls below. The data element can override the calibrations with the `intensity_calibration` and `spatial_calibrations` keys.
 
 Providing a Camera Panel Delegate
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -170,10 +170,8 @@ properties                      none            a dict of properties, see below
 properties.frame_number
 properties.frame_index
 properties.integration_count
-counts_per_electron             none            *deprecated* use calibration_controls instead
-intensity_calibration           none            *deprecated* use calibration_controls instead
-spatial_calibrations            none            *deprecated* use calibration_controls instead
-calibration_controls            none            see description below
+intensity_calibration           none            overrides the intensity calibration from the camera calibrator
+spatial_calibrations            none            overrides the spatial calibrations from the camera calibrator
 reader_version
 large_format
 metadata
@@ -213,7 +211,7 @@ hardware_source_name, hardware_source_id, state, and valid_rows will be set afte
 
 Calibration Controls
 --------------------
-To faciliate integration with the instrument controller, calibrations can be passed directly or read from the instrument controller.
+The `calibration_controls` camera device property describes how the default camera calibrator reads the calibrations from the instrument controller.
 
 The dict should have keys of the form `<axis>_<field>_<type>` where `<axis>` is `x`, `y`, `z`, or `intensity`, `<field>` is `scale`, `offset`, `units`, or `origin_override`, and `<type>` is `control` or `value`. If `<type>` is `control`, then the value for that axis/field will use the value of that key to read the calibration field value from the instrument controller. If `<type>` is `value`, then the calibration field value will be the value of that key.
 
