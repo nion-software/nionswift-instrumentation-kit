@@ -1815,6 +1815,8 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
                 return _("EELS Image")
         elif self.__signal_type == "ronchigram":
             return _("Ronchigram")
+        elif self.__signal_type == "edxs":
+            return _("EDXS")
         else:
             return _("Camera Data")
 
