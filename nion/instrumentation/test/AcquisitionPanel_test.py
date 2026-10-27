@@ -50,6 +50,21 @@ class TestCameraControlClass(unittest.TestCase):
 
             camera_settings_scope()
 
+    def test_eels_size_estimate_is_one_row_for_spectra_and_the_whole_frame_for_images(self) -> None:
+        with self.__test_context(is_eels=True) as test_context:
+            for camera_channel_id, expected_byte_dimensions in (("eels_spectrum", (1024, 4)), ("eels_image", (256, 1024, 4))):
+                with self.subTest(camera_channel_id=camera_channel_id):
+                    c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+                    c.camera_device_id = test_context.camera_hardware_source.hardware_source_id
+                    c.camera_channel_id = camera_channel_id
+
+                    # define a function for the camera settings scope; it will be de-ref'd when the scope exits.
+                    def camera_settings_scope() -> None:
+                        camera_settings = AcquisitionPanel.CameraSettingsModel(c)
+                        self.assertEqual(expected_byte_dimensions, camera_settings.get_byte_dimensions((256, 1024)))
+
+                    camera_settings_scope()
+
     def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
