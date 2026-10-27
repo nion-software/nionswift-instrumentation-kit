@@ -76,6 +76,11 @@ class Instrument(stem_controller.STEMController):
         self.__live_probe_position: typing.Optional[Geometry.FloatPoint] = None
         self._is_synchronized = False
 
+        # the scan context of the last scan. a thread which sets the scan device's frame parameters or starts a frame
+        # writes it, and a camera thread reads it. replacing the reference is atomic, so a reader gets either the
+        # previous or the new scan context.
+        self.__last_scan_context: stem_controller.ScanContext | None = None
+
     def _get_config_property(self, name: str) -> typing.Any:
         if name in ("stage_size_nm", "max_defocus"):
             return getattr(self, name)
@@ -102,6 +107,18 @@ class Instrument(stem_controller.STEMController):
     def live_probe_position(self, position: typing.Optional[Geometry.FloatPoint]) -> None:
         self.__live_probe_position = position
         self.property_changed_event.fire("live_probe_position")
+
+    @property
+    def last_scan_context(self) -> stem_controller.ScanContext | None:
+        """Return the scan context of the last scan, or None before any scan.
+
+        A parked probe is positioned within it, as SuperScan positions a parked probe within the last scan it ran. It
+        leaves out the subscan, so the probe is positioned within the full frame.
+        """
+        return self.__last_scan_context
+
+    def _set_last_scan_context(self, scan_context: stem_controller.ScanContext) -> None:
+        self.__last_scan_context = scan_context
 
     def _set_scan_context_probe_position(self, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         self.__probe_position = probe_position

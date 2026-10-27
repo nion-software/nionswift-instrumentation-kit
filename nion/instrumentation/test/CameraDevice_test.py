@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import threading
 import time
 import typing
@@ -84,6 +85,29 @@ class ConcurrencyRecordingAcquisitionTestContextConfiguration(AcquisitionTestCon
         super().__init__()
         self.eels_camera_device.close()
         self.simulator = ConcurrencyRecordingCameraSimulator()
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", self.simulator, self.instrument)
+
+
+# a camera simulator which records the scan context of its latest frame. the camera thread writes it, and a test reads
+# it only after the frame is delivered.
+class ScanContextRecordingCameraSimulator(AcquisitionTestContextConfiguration.CameraSimulator):
+
+    def __init__(self) -> None:
+        super().__init__(("", "eV"))
+        self.scan_context: stem_controller.ScanContext | None = None
+
+    def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: Geometry.FloatPoint | None) -> DataAndMetadata.DataAndMetadata:
+        self.scan_context = copy.deepcopy(scan_context)
+        return super().get_frame_data(readout_area, binning_shape, exposure_s, scan_context, probe_position)
+
+
+# a test configuration whose spectrometer has a simulator which records the scan context of its latest frame.
+class ScanContextRecordingAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.eels_camera_device.close()
+        self.simulator = ScanContextRecordingCameraSimulator()
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", self.simulator, self.instrument)
 
 
@@ -278,6 +302,56 @@ class TestCameraDeviceClass(unittest.TestCase):
                 hardware_source.abort_playing(sync_timeout=3.0)
             self.assertLess(elapsed, 1.0, "the view stalled until the sequence finished")
 
+    def test_parked_probe_is_positioned_within_the_last_scan(self) -> None:
+        configuration = ScanContextRecordingAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=16, w=16)
+            frame_parameters.fov_nm = 50.0
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                scan_hardware_source.get_next_xdatas_to_finish(timeout=10.0)
+            finally:
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+            # the user changes the field of view with no view playing, so it isn't scanned, and parks the probe. the
+            # probe is off center only as a user would park it; the result doesn't depend on its position.
+            frame_parameters.fov_nm = 200.0
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            test_context.instrument.probe_position = Geometry.FloatPoint(y=0.25, x=0.25)
+            test_context.camera_hardware_source.grab_next_to_start()
+            scan_context = configuration.simulator.scan_context
+            assert scan_context is not None
+            self.assertEqual(50.0, scan_context.fov_nm, "the parked probe moved to frame parameters which were never scanned")
+
+
+    def test_parked_probe_is_positioned_within_frame_parameters_changed_while_scanning(self) -> None:
+        configuration = ScanContextRecordingAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.pixel_size = Geometry.IntSize(h=256, w=256)
+            frame_parameters.pixel_time_us = 10.0
+            frame_parameters.fov_nm = 50.0
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_hardware_source.start_playing(sync_timeout=3.0)
+            try:
+                # a frame takes about 0.65 s, so the change below is made while it scans.
+                start_time = time.time()
+                while not scan_hardware_source.scan_device.is_scanning:
+                    self.assertLess(time.time() - start_time, 3.0)
+                    time.sleep(0.01)
+                frame_parameters.fov_nm = 200.0
+                scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            finally:
+                # stopping lets the frame being scanned finish without starting another.
+                scan_hardware_source.stop_playing(sync_timeout=3.0)
+            test_context.instrument.probe_position = Geometry.FloatPoint(y=0.25, x=0.25)
+            test_context.camera_hardware_source.grab_next_to_start()
+            scan_context = configuration.simulator.scan_context
+            assert scan_context is not None
+            self.assertEqual(200.0, scan_context.fov_nm, "the parked probe stayed within frame parameters which were replaced while scanning")
 
 if __name__ == '__main__':
     unittest.main()
