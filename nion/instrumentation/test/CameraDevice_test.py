@@ -129,7 +129,7 @@ class TestCameraDeviceClass(unittest.TestCase):
                 xdata = hardware_source.get_next_xdatas_to_finish()[0]
             finally:
                 hardware_source.abort_playing(sync_timeout=3.0)
-            self.assertEqual(["", "eV"], [calibration.units for calibration in xdata.dimensional_calibrations])
+            self.assertEqual(["eV"], [calibration.units for calibration in xdata.dimensional_calibrations])
 
     def test_camera_data_has_the_signal_type_of_its_camera(self) -> None:
         with AcquisitionTestContext.test_context(EDXSAcquisitionTestContextConfiguration(), is_eels=True) as test_context:
