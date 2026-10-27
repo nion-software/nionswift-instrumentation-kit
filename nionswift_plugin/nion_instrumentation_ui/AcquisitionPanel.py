@@ -1177,6 +1177,13 @@ def make_exposure_str(exposure: float, exposure_precision: int) -> str:
     return str(format_str.format(exposure / math.pow(10, math.trunc(exposure_precision / 3) * 3)))
 
 
+def _get_camera_channel_ids(camera_hardware_source: camera_base.CameraHardwareSource | None) -> typing.Sequence[str]:
+    """Return the ids of the camera channels offered for the camera hardware source; "image" for an unknown signal type."""
+    signal_type = camera_hardware_source.signal_type if camera_hardware_source else None
+    signal_type_description = camera_base.camera_signal_type_descriptions.get(signal_type or str())
+    return signal_type_description.channel_ids if signal_type_description else ("image",)
+
+
 class CameraSettingsModel(DeviceSettingsModel):
     """A model of the camera exposure and related values of a hardware source stream.
 
@@ -1276,16 +1283,7 @@ class CameraSettingsModel(DeviceSettingsModel):
     def __update_channel_descriptions(self) -> None:
         # when the list of hardware sources changes or the selected hardware source changes, the list of available
         # channels needs to be updated. the selected channel may also be updated if it is no longer available.
-        camera_hardware_source = self.camera_hardware_source
-        if camera_hardware_source:
-            if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
-                channel_descriptions = [Acquisition.hardware_source_channel_descriptions["ronchigram"]]
-            elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
-                channel_descriptions = [Acquisition.hardware_source_channel_descriptions["eels_spectrum"], Acquisition.hardware_source_channel_descriptions["eels_image"]]
-            else:
-                channel_descriptions = [Acquisition.hardware_source_channel_descriptions["image"]]
-        else:
-            channel_descriptions = [Acquisition.hardware_source_channel_descriptions["image"]]
+        channel_descriptions = [Acquisition.hardware_source_channel_descriptions[channel_id] for channel_id in _get_camera_channel_ids(self.camera_hardware_source)]
         output = Acquisition.hardware_source_channel_descriptions.get(self.__camera_hardware_source_channel_model.value or str())
         if not output or output not in channel_descriptions:
             output = channel_descriptions[0]
@@ -1296,17 +1294,13 @@ class CameraSettingsModel(DeviceSettingsModel):
             self.notify_property_changed("channel_descriptions")
 
     def get_byte_dimensions(self, camera_size: tuple[int, int]) -> tuple[int, ...]:
-        camera_hardware_source = self.camera_hardware_source
         item_size = numpy.dtype(numpy.float32).itemsize
-        if camera_hardware_source:
-            if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
-                return (camera_size[0], camera_size[1], item_size)
-            elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
-                return (camera_size[1], item_size) if self.channel_index == 0 else (camera_size[0], camera_size[1], item_size)
-            else:
-                return (camera_size[0], camera_size[1], item_size)
-        else:
-            return (camera_size[0], camera_size[1], item_size)
+        channel_index = self.channel_index
+        channel_description = self.__channel_descriptions[channel_index] if channel_index is not None else None
+        # a sum_project output sums the rows of each frame into one.
+        if channel_description and channel_description.processing_id == "sum_project":
+            return (camera_size[1], item_size)
+        return (camera_size[0], camera_size[1], item_size)
 
     @property
     def exposure_time(self) -> typing.Optional[float]:
@@ -1779,14 +1773,7 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         hardware_sources = typing.cast(typing.Sequence[HardwareSource.HardwareSource], self._camera_settings_model.hardware_source_choice_model.hardware_source_choice.hardware_sources_model.value)
         for index, hardware_source in enumerate(hardware_sources):
             if hardware_source_id == hardware_source.hardware_source_id:
-                # self._camera_settings_model.channel_descriptions
-                camera_hardware_source = typing.cast(camera_base.CameraHardwareSource, hardware_source)
-                if getattr(camera_hardware_source.camera, "camera_type") == "ronchigram":
-                    return(["ronchigram"])
-                elif getattr(camera_hardware_source.camera, "camera_type") == "eels":
-                    return(["eels_spectrum", "eels_image"])
-                else:
-                    return(["image"])
+                return _get_camera_channel_ids(typing.cast(camera_base.CameraHardwareSource, hardware_source))
         raise RuntimeError("Camera hardware source not found")
 
     def _get_camera_hardware_source_id_list(self) -> typing.Sequence[str]:

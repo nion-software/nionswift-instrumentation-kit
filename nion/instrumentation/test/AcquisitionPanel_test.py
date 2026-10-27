@@ -1,9 +1,11 @@
 import typing
 import unittest
 
+from nion.device_kit import CameraDevice
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.swift import Application
 from nion.swift.model import Schema
 from nion.swift.test import TestContext
@@ -11,6 +13,16 @@ from nion.ui import TestUI
 from nion.utils import Model
 from nion.utils import Stream
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
+
+
+# a test configuration whose spectrometer is an EDXS detector.
+class EDXSAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.eels_camera_device.close()
+        simulator = AcquisitionTestContextConfiguration.CameraSimulator(("", "eV"))
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "edxs", "EDXS", simulator, self.instrument)
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -64,6 +76,21 @@ class TestCameraControlClass(unittest.TestCase):
                         self.assertEqual(expected_byte_dimensions, camera_settings.get_byte_dimensions((256, 1024)))
 
                     camera_settings_scope()
+
+    def test_edxs_camera_offers_only_spectra(self) -> None:
+        with AcquisitionTestContext.test_context(EDXSAcquisitionTestContextConfiguration(), is_eels=True) as test_context:
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = test_context.camera_hardware_source.hardware_source_id
+            # an acquisition panel saved by an earlier release has the image channel selected for an EDXS camera.
+            c.camera_channel_id = "image"
+
+            # define a function for the camera settings scope; it will be de-ref'd when the scope exits.
+            def camera_settings_scope() -> None:
+                camera_settings = AcquisitionPanel.CameraSettingsModel(c)
+                self.assertEqual(["edxs_spectrum"], [channel_description.channel_id for channel_description in camera_settings.channel_descriptions])
+                self.assertEqual("edxs_spectrum", camera_settings.camera_channel)
+
+            camera_settings_scope()
 
     def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
         with self.__test_context() as test_context:

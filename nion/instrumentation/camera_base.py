@@ -1442,6 +1442,9 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def camera(self) -> CameraDevice: raise NotImplementedError()
 
     @property
+    def signal_type(self) -> str | None: raise NotImplementedError()
+
+    @property
     def camera_settings(self) -> CameraSettings: raise NotImplementedError()
 
     @property
@@ -1495,9 +1498,27 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     log_messages_event: Event.Event
 
 
+@dataclasses.dataclass(frozen=True)
+class CameraSignalTypeDescription:
+    """Describe how the data of a camera signal type is acquired.
+
+    channel_ids are the ids of the camera channels which an acquisition of the data offers, the first being the default.
+    It is a tuple so that the description is immutable.
+    """
+    channel_ids: tuple[str, ...]
+
+
+# the descriptions of the known camera signal types.
+camera_signal_type_descriptions: typing.Mapping[str, CameraSignalTypeDescription] = {
+    "eels": CameraSignalTypeDescription(("eels_spectrum", "eels_image")),
+    "ronchigram": CameraSignalTypeDescription(("ronchigram",)),
+    "edxs": CameraSignalTypeDescription(("edxs_spectrum",)),
+}
+
+
 def get_default_signal_type(camera_type: str) -> str | None:
-    """Return the signal type of a camera which does not define one: its camera type for "eels", "ronchigram" or "edxs", else None."""
-    return camera_type if camera_type in ("eels", "ronchigram", "edxs") else None
+    """Return the signal type of a camera which does not define one: its camera type if that is a known signal type, else None."""
+    return camera_type if camera_type in camera_signal_type_descriptions else None
 
 
 configuration_lock = threading.RLock()
@@ -1736,6 +1757,10 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     @property
     def camera(self) -> CameraDevice:
         return self.__camera
+
+    @property
+    def signal_type(self) -> str | None:
+        return self.__signal_type
 
     @property
     def cooler_state(self) -> CoolerState:
