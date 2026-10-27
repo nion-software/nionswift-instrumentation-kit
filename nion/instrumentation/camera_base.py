@@ -1496,11 +1496,8 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
 
 def get_default_signal_type(camera_type: str) -> str | None:
-    """Return the signal type of a camera which does not define one: its camera type for "eels" or "ronchigram", else None.
-
-    This is for backward compatibility. New cameras should define signal_type directly.
-    """
-    return camera_type if camera_type in ("eels", "ronchigram") else None
+    """Return the signal type of a camera which does not define one: its camera type for "eels", "ronchigram" or "edxs", else None."""
+    return camera_type if camera_type in ("eels", "ronchigram", "edxs") else None
 
 
 configuration_lock = threading.RLock()

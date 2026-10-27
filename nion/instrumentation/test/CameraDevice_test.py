@@ -16,15 +16,15 @@ from nion.swift.test import TestContext
 from nion.utils import Geometry
 
 
-# a test configuration whose spectrometer is an EDXS detector, a camera type with no units or signal type of its own,
-# and with no counts per electron.
+# a test configuration whose spectrometer is an EDXS detector, a camera type with no units of its own, and with no
+# counts per electron.
 class EDXSAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
 
     def __init__(self) -> None:
         super().__init__()
         self.eels_camera_device.close()
         simulator = AcquisitionTestContextConfiguration.CameraSimulator(("", "eV"))
-        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "edxs", "EDXS", simulator, self.instrument, signal_type="edxs")
+        self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "edxs", "EDXS", simulator, self.instrument)
 
 
 # an instrument whose cameras all have a single row of 1024 pixels, like a spectrometer.
@@ -107,7 +107,7 @@ class TestCameraDeviceClass(unittest.TestCase):
                 hardware_source.abort_playing(sync_timeout=3.0)
             self.assertEqual(["eV"], [calibration.units for calibration in xdata.dimensional_calibrations])
 
-    def test_camera_data_has_the_signal_type_of_its_camera(self) -> None:
+    def test_camera_data_has_the_default_signal_type_of_its_camera_type(self) -> None:
         with AcquisitionTestContext.test_context(EDXSAcquisitionTestContextConfiguration(), is_eels=True) as test_context:
             hardware_source = test_context.camera_hardware_source
             hardware_source.start_playing(sync_timeout=3.0)
