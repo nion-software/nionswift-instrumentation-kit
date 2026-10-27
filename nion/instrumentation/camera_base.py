@@ -1500,19 +1500,22 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class CameraSignalTypeDescription:
-    """Describe how the data of a camera signal type is acquired.
+    """Describe how the data of a camera signal type is acquired and calibrated.
 
     channel_ids are the ids of the camera channels which an acquisition of the data offers, the first being the default.
     It is a tuple so that the description is immutable.
+
+    is_spectrum is whether the data is a spectrum, whose calibration origin is at the start of its axis.
     """
     channel_ids: tuple[str, ...]
+    is_spectrum: bool
 
 
 # the descriptions of the known camera signal types.
 camera_signal_type_descriptions: typing.Mapping[str, CameraSignalTypeDescription] = {
-    "eels": CameraSignalTypeDescription(("eels_spectrum", "eels_image")),
-    "ronchigram": CameraSignalTypeDescription(("ronchigram",)),
-    "edxs": CameraSignalTypeDescription(("edxs_spectrum",)),
+    "eels": CameraSignalTypeDescription(("eels_spectrum", "eels_image"), is_spectrum=True),
+    "ronchigram": CameraSignalTypeDescription(("ronchigram",), is_spectrum=False),
+    "edxs": CameraSignalTypeDescription(("edxs_spectrum",), is_spectrum=True),
 }
 
 
@@ -2777,7 +2780,9 @@ class CalibrationControlsCalibrator2(CameraCalibrator):
         binning = frame_parameters.binning
         signal_type = typing.cast(str | None, getattr(self.__camera_device, "signal_type", None))
         camera_type = typing.cast(str | None, getattr(self.__camera_device, "camera_type", None))
-        is_center_origin = (signal_type is not None and signal_type != "eels") or (camera_type is not None and camera_type != "eels")
+        signal_or_camera_type = signal_type or camera_type
+        signal_type_description = camera_signal_type_descriptions.get(signal_or_camera_type or str())
+        is_center_origin = signal_or_camera_type is not None and not (signal_type_description and signal_type_description.is_spectrum)
         suffix = self.__construct_suffix()
         if len(data_shape) == 2:
             x_calibration = self.__construct_calibration("calibX", suffix, binning, is_center_origin, data_shape[1] if len(data_shape) > 1 else 0)
