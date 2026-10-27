@@ -72,6 +72,7 @@ class Instrument(stem_controller.STEMController):
 
         self.__ronchigram_shape = Geometry.IntSize(2048, 2048)
         self.__eels_shape = Geometry.IntSize(256, 1024)
+        self.__edxs_shape = Geometry.IntSize(1, 2048)  # a silicon drift detector, whose spectrum is a single row of channels
         self.__probe_position: typing.Optional[Geometry.FloatPoint] = None
         self.__live_probe_position: typing.Optional[Geometry.FloatPoint] = None
         self._is_synchronized = False
@@ -115,6 +116,8 @@ class Instrument(stem_controller.STEMController):
     def camera_sensor_dimensions(self, camera_type: str) -> typing.Tuple[int, int]:
         if camera_type == "ronchigram":
             return self.__ronchigram_shape[0], self.__ronchigram_shape[1]
+        elif camera_type == "edxs":
+            return self.__edxs_shape[0], self.__edxs_shape[1]
         else:
             return self.__eels_shape[0], self.__eels_shape[1]
 
@@ -122,6 +125,8 @@ class Instrument(stem_controller.STEMController):
         # returns readout area TLBR
         if camera_type == "ronchigram":
             return 0, 0, self.__ronchigram_shape[0], self.__ronchigram_shape[1]
+        elif camera_type == "edxs":
+            return 0, 0, self.__edxs_shape[0], self.__edxs_shape[1]
         else:
             return 0, 0, self.__eels_shape[0], self.__eels_shape[1]
 
