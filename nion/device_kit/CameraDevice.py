@@ -393,7 +393,11 @@ class Camera(camera_base.CameraDevice3):
         # scan device is only set during synchronized acquisition
         if self.__scan_device:
             self.__scan_device.advance_pixel(do_sync=do_sync)
-        xdata = self.__simulator.get_frame_data(Geometry.IntRect.from_tlbr(*readout_area), binning_shape, self.__exposure, self.__instrument.scan_context, self.__instrument.probe_position)
+        # the software scan context is used before any scan and while the probe is scanning.
+        scan_context = self.__instrument.scan_context
+        if self.__instrument.probe_state == "parked" and (last_scan_context := self.__instrument.last_scan_context) is not None:
+            scan_context = last_scan_context
+        xdata = self.__simulator.get_frame_data(Geometry.IntRect.from_tlbr(*readout_area), binning_shape, self.__exposure, scan_context, self.__instrument.probe_position)
         self.__acquired_one_event.set()
         elapsed = time.perf_counter() - start
         wait_s = max(self.__exposure - elapsed, 0)

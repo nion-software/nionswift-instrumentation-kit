@@ -168,6 +168,9 @@ class Device(scan_base.ScanDevice):
     def current_frame_parameters(self) -> scan_base.ScanFrameParameters:
         return self.__frame_parameters
 
+    def __record_last_scan_context(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
+        self.__instrument._set_last_scan_context(stem_controller.ScanContext(Geometry.IntSize.make(frame_parameters.pixel_size), Geometry.FloatPoint.make(frame_parameters.center_nm), frame_parameters.fov_nm, frame_parameters.rotation_rad))
+
     @property
     def channel_count(self) -> int:
         return len(self.__channels)
@@ -378,6 +381,10 @@ class Device(scan_base.ScanDevice):
         Device should use these parameters for new acquisition; and update to these parameters during acquisition.
         """
         self.__frame_parameters = ScanFrameParameters(frame_parameters.as_dict())
+        # SuperScan applies frame parameters set while scanning at once, so they describe the last scan, although this
+        # device scans them only from its next frame.
+        if self.__is_scanning:
+            self.__record_last_scan_context(self.__frame_parameters)
 
     def set_scan_context_probe_position(self, scan_context: stem_controller.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None:
         self.__instrument._set_scan_context_probe_position(scan_context, probe_position)
@@ -401,6 +408,7 @@ class Device(scan_base.ScanDevice):
             channel.data = numpy.zeros(tuple(size), numpy.float32)
         self.__frame_number += 1
         self.__frame = Frame(self.__frame_number, channels, frame_parameters)
+        self.__record_last_scan_context(frame_parameters)
         self.__scan_simulator.reset_frame()
         self.__scan_simulator.scan_shape_pixels = size
         if frame_parameters.fov_size_nm is not None:
