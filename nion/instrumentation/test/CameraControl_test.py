@@ -2010,6 +2010,21 @@ class TestCameraControlClass(unittest.TestCase):
         intensity_calibration = calibrator.get_intensity_calibration(camera_frame_parameters)
         self.assertTrue(calibration_equal(Calibration.Calibration(), intensity_calibration))
 
+    def test_edxs_calibration_has_its_origin_at_the_start_of_the_axis(self) -> None:
+        instrument_controller = InstrumentController({"energy": 0.01})
+        config = {
+            "calibXScaleControl": "energy",
+            "calibXUnits": "eV",
+        }
+        # a camera of another type may declare the edxs signal type, or an edxs camera may declare none.
+        detector_camera_device = CameraDevice("detector")
+        detector_camera_device.signal_type = "edxs"
+        for camera_device in (detector_camera_device, CameraDevice("edxs")):
+            with self.subTest(camera_type=camera_device.camera_type):
+                calibrator = camera_base.CalibrationControlsCalibrator2(instrument_controller, camera_device, config)
+                calibrations = calibrator.get_signal_calibrations(CameraFrameParameters(), (1024,))
+                self.assertTrue(calibration_equal(Calibration.Calibration(None, 0.02, "eV"), calibrations[0]))
+
     def test_camera_control_panel_periodic_delivers_camera_log_messages(self) -> None:
         configuration = AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration()
         # the camera hardware source reads the logger function from the camera device when it is created.
