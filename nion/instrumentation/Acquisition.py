@@ -3401,6 +3401,7 @@ hardware_source_channel_descriptions = {
     "ronchigram": HardwareSourceChannelDescription("ronchigram", None, _("Ronchigram"), DataAndMetadata.DataDescriptor(False, 0, 2)),
     "eels_spectrum": HardwareSourceChannelDescription("eels_spectrum", "sum_project", _("Spectra"), DataAndMetadata.DataDescriptor(False, 0, 1)),
     "eels_image": HardwareSourceChannelDescription("eels_image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
+    "edxs_spectrum": HardwareSourceChannelDescription("edxs_spectrum", None, _("Spectra"), DataAndMetadata.DataDescriptor(False, 0, 1)),
     "image": HardwareSourceChannelDescription("image", None, _("Image"), DataAndMetadata.DataDescriptor(False, 0, 2)),
 }
 
