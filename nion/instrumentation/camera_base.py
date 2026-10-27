@@ -77,7 +77,7 @@ class CameraDevice(typing.Protocol):
     camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
     camera_name (required, the name of the camera. example: 'Bottom Camera')
     camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
-    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
+    signal_type (optional, None, empty or absent for the default of its camera type, given by get_default_signal_type)
     has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
     """
 
@@ -458,7 +458,7 @@ class CameraDevice3(typing.Protocol):
     camera_id (required, the camera identifier, must be unique. example: 'pci_camera_1')
     camera_name (required, the name of the camera. example: 'Bottom Camera')
     camera_type (required, the camera type. examples: 'eels' or 'ronchigram')
-    signal_type (optional, falls back to camera_type if 'eels' or 'ronchigram' otherwise empty)
+    signal_type (optional, None, empty or absent for the default of its camera type, given by get_default_signal_type)
     has_processed_channel (optional, whether to automatically include a processed (vertical sum) channel of data)
 
     Cooler properties:
@@ -1552,7 +1552,7 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
 
         self.__camera = camera
         self.__camera_category = typing.cast(typing.Any, camera).camera_type
-        self.__signal_type = getattr(camera, "signal_type", get_default_signal_type(self.__camera_category))
+        self.__signal_type = getattr(camera, "signal_type", None) or get_default_signal_type(self.__camera_category)
         self.processor = None
 
         self.__camera_calibrator: typing.Optional[CameraCalibrator] = None
