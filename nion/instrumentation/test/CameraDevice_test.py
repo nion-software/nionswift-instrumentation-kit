@@ -88,20 +88,24 @@ class ConcurrencyRecordingAcquisitionTestContextConfiguration(AcquisitionTestCon
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "eels", "EELS", self.simulator, self.instrument)
 
 
-# a camera simulator which records the scan context of its latest frame. the camera thread writes it, and a test reads
-# it only after the frame is delivered.
+# a camera simulator which records the scan context of each frame. the camera thread writes them, and a test reads them
+# only after the frames are delivered, or reads only the length of the list, which appending keeps consistent.
 class ScanContextRecordingCameraSimulator(AcquisitionTestContextConfiguration.CameraSimulator):
 
     def __init__(self) -> None:
         super().__init__(("", "eV"))
-        self.scan_context: stem_controller.ScanContext | None = None
+        self.scan_contexts: list[stem_controller.ScanContext] = list()
+
+    @property
+    def scan_context(self) -> stem_controller.ScanContext | None:
+        return self.scan_contexts[-1] if self.scan_contexts else None
 
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: stem_controller.ScanContext, probe_position: Geometry.FloatPoint | None) -> DataAndMetadata.DataAndMetadata:
-        self.scan_context = copy.deepcopy(scan_context)
+        self.scan_contexts.append(copy.deepcopy(scan_context))
         return super().get_frame_data(readout_area, binning_shape, exposure_s, scan_context, probe_position)
 
 
-# a test configuration whose spectrometer has a simulator which records the scan context of its latest frame.
+# a test configuration whose spectrometer has a simulator which records the scan context of each frame.
 class ScanContextRecordingAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
 
     def __init__(self) -> None:
@@ -352,6 +356,42 @@ class TestCameraDeviceClass(unittest.TestCase):
             scan_context = configuration.simulator.scan_context
             assert scan_context is not None
             self.assertEqual(200.0, scan_context.fov_nm, "the parked probe stayed within frame parameters which were replaced while scanning")
+
+    def test_spectra_of_a_synchronized_acquisition_stay_within_its_scan_after_an_edit_during_it(self) -> None:
+        configuration = ScanContextRecordingAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            frame_parameters.fov_nm = 100.0
+            scan_hardware_source.set_current_frame_parameters(frame_parameters)
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(16, 16)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.processing = "sum_project"
+            results: list[typing.Any] = list()
+
+            def grab_synchronized() -> None:
+                results.append(scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters))
+
+            synchronized_thread = threading.Thread(target=grab_synchronized)
+            synchronized_thread.start()
+            try:
+                # the user changes the field of view partway through the acquisition, as activating another profile does.
+                start_time = time.time()
+                while len(configuration.simulator.scan_contexts) < 10:
+                    self.assertLess(time.time() - start_time, 10.0)
+                    time.sleep(0.005)
+                frame_parameters.fov_nm = 400.0
+                scan_hardware_source.set_current_frame_parameters(frame_parameters)
+                changed_index = len(configuration.simulator.scan_contexts)
+            finally:
+                synchronized_thread.join()
+            self.assertEqual(1, len(results), "the synchronized acquisition failed")
+            field_widths_after_edit = {scan_context.fov_nm for scan_context in configuration.simulator.scan_contexts[changed_index:]}
+            self.assertEqual({100.0}, field_widths_after_edit, "the spectra after the edit were placed within the edited field of view instead of the scan being acquired")
 
 if __name__ == '__main__':
     unittest.main()
