@@ -113,8 +113,9 @@ class Instrument(stem_controller.STEMController):
     def last_scan_context(self) -> stem_controller.ScanContext | None:
         """Return the scan context of the last scan, or None before any scan.
 
-        A parked probe is positioned within it, as SuperScan positions a parked probe within the last scan it ran. It
-        leaves out the subscan, so the probe is positioned within the full frame.
+        The simulated cameras position the probe within it, whether parked or scanning. SuperScan positions a parked probe
+        within the last scan it ran, and a scanning probe is within the scan being acquired. It leaves out the subscan, so
+        the probe is positioned within the full frame.
         """
         return self.__last_scan_context
 
