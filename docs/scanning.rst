@@ -60,8 +60,15 @@ ac_line_sync                    no          whether to sync each line to power l
 ac_frame_sync                   no          whether to sync each frame to power line frequency
 ============================    =========   ===========
 
-The scan controller tracks its current frame parameters during acquisition. ``get_current_frame_parameters`` returns a
-copy of them, so changing the copy changes nothing until it is passed to the scan.
+The current frame parameters are the user's. The scan control panel shows them, and the active scan profile keeps
+them. ``get_current_frame_parameters`` returns a copy, and changing the copy doesn't change the scan until it is passed
+to ``set_current_frame_parameters``.
+
+An acquisition, such as ``record_immediate``, ``grab_synchronized`` or a sequence, scans with the frame parameters it is
+given and doesn't change the current ones. To scan with other frame parameters, pass them to the acquisition. Setting
+them as current would also change the scan control panel and the active profile. A change to the current frame
+parameters during an acquisition doesn't change the acquisition. The scan device takes the change when the acquisition
+ends, or, after a recording with no view playing, when the next view starts.
 
 Some parameters (fov_nm, rotation_rad, pixel_time_us, and flyback_time_us) take effect immediately, while others
 are marked as pending and take effect on the next frame.
@@ -378,9 +385,7 @@ The following code will perform a scan synchronized with a camera::
     camera_data = camera_data_list[0]
 
 The scan uses the scan frame parameters it is given, including their rotation. A running view is stopped during the
-acquisition. When the acquisition ends, the scan's current frame parameters are set back to what they were before, which
-also puts the scan device back on them, and the view is started again if it was running. So the current frame parameters
-are unchanged afterwards.
+acquisition and started again when it ends.
 
 You can use a camera frame parameter to control processing from 2d to 1d data.
 
