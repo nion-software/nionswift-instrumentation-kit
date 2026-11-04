@@ -1207,6 +1207,7 @@ class ReservedResource[_ReservedType]:
         Must be called on the main thread.
         """
         if threading.current_thread() is not threading.main_thread():
+            # If this is being called from a worker thread, it is considered an error in the calling code.
             raise InvalidThreadError("release must be called on the main thread.")
         self.__finalizer()
         self.__resource = None
@@ -1261,15 +1262,16 @@ class ResourceReservation[_ReservedType]:
         resource = self.__resource()
         if resource is None:
             raise ValueError("Resource is not available.")
-        reservation = ReservedResource(resource, self.release)
+        reservation = ReservedResource(resource, self.__release)
         self.__reservation = weakref.ref(reservation)
         self.__update_availability_stream()
         return reservation
 
-    def release(self) -> None:
+    def __release(self) -> None:
         """Release the current reservation.
 
-        Must be called on the main thread.
+        This should only be run on the main thread, if it is run from a worker thread,
+        it is considered an error in the calling code and InvalidThreadError is raised.
         """
         if threading.current_thread() is not threading.main_thread():
             raise InvalidThreadError("release must be called on the main thread.")
