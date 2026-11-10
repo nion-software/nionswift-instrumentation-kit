@@ -1,6 +1,8 @@
+import asyncio
 import contextlib
 import copy
 import datetime
+import gc
 import threading
 import time
 import typing
@@ -1486,6 +1488,225 @@ class TestHardwareSourceClass(unittest.TestCase):
             self.assertEqual("nm", display_item.display_info.display_calibration_info.displayed_dimensional_calibrations[0].units)
             self.assertEqual("e", display_item.display_info.display_calibration_info.displayed_intensity_calibration.units)
 
+
+class TestResourceReservation(unittest.TestCase):
+    "The camera is used as a representative hardware source for testing resource reservation."
+    def setUp(self) -> None:
+        AcquisitionTestContext.begin_leaks()
+        self._test_setup = TestContext.TestSetup()
+
+    def tearDown(self) -> None:
+        self._test_setup = typing.cast(typing.Any, None)
+        AcquisitionTestContext.end_leaks(self)
+
+    def _test_context(self) -> AcquisitionTestContext.AcquisitionTestContext:
+        # subclasses may override this to provide a different configuration
+        return AcquisitionTestContext.test_context()
+
+    def test_reserve_and_release_ronchigram_camera(self) -> None:
+        """Reserving the camera makes it unavailable until explicitly released."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            available_stream = camera._get_available_stream()
+            self.assertTrue(available_stream.value)
+            reservation = camera._reserve()
+            self.assertIsNotNone(reservation)
+            assert reservation
+            self.assertIsNotNone(reservation.resource)
+            self.assertFalse(available_stream.value)
+
+            reservation.release()
+            self.assertTrue(available_stream.value)
+
+    def test_reserve_and_release_ronchigram_camera_via_context_manager(self) -> None:
+        """The reservation context manager releases the camera on exit."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            with camera._reserve() as reservation:
+                self.assertIsNotNone(reservation)
+                assert reservation
+                self.assertIsNotNone(reservation.resource)
+                self.assertFalse(camera._get_available_stream().value)
+
+            self.assertTrue(camera._get_available_stream().value)
+
+    def test_context_manager_releases_after_exception(self) -> None:
+        """The reservation context manager releases the camera when its body raises."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            with self.assertRaises(ValueError):
+                with camera._reserve() as reservation:
+                    assert reservation
+                    self.assertIsNotNone(reservation.resource)
+                    raise ValueError
+
+            self.assertTrue(camera._get_available_stream().value)
+            reservation = camera._reserve()
+            assert reservation
+            reservation.release()
+
+    def test_reserve_ronchigram_camera_twice(self) -> None:
+        """A second reservation is refused while the first token is held."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            reservation = camera._reserve()
+            self.assertIsNotNone(reservation)
+            assert reservation
+            self.assertIsNotNone(reservation.resource)
+
+            with self.assertRaises(HardwareSource.ResourceReservedError):
+                camera._reserve()
+
+            reservation.release()
+
+    def test_leaving_with_scope_allows_new_reservation(self) -> None:
+        """Exiting a reservation context allows the camera to be reserved again."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            with camera._reserve() as reservation:
+                self.assertIsNotNone(reservation)
+                assert reservation
+                self.assertIsNotNone(reservation.resource)
+
+            reservation2 = camera._reserve()
+            self.assertIsNotNone(reservation2)
+            assert reservation2
+            self.assertIsNotNone(reservation2.resource)
+
+            reservation2.release()
+
+    def test_unreleased_out_of_scope_reservation_allows_new_reservation(self) -> None:
+        """Garbage collecting an unreleased token allows a new reservation."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            reservation = camera._reserve()
+            self.assertFalse(camera._get_available_stream().value)
+            reservation = None
+            gc.collect()
+
+            self.assertTrue(camera._get_available_stream().value)
+
+            reservation2 = camera._reserve()
+            self.assertIsNotNone(reservation2)
+            assert reservation2
+            self.assertIsNotNone(reservation2.resource)
+
+            reservation2.release()
+
+    def test_cannot_reserve_in_thread(self) -> None:
+        """Reserving the camera from a worker thread raises InvalidThreadError."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            exceptions: list[HardwareSource.InvalidThreadError] = []
+
+            def reserve_camera() -> None:
+                try:
+                    camera._reserve()
+                except HardwareSource.InvalidThreadError as e:
+                    exceptions.append(e)
+
+            thread = threading.Thread(target=reserve_camera)
+            thread.start()
+            thread.join()
+            self.assertEqual(1, len(exceptions))
+            self.assertTrue(camera._get_available_stream().value)
+            reservation = camera._reserve()
+            assert reservation
+            reservation.release()
+
+    def test_cannot_release_in_thread(self) -> None:
+        """Releasing a reservation from a worker thread leaves it active."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            reservation = camera._reserve()
+            assert reservation
+            exceptions: list[HardwareSource.InvalidThreadError] = []
+
+            def release_reservation() -> None:
+                try:
+                    reservation.release()
+                except HardwareSource.InvalidThreadError as e:
+                    exceptions.append(e)
+
+            thread = threading.Thread(target=release_reservation)
+            thread.start()
+            thread.join()
+
+            self.assertEqual(1, len(exceptions))
+            self.assertIsNotNone(reservation.resource)
+            self.assertFalse(camera._get_available_stream().value)
+            reservation.release()
+            self.assertTrue(camera._get_available_stream().value)
+
+    def test_can_reserve_in_async(self) -> None:
+        """A waiting async task holds its reservation against synchronous attempts until released."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            release_camera = asyncio.Event()
+
+            async def reserve_camera_async() -> None:
+                with camera._reserve() as reservation:
+                    assert reservation
+                    self.assertIsNotNone(reservation.resource)
+                    await release_camera.wait()
+
+            with asyncio.Runner() as runner:
+                loop = runner.get_loop()
+                task = loop.create_task(reserve_camera_async())
+                runner.run(asyncio.sleep(0))
+                try:
+                    self.assertFalse(task.done())
+                    self.assertFalse(camera._get_available_stream().value)
+                    with self.assertRaises(HardwareSource.ResourceReservedError):
+                        camera._reserve()
+                finally:
+                    release_camera.set()
+                    loop.run_until_complete(task)
+
+            self.assertTrue(camera._get_available_stream().value)
+
+    def test_context_reserving_twice(self) -> None:
+        """A reserve request on a busy camera raises ResourceReservedError"""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            with camera._reserve() as reservation1:
+                assert reservation1
+                self.assertIsNotNone(reservation1.resource)
+                self.assertFalse(camera._get_available_stream().value)
+                with self.assertRaises(HardwareSource.ResourceReservedError):
+                    with camera._reserve() as reservation2:
+                        assert reservation2
+                        self.assertIsNotNone(reservation2.resource)
+                self.assertFalse(camera._get_available_stream().value)
+            self.assertTrue(camera._get_available_stream().value)
+
+    def test_accessing_resource_from_released_reservation(self) -> None:
+        """Accessing the resource from a released reservation raises UnreservedResourceError"""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            reservation = camera._reserve()
+            assert reservation
+            self.assertIsNotNone(reservation.resource)
+            reservation.release()
+            with self.assertRaises(HardwareSource.UnreservedResourceError):
+                _ = reservation.resource
+
+    def test_double_release_does_not_affect_second_reservation(self) -> None:
+        """Releasing a reservation twice does not affect a second reservation."""
+        with self._test_context() as test_context:
+            camera = test_context.camera_hardware_source
+            is_available_stream = camera._get_available_stream()
+            reservation1 = camera._reserve()
+            self.assertFalse(is_available_stream.value)
+            reservation1.release()
+            self.assertTrue(is_available_stream.value)
+            reservation1.release() # Should not throw any errors
+            reservation2 = camera._reserve()
+            self.assertFalse(is_available_stream.value)
+            reservation1.release() # should not release the second reservation
+            self.assertFalse(is_available_stream.value)
+            reservation2.release()
+            self.assertTrue(is_available_stream.value)
 
 if __name__ == '__main__':
     unittest.main()
