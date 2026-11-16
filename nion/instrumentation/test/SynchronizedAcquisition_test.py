@@ -105,6 +105,16 @@ class FrameIndexCamera(CameraDevice.Camera):
         self.called_families: set[str] = set()
         self.cancel_family: str | None = None
 
+    # like a released driver, the camera doesn't declare that it takes a collection shape on its sequence methods, and
+    # it refuses every sequence it is asked about, so a test fails if the hardware source asks a camera which doesn't
+    # declare.
+    @property
+    def is_sequence_collection_shape_supported(self) -> bool:
+        return False
+
+    def is_sequence_supported(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return False
+
     def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
         self.called_families.add("acquire_sequence")
         return super().acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
@@ -123,17 +133,12 @@ class FrameIndexCamera(CameraDevice.Camera):
 
 
 # a frame index camera which declares that it takes a collection shape on its sequence methods, and whose synchronized
-# begin isn't implemented. the simulated camera takes a collection shape on its synchronized begin, so its sequence begin
-# calls that.
+# begin isn't implemented.
 class SequenceOnlyFrameIndexCamera(FrameIndexCamera):
 
     @property
     def is_sequence_collection_shape_supported(self) -> bool:
         return True
-
-    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> camera_base.PartialData:
-        self.called_families.add("acquire_sequence")
-        return CameraDevice.Camera.acquire_synchronized_begin(self, camera_frame_parameters, collection_shape if collection_shape is not None else (count,))
 
     def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
         raise NotImplementedError()

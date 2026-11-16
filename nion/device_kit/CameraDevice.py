@@ -349,13 +349,22 @@ class Camera(camera_base.CameraDevice3):
         data_element["properties"] = properties
         return data_element
 
+    # the sequence methods take a collection shape.
+    @property
+    def is_sequence_collection_shape_supported(self) -> bool:
+        return True
+
+    # the camera acquires a sequence in any collection shape of one or two axes, with any frame parameters.
+    def is_sequence_supported(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return True
+
     # the view stays paused until the sequence ends, since a canceled sequence may still be acquiring a frame on its
     # own thread.
     def acquire_sequence_cancel(self) -> None:
         self.__cancel_sequence_event.set()
 
-    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
-        return self.__begin_sequence(camera_frame_parameters, (count,))
+    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> camera_base.PartialData:
+        return self.__begin_sequence(camera_frame_parameters, collection_shape if collection_shape is not None else (count,))
 
     # begin a sequence of frames arranged in the collection shape. each frame advances the scan if the scan takes its clock
     # from this camera when the sequence begins.
