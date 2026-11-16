@@ -2242,7 +2242,7 @@ class CameraDeviceStreamInterface(typing.Protocol):
 
 
 class CameraDeviceSynchronizedStreamDelegate(CameraDeviceStreamInterface):
-    """An interface using the 'synchronized' style methods of the camera."""
+    """An interface acquiring a camera sequence collected over a scan, cropping the flyback frames from its rows."""
     def __init__(self, camera_hardware_source: CameraHardwareSource, camera_frame_parameters: CameraFrameParameters, flyback_pixels: int = 0, additional_metadata: typing.Optional[DataAndMetadata.MetadataType] = None) -> None:
         self.__camera_hardware_source = camera_hardware_source
         self.__camera_frame_parameters = camera_frame_parameters
@@ -2279,16 +2279,17 @@ class CameraDeviceSynchronizedStreamDelegate(CameraDeviceStreamInterface):
         self.__camera_frame_parameters_original = self.__camera_hardware_source.get_current_frame_parameters()
         self.__camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
-        self.__camera_hardware_source.acquire_synchronized_prepare(collection_shape, index_stack=index_stack)
-        return int(numpy.prod(collection_shape, dtype=numpy.uint64))  # type: ignore
+        count = math.prod(collection_shape)
+        self.__camera_hardware_source.acquire_sequence_prepare(count, collection_shape=collection_shape, index_stack=index_stack)
+        return count
 
     def start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         self.__slice = list(stream_args.slice)
         collection_shape = (stream_args.slice_rect.height, stream_args.slice_rect.width + self.__flyback_pixels)  # includes flyback pixels
-        self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_begin(self.__camera_frame_parameters, collection_shape)
+        self.__partial_data_info = self.__camera_hardware_source.acquire_sequence_begin(self.__camera_frame_parameters, math.prod(collection_shape), collection_shape=collection_shape)
 
     def finish_stream(self) -> None:
-        self.__camera_hardware_source.acquire_synchronized_end()
+        self.__camera_hardware_source.acquire_sequence_end()
         # restore camera frame parameters.
         assert self.__camera_frame_parameters_original
         self.__camera_hardware_source.set_current_frame_parameters(self.__camera_frame_parameters_original)
@@ -2338,7 +2339,7 @@ class CameraDeviceSynchronizedStreamDelegate(CameraDeviceStreamInterface):
     def continue_data(self, partial_data: typing.Optional[CameraDeviceStreamPartialData]) -> None:
         # acquire the next section and continue
         if not partial_data or not partial_data.is_complete:
-            self.__partial_data_info = self.__camera_hardware_source.acquire_synchronized_continue()
+            self.__partial_data_info = self.__camera_hardware_source.acquire_sequence_continue()
         else:
             self.__partial_data_info = typing.cast(typing.Any, None)
 
