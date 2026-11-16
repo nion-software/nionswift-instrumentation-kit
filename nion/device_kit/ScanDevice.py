@@ -99,6 +99,17 @@ class ScanFrameParameters(scan_base.ScanFrameParameters):
         # 0=off, 1=on:rising, 2=on:falling
         self.set_parameter("external_clock_mode", value)
 
+    # the camera_id of the camera wired to the external clock input, or None. the camera is named by its camera_id because
+    # camera ids are unique, a camera device can compare one with its own, and an id can be copied with the frame
+    # parameters and written into the scan's metadata.
+    @property
+    def external_clock_camera_id(self) -> str | None:
+        return typing.cast(str | None, self.get_parameter("external_clock_camera_id", None))
+
+    @external_clock_camera_id.setter
+    def external_clock_camera_id(self, value: str | None) -> None:
+        self.set_parameter("external_clock_camera_id", value)
+
     @property
     def external_scan_mode(self) -> int:
         # 0=off, 1=on:rising, 2=on:falling
@@ -148,6 +159,10 @@ class Device(scan_base.ScanDevice):
         # changes, so that advance_pixel can wait for the scan to start.
         self.__is_scanning = False
         self.__is_scanning_condition = threading.Condition()
+
+        # the camera_id of the camera which clocks the frame being scanned, or None. it is written with the frame before
+        # is_scanning is set, and read with is_scanning under the is_scanning condition.
+        self.__external_clock_camera_id: str | None = None
 
         self.__flyback_pixels = 2
         self.on_device_state_changed = None
@@ -415,6 +430,7 @@ class Device(scan_base.ScanDevice):
             self.__scan_simulator.pixel_size_nm = Geometry.FloatSize(frame_parameters.fov_size_nm.height / size.height,
                                                                      frame_parameters.fov_size_nm.width / size.width)
         self.__scan_simulator.external_clock = self.__frame_parameters.external_clock_mode != 0
+        self.__external_clock_camera_id = frame_parameters.external_clock_camera_id
         self.__set_is_scanning(True)
         self.__flyback_pixels = self.calculate_flyback_pixels(frame_parameters)
 
@@ -430,11 +446,21 @@ class Device(scan_base.ScanDevice):
     def is_scanning(self) -> bool:
         return self.__is_scanning
 
-    def prepare_synchronized_scan(self, scan_frame_parameters: scan_base.ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None:
+    def is_externally_clocked_by(self, camera_id: str) -> bool:
+        """Return whether the device is scanning, in external clock mode, a frame which takes its clock from the camera.
+
+        A frame takes its clock from the camera which prepare_synchronized_scan names, or from any camera if it names none.
+        advance_pixel moves the probe during such a frame.
+        """
+        with self.__is_scanning_condition:
+            return self.__is_scanning and self.__scan_simulator.external_clock and self.__external_clock_camera_id in (None, camera_id)
+
+    def prepare_synchronized_scan(self, scan_frame_parameters: scan_base.ScanFrameParameters, *, camera_exposure_ms: float, camera_id: str | None = None, **kwargs: typing.Any) -> None:
         # this method modifies scan_frame_parameters in place, so use base functions to update the fields. bad design.
         scan_frame_parameters.set_parameter("pixel_time_us", min(5120000, int(1000 * camera_exposure_ms * 0.75)))
         scan_frame_parameters.set_parameter("external_clock_wait_time_ms", 20000)  # int(camera_frame_parameters["exposure_ms"] * 1.5)
         scan_frame_parameters.set_parameter("external_clock_mode", 1)
+        scan_frame_parameters.set_parameter("external_clock_camera_id", camera_id)
 
     def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: scan_base.ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float:
         scan_width = scan_frame_parameters.scan_size.width

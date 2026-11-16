@@ -707,6 +707,7 @@ class ScanDevice(typing.Protocol):
     def get_buffer_data(self, start: int, count: int) -> typing.List[typing.List[typing.Dict[str, typing.Any]]]: ...
     def set_scan_context_probe_position(self, scan_context: STEMController.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> None: ...
     def set_idle_position_by_percentage(self, x: float, y: float) -> None: ...
+    # a synchronized acquisition passes the camera_id of the camera which clocks the scan as the keyword argument camera_id.
     def prepare_synchronized_scan(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> None: ...
     def calculate_synchronized_scan_partial_timeout(self, scan_frame_parameters: ScanFrameParameters, *, camera_exposure_ms: float, **kwargs: typing.Any) -> float: ...
     def calculate_flyback_pixels(self, frame_parameters: ScanFrameParameters) -> int: return 2
@@ -2636,6 +2637,8 @@ class ScanDataStream(Acquisition.DataStream):
     The scan is defined by a ScanFrameParameters object and a ScanHardwareSource object.
 
     The fov_nm and rotation models allow the magnification to be controlled by envelopes like 1D ramp.
+
+    The camera id, if given with a camera data stream, is the camera_id of the camera which clocks the scan.
     """
     def __init__(self, scan_hardware_source: ScanHardwareSource,
                  scan_frame_parameters: ScanFrameParameters, scan_id: uuid.UUID,
@@ -2645,6 +2648,7 @@ class ScanDataStream(Acquisition.DataStream):
                  *,
                  fov_nm_model: typing.Optional[Model.PropertyModel[float]] = None,
                  rotation_model: typing.Optional[Model.PropertyModel[float]] = None,
+                 camera_id: str | None = None
                  ) -> None:
         super().__init__()
         scan_frame_parameters = copy.deepcopy(scan_frame_parameters)
@@ -2656,6 +2660,7 @@ class ScanDataStream(Acquisition.DataStream):
         self.__drift_tracker = drift_tracker
         self.__camera_data_stream = camera_data_stream
         self.__camera_exposure_ms = camera_exposure_ms
+        self.__camera_id = camera_id
         self.__enabled_channels = scan_frame_parameters.enabled_channel_indexes if scan_frame_parameters.enabled_channel_indexes is not None else scan_hardware_source.get_enabled_channel_indexes()
         self.__fov_nm_model = fov_nm_model
         self.__rotation_model = rotation_model
@@ -2697,7 +2702,8 @@ class ScanDataStream(Acquisition.DataStream):
             camera_exposure_ms=self.__camera_exposure_ms,
             camera_data_stream=self.__camera_data_stream,
             fov_nm_model=self.__fov_nm_model,
-            rotation_model=self.__rotation_model
+            rotation_model=self.__rotation_model,
+            camera_id=self.__camera_id
         )
 
     def __update_data(self, data_channel_event_args: HardwareSource.DataChannelEventArgs, data_and_metadata: DataAndMetadata.DataAndMetadata) -> None:
@@ -2758,7 +2764,7 @@ class ScanDataStream(Acquisition.DataStream):
         # print(f"scan center_nm={self.__scan_frame_parameters.center_nm}")
         if self.__camera_data_stream:
             assert self.__camera_exposure_ms is not None
-            self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms)
+            self.__scan_hardware_source.scan_device.prepare_synchronized_scan(self.__scan_frame_parameters, camera_exposure_ms=self.__camera_exposure_ms, camera_id=self.__camera_id)
 
     def _start_stream(self, stream_args: Acquisition.DataStreamArgs) -> None:
         scan_frame_parameters = self.__scan_frame_parameters
@@ -2973,7 +2979,9 @@ def make_synchronized_scan_data_stream(
     # for a particular section gets calculated here and in ScanDataStream.prepare. if they
     # don't match, the total pixel count for the camera will not match the scan pixels.
     scan_parameters_copy = copy.deepcopy(scan_frame_parameters)
-    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_parameters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms)
+    # the scan device learns which camera clocks the scan from the camera's camera_id, which is its hardware source id.
+    camera_id = camera_hardware_source.hardware_source_id
+    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_parameters_copy, camera_exposure_ms=camera_frame_parameters.exposure_ms, camera_id=camera_id)
     flyback_pixels = scan_hardware_source.calculate_flyback_pixels(scan_parameters_copy)
     camera_data_stream = camera_base.CameraDataStream(camera_hardware_source, camera_frame_parameters,
                                                       camera_base.CameraDeviceSynchronizedStreamDelegate(
@@ -2995,7 +3003,7 @@ def make_synchronized_scan_data_stream(
             processed_camera_data_stream = Acquisition.FramedDataStream(processed_camera_data_stream, operator=operator)
     scan_data_stream = ScanDataStream(scan_hardware_source, scan_frame_parameters, scan_id,
                                       scan_hardware_source.drift_tracker, camera_exposure_ms, camera_data_stream,
-                                      fov_nm_model=fov_nm_model, rotation_model=rotation_model)
+                                      fov_nm_model=fov_nm_model, rotation_model=rotation_model, camera_id=camera_id)
     scan_size = scan_data_stream.scan_size
     scan_like_data_stream: Acquisition.DataStream = scan_data_stream
     if scan_data_stream_functor:

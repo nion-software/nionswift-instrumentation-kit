@@ -6,6 +6,8 @@ import typing
 import unittest
 import uuid
 
+import numpy
+
 from nion.data import DataAndMetadata
 from nion.device_kit import CameraDevice
 from nion.device_kit import InstrumentDevice
@@ -392,6 +394,54 @@ class TestCameraDeviceClass(unittest.TestCase):
             self.assertEqual(1, len(results), "the synchronized acquisition failed")
             field_widths_after_edit = {scan_context.fov_nm for scan_context in configuration.simulator.scan_contexts[changed_index:]}
             self.assertEqual({100.0}, field_widths_after_edit, "the spectra after the edit were placed within the edited field of view instead of the scan being acquired")
+
+    def test_camera_sequence_after_a_synchronized_acquisition_does_not_advance_the_scan(self) -> None:
+        with AcquisitionTestContext.test_context(is_eels=True) as test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(height=4, width=6)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.processing = "sum_project"
+            scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            # a camera which keeps the scan of the ended synchronized acquisition fails its first frame, waiting for the scan to start.
+            camera_hardware_source.acquire_sequence_prepare(10)
+            data_elements = camera_hardware_source.acquire_sequence(10)
+            self.assertEqual(10, data_elements[0]["data"].shape[0])
+            self.assertTrue(all(numpy.any(frame) for frame in data_elements[0]["data"]), "a frame of the sequence is missing")
+
+    def test_camera_sequence_advances_an_externally_clocked_scan_which_takes_its_clock_from_the_camera(self) -> None:
+        # a scan which names no camera takes its clock from any camera.
+        for clock_camera, expected_advance_count in (("no camera", 10), ("ronchigram", 10), ("eels", 0)):
+            with self.subTest(clock_camera=clock_camera):
+                advanced_pixel_counts: list[int] = list()
+
+                def record_advance(pixel_count: int) -> bool:
+                    advanced_pixel_counts.append(pixel_count)
+                    return True
+
+                with AcquisitionTestContext.test_context(is_both_cameras=True, advance_pixel_filter=record_advance) as test_context:
+                    scan_hardware_source = test_context.scan_hardware_source
+                    camera_hardware_source = test_context.camera_hardware_source
+                    eels_hardware_source = test_context.eels_hardware_source
+                    assert eels_hardware_source
+                    clock_camera_ids = {"no camera": None, "ronchigram": camera_hardware_source.hardware_source_id, "eels": eels_hardware_source.hardware_source_id}
+                    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    scan_frame_parameters.size = Geometry.IntSize(height=4, width=6)
+                    scan_hardware_source.scan_device.prepare_synchronized_scan(scan_frame_parameters, camera_exposure_ms=5, camera_id=clock_camera_ids[clock_camera])
+                    scan_hardware_source.start_playing(frame_parameters=scan_frame_parameters, sync_timeout=3.0)
+                    try:
+                        camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+                        camera_frame_parameters.exposure_ms = 5
+                        camera_frame_parameters.processing = "sum_project"
+                        camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+                        camera_hardware_source.acquire_sequence_prepare(10)
+                        camera_hardware_source.acquire_sequence(10)
+                    finally:
+                        scan_hardware_source.abort_playing(sync_timeout=3.0)
+                    self.assertEqual(expected_advance_count, len(advanced_pixel_counts), "the ronchigram's sequence advanced the scan the wrong number of times")
 
 if __name__ == '__main__':
     unittest.main()
