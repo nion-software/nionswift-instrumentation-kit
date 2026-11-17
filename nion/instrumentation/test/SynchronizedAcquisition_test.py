@@ -15,6 +15,8 @@ from nion.swift.model import ApplicationData
 from nion.swift.model import Metadata
 from nion.swift.test import TestContext
 from nion.utils import Geometry
+from nion.device_kit import CameraDevice
+from nion.device_kit import InstrumentDevice
 from nion.instrumentation import Acquisition
 from nion.instrumentation import camera_base
 from nion.instrumentation import DataChannel
@@ -23,6 +25,7 @@ from nion.instrumentation import scan_base
 from nion.instrumentation import stem_controller as STEMControllerModule
 from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation.test import AcquisitionTestContext
+from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nionswift_plugin.nion_instrumentation_ui import ScanAcquisition
 
 """
@@ -66,6 +69,46 @@ class ScanMoverFunctor(Acquisition.DataStreamFunctor):
         # ensure that the stage is moved first, then the drift corrector measures drift,
         # then the scan section is prepared (using the measured drift).
         return ScanMover(self.__scan_hardware_source, self.__drift, self.__functor.apply(data_stream))
+
+
+# a camera simulator whose frames are filled with their index, counting from 0, so that a test can tell where each frame
+# arrived.
+class FrameIndexCameraSimulator(AcquisitionTestContextConfiguration.CameraSimulator):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.__frame_index = 0
+
+    def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: STEMControllerModule.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
+        data = numpy.full((readout_area.height // binning_shape.height, readout_area.width // binning_shape.width), self.__frame_index, numpy.float32)
+        self.__frame_index += 1
+        return DataAndMetadata.new_data_and_metadata(data)
+
+
+# a simulated camera with 3 x 11 frames from a frame index simulator, which records the method families which begin and
+# cancel its acquisitions, by the prefix of their method names, such as acquire_sequence.
+class FrameIndexCamera(CameraDevice.Camera):
+
+    def __init__(self, camera_id: str, instrument: InstrumentDevice.Instrument) -> None:
+        super().__init__(camera_id, "ronchigram", "Frame Index Camera", FrameIndexCameraSimulator(), instrument)
+        self.readout_area = (0, 0, 3, 11)
+        self.called_families: set[str] = set()
+
+    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
+        self.called_families.add("acquire_sequence")
+        return super().acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
+
+    def acquire_sequence_cancel(self) -> None:
+        self.called_families.add("acquire_sequence")
+        super().acquire_sequence_cancel()
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
+        self.called_families.add("acquire_synchronized")
+        return super().acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
+
+    def acquire_synchronized_cancel(self) -> None:
+        self.called_families.add("acquire_synchronized")
+        super().acquire_synchronized_cancel()
 
 
 class TestSynchronizedAcquisitionClass(unittest.TestCase):
@@ -1525,6 +1568,56 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             maker = None
 
     # TODO: check for counts per electron
+
+    # return a test context whose ronchigram camera is a frame index camera of the given type. the camera delivers four
+    # frames for each continue, so that a scan arrives in parts which don't align with its rows.
+    def __frame_index_test_context(self, camera_type: typing.Callable[[str, InstrumentDevice.Instrument], FrameIndexCamera]) -> tuple[AcquisitionTestContext.AcquisitionTestContext, FrameIndexCamera]:
+        configuration = AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration()
+        configuration.ronchigram_camera_device.close()
+        camera = camera_type(configuration.ronchigram_camera_device_id, configuration.instrument)
+        configuration.ronchigram_camera_device = camera
+        test_context = AcquisitionTestContext.test_context(configuration)
+        test_context.camera_hardware_source._update_period_for_testing = 0.022
+        return test_context, camera
+
+    def test_sequence_acquisition_puts_each_frame_at_its_sequence_index(self) -> None:
+        test_context, camera = self.__frame_index_test_context(FrameIndexCamera)
+        with test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.binning = 1
+            camera_frame_parameters.processing = None
+            camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+            camera_hardware_source.acquire_sequence_prepare(13)
+            data_elements = camera_hardware_source.acquire_sequence(13)
+            expected_data = numpy.broadcast_to(numpy.arange(13)[:, numpy.newaxis, numpy.newaxis], (13, 3, 11))
+            self.assertTrue(numpy.array_equal(expected_data, data_elements[0]["data"]), "a frame of the sequence is wrong or missing")
+            self.assertEqual({"acquire_sequence"}, camera.called_families)
+
+    def test_synchronized_acquisition_puts_each_frame_at_its_scan_position(self) -> None:
+        test_context, camera = self.__frame_index_test_context(FrameIndexCamera)
+        with test_context:
+            scan_hardware_source = test_context.scan_hardware_source
+            camera_hardware_source = test_context.camera_hardware_source
+            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.scan_id = uuid.uuid4()
+            scan_frame_parameters.size = Geometry.IntSize(height=5, width=7)
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.binning = 1
+            camera_frame_parameters.processing = None
+            result = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+            assert result is not None
+            scans, camera_data_list = result
+            camera_xdata = camera_data_list[0]
+            # every scan position has the frame which the camera took there, skipping the two flyback frames which begin
+            # each row of nine frames.
+            expected_frame_indexes = numpy.arange(5)[:, numpy.newaxis] * 9 + 2 + numpy.arange(7)[numpy.newaxis, :]
+            expected_data = numpy.broadcast_to(expected_frame_indexes[:, :, numpy.newaxis, numpy.newaxis], (5, 7, 3, 11))
+            self.assertEqual((5, 7, 3, 11), camera_xdata.data_shape)
+            self.assertTrue(numpy.array_equal(expected_data, camera_xdata._data_ex), "a scan position has the wrong frame, or no frame")
+            self.assertEqual({"acquire_synchronized"}, camera.called_families)
 
 
 if __name__ == '__main__':
