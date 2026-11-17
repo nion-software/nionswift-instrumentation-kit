@@ -337,12 +337,8 @@ class CameraDevice(typing.Protocol):
         The camera device should wait up to update_period seconds for data and populate PartialData with data and
         information about the acquisition.
 
-        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
-        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
-        data and then update last valid item with valid_count.
-
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
-        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+        The xdata field of PartialData must be filled with the data allocated during acquire_sequence_begin. The
+        frames up to valid_count must remain valid until the last Python reference to xdata is released.
 
         Returns PartialData.
         """
@@ -393,7 +389,7 @@ class CameraDevice(typing.Protocol):
         The camera device should wait up to update_period seconds for data and populate PartialData with data and
         information about the acquisition.
 
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        The xdata field of PartialData must be filled with the data allocated during acquire_single_begin. The
         section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
         """
         partial_data = self.acquire_sequence_continue(update_period=update_period, **kwargs)
@@ -447,8 +443,8 @@ class CameraDevice3(typing.Protocol):
     Camera devices can support several modes of operation:
         - continue acquire (acquire single images repeatedly for viewing)
         - single acquire (acquire one image)
-        - sequence acquire (acquire n continuous images)
-        - synchronized acquire (synchronized with scan controller)
+        - sequence acquire (acquire n images, optionally arranged in a collection shape such as that of a scan)
+        - synchronized acquire (deprecated, replaced by sequence acquire with a collection shape)
 
     It is recommended to implement all optional methods that are not deprecated. Some methods are deprecated but still
     valid for backward compatibility.
@@ -766,25 +762,40 @@ class CameraDevice3(typing.Protocol):
         """
         return dict()
 
+    @property
+    def is_sequence_collection_shape_supported(self) -> bool:
+        """Return whether the device takes a collection_shape keyword on acquire_sequence_prepare and acquire_sequence_begin.
+
+        A device which returns True receives the collection shape of every sequence, and returns its frames with the
+        collection shape as their leading axes. It must also answer is_sequence_supported, whose default refuses every
+        sequence. The default is False. A device which returns False receives only the count on its sequence methods, and
+        receives a sequence with a collection shape of two axes on its acquire_synchronized methods instead.
+
+        Camera devices commonly accept and ignore keyword arguments they don't use, so this property is how the hardware
+        source knows that the device uses collection_shape. This property is transitional: it and the deprecated
+        acquire_synchronized methods serve devices which don't take collection shapes.
+        """
+        return False
+
+    def is_sequence_supported(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        """Return whether the device can acquire a sequence with the frame parameters, arranged in the collection shape.
+
+        The hardware source asks only a device which declares is_sequence_collection_shape_supported, and raises
+        ValueError for a sequence which the device can't acquire. The default is False.
+        """
+        return False
+
     def acquire_synchronized_prepare(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
-        """Begin synchronized acquire.
+        """Prepare synchronized acquire.
 
-        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
-
-        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
-        False, is_canceled set to False, and valid_rows and valid_count set to 0.
-
-        Returns PartialData.
+        Deprecated: replaced by acquire_sequence_prepare with a collection_shape; see is_sequence_collection_shape_supported.
         """
         return
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
         """Begin synchronized acquire.
 
-        The camera device can allocate memory to accommodate the collection_shape and begin acquisition immediately.
-
-        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
-        False, is_canceled set to False, and valid_rows and valid_count set to 0.
+        Deprecated: replaced by acquire_sequence_begin with a collection_shape; see is_sequence_collection_shape_supported.
 
         Returns PartialData.
         """
@@ -793,19 +804,7 @@ class CameraDevice3(typing.Protocol):
     def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> PartialData:
         """Continue synchronized acquire.
 
-        The camera device should wait up to update_period seconds for data and populate PartialData with data and
-        information about the acquisition.
-
-        Deprecated: The valid_rows field of PartialData indicates how many rows are valid in xdata. The
-        grab_synchronized method will keep track of the last valid row and copy data from the last valid row to
-        valid_rows into the acquisition data and then update last valid row with valid_rows.
-
-        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
-        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
-        data and then update last valid item with valid_count.
-
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
-        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+        Deprecated: replaced by acquire_sequence_continue; see is_sequence_collection_shape_supported.
 
         Returns PartialData.
         """
@@ -814,36 +813,33 @@ class CameraDevice3(typing.Protocol):
     def acquire_synchronized_end(self, **kwargs: typing.Any) -> None:
         """Clean up synchronized acquire.
 
-        The camera device can clean up anything internal that was required for acquisition.
-
-        The memory returned during acquire_synchronized_begin or acquire_synchronized_continue must remain valid until
-        the last Python reference to that memory is released.
+        Deprecated: replaced by acquire_sequence_end; see is_sequence_collection_shape_supported.
         """
         ...
 
     def acquire_synchronized_cancel(self) -> None:
         """Request to cancel a synchronized acquisition.
 
-        Future calls to acquire_synchronized_continue should have the is_cancelled flag set.
+        Deprecated: replaced by acquire_sequence_cancel; see is_sequence_collection_shape_supported.
         """
         pass
 
     def acquire_sequence_prepare(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> None:
-        """Begin sequence acquire.
+        """Prepare sequence acquire.
 
-        The camera device can allocate memory to accommodate the count and begin acquisition immediately.
+        The camera device can allocate memory to accommodate the count frames, and arm itself so that acquisition can
+        begin immediately.
 
-        The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
-        False, is_canceled set to False, and valid_rows and valid_count set to 0.
-
-        Returns PartialData.
+        A device which declares is_sequence_collection_shape_supported also receives the collection_shape keyword.
         """
         return
 
     def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
         """Begin sequence acquire.
 
-        The camera device can allocate memory to accommodate the count and begin acquisition immediately.
+        The camera device can allocate memory to accommodate the count frames and begin acquisition immediately.
+
+        A device which declares is_sequence_collection_shape_supported also receives the collection_shape keyword.
 
         The camera device will typically populate the PartialData with the data array (xdata), is_complete set to
         False, is_canceled set to False, and valid_rows and valid_count set to 0.
@@ -858,12 +854,8 @@ class CameraDevice3(typing.Protocol):
         The camera device should wait up to update_period seconds for data and populate PartialData with data and
         information about the acquisition.
 
-        The valid_count field of PartialData indicates how many items are valid in xdata. The grab_synchronized method
-        will keep track of the last valid item and copy data from the last valid item to valid_count into the acquisition
-        data and then update last valid item with valid_count.
-
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
-        section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
+        The xdata field of PartialData must be filled with the data allocated during acquire_sequence_begin. The
+        frames up to valid_count must remain valid until the last Python reference to xdata is released.
 
         Returns PartialData.
         """
@@ -915,7 +907,7 @@ class CameraDevice3(typing.Protocol):
         The camera device should wait up to update_period seconds for data and populate PartialData with data and
         information about the acquisition.
 
-        The xdata field of PartialData must be filled with the data allocated during acquire_synchronized_begin. The
+        The xdata field of PartialData must be filled with the data allocated during acquire_single_begin. The
         section of data up to valid_rows must remain valid until the last Python reference to xdata is released.
         """
         partial_data = self.acquire_sequence_continue(update_period=update_period, **kwargs)
@@ -1391,9 +1383,11 @@ class PartialData:
 
     The xdata should be the entire data array.
 
-    valid_count gives the number of valid pixels.
+    valid_count gives the number of frames which are valid, counting in the order the device takes them, which is the
+    order of the data with its collection axes flattened.
 
-    valid_rows is deprecated and does not need to be supplied if valid_count is supplied.
+    valid_rows gives the number of complete rows of the collection shape's last axis, valid_count // collection_shape[-1]
+    for a collection shape of two axes. It is deprecated and does not need to be supplied if valid_count is supplied.
 
     is_complete and is_canceled should be set as required.
     """
@@ -1424,14 +1418,15 @@ class CameraHardwareSource(HardwareSource.HardwareSource, typing.Protocol):
     def grab_next_to_finish(self, *, timeout: typing.Optional[float] = None, **kwargs: typing.Any) -> typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]: ...
     def grab_sequence_prepare(self, count: int, **kwargs: typing.Any) -> bool: ...
     def grab_sequence(self, count: int, **kwargs: typing.Any) -> typing.Optional[typing.Sequence[typing.Optional[DataAndMetadata.DataAndMetadata]]]: ...
+    # acquire_synchronized_prepare, _begin, _continue and _end are deprecated; they forward to the sequence methods with the collection shape.
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData: ...
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_synchronized_end(self) -> None: ...
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None: ...
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]: ...
-    def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None: ...
+    def acquire_sequence_prepare(self, n: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> None: ...
     def acquire_sequence(self, n: int) -> typing.Sequence[ImportExportManager.DataElementType]: ...
-    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData: ...
+    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> PartialData: ...
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData: ...
     def acquire_sequence_end(self) -> None: ...
     def acquire_sequence_cancel(self) -> None: ...
@@ -1553,6 +1548,11 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         self.__record_frame_parameters_changed_event_listener = self.__camera_settings.record_frame_parameters_changed_event.listen(self.__record_frame_parameters_changed)
 
         self._update_period_for_testing: typing.Optional[float] = None
+
+        # whether the sequence in progress uses the device's deprecated acquire_synchronized methods. prepare, begin and
+        # end write it on the thread which runs the sequence. cancel may read it on another thread; reading a bool needs
+        # no lock.
+        self.__is_sequence_synchronized = False
 
         # add optional support for settings. to enable auto settings handling, the camera settings object must define
         # a settings_id property (which can just be the camera id), an apply_settings method which takes a settings
@@ -1833,21 +1833,20 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
         return RecordCameraAcquisitionTask(self, record_parameters)
 
     def acquire_synchronized_prepare(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
-        # added this because it turns out it is needed - sequence/sync prepare needs to go before
-        # the scan is started.
-        acquire_synchronized_prepare = getattr(self.__camera, "acquire_synchronized_prepare", None)
-        if callable(acquire_synchronized_prepare):
-            acquire_synchronized_prepare(self.get_current_frame_parameters(), data_shape, **kwargs)
+        """Prepare a sequence of the frames of the collection shape. Deprecated: use acquire_sequence_prepare."""
+        self.acquire_sequence_prepare(math.prod(data_shape), collection_shape=data_shape, **kwargs)
 
     def acquire_synchronized_begin(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> PartialData:
-        return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
+        """Begin a sequence of the frames of the collection shape. Deprecated: use acquire_sequence_begin."""
+        return self.acquire_sequence_begin(camera_frame_parameters, math.prod(collection_shape), collection_shape=collection_shape, **kwargs)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0) -> PartialData:
-        update_period = self._update_period_for_testing if self._update_period_for_testing is not None else update_period
-        return self.__camera.acquire_synchronized_continue(update_period=update_period)
+        """Continue a sequence. Deprecated: use acquire_sequence_continue."""
+        return self.acquire_sequence_continue(update_period=update_period)
 
     def acquire_synchronized_end(self) -> None:
-        self.__camera.acquire_synchronized_end()
+        """End a sequence. Deprecated: use acquire_sequence_end."""
+        self.acquire_sequence_end()
 
     def acquire_synchronized(self, data_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> typing.Sequence[ImportExportManager.DataElementType]:
         # prepare does nothing in camera device 3
@@ -1927,24 +1926,104 @@ class CameraHardwareSource3(HardwareSource.ConcreteHardwareSource, CameraHardwar
     def get_pixel_angle(self) -> typing.Optional[float]:
         return self.__get_camera_calibrator().get_pixel_angle()
 
-    def acquire_sequence_prepare(self, n: int, **kwargs: typing.Any) -> None:
-        # added this because it turns out it is needed - sequence/sync prepare needs to go before
-        # the scan is started.
-        acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
-        if callable(acquire_sequence_prepare):
-            acquire_sequence_prepare(self.get_current_frame_parameters(), n, **kwargs)
+    # whether the device takes a collection shape on its sequence methods, as its optional declaration says.
+    @property
+    def __is_sequence_collection_shape_supported(self) -> bool:
+        return bool(getattr(self.__camera, "is_sequence_collection_shape_supported", False))
 
-    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, **kwargs: typing.Any) -> PartialData:
-        return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
+    # return the collection shape of a sequence of count frames, (count,) by default. raise ValueError if the shape has
+    # no axes or more than the two collection axes which data can have, or if it doesn't have count frames.
+    def __get_sequence_collection_shape(self, count: int, collection_shape: DataAndMetadata.ShapeType | None) -> DataAndMetadata.ShapeType:
+        collection_shape = tuple(collection_shape) if collection_shape is not None else (count,)
+        if not 1 <= len(collection_shape) <= 2:
+            raise ValueError(f"The collection shape {collection_shape} does not have one or two axes.")
+        if math.prod(collection_shape) != count:
+            raise ValueError(f"The collection shape {collection_shape} does not have {count} frames.")
+        return collection_shape
+
+    # raise ValueError if the device takes a collection shape on its sequence methods and can't acquire the sequence.
+    def __check_sequence_supported(self, camera_frame_parameters: CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> None:
+        if self.__is_sequence_collection_shape_supported and not self.__camera.is_sequence_supported(camera_frame_parameters, collection_shape):
+            raise ValueError(f"The camera can't acquire a sequence with the collection shape {collection_shape} and these frame parameters.")
+
+    # whether the device acquires a sequence of the collection shape with its deprecated acquire_synchronized methods,
+    # as a device which doesn't take a collection shape on its sequence methods does for a shape of two axes.
+    def __uses_synchronized_methods(self, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return not self.__is_sequence_collection_shape_supported and len(collection_shape) > 1
+
+    def acquire_sequence_prepare(self, n: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> None:
+        """Prepare a sequence of n frames, arranged in the collection shape, which is (n,) by default.
+
+        Call it before starting the scan of a synchronized acquisition, since the device may arm itself here.
+
+        Raises ValueError if the collection shape does not have one or two axes, or does not have n frames, or if the
+        camera can't acquire the sequence.
+        """
+        collection_shape = self.__get_sequence_collection_shape(n, collection_shape)
+        camera_frame_parameters = self.get_current_frame_parameters()
+        self.__check_sequence_supported(camera_frame_parameters, collection_shape)
+        try:
+            self.__is_sequence_synchronized = self.__uses_synchronized_methods(collection_shape)
+            if self.__is_sequence_synchronized:
+                acquire_synchronized_prepare = getattr(self.__camera, "acquire_synchronized_prepare", None)
+                if callable(acquire_synchronized_prepare):
+                    acquire_synchronized_prepare(camera_frame_parameters, collection_shape, **kwargs)
+            else:
+                acquire_sequence_prepare = getattr(self.__camera, "acquire_sequence_prepare", None)
+                if callable(acquire_sequence_prepare):
+                    if self.__is_sequence_collection_shape_supported:
+                        acquire_sequence_prepare(camera_frame_parameters, n, collection_shape=collection_shape, **kwargs)
+                    else:
+                        acquire_sequence_prepare(camera_frame_parameters, n, **kwargs)
+        except BaseException:
+            # a caller doesn't end a sequence which fails to prepare, so a later cancel goes to the sequence methods, as
+            # it does when no sequence is in progress.
+            self.__is_sequence_synchronized = False
+            raise
+
+    def acquire_sequence_begin(self, camera_frame_parameters: CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> PartialData:
+        """Begin a sequence of count frames, arranged in the collection shape, which is (count,) by default.
+
+        Returns the partial data of the sequence, whose data has the collection shape as its leading axes.
+
+        Raises ValueError if the collection shape does not have one or two axes, or does not have count frames, or if
+        the camera can't acquire the sequence.
+        """
+        try:
+            collection_shape = self.__get_sequence_collection_shape(count, collection_shape)
+            self.__check_sequence_supported(camera_frame_parameters, collection_shape)
+            self.__is_sequence_synchronized = self.__uses_synchronized_methods(collection_shape)
+            if self.__is_sequence_synchronized:
+                return self.__camera.acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
+            if self.__is_sequence_collection_shape_supported:
+                return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, collection_shape=collection_shape, **kwargs)
+            return self.__camera.acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
+        except BaseException:
+            # a caller doesn't end a sequence which fails to begin, so a later cancel goes to the sequence methods, as
+            # it does when no sequence is in progress.
+            self.__is_sequence_synchronized = False
+            raise
 
     def acquire_sequence_continue(self, *, update_period: float = 1.0) -> PartialData:
+        update_period = self._update_period_for_testing if self._update_period_for_testing is not None else update_period
+        if self.__is_sequence_synchronized:
+            return self.__camera.acquire_synchronized_continue(update_period=update_period)
         return self.__camera.acquire_sequence_continue(update_period=update_period)
 
     def acquire_sequence_end(self) -> None:
-        self.__camera.acquire_sequence_end()
+        try:
+            if self.__is_sequence_synchronized:
+                self.__camera.acquire_synchronized_end()
+            else:
+                self.__camera.acquire_sequence_end()
+        finally:
+            self.__is_sequence_synchronized = False
 
     def acquire_sequence_cancel(self) -> None:
-        self.__camera.acquire_sequence_cancel()
+        if self.__is_sequence_synchronized:
+            self.__camera.acquire_synchronized_cancel()
+        else:
+            self.__camera.acquire_sequence_cancel()
 
     def get_acquire_sequence_metrics(self, frame_parameters: CameraFrameParameters) -> typing.Mapping[str, typing.Any]:
         get_acquire_sequence_metrics = getattr(self.__camera, "get_acquire_sequence_metrics", None)

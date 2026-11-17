@@ -443,5 +443,21 @@ class TestCameraDeviceClass(unittest.TestCase):
                         scan_hardware_source.abort_playing(sync_timeout=3.0)
                     self.assertEqual(expected_advance_count, len(advanced_pixel_counts), "the ronchigram's sequence advanced the scan the wrong number of times")
 
+    def test_camera_sequence_with_a_collection_shape_acquires_every_frame_in_the_shape(self) -> None:
+        with AcquisitionTestContext.test_context(is_eels=True) as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            camera_frame_parameters.exposure_ms = 5
+            camera_frame_parameters.processing = None
+            camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+            camera_hardware_source.acquire_sequence_prepare(12, collection_shape=(3, 4))
+            partial_data = camera_hardware_source.acquire_sequence_begin(camera_frame_parameters, 12, collection_shape=(3, 4))
+            while not partial_data.is_complete:
+                partial_data = camera_hardware_source.acquire_sequence_continue()
+            camera_hardware_source.acquire_sequence_end()
+            data = partial_data.xdata._data_ex
+            self.assertEqual((3, 4) + camera_hardware_source.get_expected_dimensions(camera_frame_parameters), data.shape)
+            self.assertTrue(all(numpy.any(frame) for frame in data.reshape((12,) + data.shape[2:])), "a frame of the collection is missing")
+
 if __name__ == '__main__':
     unittest.main()

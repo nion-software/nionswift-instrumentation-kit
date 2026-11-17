@@ -72,34 +72,45 @@ class ScanMoverFunctor(Acquisition.DataStreamFunctor):
 
 
 # a camera simulator whose frames are filled with their index, counting from 0, so that a test can tell where each frame
-# arrived.
+# arrived. it sets paused_event and waits for resume_event before the frame at pause_frame_index, as a camera which waits
+# for a trigger does.
 class FrameIndexCameraSimulator(AcquisitionTestContextConfiguration.CameraSimulator):
 
     def __init__(self) -> None:
         super().__init__()
         self.__frame_index = 0
+        self.pause_frame_index: int | None = None
+        self.paused_event = threading.Event()
+        self.resume_event = threading.Event()
 
+    # runs on the thread of the camera's acquisition.
     def get_frame_data(self, readout_area: Geometry.IntRect, binning_shape: Geometry.IntSize, exposure_s: float, scan_context: STEMControllerModule.ScanContext, probe_position: typing.Optional[Geometry.FloatPoint]) -> DataAndMetadata.DataAndMetadata:
+        if self.__frame_index == self.pause_frame_index:
+            self.paused_event.set()
+            self.resume_event.wait(10.0)
         data = numpy.full((readout_area.height // binning_shape.height, readout_area.width // binning_shape.width), self.__frame_index, numpy.float32)
         self.__frame_index += 1
         return DataAndMetadata.new_data_and_metadata(data)
 
 
-# a simulated camera with 3 x 11 frames from a frame index simulator, which records the method families which begin and
-# cancel its acquisitions, by the prefix of their method names, such as acquire_sequence.
+# a simulated camera with 3 x 11 frames from a frame index simulator. the camera records the method families which begin
+# its acquisitions, by the prefix of their method names, such as acquire_sequence. it records only the family of the first
+# cancel method which a cancel reaches, since the simulated camera's synchronized cancel calls its sequence cancel.
 class FrameIndexCamera(CameraDevice.Camera):
 
     def __init__(self, camera_id: str, instrument: InstrumentDevice.Instrument) -> None:
-        super().__init__(camera_id, "ronchigram", "Frame Index Camera", FrameIndexCameraSimulator(), instrument)
+        self.frame_index_simulator = FrameIndexCameraSimulator()
+        super().__init__(camera_id, "ronchigram", "Frame Index Camera", self.frame_index_simulator, instrument)
         self.readout_area = (0, 0, 3, 11)
         self.called_families: set[str] = set()
+        self.cancel_family: str | None = None
 
     def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
         self.called_families.add("acquire_sequence")
         return super().acquire_sequence_begin(camera_frame_parameters, count, **kwargs)
 
     def acquire_sequence_cancel(self) -> None:
-        self.called_families.add("acquire_sequence")
+        self.cancel_family = self.cancel_family or "acquire_sequence"
         super().acquire_sequence_cancel()
 
     def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
@@ -107,8 +118,50 @@ class FrameIndexCamera(CameraDevice.Camera):
         return super().acquire_synchronized_begin(camera_frame_parameters, collection_shape, **kwargs)
 
     def acquire_synchronized_cancel(self) -> None:
-        self.called_families.add("acquire_synchronized")
+        self.cancel_family = self.cancel_family or "acquire_synchronized"
         super().acquire_synchronized_cancel()
+
+
+# a frame index camera which declares that it takes a collection shape on its sequence methods, and whose synchronized
+# begin isn't implemented. the simulated camera takes a collection shape on its synchronized begin, so its sequence begin
+# calls that.
+class SequenceOnlyFrameIndexCamera(FrameIndexCamera):
+
+    @property
+    def is_sequence_collection_shape_supported(self) -> bool:
+        return True
+
+    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> camera_base.PartialData:
+        self.called_families.add("acquire_sequence")
+        return CameraDevice.Camera.acquire_synchronized_begin(self, camera_frame_parameters, collection_shape if collection_shape is not None else (count,))
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
+        raise NotImplementedError()
+
+    def is_sequence_supported(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return True
+
+
+# a frame index camera whose synchronized begin fails, as a camera which fails to arm does.
+class FailingBeginFrameIndexCamera(FrameIndexCamera):
+
+    def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
+        self.called_families.add("acquire_synchronized")
+        raise RuntimeError("The camera failed to begin.")
+
+
+# a frame index camera whose synchronized prepare fails, as a camera which fails to arm does.
+class FailingPrepareFrameIndexCamera(FrameIndexCamera):
+
+    def acquire_synchronized_prepare(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> None:
+        raise RuntimeError("The camera failed to prepare.")
+
+
+# a sequence-only frame index camera which can acquire a sequence of one axis, and can't acquire a scan.
+class OneAxisFrameIndexCamera(SequenceOnlyFrameIndexCamera):
+
+    def is_sequence_supported(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return len(collection_shape) == 1
 
 
 class TestSynchronizedAcquisitionClass(unittest.TestCase):
@@ -1596,28 +1649,110 @@ class TestSynchronizedAcquisitionClass(unittest.TestCase):
             self.assertEqual({"acquire_sequence"}, camera.called_families)
 
     def test_synchronized_acquisition_puts_each_frame_at_its_scan_position(self) -> None:
-        test_context, camera = self.__frame_index_test_context(FrameIndexCamera)
+        for camera_type, family in ((FrameIndexCamera, "acquire_synchronized"), (SequenceOnlyFrameIndexCamera, "acquire_sequence")):
+            with self.subTest(camera_type=camera_type.__name__):
+                test_context, camera = self.__frame_index_test_context(camera_type)
+                with test_context:
+                    scan_hardware_source = test_context.scan_hardware_source
+                    camera_hardware_source = test_context.camera_hardware_source
+                    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    scan_frame_parameters.scan_id = uuid.uuid4()
+                    scan_frame_parameters.size = Geometry.IntSize(height=5, width=7)
+                    camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+                    camera_frame_parameters.exposure_ms = 5
+                    camera_frame_parameters.binning = 1
+                    camera_frame_parameters.processing = None
+                    result = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+                    assert result is not None
+                    scans, camera_data_list = result
+                    camera_xdata = camera_data_list[0]
+                    # every scan position has the frame which the camera took there, skipping the two flyback frames which begin
+                    # each row of nine frames.
+                    expected_frame_indexes = numpy.arange(5)[:, numpy.newaxis] * 9 + 2 + numpy.arange(7)[numpy.newaxis, :]
+                    expected_data = numpy.broadcast_to(expected_frame_indexes[:, :, numpy.newaxis, numpy.newaxis], (5, 7, 3, 11))
+                    self.assertEqual((5, 7, 3, 11), camera_xdata.data_shape)
+                    self.assertTrue(numpy.array_equal(expected_data, camera_xdata._data_ex), "a scan position has the wrong frame, or no frame")
+                    self.assertEqual({family}, camera.called_families)
+
+    def test_deprecated_synchronized_methods_of_a_camera_acquire_through_the_sequence_methods_of_its_device(self) -> None:
+        for camera_type, collection_shape in ((SequenceOnlyFrameIndexCamera, (2, 3)), (FrameIndexCamera, (6,))):
+            with self.subTest(camera_type=camera_type.__name__, collection_shape=collection_shape):
+                test_context, camera = self.__frame_index_test_context(camera_type)
+                with test_context:
+                    camera_hardware_source = test_context.camera_hardware_source
+                    camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+                    camera_frame_parameters.exposure_ms = 5
+                    camera_frame_parameters.binning = 1
+                    camera_frame_parameters.processing = None
+                    camera_hardware_source.set_current_frame_parameters(camera_frame_parameters)
+                    camera_hardware_source.acquire_synchronized_prepare(collection_shape)
+                    partial_data = camera_hardware_source.acquire_synchronized_begin(camera_frame_parameters, collection_shape)
+                    while not partial_data.is_complete:
+                        partial_data = camera_hardware_source.acquire_synchronized_continue()
+                    camera_hardware_source.acquire_synchronized_end()
+                    expected_data = numpy.broadcast_to(numpy.arange(6).reshape(collection_shape + (1, 1)), collection_shape + (3, 11))
+                    self.assertTrue(numpy.array_equal(expected_data, partial_data.xdata._data_ex), "a frame of the collection is wrong or missing")
+                    self.assertEqual({"acquire_sequence"}, camera.called_families)
+
+    def test_cancel_of_a_synchronized_acquisition_goes_to_the_methods_which_began_it(self) -> None:
+        for camera_type, family in ((SequenceOnlyFrameIndexCamera, "acquire_sequence"), (FrameIndexCamera, "acquire_synchronized")):
+            with self.subTest(camera_type=camera_type.__name__):
+                test_context, camera = self.__frame_index_test_context(camera_type)
+                with test_context:
+                    scan_hardware_source = test_context.scan_hardware_source
+                    camera_hardware_source = test_context.camera_hardware_source
+                    scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
+                    scan_frame_parameters.scan_id = uuid.uuid4()
+                    scan_frame_parameters.size = Geometry.IntSize(height=5, width=7)
+                    camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+                    camera_frame_parameters.exposure_ms = 5
+                    camera_frame_parameters.binning = 1
+                    camera_frame_parameters.processing = None
+                    # the camera pauses before the frame at index 10, and this thread cancels the acquisition while it waits.
+                    camera.frame_index_simulator.pause_frame_index = 10
+
+                    def grab_synchronized() -> None:
+                        scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
+
+                    synchronized_thread = threading.Thread(target=grab_synchronized)
+                    synchronized_thread.start()
+                    try:
+                        self.assertTrue(camera.frame_index_simulator.paused_event.wait(10.0), "the camera didn't reach its pause")
+                        scan_hardware_source.grab_synchronized_abort()
+                    finally:
+                        camera.frame_index_simulator.resume_event.set()
+                        synchronized_thread.join()
+                    self.assertEqual(family, camera.cancel_family, "the cancel didn't reach the methods which began the acquisition")
+                    self.assertEqual({family}, camera.called_families)
+
+    def test_cancel_after_a_camera_fails_to_begin_a_synchronized_acquisition_goes_to_its_sequence_methods(self) -> None:
+        test_context, camera = self.__frame_index_test_context(FailingBeginFrameIndexCamera)
         with test_context:
-            scan_hardware_source = test_context.scan_hardware_source
             camera_hardware_source = test_context.camera_hardware_source
-            scan_frame_parameters = scan_hardware_source.get_current_frame_parameters()
-            scan_frame_parameters.scan_id = uuid.uuid4()
-            scan_frame_parameters.size = Geometry.IntSize(height=5, width=7)
-            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
-            camera_frame_parameters.exposure_ms = 5
-            camera_frame_parameters.binning = 1
-            camera_frame_parameters.processing = None
-            result = scan_hardware_source.grab_synchronized(scan_frame_parameters=scan_frame_parameters, camera=camera_hardware_source, camera_frame_parameters=camera_frame_parameters)
-            assert result is not None
-            scans, camera_data_list = result
-            camera_xdata = camera_data_list[0]
-            # every scan position has the frame which the camera took there, skipping the two flyback frames which begin
-            # each row of nine frames.
-            expected_frame_indexes = numpy.arange(5)[:, numpy.newaxis] * 9 + 2 + numpy.arange(7)[numpy.newaxis, :]
-            expected_data = numpy.broadcast_to(expected_frame_indexes[:, :, numpy.newaxis, numpy.newaxis], (5, 7, 3, 11))
-            self.assertEqual((5, 7, 3, 11), camera_xdata.data_shape)
-            self.assertTrue(numpy.array_equal(expected_data, camera_xdata._data_ex), "a scan position has the wrong frame, or no frame")
-            self.assertEqual({"acquire_synchronized"}, camera.called_families)
+            camera_hardware_source.acquire_sequence_prepare(6, collection_shape=(2, 3))
+            with self.assertRaises(RuntimeError):
+                camera_hardware_source.acquire_sequence_begin(camera_hardware_source.get_current_frame_parameters(), 6, collection_shape=(2, 3))
+            camera_hardware_source.acquire_sequence_cancel()
+            self.assertEqual("acquire_sequence", camera.cancel_family)
+
+    def test_cancel_after_a_camera_fails_to_prepare_a_synchronized_acquisition_goes_to_its_sequence_methods(self) -> None:
+        test_context, camera = self.__frame_index_test_context(FailingPrepareFrameIndexCamera)
+        with test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            with self.assertRaises(RuntimeError):
+                camera_hardware_source.acquire_sequence_prepare(6, collection_shape=(2, 3))
+            camera_hardware_source.acquire_sequence_cancel()
+            self.assertEqual("acquire_sequence", camera.cancel_family)
+
+    def test_sequence_which_a_camera_can_not_acquire_raises_value_error(self) -> None:
+        test_context, camera = self.__frame_index_test_context(OneAxisFrameIndexCamera)
+        with test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            with self.assertRaises(ValueError):
+                camera_hardware_source.acquire_sequence_prepare(6, collection_shape=(2, 3))
+            with self.assertRaises(ValueError):
+                camera_hardware_source.acquire_sequence_begin(camera_hardware_source.get_current_frame_parameters(), 6, collection_shape=(2, 3))
+            self.assertEqual(set(), camera.called_families)
 
 
 if __name__ == '__main__':
