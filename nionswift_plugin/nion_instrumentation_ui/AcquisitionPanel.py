@@ -420,8 +420,10 @@ class SequenceAcquisitionMethodComponentHandler(AcquisitionMethodComponentHandle
 
     def _get_time_space_usage(self, device_component: AcquisitionDeviceComponentHandler) -> TimeSpaceUsage:
         unit_time_space_usage = device_component.get_time_space_usage()
-        return TimeSpaceUsage(unit_time_space_usage.time * self.configuration.count,
-                              unit_time_space_usage.space * self.configuration.count)
+        unit_time = unit_time_space_usage.time
+        unit_space = unit_time_space_usage.space
+        return TimeSpaceUsage(unit_time * self.configuration.count if unit_time is not None else None,
+                              unit_space * self.configuration.count if unit_space is not None else None)
 
     def build_acquisition_method(self) -> Acquisition.AcquisitionMethodLike:
         length = max(1, self.configuration.count) if self.configuration.count else 1
@@ -1646,16 +1648,20 @@ class CameraFrameParametersStream(Stream.ValueStream[CameraFrameParametersAndRea
     def __init__(self, hardware_source_stream: HardwareSourceChoice.HardwareSourceChoiceStream) -> None:
         super().__init__()
         self.__frame_parameters_changed_listener: typing.Optional[Event.EventListener] = None
+        self.__camera_frame_parameters_changed_listener: Event.EventListener | None = None
         self.__camera_hardware_source_stream_listener = hardware_source_stream.value_stream.listen(weak_partial(CameraFrameParametersStream.__hardware_source_stream_changed, self))
         self.__hardware_source_stream_changed(hardware_source_stream.value)
 
     def __hardware_source_stream_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
-        # when the hardware source choice changes, update the frame parameters listener. close the old one.
+        # when the hardware source choice changes, update the frame parameters listeners. drop the old ones.
         self.__frame_parameters_changed_listener = None
-        assert isinstance(hardware_source, camera_base.CameraHardwareSource)
-        self.__frame_parameters_changed_listener = hardware_source.current_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
-        self.__camera_frame_parameters_changed(hardware_source, hardware_source.get_current_frame_parameters())
-        self.__camera_frame_parameters_changed_listener = hardware_source.camera_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
+        self.__camera_frame_parameters_changed_listener = None
+        if isinstance(hardware_source, camera_base.CameraHardwareSource):
+            self.__frame_parameters_changed_listener = hardware_source.current_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
+            self.__camera_frame_parameters_changed(hardware_source, hardware_source.get_current_frame_parameters())
+            self.__camera_frame_parameters_changed_listener = hardware_source.camera_frame_parameters_changed_event.listen(weak_partial(CameraFrameParametersStream.__camera_frame_parameters_changed, self, hardware_source))
+        else:
+            self.value = None
 
     def __camera_frame_parameters_changed(self, camera_hardware_source: camera_base.CameraHardwareSource, frame_parameters: camera_base.CameraFrameParameters) -> None:
         self.value = CameraFrameParametersAndReadoutArea(copy.copy(frame_parameters), camera_hardware_source.camera.readout_area)
