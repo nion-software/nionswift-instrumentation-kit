@@ -1,16 +1,21 @@
+import contextlib
 import typing
 import unittest
 
 from nion.device_kit import CameraDevice
+from nion.instrumentation import AcquisitionPreferences
 from nion.instrumentation import HardwareSource
 from nion.instrumentation import stem_controller
 from nion.instrumentation.test import AcquisitionTestContext
 from nion.instrumentation.test import AcquisitionTestContextConfiguration
 from nion.swift import Application
+from nion.swift.model import ApplicationData
 from nion.swift.model import Schema
 from nion.swift.test import TestContext
+from nion.ui import Declarative
 from nion.ui import TestUI
 from nion.utils import Model
+from nion.utils import Registry
 from nion.utils import Stream
 from nionswift_plugin.nion_instrumentation_ui import AcquisitionPanel
 
@@ -23,6 +28,30 @@ class EDXSAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguratio
         self.eels_camera_device.close()
         simulator = AcquisitionTestContextConfiguration.CameraSimulator(("", "eV"))
         self.eels_camera_device = CameraDevice.Camera(self.eels_camera_device_id, "edxs", "EDXS", simulator, self.instrument)
+
+
+# a test configuration whose cameras are offline at launch. a test brings them online with register_cameras.
+class NoCameraAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration.AcquisitionTestContextConfiguration):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.__are_cameras_registered = False
+
+    def run(self) -> None:
+        Registry.register_component(self.instrument, {"instrument_controller", "stem_controller"})
+        Registry.register_component(self.scan_module, {"scan_module"})
+
+    def register_cameras(self) -> None:
+        Registry.register_component(CameraDevice.CameraModule(self.instrument_id, self.ronchigram_camera_device, self.ronchigram_camera_settings), {"camera_module"})
+        Registry.register_component(CameraDevice.CameraModule(self.instrument_id, self.eels_camera_device, self.eels_camera_settings), {"camera_module"})
+        self.__are_cameras_registered = True
+
+    def stop(self) -> None:
+        super().stop()
+        # unregistering a camera module closes its device, so only devices which were never registered need closing.
+        if not self.__are_cameras_registered:
+            self.ronchigram_camera_device.close()
+            self.eels_camera_device.close()
 
 
 class TestCameraControlClass(unittest.TestCase):
@@ -91,6 +120,34 @@ class TestCameraControlClass(unittest.TestCase):
                 self.assertEqual("edxs_spectrum", camera_settings.camera_channel)
 
             camera_settings_scope()
+
+    def test_acquisition_panel_opens_without_camera(self) -> None:
+        with AcquisitionTestContext.test_context(NoCameraAcquisitionTestContextConfiguration()) as test_context:
+            document_controller = test_context.document_controller
+            for device_component_id in ("camera", "synchronized-scan"):
+                for method_component_id in ("basic-acquire", "sequence-acquire", "series-acquire", "tableau-acquire", "multiple-acquire"):
+                    with self.subTest(device_component_id=device_component_id, method_component_id=method_component_id):
+                        acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationData.ApplicationData())
+                        acquisition_configuration.acquisition_device_component_id = device_component_id
+                        acquisition_configuration.acquisition_method_component_id = method_component_id
+                        acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationData.ApplicationData())
+                        acquisition_controller = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
+                        # the widget closes the acquisition controller when it closes.
+                        widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, acquisition_controller)
+                        with contextlib.closing(widget):
+                            document_controller.periodic()
+                            self.assertIsNone(acquisition_controller.time_usage_model.value)
+
+    def test_acquisition_panel_estimates_time_once_a_camera_comes_online(self) -> None:
+        configuration = NoCameraAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration) as test_context:
+            acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationData.ApplicationData())
+            acquisition_configuration.acquisition_device_component_id = "camera"
+            acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationData.ApplicationData())
+            acquisition_controller = AcquisitionPanel.AcquisitionController(test_context.document_controller, acquisition_configuration, acquisition_preferences)
+            with contextlib.closing(acquisition_controller):
+                configuration.register_cameras()
+                self.assertIsNotNone(acquisition_controller.time_usage_model.value)
 
     def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
         with self.__test_context() as test_context:
