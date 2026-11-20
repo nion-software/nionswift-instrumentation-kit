@@ -1801,13 +1801,15 @@ class ScanFrameParametersStream(Stream.ValueStream[scan_base.ScanFrameParameters
         self.__hardware_source_stream_changed(scan_hardware_source_stream.value)
 
     def __hardware_source_stream_changed(self, hardware_source: typing.Optional[HardwareSource.HardwareSource]) -> None:
-        # when the hardware source choice changes, update the frame parameters listener. close the old one.
+        # when the hardware source choice changes, update the frame parameters listener. drop the old one.
         self.__frame_parameters_changed_listener = None
-        assert isinstance(hardware_source, scan_base.ScanHardwareSource)
-        self.__frame_parameters_changed_listener = hardware_source.scan_frame_parameters_changed_event.listen(weak_partial(ScanFrameParametersStream.__frame_parameters_changed, self))
-        scan_frame_parameters = hardware_source.get_current_frame_parameters()
-        scan_frame_parameters.enabled_channel_indexes = hardware_source.get_enabled_channel_indexes()
-        self.__frame_parameters_changed(scan_frame_parameters)
+        if isinstance(hardware_source, scan_base.ScanHardwareSource):
+            self.__frame_parameters_changed_listener = hardware_source.scan_frame_parameters_changed_event.listen(weak_partial(ScanFrameParametersStream.__frame_parameters_changed, self))
+            scan_frame_parameters = hardware_source.get_current_frame_parameters()
+            scan_frame_parameters.enabled_channel_indexes = hardware_source.get_enabled_channel_indexes()
+            self.__frame_parameters_changed(scan_frame_parameters)
+        else:
+            self.value = None
 
     def __frame_parameters_changed(self, frame_parameters: scan_base.ScanFrameParameters) -> None:
         self.value = copy.copy(frame_parameters)
