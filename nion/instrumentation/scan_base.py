@@ -1314,11 +1314,11 @@ class ConcreteScanHardwareSource(HardwareSource.ConcreteHardwareSource, ScanHard
         self.__frame_parameters_changed_event_listener = self.__settings.frame_parameters_changed_event.listen(self.frame_parameters_changed_event.fire)
 
         self.__stem_controller = stem_controller_
-        self.__subscan_state = STEMController.SubscanState.DISABLED_HIDDEN
-        self.__subscan_region = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
-        self.__subscan_rotation = 0.0
-        self.__line_scan_state = STEMController.LineScanState.INVALID
-        self.__line_scan_vector = ((0.25, 0.25), (0.75, 0.75))
+        self.__subscan_state = STEMController.DEFAULT_SUBSCAN_STATE
+        self.__subscan_region = STEMController.DEFAULT_SUBSCAN_REGION
+        self.__subscan_rotation = STEMController.DEFAULT_SUBSCAN_ROTATION
+        self.__line_scan_state = STEMController.DEFAULT_LINE_SCAN_STATE
+        self.__line_scan_vector = STEMController.DEFAULT_LINE_SCAN_VECTOR
         self.__syncing_scan_properties = False
 
         self.__probe_state_changed_event_listener = self.__stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
