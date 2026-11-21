@@ -12,6 +12,7 @@ import logging
 import math
 import threading
 import time
+import traceback
 import typing
 import uuid
 
@@ -1186,7 +1187,12 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
         self.__probe_state_changed_listener = stem_controller.probe_state_changed_event.listen(self.__probe_state_changed)
         self.__document_model.register_implicit_dependency(self)
         # update in case a new document model is opened with the line scan already enabled
-        self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
+        try:
+            self.__update_probe_state(stem_controller.probe_state, stem_controller.probe_position)
+        except Exception:
+            # close this view, so that a failed view doesn't stay registered with the document.
+            self.close()
+            raise
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
@@ -1298,7 +1304,12 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
         self.__subscan_settings_changed_listener = self.__subscan_settings.property_changed_event.listen(self.__subscan_settings_changed)
         self.__document_model.register_implicit_dependency(self)
         # update in case a new document model is opened with the line scan already enabled
-        self.__update_subscan_region()
+        try:
+            self.__update_subscan_region()
+        except Exception:
+            # close this view, so that a failed view doesn't stay registered with the document.
+            self.close()
+            raise
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
@@ -1399,7 +1410,12 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
         self.__line_scan_vector_changed_listener = self.__subscan_settings.property_changed_event.listen(self.__line_scan_vector_changed)
         self.__document_model.register_implicit_dependency(self)
         # update in case a new document model is opened with the line scan already enabled
-        self.__update_line_scan_vector()
+        try:
+            self.__update_line_scan_vector()
+        except Exception:
+            # close this view, so that a failed view doesn't stay registered with the document.
+            self.close()
+            raise
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
@@ -1510,7 +1526,12 @@ class DriftView:
         # note: these property changed listeners can all possibly be fired from a thread.
         self.__drift_settings_changed_listener = self.__drift_view_settings.property_changed_event.listen(self.__drift_settings_changed)
         # update in case a new document model is opened with the line scan already enabled
-        self.__update_drift_region()
+        try:
+            self.__update_drift_region()
+        except Exception:
+            # close this view, so that a failed view doesn't keep listening to the document.
+            self.close()
+            raise
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
@@ -1645,6 +1666,17 @@ class ScanContextController:
         self.__class__.count -= 1
 
     def register_instrument(self, instrument: typing.Any) -> None:
+        # registering a document model or an instrument fires an event which stops at the first listener which raises,
+        # and a later listener of the document model connects the hardware sources to the document. a failure to add
+        # the views is caught and printed here, and the views added before it are closed, so that the document still
+        # receives data from the hardware sources.
+        try:
+            self.__add_instrument_views(instrument)
+        except Exception:
+            traceback.print_exc()
+            self.unregister_instrument(instrument)
+
+    def __add_instrument_views(self, instrument: typing.Any) -> None:
         # if this is a stem controller, add a probe view
         if hasattr(type(instrument), "probe_position"):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
