@@ -1601,19 +1601,26 @@ class DriftView:
             if self.__graphic:
                 self.__remove_graphic()
 
-    def __remove_graphic(self) -> None:
+    def __untrack_graphic(self) -> None:
         if self.__graphic_property_changed_listener:
             self.__graphic_property_changed_listener.close()
             self.__graphic_property_changed_listener = None
         if self.__graphic_about_to_be_removed_listener:
             self.__graphic_about_to_be_removed_listener.close()
             self.__graphic_about_to_be_removed_listener = None
-        if self.__graphic_display_item and self.__graphic:
-            self.__graphic_display_item.remove_graphic(self.__graphic).close()
-            self.__graphic_display_item = None
+        self.__graphic_display_item = None
         self.__graphic = None
 
+    def __remove_graphic(self) -> None:
+        graphic_display_item = self.__graphic_display_item
+        graphic = self.__graphic
+        self.__untrack_graphic()
+        if graphic_display_item and graphic:
+            graphic_display_item.remove_graphic(graphic).close()
+
     def __graphic_about_to_be_removed(self) -> None:
+        # the graphic is removed by the user or with its display item, so stop tracking it, since it can't be removed again.
+        self.__untrack_graphic()
         # clear drift state
         self.__drift_view_settings.drift_channel_id = None
         self.__drift_view_settings.drift_region = None

@@ -3471,6 +3471,21 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(1, len(units))
             self.assertTrue(next(iter(units)))  # confirm calibration is not empty
 
+    def test_drift_graphic_appears_again_after_its_display_item_is_deleted(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            document_model.remove_display_item(document_model.display_items[0])
+            document_controller.periodic()
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            self.assertEqual(["drift"], [graphic.graphic_id for graphic in document_model.display_items[0].graphics])
+
     def test_reloading_document_cleans_display_items(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
