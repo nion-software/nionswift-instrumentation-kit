@@ -96,12 +96,11 @@ class HardwareSourceChoice:
 
     def __update_current_hardware_source(self, key: str) -> None:
         if key == "value":
-            hardware_sources = self.hardware_sources_model.value or list()
-            index = self.hardware_source_index_model.value or 0
-            hardware_source = hardware_sources[index]
-            hardware_source_id = hardware_source.hardware_source_id if hardware_source else None
-            self.__choice_model.value = hardware_source_id
-            self.hardware_source_changed_event.fire(self.hardware_source)
+            hardware_source = self.hardware_source
+            # keep the saved choice while there are no hardware sources.
+            if self.hardware_sources:
+                self.__choice_model.value = hardware_source.hardware_source_id if hardware_source else None
+            self.hardware_source_changed_event.fire(hardware_source)
 
 
 class HardwareSourceChoiceStream(Stream.AbstractStream[HardwareSource.HardwareSource]):

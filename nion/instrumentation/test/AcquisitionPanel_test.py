@@ -14,6 +14,7 @@ from nion.swift.model import Schema
 from nion.swift.test import TestContext
 from nion.ui import Declarative
 from nion.ui import TestUI
+from nion.utils import Binding
 from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import Stream
@@ -148,6 +149,42 @@ class TestCameraControlClass(unittest.TestCase):
             with contextlib.closing(acquisition_controller):
                 configuration.register_cameras()
                 self.assertIsNotNone(acquisition_controller.time_usage_model.value)
+
+    def test_saved_camera_choice_is_kept_once_the_last_camera_unregisters(self) -> None:
+        with self.__test_context() as test_context:
+            camera_device_id = test_context.camera_hardware_source.hardware_source_id
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = camera_device_id
+
+            # define a function for the camera settings scope; it will be de-ref'd when the scope exits.
+            def camera_settings_scope() -> None:
+                camera_settings = AcquisitionPanel.CameraSettingsModel(c)
+                # unregister the chosen camera last, since the choice moves to another camera while one remains.
+                camera_modules = sorted(Registry.get_components_by_type("camera_module"), key=lambda camera_module: camera_module.camera_device.camera_id == camera_device_id)
+                for camera_module in camera_modules:
+                    Registry.unregister_component(camera_module, {"camera_module"})
+                self.assertEqual(camera_device_id, c.camera_device_id)
+
+            camera_settings_scope()
+
+    def test_camera_choice_shows_no_camera_once_the_last_camera_unregisters(self) -> None:
+        with self.__test_context() as test_context:
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = test_context.camera_hardware_source.hardware_source_id
+
+            # define a function for the camera settings scope; it will be de-ref'd when the scope exits.
+            def camera_settings_scope() -> None:
+                camera_settings = AcquisitionPanel.CameraSettingsModel(c)
+                # bind the hardware source index the way the camera combo box does.
+                index_binding = Binding.PropertyBinding(camera_settings.hardware_source_choice_model.hardware_source_choice.hardware_source_index_model, "value")
+                combo_box_indexes: list[int | None] = list()
+                index_binding.target_setter = combo_box_indexes.append
+                for camera_module in list(Registry.get_components_by_type("camera_module")):
+                    Registry.unregister_component(camera_module, {"camera_module"})
+                index_binding.close()
+                self.assertIsNone(combo_box_indexes[-1])
+
+            camera_settings_scope()
 
     def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
         with self.__test_context() as test_context:
