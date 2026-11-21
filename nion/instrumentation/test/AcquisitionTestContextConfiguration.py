@@ -267,3 +267,22 @@ class AcquisitionTestContextConfiguration:
         # remove the configuration files written during the test run so no residue is left in the working directory.
         if self.configuration_location.exists():
             shutil.rmtree(self.configuration_location)
+
+
+# a test configuration which registers the instrument and cameras but no scan device, as when the scan device is
+# misconfigured.
+class NoScanDeviceAcquisitionTestContextConfiguration(AcquisitionTestContextConfiguration):
+
+    def run(self) -> None:
+        Registry.register_component(self.instrument, {"instrument_controller", "stem_controller"})
+        Registry.register_component(CameraDevice.CameraModule(self.instrument_id, self.ronchigram_camera_device, self.ronchigram_camera_settings), {"camera_module"})
+        Registry.register_component(CameraDevice.CameraModule(self.instrument_id, self.eels_camera_device, self.eels_camera_settings), {"camera_module"})
+
+    def stop(self) -> None:
+        for component in Registry.get_components_by_type("camera_module"):
+            Registry.unregister_component(component, {"camera_module"})
+        Registry.unregister_component(self.instrument, {"instrument_controller", "stem_controller"})
+        # the scan device was never registered, so nothing else closes it.
+        self.scan_module.device.close()
+        if self.configuration_location.exists():
+            shutil.rmtree(self.configuration_location)

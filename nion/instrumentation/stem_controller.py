@@ -1658,25 +1658,16 @@ class ScanContextController:
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             self.__m.setdefault(instrument, dict())["line_scan_view"] = LineScanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
-        if hasattr(type(instrument), "drift_region"):
+        # the drift view shows the drift region on a channel of the scan device, so an instrument without one gets none.
+        if hasattr(type(instrument), "drift_region") and (scan_controller := instrument.scan_controller):
             safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
-            scan_hardware_source_id = instrument.scan_controller.hardware_source_id
-            self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(scan_hardware_source_id, instrument, scan_display_items_model, self.__document_model, safe_event_loop)
+            self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(scan_controller.hardware_source_id, instrument, scan_display_items_model, self.__document_model, safe_event_loop)
 
     def unregister_instrument(self, instrument: typing.Any) -> None:
-        probe_view = self.__m.get(instrument, dict()).pop("probe_view")
-        if probe_view:
-            probe_view.close()
-        subscan_view = self.__m.get(instrument, dict()).pop("subscan_view")
-        if subscan_view:
-            subscan_view.close()
-        line_scan_view = self.__m.get(instrument, dict()).pop("line_scan_view")
-        if line_scan_view:
-            line_scan_view.close()
-        drift_view = self.__m.get(instrument, dict()).pop("drift_view")
-        if drift_view:
-            drift_view.close()
+        # close only the views which register_instrument made for this instrument.
+        for view in self.__m.pop(instrument, dict()).values():
+            view.close()
 
 
 # device controller facilitates setting of global state during acquisition.

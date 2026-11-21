@@ -823,6 +823,15 @@ class TestCameraControlClass(unittest.TestCase):
             hardware_source = test_context.camera_hardware_source
             self._acquire_one(document_controller, hardware_source)
 
+    def test_acquiring_ronchigram_without_scan_device_puts_data_into_document(self):
+        configuration = AcquisitionTestContextConfiguration.NoScanDeviceAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration, camera_exposure=self.exposure) as test_context:
+            # open a document after the instruments start, as the application does.
+            document_controller = test_context.create_document_controller(auto_close=False)
+            with contextlib.closing(document_controller):
+                self._acquire_one(document_controller, test_context.camera_hardware_source)
+                self.assertEqual(1, len(document_controller.document_model.data_items))
+
     def test_acquiring_ronchigram_sets_signal_type(self):
         # assumes EELS camera produces two data items
         with self._test_context() as test_context:
