@@ -186,6 +186,24 @@ class TestCameraControlClass(unittest.TestCase):
 
             camera_settings_scope()
 
+    def test_saved_camera_channel_is_kept_while_no_camera_is_available(self) -> None:
+        configuration = NoCameraAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration):
+            # an earlier launch saved the EELS image channel.
+            c = Schema.Entity(Schema.get_entity_type("acquisition_device_component_camera"))
+            c.camera_device_id = configuration.eels_camera_device_id
+            c.camera_channel_id = "eels_image"
+
+            # define a function for the camera settings scope; it will be de-ref'd when the scope exits.
+            def camera_settings_scope() -> None:
+                camera_settings = AcquisitionPanel.CameraSettingsModel(c)
+                # the combo box sets channel_index to None as part of switching its list of items. since it isn't
+                # connected, do it here.
+                camera_settings.channel_index = None
+                self.assertEqual("eels_image", c.camera_channel_id)
+
+            camera_settings_scope()
+
     def test_scan_drift_interval_without_camera_follows_scan_pixel_time(self) -> None:
         with self.__test_context() as test_context:
             scan_hardware_source = test_context.scan_hardware_source
