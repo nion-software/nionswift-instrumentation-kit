@@ -1276,22 +1276,28 @@ class CameraSettingsModel(DeviceSettingsModel):
 
     @channel_index.setter
     def channel_index(self, value: typing.Optional[int]) -> None:
-        # map from the channel index to the channel model (channel identifier string).
-        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else (self.__channel_descriptions[0].channel_id if self.__channel_descriptions else "image")
+        # map from the channel index to the channel model (channel identifier string). keep the saved channel while
+        # there are no channels, which is while no camera is available.
+        if not self.__channel_descriptions:
+            return
+        channel_id = self.__channel_descriptions[value].channel_id if (value is not None and 0 <= value < len(self.__channel_descriptions)) else self.__channel_descriptions[0].channel_id
         if channel_id != self.__camera_hardware_source_channel_model.value:
             self.__camera_hardware_source_channel_model.value = channel_id
             self.notify_property_changed("channel_index")
 
     def __update_channel_descriptions(self) -> None:
         # when the list of hardware sources changes or the selected hardware source changes, the list of available
-        # channels needs to be updated. the selected channel may also be updated if it is no longer available.
-        channel_descriptions = [Acquisition.hardware_source_channel_descriptions[channel_id] for channel_id in _get_camera_channel_ids(self.camera_hardware_source)]
-        output = Acquisition.hardware_source_channel_descriptions.get(self.__camera_hardware_source_channel_model.value or str())
-        if not output or output not in channel_descriptions:
-            output = channel_descriptions[0]
+        # channels needs to be updated. the selected channel may also be updated if it is no longer available, but it
+        # is kept while no camera is available, since the channels depend on the camera.
+        camera_hardware_source = self.camera_hardware_source
+        channel_descriptions = [Acquisition.hardware_source_channel_descriptions[channel_id] for channel_id in _get_camera_channel_ids(camera_hardware_source)] if camera_hardware_source else list()
         channel_descriptions_changed = channel_descriptions != self.__channel_descriptions
         self.__channel_descriptions = channel_descriptions
-        self.__camera_hardware_source_channel_model.value = output.channel_id
+        if channel_descriptions:
+            output = Acquisition.hardware_source_channel_descriptions.get(self.__camera_hardware_source_channel_model.value or str())
+            if not output or output not in channel_descriptions:
+                output = channel_descriptions[0]
+            self.__camera_hardware_source_channel_model.value = output.channel_id
         if channel_descriptions_changed:
             self.notify_property_changed("channel_descriptions")
 
