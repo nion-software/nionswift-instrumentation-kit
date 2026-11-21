@@ -15,6 +15,7 @@ from nion.swift.test import TestContext
 from nion.ui import Declarative
 from nion.ui import TestUI
 from nion.utils import Binding
+from nion.utils import Geometry
 from nion.utils import Model
 from nion.utils import Registry
 from nion.utils import Stream
@@ -149,6 +150,28 @@ class TestCameraControlClass(unittest.TestCase):
             with contextlib.closing(acquisition_controller):
                 configuration.register_cameras()
                 self.assertIsNotNone(acquisition_controller.time_usage_model.value)
+
+    def test_acquire_is_enabled_once_a_camera_comes_online(self) -> None:
+        configuration = NoCameraAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration) as test_context:
+            # a synchronized scan also needs a scan context.
+            test_context.scan_hardware_source.scan_context.fov_nm = 100.0
+            test_context.scan_hardware_source.scan_context.size = Geometry.IntSize(100, 100)
+            test_context.scan_hardware_source.scan_context.rotation_rad = 0.0
+            test_context.scan_hardware_source.scan_context.center_nm = Geometry.IntPoint(0, 0)
+            acquisition_controllers = list()
+            for device_component_id in ("camera", "synchronized-scan"):
+                acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationData.ApplicationData())
+                acquisition_configuration.acquisition_device_component_id = device_component_id
+                acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationData.ApplicationData())
+                acquisition_controllers.append(AcquisitionPanel.AcquisitionController(test_context.document_controller, acquisition_configuration, acquisition_preferences))
+            try:
+                self.assertEqual([False, False], [acquisition_controller.button_enabled_model.value for acquisition_controller in acquisition_controllers])
+                configuration.register_cameras()
+                self.assertEqual([True, True], [acquisition_controller.button_enabled_model.value for acquisition_controller in acquisition_controllers])
+            finally:
+                for acquisition_controller in acquisition_controllers:
+                    acquisition_controller.close()
 
     def test_saved_camera_choice_is_kept_once_the_last_camera_unregisters(self) -> None:
         with self.__test_context() as test_context:
