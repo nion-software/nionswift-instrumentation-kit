@@ -1410,12 +1410,18 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # the scan width model is a property model made by observing the scan_width property in the configuration.
         self.scan_width = Model.PropertyChangedPropertyModel[int](configuration, "scan_width")
 
+        # use one hardware source stream for each choice, so that everything which follows the camera or the scan sees
+        # the same hardware source when it changes. the camera stream is the one which the camera settings follow.
+        camera_hardware_source_stream = self._camera_settings_model.hardware_source_choice_stream
+
+        scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice)
+
         # the scan context description value stream observes the scan and camera hardware sources to produce
         # a description of the upcoming scan. it also supplies a scan_context_valid flag which can be used to enable
         # the acquire button in the UI.
         self.__scan_context_description_value_stream = ScanSpecifierValueStream(
-            self._camera_settings_model.hardware_source_choice_stream,
-            HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice),
+            camera_hardware_source_stream,
+            scan_hardware_source_stream,
             self.scan_width,
             asyncio.get_event_loop()).add_ref()
 
@@ -1446,10 +1452,6 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # for this component, the time space usage changed event is fired when the extended camera frame parameters (
         # includes readout area) or the extended scan frame parameters (includes enabled channels) change.
         self.time_space_usage_changed_event = Event.Event()
-
-        camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self._camera_settings_model.hardware_source_choice_model.hardware_source_choice)
-
-        scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice)
 
         self.__camera_hardware_source_stream = camera_hardware_source_stream
 
@@ -1693,7 +1695,9 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         # includes readout area) change.
         self.time_space_usage_changed_event = Event.Event()
 
-        camera_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self._camera_settings_model.hardware_source_choice_model.hardware_source_choice)
+        # the camera hardware source stream is the one which the camera settings follow, so that the camera and its
+        # settings agree when the camera changes.
+        camera_hardware_source_stream = self._camera_settings_model.hardware_source_choice_stream
 
         self.__camera_hardware_source_stream = camera_hardware_source_stream
 
