@@ -173,6 +173,22 @@ class TestCameraControlClass(unittest.TestCase):
                 for acquisition_controller in acquisition_controllers:
                     acquisition_controller.close()
 
+    def test_acquisition_panel_opens_with_acquire_disabled_in_scan_modes_without_scan_device(self) -> None:
+        configuration = AcquisitionTestContextConfiguration.NoScanDeviceAcquisitionTestContextConfiguration()
+        with AcquisitionTestContext.test_context(configuration) as test_context:
+            document_controller = test_context.document_controller
+            for device_component_id in ("scan", "synchronized-scan"):
+                with self.subTest(device_component_id=device_component_id):
+                    acquisition_configuration = AcquisitionPanel.AcquisitionConfiguration(ApplicationData.ApplicationData())
+                    acquisition_configuration.acquisition_device_component_id = device_component_id
+                    acquisition_preferences = AcquisitionPreferences.AcquisitionPreferences(ApplicationData.ApplicationData())
+                    acquisition_controller = AcquisitionPanel.AcquisitionController(document_controller, acquisition_configuration, acquisition_preferences)
+                    # the widget closes the acquisition controller when it closes.
+                    widget = Declarative.DeclarativeWidget(document_controller.ui, document_controller.event_loop, acquisition_controller)
+                    with contextlib.closing(widget):
+                        document_controller.periodic()
+                        self.assertFalse(acquisition_controller.button_enabled_model.value)
+
     def test_saved_camera_choice_is_kept_once_the_last_camera_unregisters(self) -> None:
         with self.__test_context() as test_context:
             camera_device_id = test_context.camera_hardware_source.hardware_source_id
