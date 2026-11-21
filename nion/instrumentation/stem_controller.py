@@ -1691,10 +1691,13 @@ class ScanContextController:
             scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
             self.__m.setdefault(instrument, dict())["line_scan_view"] = LineScanView(instrument, scan_display_items_model, self.__document_model, safe_event_loop)
         # the drift view shows the drift region on a channel of the scan device, so an instrument without one gets none.
-        if hasattr(type(instrument), "drift_region") and (scan_controller := instrument.scan_controller):
-            safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
-            scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
-            self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(scan_controller.hardware_source_id, instrument, scan_display_items_model, self.__document_model, safe_event_loop)
+        if hasattr(type(instrument), "drift_region"):
+            if scan_controller := instrument.scan_controller:
+                safe_event_loop = SafeEventLoop(self.__document_model, self.__event_loop)
+                scan_display_items_model = make_scan_display_item_list_model(self.__document_model, instrument, safe_event_loop)
+                self.__m.setdefault(instrument, dict())["drift_view"] = DriftView(scan_controller.hardware_source_id, instrument, scan_display_items_model, self.__document_model, safe_event_loop)
+            else:
+                logging.info(f"STEM controller {instrument.instrument_id} has no scan device.")
 
     def unregister_instrument(self, instrument: typing.Any) -> None:
         # close only the views which register_instrument made for this instrument.
