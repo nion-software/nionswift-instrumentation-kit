@@ -2698,6 +2698,41 @@ class TestScanControlClass(unittest.TestCase):
             self.assertEqual(2, len(display_item.graphics))  # subscan and position
             self.assertEqual(0, len(display_item1.graphics))
 
+    def test_subscan_graphic_is_not_duplicated_when_stem_controller_registers_again(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.subscan_state = stem_controller.SubscanState.ENABLED_VISIBLE
+            document_controller.periodic()
+            # the STEM controller goes offline and comes back online while the document is open.
+            instrument_id = test_context.instrument.instrument_id
+            HardwareSource.HardwareSourceManager().unregister_instrument(instrument_id)
+            HardwareSource.HardwareSourceManager().register_instrument(instrument_id, test_context.instrument)
+            subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+            scan_hardware_source.subscan_region = subscan_region
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            subscan_graphics = [graphic for graphic in display_item.graphics if graphic.graphic_id == "subscan"]
+            self.assertEqual([subscan_region], [Geometry.FloatRect.make(graphic.bounds) for graphic in subscan_graphics])
+
+    def test_drift_graphic_is_not_duplicated_when_stem_controller_registers_again(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            document_model = test_context.document_model
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            # the STEM controller goes offline and comes back online while the document is open.
+            instrument_id = test_context.instrument.instrument_id
+            HardwareSource.HardwareSourceManager().unregister_instrument(instrument_id)
+            HardwareSource.HardwareSourceManager().register_instrument(instrument_id, test_context.instrument)
+            document_controller.periodic()
+            display_item = document_model.get_display_item_for_data_item(document_model.data_items[0])
+            self.assertEqual(["drift"], [graphic.graphic_id for graphic in display_item.graphics])
+
     def test_subscan_graphic_updates_when_subscan_region_is_set(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller
