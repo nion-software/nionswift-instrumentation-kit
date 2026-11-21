@@ -1194,6 +1194,10 @@ class ProbeView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepende
             self.close()
             raise
 
+    def remove_graphics(self) -> None:
+        """Remove the graphics of this view without changing the instrument's state."""
+        self.__graphic_set.remove_all_graphics()
+
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
         if self.__probe_state_changed_listener:
@@ -1311,6 +1315,10 @@ class SubscanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepen
             self.close()
             raise
 
+    def remove_graphics(self) -> None:
+        """Remove the graphics of this view without changing the instrument's state."""
+        self.__graphic_set.remove_all_graphics()
+
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
         self.__subscan_settings_changed_listener = typing.cast(typing.Any, None)
@@ -1416,6 +1424,10 @@ class LineScanView(AbstractGraphicSetHandler, DocumentModel.AbstractImplicitDepe
             # close this view, so that a failed view doesn't stay registered with the document.
             self.close()
             raise
+
+    def remove_graphics(self) -> None:
+        """Remove the graphics of this view without changing the instrument's state."""
+        self.__graphic_set.remove_all_graphics()
 
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
@@ -1533,6 +1545,10 @@ class DriftView:
             self.close()
             raise
 
+    def remove_graphics(self) -> None:
+        """Remove the graphic of this view without changing the instrument's state."""
+        self.__remove_graphic()
+
     def close(self) -> None:
         self.__safe_event_loop._mark_closed()
         self.__drift_settings_changed_listener = typing.cast(typing.Any, None)
@@ -1646,6 +1662,14 @@ class DriftView:
             self.__update_drift_region()
 
 
+class ScanContextViewLike(typing.Protocol):
+    """The probe, subscan, line scan and drift views which a scan context controller makes for an instrument."""
+
+    def remove_graphics(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
 class ScanContextController:
     """Manage probe view, subscan, and drift area for each instrument (STEMController) that gets registered."""
     count = 0
@@ -1655,7 +1679,7 @@ class ScanContextController:
         assert event_loop is not None
         self.__document_model = document_model
         self.__event_loop = event_loop
-        self.__m: typing.Dict[typing.Any, typing.Dict[typing.Any, typing.Any]] = dict()
+        self.__m: dict[typing.Any, dict[str, ScanContextViewLike]] = dict()
         # be sure to keep a reference or it will be closed immediately.
         self.__instrument_added_event_listener = HardwareSource.HardwareSourceManager().instrument_added_event.listen(self.register_instrument)
         self.__instrument_removed_event_listener = HardwareSource.HardwareSourceManager().instrument_removed_event.listen(self.unregister_instrument)
@@ -1664,9 +1688,9 @@ class ScanContextController:
 
     def close(self) -> None:
         # close every view this controller made, including those of an instrument which the hardware source manager no longer lists,
-        # as after it closes.
+        # as after it closes. the graphics stay on the display items, and the clean at project load removes them.
         for instrument in list(self.__m):
-            self.unregister_instrument(instrument)
+            self.__close_instrument_views(instrument, is_removing_graphics=False)
         self.__instrument_added_event_listener.close()
         self.__instrument_added_event_listener = typing.cast(typing.Any, None)
         self.__instrument_removed_event_listener.close()
@@ -1676,8 +1700,8 @@ class ScanContextController:
     def register_instrument(self, instrument: typing.Any) -> None:
         # registering a document model or an instrument fires an event which stops at the first listener which raises,
         # and a later listener of the document model connects the hardware sources to the document. a failure to add
-        # the views is caught and printed here, and the views added before it are closed, so that the document still
-        # receives data from the hardware sources.
+        # the views is caught and printed here, and the views added before it remove their graphics and are closed, so that
+        # the document still receives data from the hardware sources.
         try:
             self.__add_instrument_views(instrument)
         except Exception:
@@ -1708,8 +1732,15 @@ class ScanContextController:
                 logging.info(f"STEM controller {instrument.instrument_id} has no scan device.")
 
     def unregister_instrument(self, instrument: typing.Any) -> None:
+        # the views remove their graphics, since a graphic left behind would be duplicated when the instrument's views are
+        # made again.
+        self.__close_instrument_views(instrument, is_removing_graphics=True)
+
+    def __close_instrument_views(self, instrument: typing.Any, *, is_removing_graphics: bool) -> None:
         # close only the views which register_instrument made for this instrument.
         for view in self.__m.pop(instrument, dict()).values():
+            if is_removing_graphics:
+                view.remove_graphics()
             view.close()
 
 
