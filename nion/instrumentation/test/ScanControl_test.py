@@ -2641,13 +2641,13 @@ class TestScanControlClass(unittest.TestCase):
                 scan_listener.close()
                 instrument_listener.close()
 
-    def test_stem_controller_scan_properties_raise_without_scan_controller(self):
+    def test_stem_controller_keeps_subscan_and_line_scan_hidden_without_scan_controller(self):
         instrument = stem_controller.STEMController()
         self.addCleanup(instrument.close)
-        with self.assertRaises(RuntimeError):
-            _ = instrument.subscan_state
-        with self.assertRaises(RuntimeError):
-            instrument.subscan_region = Geometry.FloatRect.from_tlhw(0.1, 0.2, 0.3, 0.4)
+        instrument.subscan_state = stem_controller.SubscanState.ENABLED_VISIBLE
+        instrument.line_scan_state = stem_controller.LineScanState.ENABLED_VISIBLE
+        self.assertEqual(stem_controller.SubscanState.DISABLED_HIDDEN, instrument.subscan_state)
+        self.assertEqual(stem_controller.LineScanState.DISABLED_HIDDEN, instrument.line_scan_state)
 
     def test_line_scan_properties_are_observable_on_stem_controller_and_scan_hardware_source(self):
         with self._test_context() as test_context:

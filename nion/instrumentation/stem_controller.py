@@ -75,6 +75,15 @@ class LineScanState(enum.Enum):
     ENABLED = ENABLED_VISIBLE
 
 
+# the subscan and line scan values which a scan hardware source starts with. the STEM controller reports them while no
+# scan device is registered, and ignores attempts to set them.
+DEFAULT_SUBSCAN_STATE = SubscanState.DISABLED_HIDDEN
+DEFAULT_SUBSCAN_REGION = Geometry.FloatRect.from_tlhw(0.25, 0.25, 0.5, 0.5)
+DEFAULT_SUBSCAN_ROTATION = 0.0
+DEFAULT_LINE_SCAN_STATE = LineScanState.DISABLED_HIDDEN
+DEFAULT_LINE_SCAN_VECTOR: _VectorType = ((0.25, 0.25), (0.75, 0.75))
+
+
 class DriftIntervalUnit(enum.IntEnum):
     FRAME = 0  # each frame of SI (single pixel)
     TIME = 1   # each time interval
@@ -420,12 +429,6 @@ class STEMController(Observable.Observable):
         self.__set_scan_controller(scan_controller, is_explicit=self.__scan_controller_is_explicit)
         return self.__scan_controller
 
-    def __require_scan_controller(self) -> scan_base.ScanHardwareSource:
-        scan_controller = self.__refresh_scan_controller()
-        if not scan_controller:
-            raise RuntimeError("scan controller is not available")
-        return scan_controller
-
     def __scan_controller_property_changed(self, name: str) -> None:
         if name not in {"subscan_state", "subscan_region", "subscan_rotation", "line_scan_state", "line_scan_vector"}:
             return
@@ -504,43 +507,53 @@ class STEMController(Observable.Observable):
 
     @property
     def subscan_state(self) -> SubscanState:
-        return self.__require_scan_controller().subscan_state
+        scan_controller = self.__refresh_scan_controller()
+        return scan_controller.subscan_state if scan_controller else DEFAULT_SUBSCAN_STATE
 
     @subscan_state.setter
     def subscan_state(self, value: SubscanState) -> None:
-        self.__require_scan_controller().subscan_state = value
+        if scan_controller := self.__refresh_scan_controller():
+            scan_controller.subscan_state = value
 
     @property
     def subscan_region(self) -> Geometry.FloatRect:
-        return self.__require_scan_controller().subscan_region
+        scan_controller = self.__refresh_scan_controller()
+        return scan_controller.subscan_region if scan_controller else DEFAULT_SUBSCAN_REGION
 
     @subscan_region.setter
     def subscan_region(self, value: Geometry.FloatRect) -> None:
-        self.__require_scan_controller().subscan_region = value
+        if scan_controller := self.__refresh_scan_controller():
+            scan_controller.subscan_region = value
 
     @property
     def subscan_rotation(self) -> float:
-        return self.__require_scan_controller().subscan_rotation
+        scan_controller = self.__refresh_scan_controller()
+        return scan_controller.subscan_rotation if scan_controller else DEFAULT_SUBSCAN_ROTATION
 
     @subscan_rotation.setter
     def subscan_rotation(self, value: float) -> None:
-        self.__require_scan_controller().subscan_rotation = value
+        if scan_controller := self.__refresh_scan_controller():
+            scan_controller.subscan_rotation = value
 
     @property
     def line_scan_state(self) -> LineScanState:
-        return self.__require_scan_controller().line_scan_state
+        scan_controller = self.__refresh_scan_controller()
+        return scan_controller.line_scan_state if scan_controller else DEFAULT_LINE_SCAN_STATE
 
     @line_scan_state.setter
     def line_scan_state(self, value: LineScanState) -> None:
-        self.__require_scan_controller().line_scan_state = value
+        if scan_controller := self.__refresh_scan_controller():
+            scan_controller.line_scan_state = value
 
     @property
     def line_scan_vector(self) -> _VectorType:
-        return self.__require_scan_controller().line_scan_vector
+        scan_controller = self.__refresh_scan_controller()
+        return scan_controller.line_scan_vector if scan_controller else DEFAULT_LINE_SCAN_VECTOR
 
     @line_scan_vector.setter
     def line_scan_vector(self, value: _VectorType) -> None:
-        self.__require_scan_controller().line_scan_vector = value
+        if scan_controller := self.__refresh_scan_controller():
+            scan_controller.line_scan_vector = value
 
     @property
     def drift_channel_id(self) -> typing.Optional[str]:
