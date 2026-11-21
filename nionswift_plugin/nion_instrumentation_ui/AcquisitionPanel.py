@@ -1446,18 +1446,24 @@ class SynchronizedScanAcquisitionDeviceComponentHandler(AcquisitionDeviceCompone
         # a converter for the scan width.
         self.scan_width_converter = Converter.IntegerToStringConverter()
 
-        # the acquire_valid_value_stream is a value stream of bool values extracted from the scan context description.
-        # it is used to enable the acquire button. but to do so, this stream must be read from the enclosing
-        # declarative component handler. this stream is not used within this class. perhaps there is a better way to
-        # do this.
-        def is_scan_specifier_valid(scan_specifier: STEMController.ScanSpecifier | None) -> bool:
-            return scan_specifier.scan_context is not None if scan_specifier is not None else False
-
-        self.acquire_valid_value_stream = Stream.MapStream[STEMController.ScanSpecifier, bool](self.__scan_context_description_value_stream, is_scan_specifier_valid).add_ref()
-
         # for this component, the time space usage changed event is fired when the extended camera frame parameters (
         # includes readout area) or the extended scan frame parameters (includes enabled channels) change.
         self.time_space_usage_changed_event = Event.Event()
+
+        # the acquire_valid_value_stream is a value stream of bool values extracted from the scan context description
+        # and the camera hardware source. it is used to enable the acquire button. but to do so, this stream must be
+        # read from the enclosing declarative component handler. this stream is not used within this class. perhaps
+        # there is a better way to do this.
+        def is_scan_specifier_valid(scan_specifier: STEMController.ScanSpecifier | None) -> bool:
+            return scan_specifier.scan_context is not None if scan_specifier is not None else False
+
+        def is_camera_available(hardware_source: HardwareSource.HardwareSource | None) -> bool:
+            return isinstance(hardware_source, camera_base.CameraHardwareSource)
+
+        self.acquire_valid_value_stream = Stream.CombineLatestStream[bool, bool]([
+            Stream.MapStream[STEMController.ScanSpecifier, bool](self.__scan_context_description_value_stream, is_scan_specifier_valid),
+            Stream.MapStream[HardwareSource.HardwareSource, bool](camera_hardware_source_stream, is_camera_available)
+        ], lambda *is_valid_values: all(is_valid_values)).add_ref()
 
         self.__camera_hardware_source_stream = camera_hardware_source_stream
 
@@ -1694,9 +1700,6 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         # it can provide the current camera_hardware_source and camera_frame_parameters.
         self._camera_settings_model = CameraSettingsModel(configuration)
 
-        # a camera is always valid.
-        self.acquire_valid_value_stream = Stream.ConstantStream(True)
-
         # for this component, the time space usage changed event is fired when the extended camera frame parameters (
         # includes readout area) change.
         self.time_space_usage_changed_event = Event.Event()
@@ -1704,6 +1707,12 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         # the camera hardware source stream is the one which the camera settings follow, so that the camera and its
         # settings agree when the camera changes.
         camera_hardware_source_stream = self._camera_settings_model.hardware_source_choice_stream
+
+        # a camera is valid when it is available.
+        def is_camera_available(hardware_source: HardwareSource.HardwareSource | None) -> bool:
+            return isinstance(hardware_source, camera_base.CameraHardwareSource)
+
+        self.acquire_valid_value_stream = Stream.MapStream[HardwareSource.HardwareSource, bool](camera_hardware_source_stream, is_camera_available).add_ref()
 
         self.__camera_hardware_source_stream = camera_hardware_source_stream
 
@@ -1737,6 +1746,8 @@ class CameraAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler)
         )
 
     def close(self) -> None:
+        self.acquire_valid_value_stream.remove_ref()
+        self.acquire_valid_value_stream = typing.cast(typing.Any, None)
         self._camera_settings_model = typing.cast(typing.Any, None)
         super().close()
 
@@ -1841,14 +1852,17 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
                                                                              lambda hardware_source: hardware_source.features.get("is_scanning", False),
                                                                              force_enabled=True)
 
-        # the scan is always valid.
-        self.acquire_valid_value_stream = Stream.ConstantStream(True)
-
         # for this component, the time space usage changed event is fired when the extended scan frame parameters (
         # includes enabled channels) change.
         self.time_space_usage_changed_event = Event.Event()
 
         scan_hardware_source_stream = HardwareSourceChoice.HardwareSourceChoiceStream(self.__scan_hardware_source_choice_model.hardware_source_choice)
+
+        # the scan is valid when it is available.
+        def is_scan_available(hardware_source: HardwareSource.HardwareSource | None) -> bool:
+            return isinstance(hardware_source, scan_base.ScanHardwareSource)
+
+        self.acquire_valid_value_stream = Stream.MapStream[HardwareSource.HardwareSource, bool](scan_hardware_source_stream, is_scan_available).add_ref()
 
         def scan_frame_parameters_changed(scan_frame_parameters: scan_base.ScanFrameParameters | None) -> None:
             self.time_space_usage_changed_event.fire()
@@ -1867,6 +1881,8 @@ class ScanAcquisitionDeviceComponentHandler(AcquisitionDeviceComponentHandler):
         )
 
     def close(self) -> None:
+        self.acquire_valid_value_stream.remove_ref()
+        self.acquire_valid_value_stream = typing.cast(typing.Any, None)
         self.__scan_frame_parameters_stream_listener = typing.cast(typing.Any, None)
         self.__scan_frame_parameters_stream = typing.cast(typing.Any, None)
         self.__scan_hardware_source_choice_model.close()
