@@ -1656,8 +1656,9 @@ class ScanContextController:
             self.register_instrument(instrument)
 
     def close(self) -> None:
-        # any instrument that was registered needs to be unregistered.
-        for instrument in HardwareSource.HardwareSourceManager().instruments:
+        # close every view this controller made, including those of an instrument which the hardware source manager no longer lists,
+        # as after it closes.
+        for instrument in list(self.__m):
             self.unregister_instrument(instrument)
         self.__instrument_added_event_listener.close()
         self.__instrument_added_event_listener = typing.cast(typing.Any, None)
