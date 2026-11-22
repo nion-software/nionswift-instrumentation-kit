@@ -3551,6 +3551,26 @@ class TestScanControlClass(unittest.TestCase):
             document_model = test_context.document_model
             self.assertEqual(0, len(document_model.display_items[0].graphics))
 
+    def test_reloading_document_cleans_drift_graphic_of_disabled_channel(self):
+        with self._test_context() as test_context:
+            document_controller = test_context.document_controller
+            scan_hardware_source = test_context.scan_hardware_source
+            self._acquire_one(document_controller, scan_hardware_source)
+            scan_hardware_source.drift_enabled = True
+            document_controller.periodic()
+            # the user switches to another channel and quits with drift on.
+            scan_hardware_source.set_channel_enabled(1, True)
+            scan_hardware_source.set_channel_enabled(0, False)
+            self._acquire_one(document_controller, scan_hardware_source)
+            document_controller.close()
+            # the next launch starts with drift off.
+            scan_hardware_source.drift_enabled = False
+            test_context.document_controller = test_context.create_document_controller(auto_close=False)
+            test_context.document_model = test_context.document_controller.document_model
+            data_item_channel_reference = test_context.document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, scan_hardware_source.get_channel_id(0))
+            display_item = data_item_channel_reference.display_item
+            self.assertEqual(0, len([graphic for graphic in display_item.graphics if graphic.graphic_id == "drift"]))
+
     def test_reloading_document_cleans_only_acquisition_display_items(self):
         with self._test_context() as test_context:
             document_controller = test_context.document_controller

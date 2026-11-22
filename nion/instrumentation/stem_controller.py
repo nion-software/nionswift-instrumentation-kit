@@ -1103,11 +1103,12 @@ class DisplayItemListModel(Observable.Observable):
         self.__document_close_listener = typing.cast(typing.Any, None)
         self.__document_model = typing.cast(typing.Any, None)
 
-    def __get_scan_context_display_items(self) -> typing.Set[DisplayItem.DisplayItem]:
+    def __get_scan_context_display_items(self, *, is_disabled_channel_included: bool = False) -> typing.Set[DisplayItem.DisplayItem]:
         display_items: typing.Set[DisplayItem.DisplayItem] = set()
         scan_hardware_source = self.__stem_controller.scan_controller
         if scan_hardware_source:
-            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in scan_hardware_source.get_enabled_channel_indexes()]
+            channel_indexes = range(scan_hardware_source.channel_count) if is_disabled_channel_included else scan_hardware_source.get_enabled_channel_indexes()
+            data_channel_ids = [scan_hardware_source.get_channel_id(channel_index) for channel_index in channel_indexes]
             for data_channel_id in data_channel_ids:
                 data_item_channel_reference = self.__document_model.get_data_item_channel_reference(scan_hardware_source.hardware_source_id, data_channel_id)
                 if data_item_channel_reference and data_item_channel_reference.display_item:
@@ -1155,7 +1156,9 @@ class DisplayItemListModel(Observable.Observable):
             self.__safe_event_loop._call_soon_threadsafe(self.__refilter)
 
     def clean(self, graphic_id: str) -> None:
-        display_items = self.__get_scan_context_display_items()
+        """Remove the graphics with the graphic id from the display items of every channel of the scan device."""
+        # a graphic stays on the display item of a channel which is disabled when the project closes, so clean those too.
+        display_items = self.__get_scan_context_display_items(is_disabled_channel_included=True)
         for display_item in self.__document_model.display_items:
             if display_item in display_items:
                 for graphic in display_item.graphics:
