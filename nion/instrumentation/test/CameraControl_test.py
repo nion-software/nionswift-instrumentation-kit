@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import functools
 import json
+import math
 import pathlib
 import random
 import tempfile
@@ -2065,6 +2066,18 @@ class TestCameraControlClass(unittest.TestCase):
 
     def planned_test_hot_start_acquisition_from_thread_with_custom_parameters_produces_data(self):
         pass
+
+    def test_sequence_with_a_collection_shape_of_no_axes_or_three_axes_raises_value_error(self) -> None:
+        with self._test_context() as test_context:
+            camera_hardware_source = test_context.camera_hardware_source
+            camera_frame_parameters = camera_hardware_source.get_current_frame_parameters()
+            for collection_shape in ((), (2, 3, 4)):
+                with self.subTest(collection_shape=collection_shape):
+                    count = math.prod(collection_shape)
+                    with self.assertRaises(ValueError):
+                        camera_hardware_source.acquire_sequence_prepare(count, collection_shape=collection_shape)
+                    with self.assertRaises(ValueError):
+                        camera_hardware_source.acquire_sequence_begin(camera_frame_parameters, count, collection_shape=collection_shape)
 
 
 if __name__ == '__main__':

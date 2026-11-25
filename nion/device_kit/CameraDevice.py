@@ -22,12 +22,12 @@ from nion.utils import Geometry
 from nion.utils import Registry
 
 # other plug-ins
+from nion.device_kit import ScanDevice
 from nion.instrumentation import camera_base
 from nion.instrumentation import stem_controller
 
 if typing.TYPE_CHECKING:
     from nion.device_kit import InstrumentDevice
-    from nion.device_kit import ScanDevice
 
 _NDArray = numpy.typing.NDArray[typing.Any]
 
@@ -349,20 +349,40 @@ class Camera(camera_base.CameraDevice3):
         data_element["properties"] = properties
         return data_element
 
+    # the sequence methods take a collection shape.
+    @property
+    def is_sequence_collection_shape_supported(self) -> bool:
+        return True
+
+    # the camera acquires a sequence in any collection shape of one or two axes, with any frame parameters.
+    def is_sequence_supported(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> bool:
+        return True
+
     # the view stays paused until the sequence ends, since a canceled sequence may still be acquiring a frame on its
     # own thread.
     def acquire_sequence_cancel(self) -> None:
         self.__cancel_sequence_event.set()
 
-    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, **kwargs: typing.Any) -> camera_base.PartialData:
+    def acquire_sequence_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, count: int, *, collection_shape: DataAndMetadata.ShapeType | None = None, **kwargs: typing.Any) -> camera_base.PartialData:
+        return self.__begin_sequence(camera_frame_parameters, collection_shape if collection_shape is not None else (count,))
+
+    # begin a sequence of frames arranged in the collection shape. each frame advances the scan if the scan takes its clock
+    # from this camera when the sequence begins.
+    def __begin_sequence(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType) -> camera_base.PartialData:
         self.__cancel_sequence_event.clear()
         self.__begin_acquiring()
         try:
             self.__set_frame_parameters(camera_frame_parameters)
-            self.__camera_task = CameraTask(self, camera_frame_parameters, (count,))
+            # a scan which this sequence clocks starts before the sequence begins, so it is already in external clock mode here.
+            # the scan device is assigned on every begin, so that a sequence never keeps the scan device of one which wasn't ended.
+            scan_controller = self.__instrument.scan_controller
+            scan_device = scan_controller.scan_device if scan_controller else None
+            self.__scan_device = scan_device if isinstance(scan_device, ScanDevice.Device) and scan_device.is_externally_clocked_by(self.camera_id) else None
+            self.__camera_task = CameraTask(self, camera_frame_parameters, tuple(collection_shape))
             self.__camera_task.start()
         except BaseException:
             # a caller does not end a sequence which fails to begin.
+            self.__scan_device = None
             self.__end_acquiring()
             raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, False, False, None, 0)
@@ -373,12 +393,15 @@ class Camera(camera_base.CameraDevice3):
             is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
         except BaseException:
             # some callers do not end a sequence which fails.
+            self.__scan_device = None
             self.__end_acquiring()
             raise
         return camera_base.PartialData(self.__camera_task._xdata_ex, is_complete, is_canceled, None, valid_count)
 
     def acquire_sequence_end(self, **kwargs: typing.Any) -> None:
         self.__camera_task = None
+        # clear the scan device before the view resumes, so that view frames do not advance the scan.
+        self.__scan_device = None
         self.__end_acquiring()
 
     # runs on the view thread or on the thread of a sequence, never on both at once; see acquire_condition.
@@ -389,7 +412,7 @@ class Camera(camera_base.CameraDevice3):
         start = time.perf_counter()
         readout_area = self.readout_area
         binning_shape = self.__get_binning_shape(readout_area, self.__binning)
-        # scan device is only set during synchronized acquisition
+        # the scan device is set only during a sequence which clocks the scan.
         if self.__scan_device:
             self.__scan_device.advance_pixel(do_sync=do_sync)
         # the software scan context is used only before any scan, since it follows edits which the scan device hasn't
@@ -437,43 +460,16 @@ class Camera(camera_base.CameraDevice3):
                         self.__acquire_condition.notify_all()
 
     def acquire_synchronized_begin(self, camera_frame_parameters: camera_base.CameraFrameParameters, collection_shape: DataAndMetadata.ShapeType, **kwargs: typing.Any) -> camera_base.PartialData:
-        self.__cancel_sequence_event.clear()
-        self.__begin_acquiring()
-        try:
-            self.__set_frame_parameters(camera_frame_parameters)
-            scan_controller = self.__instrument.scan_controller
-            assert scan_controller
-            scan_device = scan_controller.scan_device
-            self.__scan_device = typing.cast("ScanDevice.Device", scan_device)
-            self.__camera_task = CameraTask(self, camera_frame_parameters, collection_shape)
-            self.__camera_task.start()
-        except BaseException:
-            # a caller does not end a synchronized acquisition which fails to begin.
-            self.__scan_device = None
-            self.__end_acquiring()
-            raise
-        return camera_base.PartialData(self.__camera_task._xdata_ex, False, False, None, 0)
+        return self.__begin_sequence(camera_frame_parameters, collection_shape)
 
     def acquire_synchronized_continue(self, *, update_period: float = 1.0, **kwargs: typing.Any) -> camera_base.PartialData:
-        assert self.__camera_task
-        try:
-            is_complete, is_canceled, valid_count = self.__camera_task.grab_partial(update_period=update_period)
-        except BaseException:
-            # some callers do not end a synchronized acquisition which fails.
-            self.__scan_device = None
-            self.__end_acquiring()
-            raise
-        return camera_base.PartialData(self.__camera_task._xdata_ex, is_complete, is_canceled, None, valid_count)
+        return self.acquire_sequence_continue(update_period=update_period, **kwargs)
 
     def acquire_synchronized_end(self, **kwargs: typing.Any) -> None:
-        self.__camera_task = None
-        # clear the scan device before the view resumes, so that view frames do not advance the scan.
-        self.__scan_device = None
-        self.__end_acquiring()
+        self.acquire_sequence_end(**kwargs)
 
-    # the view stays paused until the synchronized acquisition ends; see acquire_sequence_cancel.
     def acquire_synchronized_cancel(self) -> None:
-        self.__cancel_sequence_event.set()
+        self.acquire_sequence_cancel()
 
     @property
     def _is_acquire_synchronized_running(self) -> bool:
